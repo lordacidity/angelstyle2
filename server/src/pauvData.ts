@@ -152,16 +152,29 @@ export async function searchNews(opts: { q?: string; size?: number; timeframeHou
   const url = new URL("https://newsdata.io/api/1/latest");
   url.searchParams.set("apikey", NEWS_KEY);
   url.searchParams.set("language", "en");
-  url.searchParams.set("size", String(Math.min(opts.size ?? 10, 50)));
+  // newsdata caps free-tier `size` at 10 per request.
+  url.searchParams.set("size", String(Math.min(opts.size ?? 10, 10)));
   if (opts.q) url.searchParams.set("q", opts.q);
-  // Newsdata: integer = hours (1–48), float like "0.5" = 30 min. We pass hours.
-  if (opts.timeframeHours) url.searchParams.set("timeframe", String(Math.min(48, Math.max(1, opts.timeframeHours))));
+  // NOTE: newsdata's `timeframe` parameter is a paid feature on their /latest
+  // endpoint. We deliberately don't send it. Instead, the caller's intended
+  // freshness window is enforced client-side by filtering on `pubDate` below.
 
   const res = await fetch(url);
   if (!res.ok) throw new Error(`newsdata ${res.status}: ${await res.text()}`);
   const json = (await res.json()) as NewsdataResponse;
   if (json.status !== "success") throw new Error(`newsdata: ${json.message ?? "unknown"}`);
-  return { total: json.totalResults ?? 0, articles: json.results ?? [] };
+
+  let articles = json.results ?? [];
+  if (opts.timeframeHours) {
+    const cutoffMs = Date.now() - opts.timeframeHours * 3600_000;
+    articles = articles.filter((a) => {
+      if (!a.pubDate) return true; // keep articles missing timestamps — common for some sources
+      const t = Date.parse(a.pubDate);
+      if (!Number.isFinite(t)) return true;
+      return t >= cutoffMs;
+    });
+  }
+  return { total: articles.length, articles };
 }
 
 // Raw "news → person" entry point for step 1. No DeepSeek classification —
