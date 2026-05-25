@@ -498,6 +498,56 @@ app.post("/api/news/chat-edit", async (req, res) => {
   }
 });
 
+// Scrape a news article URL for its featured image + site name. Used by the
+// Person News → card flow so the resulting card can use the publisher's own
+// hero image (with attribution) instead of a generic photo search result.
+app.post("/api/article/scrape-images", async (req, res) => {
+  const { url } = (req.body ?? {}) as { url?: string };
+  if (!url || typeof url !== "string") {
+    res.status(400).json({ error: "url required" });
+    return;
+  }
+  try {
+    const r = await fetch(url, {
+      headers: {
+        "User-Agent":
+          "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Safari/537.36",
+      },
+      redirect: "follow",
+    });
+    const html = await r.text();
+    const meta = (prop: string): string | null => {
+      // Match <meta property="og:image" content="..."> in either order.
+      const re1 = new RegExp(
+        `<meta[^>]+(?:property|name)=["']${prop}["'][^>]+content=["']([^"']+)["']`,
+        "i",
+      );
+      const re2 = new RegExp(
+        `<meta[^>]+content=["']([^"']+)["'][^>]+(?:property|name)=["']${prop}["']`,
+        "i",
+      );
+      const m = re1.exec(html) ?? re2.exec(html);
+      return m ? m[1] : null;
+    };
+    // Collect candidate images in priority order — og:image then twitter:image.
+    const seen = new Set<string>();
+    const images: string[] = [];
+    for (const p of ["og:image", "og:image:secure_url", "twitter:image", "twitter:image:src"]) {
+      const v = meta(p);
+      if (v && !seen.has(v)) {
+        seen.add(v);
+        images.push(v);
+      }
+    }
+    const siteName = meta("og:site_name");
+    const title = meta("og:title");
+    const finalUrl = r.url || url;
+    res.json({ images, siteName, title, finalUrl });
+  } catch (err) {
+    res.status(500).json({ error: String(err) });
+  }
+});
+
 app.post("/api/news/extract-person", async (req, res) => {
   try {
     const body = (req.body ?? {}) as {

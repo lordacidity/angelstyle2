@@ -148,6 +148,41 @@ export function NewsCardsView() {
       });
   }, []);
 
+  // Person News hand-off: if a seed was left in sessionStorage by clicking
+  // "Build card →" on a Person News story, consume it and jump straight to
+  // the photo step with the talent + DeepSeek-optimized caption preloaded.
+  // The seed is one-shot — we delete it so a future visit to /news/industry
+  // starts at the industry picker as usual.
+  useEffect(() => {
+    const raw = sessionStorage.getItem("person-news-seed");
+    if (!raw) return;
+    sessionStorage.removeItem("person-news-seed");
+    try {
+      const seed = JSON.parse(raw) as {
+        selectedItem: SelectedItem;
+        extract: ExtractResult;
+        articleImages: string[];
+        articleSourceName: string | null;
+      };
+      setSelectedItem(seed.selectedItem);
+      setExtract(seed.extract);
+      // Pre-populate the photo strip with any images scraped from the
+      // article, marked with the publisher's name so the card can show
+      // attribution. The user can still rewrite the query for more photos.
+      const articlePhotos: Photo[] = (seed.articleImages ?? []).map((url, i) => ({
+        url,
+        thumbnail: url,
+        title: i === 0 ? "Article hero image" : `Article image ${i + 1}`,
+        source: seed.articleSourceName ?? undefined,
+      }));
+      setPhotos(articlePhotos);
+      if (articlePhotos.length > 0) setSelectedPhoto(articlePhotos[0]);
+      setStep("photo");
+    } catch (e) {
+      console.warn("[person-news-seed] failed to parse:", e);
+    }
+  }, []);
+
   // initial industries fetch
   useEffect(() => {
     fetch("/api/industries")
@@ -976,6 +1011,11 @@ export function NewsCardsView() {
                 );
               })}
             </div>
+            {selectedPhoto?.source && (
+              <div className="file-meta" style={{ marginTop: 8 }}>
+                📸 Credit: <strong>{selectedPhoto.source}</strong> — verify usage rights before publishing.
+              </div>
+            )}
             {selectedPhoto && (
               <div className="row" style={{ marginTop: 16 }}>
                 <button

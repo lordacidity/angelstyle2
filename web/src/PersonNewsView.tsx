@@ -56,6 +56,70 @@ export function PersonNewsView() {
   const [result, setResult] = useState<PersonLookupResult | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [showOffBrand, setShowOffBrand] = useState(false);
+  // URL of the story currently being prepared for the card flow.
+  const [buildingFor, setBuildingFor] = useState<string | null>(null);
+
+  // Run DeepSeek extract + article-image scrape in parallel, then hand off
+  // to the existing card-build flow (NewsCardsView) via sessionStorage.
+  const buildCard = async (item: LookupItem) => {
+    if (!result?.talent) return;
+    setBuildingFor(item.url);
+    setError(null);
+    try {
+      const extractPayload = item.source === "tweet"
+        ? { tweetText: item.rawText || item.caption, tweetAuthorName: item.sourceName }
+        : { title: item.caption, description: item.rawText || null };
+
+      const extractFetch = fetch("/api/news/extract-person", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(extractPayload),
+      }).then(async (r) => {
+        if (!r.ok) throw new Error(await r.text());
+        return r.json();
+      });
+
+      // Article-image scrape is best-effort: we still proceed if it returns
+      // nothing (Google News redirect URLs, paywalled sites, etc.). Tweets
+      // skip the scrape entirely.
+      const scrapeFetch = item.source === "article"
+        ? fetch("/api/article/scrape-images", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ url: item.url }),
+          })
+            .then((r) => (r.ok ? r.json() : null))
+            .catch(() => null)
+        : Promise.resolve(null);
+
+      const [extract, scrape] = await Promise.all([extractFetch, scrapeFetch]);
+
+      const articleImages: string[] = scrape?.images ?? [];
+      const seed = {
+        selectedItem: {
+          caption: item.caption,
+          source: item.source,
+          url: item.url,
+          mainPerson: item.mainPerson,
+          matchedTicker: item.matchedTicker,
+          publishedAt: item.publishedAt,
+          imageUrl: item.imageUrl,
+          rawText: item.rawText,
+          sourceName: item.sourceName,
+          likeCount: item.likeCount,
+          extractPayload,
+        },
+        extract,
+        articleImages,
+        articleSourceName: scrape?.siteName ?? item.sourceName,
+      };
+      sessionStorage.setItem("person-news-seed", JSON.stringify(seed));
+      window.location.href = "/news/industry";
+    } catch (e) {
+      setError(`Couldn't prepare card: ${String(e)}`);
+      setBuildingFor(null);
+    }
+  };
 
   useEffect(() => {
     fetch("/api/talents")
@@ -270,25 +334,35 @@ export function PersonNewsView() {
                 </div>
               ) : (
                 <>
-                  {visibleItems.map((item, idx) => (
-                    <a
-                      key={`${item.url}-${idx}`}
-                      href={item.url}
-                      target="_blank"
-                      rel="noreferrer"
-                      className="file"
-                      style={{ display: "block", textDecoration: "none", color: "inherit" }}
-                    >
-                      <div className="file-header">
-                        <div className="file-name">{item.caption}</div>
-                        <div className="file-meta">
-                          {item.category ? `${item.category} · ` : ""}
-                          {item.source === "tweet" ? "🐦" : "📰"} {item.sourceName}
-                          {item.publishedAt ? ` · ${item.publishedAt}` : ""}
+                  {visibleItems.map((item, idx) => {
+                    const isBuilding = buildingFor === item.url;
+                    return (
+                      <div className="file" key={`${item.url}-${idx}`}>
+                        <div className="file-header" style={{ alignItems: "flex-start" }}>
+                          <a
+                            href={item.url}
+                            target="_blank"
+                            rel="noreferrer"
+                            style={{ flex: 1, textDecoration: "none", color: "inherit" }}
+                          >
+                            <div className="file-name">{item.caption}</div>
+                            <div className="file-meta" style={{ marginTop: 4 }}>
+                              {item.category ? `${item.category} · ` : ""}
+                              {item.source === "tweet" ? "🐦" : "📰"} {item.sourceName}
+                              {item.publishedAt ? ` · ${item.publishedAt}` : ""}
+                            </div>
+                          </a>
+                          <button
+                            onClick={() => buildCard(item)}
+                            disabled={isBuilding || buildingFor !== null}
+                            style={{ flexShrink: 0 }}
+                          >
+                            {isBuilding ? "Preparing…" : "Build card →"}
+                          </button>
                         </div>
                       </div>
-                    </a>
-                  ))}
+                    );
+                  })}
 
                   <div className="row" style={{ marginTop: 16 }}>
                     <button
