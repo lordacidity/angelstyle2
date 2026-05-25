@@ -1,5 +1,5 @@
 // Person News (Flow C): pick a Pauv talent, get curator-and-Newsdata stories
-// about them in the past 24h. About-them only — we don't query from:@theirhandle.
+// about them in the past 48h. About-them only — we don't query from:@theirhandle.
 
 import { useEffect, useMemo, useState } from "react";
 import { Sidebar } from "./Sidebar";
@@ -148,7 +148,7 @@ export function PersonNewsView() {
           <div>
             <h1>Person News</h1>
             <div className="subtitle">
-              Pick a Pauv talent, get curator + Newsdata stories about them from the past 24 hours.
+              Pick a Pauv talent, get curator + Newsdata stories about them from the past 48 hours.
             </div>
           </div>
           <div className="row">
@@ -265,7 +265,7 @@ export function PersonNewsView() {
               {visibleItems.length === 0 ? (
                 <div className="card empty" style={{ textAlign: "left" }}>
                   {result.items.length === 0
-                    ? `No stories found about ${result.talent.name} in the past 24 hours.`
+                    ? `No stories found about ${result.talent.name} in the past 48 hours.`
                     : "All ranked items were filtered out as tabloid/controversy. Toggle the checkbox above to see them."}
                 </div>
               ) : (

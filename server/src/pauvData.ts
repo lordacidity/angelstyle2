@@ -187,7 +187,7 @@ export async function latestArticlesByIndustry(
   const { articles } = await searchNews({
     q: industrySingular,
     size,
-    timeframeHours: 24,
+    timeframeHours: 48,
   });
   return articles.map((a) => ({
     caption: a.title,
@@ -865,7 +865,7 @@ export async function lookupAllNews(exclude: string[] = []): Promise<AllLookupRe
 
 // ---------- person-specific news (Flow C) ----------
 //
-// "Show me news ABOUT <talent> in the past 24h." Same item shape as the
+// "Show me news ABOUT <talent> in the past 48h." Same item shape as the
 // other lookups so the UI can share rendering. Strategy: pull curator tweets
 // that mention the person's name + Newsdata articles for the same name, then
 // DeepSeek captions + categorizes (no roster matching needed — person is
@@ -930,7 +930,7 @@ export async function lookupPersonNews(
     curator.used > 0
       ? searchTweets({ query: curator.query, queryType: "Latest", maxItems: 20 })
       : Promise.resolve<Tweet[]>([]),
-    searchNews({ q: `"${talent.name}"`, size: 10, timeframeHours: 24 }),
+    searchNews({ q: `"${talent.name}"`, size: 10, timeframeHours: 48 }),
   ]);
 
   const rawItems: RawItem[] = [];
