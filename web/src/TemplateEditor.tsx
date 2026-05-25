@@ -17,6 +17,7 @@ import { TemplateRenderer } from "./TemplateRenderer";
 import {
   TEXT_ROLES, IMAGE_ROLES, defaultTemplate, newLayerId, migrateToStack, GRID, snap,
   type Layer, type TextLayer, type ImageLayer, type ShapeLayer,
+  SHAPES, SHAPE_LABEL, type ShapeKind,
   type TemplateDoc, type TextRole, type ImageRole,
 } from "./templateModel";
 
@@ -742,16 +743,51 @@ function ImageProps({ layer, onChange }: { layer: ImageLayer; onChange: (p: Part
 }
 
 function ShapeProps({ layer, onChange }: { layer: ShapeLayer; onChange: (p: Partial<ShapeLayer>) => void }) {
+  const borderWidth = layer.borderWidth ?? 0;
+  const borderColor = layer.borderColor ?? "#000000";
   return (
     <>
       <PanelField label="Shape">
-        <select value={layer.shape} onChange={(e) => onChange({ shape: e.target.value as "rect" | "circle" })}>
-          <option value="rect">Rectangle</option>
-          <option value="circle">Circle</option>
+        <select
+          value={layer.shape}
+          onChange={(e) => {
+            const next = e.target.value as ShapeKind;
+            const patch: Partial<ShapeLayer> = { shape: next };
+            // A circle should be a circle, not an ellipse — square the layer
+            // when switching in. Use min so the layer can never grow off-canvas.
+            if (next === "circle" && layer.width !== layer.height) {
+              const size = Math.max(GRID, Math.min(layer.width, layer.height));
+              patch.width = size;
+              patch.height = size;
+            }
+            onChange(patch);
+          }}
+        >
+          {SHAPES.map((k) => (
+            <option key={k} value={k}>{SHAPE_LABEL[k]}</option>
+          ))}
         </select>
       </PanelField>
       <PanelField label="Fill">
         <input type="color" value={layer.fill} onChange={(e) => onChange({ fill: e.target.value })} />
+      </PanelField>
+      <PanelField label="Border">
+        <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+          <input
+            type="color"
+            value={borderColor}
+            onChange={(e) => onChange({ borderColor: e.target.value })}
+            disabled={borderWidth === 0}
+            title="Border color"
+          />
+          <NumField
+            label="Width"
+            value={borderWidth}
+            step={1}
+            min={0}
+            onChange={(v) => onChange({ borderWidth: Math.max(0, v) })}
+          />
+        </div>
       </PanelField>
     </>
   );

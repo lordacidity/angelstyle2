@@ -235,14 +235,85 @@ const ImageView = forwardRef<HTMLDivElement, {
 });
 
 function ShapeView({ layer }: { layer: ShapeLayer }) {
+  const w = layer.width;
+  const h = layer.height;
+  const sw = Math.max(0, layer.borderWidth ?? 0);
+  const stroke = sw > 0 ? (layer.borderColor ?? "#000") : "none";
+  // Inset the geometry by half the stroke width so the border is fully
+  // contained within the layer box (SVG strokes paint centered on the path).
+  const inset = sw / 2;
+
+  let body: React.ReactNode;
+  switch (layer.shape) {
+    case "rect": {
+      body = (
+        <rect
+          x={inset}
+          y={inset}
+          width={Math.max(0, w - sw)}
+          height={Math.max(0, h - sw)}
+          fill={layer.fill}
+          stroke={stroke}
+          strokeWidth={sw}
+        />
+      );
+      break;
+    }
+    case "circle": {
+      // Editor enforces width === height for circles, so this is a true
+      // circle. If a legacy template has unequal sides we still draw the
+      // largest centered circle that fits.
+      const d = Math.min(w, h);
+      const cx = w / 2;
+      const cy = h / 2;
+      const r = Math.max(0, d / 2 - inset);
+      body = (
+        <circle cx={cx} cy={cy} r={r} fill={layer.fill} stroke={stroke} strokeWidth={sw} />
+      );
+      break;
+    }
+    case "triangle": {
+      // Upward-pointing isosceles triangle filling the bounds.
+      const pts = `${w / 2},${inset} ${w - inset},${h - inset} ${inset},${h - inset}`;
+      body = (
+        <polygon points={pts} fill={layer.fill} stroke={stroke} strokeWidth={sw} strokeLinejoin="round" />
+      );
+      break;
+    }
+    case "chevronRight":
+    case "chevronLeft":
+    case "chevronUp":
+    case "chevronDown": {
+      // Filled chevron — a > shape with thickness. The "thickness" controls
+      // how thick the chevron's arms are relative to its bounds.
+      const T = 0.4; // arm thickness (fraction of the long dimension)
+      const i = inset;
+      let pts: string;
+      if (layer.shape === "chevronRight") {
+        pts = `${i},${i} ${w * (1 - T)},${i} ${w - i},${h / 2} ${w * (1 - T)},${h - i} ${i},${h - i} ${w * T},${h / 2}`;
+      } else if (layer.shape === "chevronLeft") {
+        pts = `${w - i},${i} ${w * T},${i} ${i},${h / 2} ${w * T},${h - i} ${w - i},${h - i} ${w * (1 - T)},${h / 2}`;
+      } else if (layer.shape === "chevronUp") {
+        pts = `${i},${h - i} ${i},${h * T} ${w / 2},${i} ${w - i},${h * T} ${w - i},${h - i} ${w / 2},${h * (1 - T)}`;
+      } else {
+        // chevronDown
+        pts = `${i},${i} ${i},${h * (1 - T)} ${w / 2},${h - i} ${w - i},${h * (1 - T)} ${w - i},${i} ${w / 2},${h * T}`;
+      }
+      body = (
+        <polygon points={pts} fill={layer.fill} stroke={stroke} strokeWidth={sw} strokeLinejoin="round" />
+      );
+      break;
+    }
+  }
+
   return (
-    <div
-      style={{
-        width: "100%",
-        height: layer.height,
-        background: layer.fill,
-        borderRadius: layer.shape === "circle" ? "50%" : 0,
-      }}
-    />
+    <svg
+      width={w}
+      height={h}
+      viewBox={`0 0 ${w} ${h}`}
+      style={{ display: "block" }}
+    >
+      {body}
+    </svg>
   );
 }

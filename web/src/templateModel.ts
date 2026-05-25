@@ -67,11 +67,35 @@ export interface ImageLayer extends BaseLayer {
   borderRadius: number;
 }
 
+export const SHAPES = [
+  "rect",
+  "circle",
+  "triangle",
+  "chevronRight",
+  "chevronLeft",
+  "chevronUp",
+  "chevronDown",
+] as const;
+export type ShapeKind = (typeof SHAPES)[number];
+
+export const SHAPE_LABEL: Record<ShapeKind, string> = {
+  rect: "Rectangle",
+  circle: "Circle",
+  triangle: "Triangle",
+  chevronRight: "Chevron →",
+  chevronLeft: "Chevron ←",
+  chevronUp: "Chevron ↑",
+  chevronDown: "Chevron ↓",
+};
+
 export interface ShapeLayer extends BaseLayer {
   type: "shape";
   role: "decorative";
-  shape: "rect" | "circle";
+  shape: ShapeKind;
   fill: string;
+  // Optional border (stroke). 0 or missing = no border.
+  borderWidth?: number;
+  borderColor?: string;
 }
 
 export type Layer = TextLayer | ImageLayer | ShapeLayer;
