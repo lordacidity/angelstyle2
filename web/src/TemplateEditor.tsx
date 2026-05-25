@@ -95,11 +95,13 @@ export function TemplateEditor({ initial, onSave, onCancel }: Props) {
   };
 
   const addText = () => {
+    // Text is pinned by default too — users can drop new text anywhere on the
+    // canvas without colliding with existing layers. Toggle to "↕ In flow" in
+    // the panel if you want the auto-stacking behavior for a particular layer.
     const l: TextLayer = {
       id: newLayerId(), type: "text", role: "static",
-      x: 40, y: 0, width: 1000, height: 80, gapTop: GRID * 2, sameRow: false,
-      rotation: 0, opacity: 1,
-      zIndex: 10,
+      x: 100, y: 100, width: 600, height: 80, gapTop: 0, sameRow: false,
+      rotation: 0, opacity: 1, zIndex: 10, pinned: true,
       content: "New text",
       fontFamily: "system-ui, -apple-system, 'Segoe UI', sans-serif",
       fontSize: 40, fontWeight: 600, color: "#fafafa",
@@ -762,6 +764,9 @@ function TextProps({ layer, onChange }: { layer: TextLayer; onChange: (p: Partia
 }
 
 function ImageProps({ layer, onChange }: { layer: ImageLayer; onChange: (p: Partial<ImageLayer>) => void }) {
+  const shape = layer.shape ?? "rect";
+  const borderWidth = layer.borderWidth ?? 0;
+  const borderColor = layer.borderColor ?? "#000000";
   return (
     <>
       <PanelField label="Role">
@@ -778,7 +783,47 @@ function ImageProps({ layer, onChange }: { layer: ImageLayer; onChange: (p: Part
           <option value="contain">Contain</option>
         </select>
       </PanelField>
-      <NumField label="Border radius" value={layer.borderRadius} min={0} onChange={(v) => onChange({ borderRadius: v })} />
+      <PanelField label="Shape">
+        <select
+          value={shape}
+          onChange={(e) => {
+            const next = e.target.value as ShapeKind;
+            const patch: Partial<ImageLayer> = { shape: next };
+            // Auto-square when switching to circle so it's actually a circle.
+            if (next === "circle" && layer.width !== layer.height) {
+              const size = Math.max(GRID, Math.min(layer.width, layer.height));
+              patch.width = size;
+              patch.height = size;
+            }
+            onChange(patch);
+          }}
+        >
+          {SHAPES.map((k) => (
+            <option key={k} value={k}>{SHAPE_LABEL[k]}</option>
+          ))}
+        </select>
+      </PanelField>
+      {shape === "rect" && (
+        <NumField label="Border radius" value={layer.borderRadius} min={0} onChange={(v) => onChange({ borderRadius: v })} />
+      )}
+      <PanelField label="Border">
+        <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+          <input
+            type="color"
+            value={borderColor}
+            onChange={(e) => onChange({ borderColor: e.target.value })}
+            disabled={borderWidth === 0}
+            title="Border color"
+          />
+          <NumField
+            label="Width"
+            value={borderWidth}
+            step={1}
+            min={0}
+            onChange={(v) => onChange({ borderWidth: Math.max(0, v) })}
+          />
+        </div>
+      </PanelField>
     </>
   );
 }

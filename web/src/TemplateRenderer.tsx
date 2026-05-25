@@ -16,12 +16,82 @@ import type {
   TextLayer,
   ImageLayer,
   ShapeLayer,
+  ShapeKind,
   PopulateContext,
   CopyOverrides,
   LayoutOverrides,
   LayoutOverride,
 } from "./templateModel";
 import { resolveText, resolveImageSrc, groupRows, pinnedLayers } from "./templateModel";
+
+// ---- shape geometry helpers --------------------------------------------
+// Both ShapeView and ImageView (for the optional clip + border) need to draw
+// the same shape outlines. These two helpers keep the logic in one place.
+
+// SVG body for a shape — used for both filled shapes and stroke-only borders.
+function shapeSvgElement(
+  shape: ShapeKind,
+  w: number,
+  h: number,
+  inset: number,
+  fill: string,
+  stroke: string,
+  strokeWidth: number,
+): React.ReactNode {
+  const common = { fill, stroke, strokeWidth, strokeLinejoin: "round" as const };
+  switch (shape) {
+    case "rect":
+      return <rect x={inset} y={inset} width={Math.max(0, w - 2 * inset)} height={Math.max(0, h - 2 * inset)} {...common} />;
+    case "circle": {
+      const d = Math.min(w, h);
+      return <circle cx={w / 2} cy={h / 2} r={Math.max(0, d / 2 - inset)} {...common} />;
+    }
+    case "triangle":
+      return <polygon points={`${w / 2},${inset} ${w - inset},${h - inset} ${inset},${h - inset}`} {...common} />;
+    case "chevronRight": {
+      const T = 0.4;
+      const i = inset;
+      return <polygon points={`${i},${i} ${w * (1 - T)},${i} ${w - i},${h / 2} ${w * (1 - T)},${h - i} ${i},${h - i} ${w * T},${h / 2}`} {...common} />;
+    }
+    case "chevronLeft": {
+      const T = 0.4;
+      const i = inset;
+      return <polygon points={`${w - i},${i} ${w * T},${i} ${i},${h / 2} ${w * T},${h - i} ${w - i},${h - i} ${w * (1 - T)},${h / 2}`} {...common} />;
+    }
+    case "chevronUp": {
+      const T = 0.4;
+      const i = inset;
+      return <polygon points={`${i},${h - i} ${i},${h * T} ${w / 2},${i} ${w - i},${h * T} ${w - i},${h - i} ${w / 2},${h * (1 - T)}`} {...common} />;
+    }
+    case "chevronDown": {
+      const T = 0.4;
+      const i = inset;
+      return <polygon points={`${i},${i} ${i},${h * (1 - T)} ${w / 2},${h - i} ${w - i},${h * (1 - T)} ${w - i},${i} ${w / 2},${h * T}`} {...common} />;
+    }
+  }
+}
+
+// CSS clip-path expression for the shape — used to mask images. Returns
+// undefined for "rect" (we use borderRadius for rectangles instead).
+function shapeClipPath(shape: ShapeKind, w: number, h: number): string | undefined {
+  switch (shape) {
+    case "rect":
+      return undefined;
+    case "circle":
+      // px to guarantee a perfect circle regardless of CSS percentage reference.
+      return `circle(${Math.min(w, h) / 2}px at 50% 50%)`;
+    case "triangle":
+      return "polygon(50% 0%, 100% 100%, 0% 100%)";
+    case "chevronRight":
+      return "polygon(0% 0%, 60% 0%, 100% 50%, 60% 100%, 0% 100%, 40% 50%)";
+    case "chevronLeft":
+      return "polygon(100% 0%, 40% 0%, 0% 50%, 40% 100%, 100% 100%, 60% 50%)";
+    case "chevronUp":
+      return "polygon(0% 100%, 0% 40%, 50% 0%, 100% 40%, 100% 100%, 50% 60%)";
+    case "chevronDown":
+      return "polygon(0% 0%, 0% 60%, 50% 100%, 100% 60%, 100% 0%, 50% 40%)";
+  }
+}
 
 interface Props {
   doc: TemplateDoc;
@@ -258,30 +328,59 @@ const ImageView = forwardRef<HTMLDivElement, {
   const src = resolveImageSrc(layer, context);
   const posX = layoutOverride?.objectPositionX ?? 50;
   const posY = layoutOverride?.objectPositionY ?? 50;
+  const w = layer.width;
+  const h = layer.height;
+  const shape: ShapeKind = layer.shape ?? "rect";
+  const sw = Math.max(0, layer.borderWidth ?? 0);
+  const stroke = sw > 0 ? (layer.borderColor ?? "#000") : "none";
+  const clip = shapeClipPath(shape, w, h);
   return (
-    <div
-      ref={ref}
-      style={{
-        width: "100%",
-        height: layer.height,
-        overflow: "hidden",
-        borderRadius: layer.borderRadius,
-        background: "#1a1a1c",
-      }}
-    >
-      {src && (
-        <img
-          src={src}
-          alt=""
-          crossOrigin="anonymous"
+    <div ref={ref} style={{ position: "relative", width: "100%", height: h }}>
+      <div
+        style={{
+          width: "100%",
+          height: "100%",
+          overflow: "hidden",
+          clipPath: clip,
+          // borderRadius only applies to the rect shape (no clip-path).
+          borderRadius: shape === "rect" ? layer.borderRadius : undefined,
+          background: "#1a1a1c",
+        }}
+      >
+        {src && (
+          <img
+            src={src}
+            alt=""
+            crossOrigin="anonymous"
+            style={{
+              width: "100%",
+              height: "100%",
+              objectFit: layer.fit,
+              objectPosition: `${posX}% ${posY}%`,
+              display: "block",
+            }}
+          />
+        )}
+      </div>
+      {/* Border overlay: same shape outline, stroke-only. Sits on top of the
+          clipped image without intercepting pointer events. */}
+      {sw > 0 && (
+        <svg
+          width={w}
+          height={h}
+          viewBox={`0 0 ${w} ${h}`}
           style={{
+            position: "absolute",
+            top: 0,
+            left: 0,
             width: "100%",
             height: "100%",
-            objectFit: layer.fit,
-            objectPosition: `${posX}% ${posY}%`,
+            pointerEvents: "none",
             display: "block",
           }}
-        />
+        >
+          {shapeSvgElement(shape, w, h, sw / 2, "none", stroke, sw)}
+        </svg>
       )}
     </div>
   );
@@ -292,81 +391,12 @@ function ShapeView({ layer }: { layer: ShapeLayer }) {
   const h = layer.height;
   const sw = Math.max(0, layer.borderWidth ?? 0);
   const stroke = sw > 0 ? (layer.borderColor ?? "#000") : "none";
-  // Inset the geometry by half the stroke width so the border is fully
-  // contained within the layer box (SVG strokes paint centered on the path).
+  // Inset by half the stroke width so the border stays inside the box
+  // (SVG strokes paint centered on the path).
   const inset = sw / 2;
-
-  let body: React.ReactNode;
-  switch (layer.shape) {
-    case "rect": {
-      body = (
-        <rect
-          x={inset}
-          y={inset}
-          width={Math.max(0, w - sw)}
-          height={Math.max(0, h - sw)}
-          fill={layer.fill}
-          stroke={stroke}
-          strokeWidth={sw}
-        />
-      );
-      break;
-    }
-    case "circle": {
-      // Editor enforces width === height for circles, so this is a true
-      // circle. If a legacy template has unequal sides we still draw the
-      // largest centered circle that fits.
-      const d = Math.min(w, h);
-      const cx = w / 2;
-      const cy = h / 2;
-      const r = Math.max(0, d / 2 - inset);
-      body = (
-        <circle cx={cx} cy={cy} r={r} fill={layer.fill} stroke={stroke} strokeWidth={sw} />
-      );
-      break;
-    }
-    case "triangle": {
-      // Upward-pointing isosceles triangle filling the bounds.
-      const pts = `${w / 2},${inset} ${w - inset},${h - inset} ${inset},${h - inset}`;
-      body = (
-        <polygon points={pts} fill={layer.fill} stroke={stroke} strokeWidth={sw} strokeLinejoin="round" />
-      );
-      break;
-    }
-    case "chevronRight":
-    case "chevronLeft":
-    case "chevronUp":
-    case "chevronDown": {
-      // Filled chevron — a > shape with thickness. The "thickness" controls
-      // how thick the chevron's arms are relative to its bounds.
-      const T = 0.4; // arm thickness (fraction of the long dimension)
-      const i = inset;
-      let pts: string;
-      if (layer.shape === "chevronRight") {
-        pts = `${i},${i} ${w * (1 - T)},${i} ${w - i},${h / 2} ${w * (1 - T)},${h - i} ${i},${h - i} ${w * T},${h / 2}`;
-      } else if (layer.shape === "chevronLeft") {
-        pts = `${w - i},${i} ${w * T},${i} ${i},${h / 2} ${w * T},${h - i} ${w - i},${h - i} ${w * (1 - T)},${h / 2}`;
-      } else if (layer.shape === "chevronUp") {
-        pts = `${i},${h - i} ${i},${h * T} ${w / 2},${i} ${w - i},${h * T} ${w - i},${h - i} ${w / 2},${h * (1 - T)}`;
-      } else {
-        // chevronDown
-        pts = `${i},${i} ${i},${h * (1 - T)} ${w / 2},${h - i} ${w - i},${h * (1 - T)} ${w - i},${i} ${w / 2},${h * T}`;
-      }
-      body = (
-        <polygon points={pts} fill={layer.fill} stroke={stroke} strokeWidth={sw} strokeLinejoin="round" />
-      );
-      break;
-    }
-  }
-
   return (
-    <svg
-      width={w}
-      height={h}
-      viewBox={`0 0 ${w} ${h}`}
-      style={{ display: "block" }}
-    >
-      {body}
+    <svg width={w} height={h} viewBox={`0 0 ${w} ${h}`} style={{ display: "block" }}>
+      {shapeSvgElement(layer.shape, w, h, inset, layer.fill, stroke, sw)}
     </svg>
   );
 }

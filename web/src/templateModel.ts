@@ -70,6 +70,11 @@ export interface ImageLayer extends BaseLayer {
   src: string;
   fit: "cover" | "contain";
   borderRadius: number;
+  // Optional clip-path shape (defaults to "rect"). Borders use the same fields
+  // as ShapeLayer. The clipped image keeps its fit + objectPosition pan.
+  shape?: ShapeKind;
+  borderWidth?: number;
+  borderColor?: string;
 }
 
 export const SHAPES = [
