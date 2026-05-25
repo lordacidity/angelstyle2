@@ -3,6 +3,7 @@ import ws from "ws";
 import { chat, parseJson, type ChatMessage } from "./deepseek.js";
 import { searchTweets, type Tweet } from "./twitter.js";
 import { getHandlesByIndustry } from "./newsSources.js";
+import { searchGoogleNews } from "./googleNews.js";
 
 const SUPABASE_URL = process.env.NEXT_PUBLIC_SUPABASE_URL ?? "";
 const SUPABASE_KEY = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY ?? "";
@@ -926,11 +927,15 @@ export async function lookupPersonNews(
   }
   const curator = buildPersonAboutQuery(curatorHandles, talent.name);
 
-  const [tweetsResult, articlesResult] = await Promise.allSettled([
+  const [tweetsResult, articlesResult, googleResult] = await Promise.allSettled([
     curator.used > 0
       ? searchTweets({ query: curator.query, queryType: "Latest", maxItems: 20 })
       : Promise.resolve<Tweet[]>([]),
     searchNews({ q: `"${talent.name}"`, size: 10, timeframeHours: 48 }),
+    // Free supplemental source: Google News RSS. Indexes most news sites
+    // worldwide and isn't rate-limited like newsdata's free tier, so we
+    // virtually always get hits for any well-known person.
+    searchGoogleNews({ q: `"${talent.name}"`, timeframeHours: 48 }),
   ]);
 
   const rawItems: RawItem[] = [];
@@ -942,10 +947,33 @@ export async function lookupPersonNews(
   } else {
     tweetsError = String(tweetsResult.reason);
   }
+
+  // Merge newsdata + Google News results, deduped by normalized title.
+  const articleBucket: NewsArticle[] = [];
   if (articlesResult.status === "fulfilled") {
-    rawItems.push(...articlesResult.value.articles.map(articleToRaw));
+    articleBucket.push(...articlesResult.value.articles);
   } else {
     articlesError = String(articlesResult.reason);
+  }
+  if (googleResult.status === "fulfilled") {
+    articleBucket.push(...googleResult.value);
+  } else {
+    // Google News failure is non-fatal — if newsdata succeeded we still
+    // have results, and there's no user-facing knob for this source.
+    if (!articlesError) articlesError = String(googleResult.reason);
+  }
+  const seenTitles = new Set<string>();
+  const normalizeTitle = (t: string): string =>
+    t.toLowerCase()
+      // Drop the trailing " - Source Name" that Google News appends.
+      .replace(/\s+-\s+[^-]+$/, "")
+      .replace(/\s+/g, " ")
+      .trim();
+  for (const a of articleBucket) {
+    const key = normalizeTitle(a.title);
+    if (!key || seenTitles.has(key)) continue;
+    seenTitles.add(key);
+    rawItems.push(articleToRaw(a));
   }
 
   const excludeSet = new Set(exclude);
