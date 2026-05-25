@@ -49,7 +49,9 @@ export function CardLayoutOverlay({ doc, overrides, cardEl, scale, onChange }: P
 
   // Re-measure whenever the doc, overrides (text content can change), or
   // cardEl change. useLayoutEffect runs before paint so the hit boxes never
-  // lag visibly behind the rendered content.
+  // lag visibly behind the rendered content. The dep array is mandatory —
+  // without it this re-runs every render, calls setBoxes, triggers another
+  // render → infinite loop.
   useLayoutEffect(() => {
     if (!cardEl) { setBoxes([]); return; }
     const cardRect = cardEl.getBoundingClientRect();
@@ -74,7 +76,7 @@ export function CardLayoutOverlay({ doc, overrides, cardEl, scale, onChange }: P
       });
     }
     setBoxes(next);
-  });
+  }, [doc, overrides, cardEl, scale]);
 
   const dragRef = useRef<{
     layerId: string;
