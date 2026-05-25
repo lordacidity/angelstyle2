@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { SettingsModal } from "./Settings";
 import { AccountsModal, type Theme } from "./Accounts";
 import { ThemePicker } from "./ThemePicker";
+import { Sidebar } from "./Sidebar";
 import { ensureNotificationPermission, playDing, showDesktopNotification } from "./notify";
 
 interface SentEvent {
@@ -251,7 +252,9 @@ export function App() {
   };
 
   return (
-    <div className="app">
+    <div className="layout">
+      <Sidebar current="phonedeck" />
+      <div className="layout-main">
       <div className="app-header">
         <div>
           <h1>Phonedeck</h1>
@@ -392,6 +395,7 @@ export function App() {
             </div>
           ))}
         </div>
+      </div>
       </div>
     </div>
   );

@@ -5,12 +5,29 @@ import path from "node:path";
 import fs from "node:fs";
 import os from "node:os";
 import { execFileSync } from "node:child_process";
+import dotenv from "dotenv";
+import { fileURLToPath } from "node:url";
 import { config } from "./config.js";
 import { IncomingWatcher } from "./watcher.js";
 import { listDevices, pushFile, mediaScan, launchScrcpy } from "./adb.js";
 import { loadSettings, getSettings, saveSettings } from "./settings.js";
 import * as store from "./store.js";
 import * as filesStore from "./filesStore.js";
+import * as templates from "./templates.js";
+import { chat as deepseekChat, parseJson as deepseekParseJson } from "./deepseek.js";
+
+// Resolve the single root .env relative to THIS file, not cwd — when launched
+// via `npm --prefix phonedeck/server run dev` from the workspace root, cwd
+// is the workspace, not the server dir.
+const HERE = path.dirname(fileURLToPath(import.meta.url));
+dotenv.config({ path: path.resolve(HERE, "..", "..", "..", ".env") });
+
+// Dynamic import AFTER dotenv runs, so pauvData sees the env vars when it
+// constructs its module-level Supabase client.
+const { listTalents, searchNews, newsForTalent, listIndustries, lookupNews, lookupAllNews, lookupPersonNews, latestArticlesByIndustry, extractPerson, chatEdit } =
+  await import("./pauvData.js");
+const { imageSearch } = await import("./serpapi.js");
+const { getHandlesByIndustry, listIndustriesWithCounts } = await import("./newsSources.js");
 
 loadSettings();
 
@@ -371,6 +388,289 @@ app.post("/api/push-theme", async (req, res) => {
     errCount: results.length - okCount,
   });
   res.json({ results, serials, unreachable: serials.filter((s) => !ready.has(s)) });
+});
+
+// ---- news-cards feature: talents (Pauv Supabase) + news (Newsdata.io) ----
+app.get("/api/talents", async (_req, res) => {
+  try {
+    res.json(await listTalents());
+  } catch (err) {
+    res.status(500).json({ error: String(err) });
+  }
+});
+
+app.get("/api/news", async (req, res) => {
+  try {
+    const q = typeof req.query.q === "string" ? req.query.q : undefined;
+    const size = req.query.size ? Number(req.query.size) : undefined;
+    res.json(await searchNews({ q, size }));
+  } catch (err) {
+    res.status(500).json({ error: String(err) });
+  }
+});
+
+app.get("/api/news/for-talent/:ticker", async (req, res) => {
+  try {
+    res.json(await newsForTalent(req.params.ticker));
+  } catch (err) {
+    res.status(500).json({ error: String(err) });
+  }
+});
+
+app.get("/api/industries", async (_req, res) => {
+  try {
+    res.json(await listIndustries());
+  } catch (err) {
+    res.status(500).json({ error: String(err) });
+  }
+});
+
+app.get("/api/news/latest-by-industry", async (req, res) => {
+  try {
+    const industry = typeof req.query.industry === "string" ? req.query.industry : "";
+    if (!industry) { res.status(400).json({ error: "industry query param required" }); return; }
+    const size = req.query.size ? Number(req.query.size) : 5;
+    res.json(await latestArticlesByIndustry(industry, size));
+  } catch (err) {
+    res.status(500).json({ error: String(err) });
+  }
+});
+
+app.post("/api/news/lookup", async (req, res) => {
+  try {
+    const { industry, pauvOnly, exclude } = req.body as {
+      industry?: string;
+      pauvOnly?: boolean;
+      exclude?: string[];
+    };
+    if (!industry) { res.status(400).json({ error: "industry required" }); return; }
+    const ex = Array.isArray(exclude) ? exclude.filter((x) => typeof x === "string") : [];
+    res.json(await lookupNews(industry, !!pauvOnly, ex));
+  } catch (err) {
+    res.status(500).json({ error: String(err) });
+  }
+});
+
+app.post("/api/news/all-lookup", async (req, res) => {
+  try {
+    const { exclude } = (req.body ?? {}) as { exclude?: string[] };
+    const ex = Array.isArray(exclude) ? exclude.filter((x) => typeof x === "string") : [];
+    res.json(await lookupAllNews(ex));
+  } catch (err) {
+    res.status(500).json({ error: String(err) });
+  }
+});
+
+app.post("/api/news/person-lookup", async (req, res) => {
+  try {
+    const { ticker, exclude } = (req.body ?? {}) as { ticker?: string; exclude?: string[] };
+    if (!ticker) { res.status(400).json({ error: "ticker required" }); return; }
+    const ex = Array.isArray(exclude) ? exclude.filter((x) => typeof x === "string") : [];
+    res.json(await lookupPersonNews(ticker, ex));
+  } catch (err) {
+    res.status(500).json({ error: String(err) });
+  }
+});
+
+app.post("/api/news/chat-edit", async (req, res) => {
+  try {
+    const { messages, state } = req.body as {
+      messages?: Array<{ role: "user" | "assistant"; content: string }>;
+      state?: {
+        caption: string;
+        mainPerson: string;
+        summary: string;
+        pauvAngle: string;
+        matchedTicker: string | null;
+      };
+    };
+    if (!Array.isArray(messages) || messages.length === 0) {
+      res.status(400).json({ error: "messages[] required (with at least one user message)" });
+      return;
+    }
+    if (!state) {
+      res.status(400).json({ error: "state required" });
+      return;
+    }
+    res.json(await chatEdit(messages, state));
+  } catch (err) {
+    res.status(500).json({ error: String(err) });
+  }
+});
+
+app.post("/api/news/extract-person", async (req, res) => {
+  try {
+    const body = (req.body ?? {}) as {
+      title?: string;
+      description?: string | null;
+      content?: string | null;
+      tweetText?: string;
+      tweetAuthorName?: string;
+      tweetAuthorHandle?: string;
+    };
+    if (!body.title && !body.tweetText) {
+      res.status(400).json({ error: "title or tweetText required" });
+      return;
+    }
+    res.json(await extractPerson(body));
+  } catch (err) {
+    res.status(500).json({ error: String(err) });
+  }
+});
+
+app.get("/api/news-sources", async (_req, res) => {
+  try {
+    res.json(await listIndustriesWithCounts());
+  } catch (err) {
+    res.status(500).json({ error: String(err) });
+  }
+});
+
+app.get("/api/news-sources/:industry", async (req, res) => {
+  try {
+    res.json(await getHandlesByIndustry(req.params.industry));
+  } catch (err) {
+    res.status(500).json({ error: String(err) });
+  }
+});
+
+// ---- card templates (Railway Postgres) ----
+app.get("/api/templates", async (_req, res) => {
+  try { res.json(await templates.listTemplates()); }
+  catch (err) { res.status(500).json({ error: String(err) }); }
+});
+
+app.get("/api/templates/:id", async (req, res) => {
+  try {
+    const t = await templates.getTemplate(req.params.id);
+    if (!t) { res.status(404).json({ error: "not found" }); return; }
+    res.json(t);
+  } catch (err) { res.status(500).json({ error: String(err) }); }
+});
+
+app.post("/api/templates", async (req, res) => {
+  try {
+    const { name, doc } = req.body ?? {};
+    if (typeof name !== "string" || !name.trim()) {
+      res.status(400).json({ error: "name required" }); return;
+    }
+    if (!doc || typeof doc !== "object") {
+      res.status(400).json({ error: "doc required" }); return;
+    }
+    res.json(await templates.createTemplate(name.trim(), doc));
+  } catch (err) { res.status(500).json({ error: String(err) }); }
+});
+
+app.put("/api/templates/:id", async (req, res) => {
+  try {
+    const { name, doc } = req.body ?? {};
+    const patch: { name?: string; doc?: templates.TemplateDoc } = {};
+    if (typeof name === "string" && name.trim()) patch.name = name.trim();
+    if (doc && typeof doc === "object") patch.doc = doc;
+    const t = await templates.updateTemplate(req.params.id, patch);
+    if (!t) { res.status(404).json({ error: "not found" }); return; }
+    res.json(t);
+  } catch (err) { res.status(500).json({ error: String(err) }); }
+});
+
+app.delete("/api/templates/:id", async (req, res) => {
+  try {
+    const ok = await templates.deleteTemplate(req.params.id);
+    if (!ok) { res.status(404).json({ error: "not found" }); return; }
+    res.json({ ok: true });
+  } catch (err) { res.status(500).json({ error: String(err) }); }
+});
+
+// DeepSeek rewrites copy for the template's text-role slots so it fits the
+// template's visual style (character budget, tone) instead of dumping the raw
+// headline verbatim. Slots whose role isn't sent here are populated client-
+// side from the talent/news data directly.
+app.post("/api/templates/populate-copy", async (req, res) => {
+  try {
+    const { slots, context } = req.body as {
+      slots?: Array<{ id: string; role: string; maxChars?: number; hint?: string }>;
+      context?: {
+        headline?: string;
+        source?: string | null;
+        pubDate?: string | null;
+        pauvAngle?: string;
+        person?: { name?: string; summary?: string };
+        talent?: {
+          name?: string; ticker?: string; industry?: string | null;
+          subcategory?: string | null; location?: string | null;
+          price?: { usd?: number | null; lifetimeChangePct?: number | null };
+        };
+      };
+    };
+    if (!Array.isArray(slots) || slots.length === 0) {
+      res.status(400).json({ error: "slots[] required" }); return;
+    }
+    if (!context) { res.status(400).json({ error: "context required" }); return; }
+
+    const sys =
+      "You write copy for a Pauv news card. Given the news context and a list of " +
+      "text slots (each with a semantic role and a max-character budget), write " +
+      "the copy for each slot. Be punchy, factual, no hashtags, no emoji. " +
+      "Return JSON: { results: { [slotId]: string } }. Stay under each maxChars.";
+    const user = JSON.stringify({ slots, context });
+    const raw = await deepseekChat(
+      [
+        { role: "system", content: sys },
+        { role: "user", content: user },
+      ],
+      { json: true, temperature: 0.4 },
+    );
+    const parsed = deepseekParseJson<{ results?: Record<string, string> }>(raw);
+    res.json({ results: parsed.results ?? {} });
+  } catch (err) {
+    res.status(500).json({ error: String(err) });
+  }
+});
+
+app.post("/api/photos/search", async (req, res) => {
+  try {
+    const { query, count, offset } = req.body as {
+      query?: string; count?: number; offset?: number;
+    };
+    if (!query) { res.status(400).json({ error: "query required" }); return; }
+    res.json(await imageSearch(query, count ?? 3, offset ?? 0));
+  } catch (err) {
+    res.status(500).json({ error: String(err) });
+  }
+});
+
+// DeepSeek suggests a different Google Images query so the user can swap
+// "Drake" → "Drake rapper Toronto stage 2024" when generic results aren't
+// matching. We send the prior tries so it doesn't loop back to the same one.
+app.post("/api/photos/rewrite-query", async (req, res) => {
+  try {
+    const { personName, personSummary, previousQueries, hint } = req.body as {
+      personName?: string;
+      personSummary?: string;
+      previousQueries?: string[];
+      hint?: string;
+    };
+    if (!personName) { res.status(400).json({ error: "personName required" }); return; }
+    const sys =
+      "You generate Google Images search queries for finding good editorial " +
+      "photos of a public figure. Return JSON: { query: string }. The query " +
+      "should be specific enough to surface high-quality press photos but not " +
+      "so narrow it returns nothing. Avoid the queries listed in `previousQueries` " +
+      "— pick a different angle each time (e.g. add a year, a venue, a role, a context).";
+    const user = JSON.stringify({ personName, personSummary, previousQueries, hint });
+    const raw = await deepseekChat(
+      [
+        { role: "system", content: sys },
+        { role: "user", content: user },
+      ],
+      { json: true, temperature: 0.7 },
+    );
+    const parsed = deepseekParseJson<{ query?: string }>(raw);
+    if (!parsed.query) { res.status(500).json({ error: "no query returned" }); return; }
+    res.json({ query: parsed.query });
+  } catch (err) {
+    res.status(500).json({ error: String(err) });
+  }
 });
 
 // Server-Sent Events stream so the UI updates the file list live.
