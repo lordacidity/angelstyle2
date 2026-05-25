@@ -168,7 +168,7 @@ export function NewsCardsView() {
       setExtract(seed.extract);
       // Pre-populate the photo strip with any images scraped from the
       // article, marked with the publisher's name so the card can show
-      // attribution. The user can still rewrite the query for more photos.
+      // attribution.
       const articlePhotos: Photo[] = (seed.articleImages ?? []).map((url, i) => ({
         url,
         thumbnail: url,
@@ -178,10 +178,52 @@ export function NewsCardsView() {
       setPhotos(articlePhotos);
       if (articlePhotos.length > 0) setSelectedPhoto(articlePhotos[0]);
       setStep("photo");
+      // Also kick off the normal SerpAPI photo search as a fallback —
+      // article scrapes are often empty (Google News redirect URLs) or
+      // hotlink-protected (publisher blocks browser <img> loads). Search
+      // results get appended after the article images so the user always
+      // has working pictures.
+      const personName = seed.extract?.person?.name;
+      if (personName) {
+        loadPhotosAppending(personName, 0, articlePhotos);
+      }
     } catch (e) {
       console.warn("[person-news-seed] failed to parse:", e);
     }
   }, []);
+
+  // Variant of loadPhotos that appends to an existing seed instead of
+  // replacing. Used by the Person News hand-off so article images stay at
+  // the front while SerpAPI fills in fallback options behind them.
+  const loadPhotosAppending = async (
+    query: string,
+    offset: number,
+    keepFirst: Photo[],
+  ) => {
+    setPhotosLoading(true);
+    setPhotoQuery(query);
+    setPhotoOffset(offset);
+    try {
+      const r = await fetch("/api/photos/search", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ query, count: 3, offset }),
+      });
+      if (!r.ok) throw new Error(await r.text());
+      const fresh: Photo[] = await r.json();
+      // Skip any search result that duplicates an article image by URL.
+      const articleUrls = new Set(keepFirst.map((p) => p.url));
+      const merged: Photo[] = [...keepFirst, ...fresh.filter((p) => !articleUrls.has(p.url))];
+      setPhotos(merged);
+      // If we had no article images, auto-select the first search result.
+      if (keepFirst.length === 0 && merged[0]) setSelectedPhoto(merged[0]);
+      setPhotoQueryHistory((h) => (h.includes(query) ? h : [...h, query]));
+    } catch (e) {
+      console.warn("[photos] fallback search failed:", e);
+    } finally {
+      setPhotosLoading(false);
+    }
+  };
 
   // initial industries fetch
   useEffect(() => {

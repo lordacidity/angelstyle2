@@ -498,6 +498,44 @@ app.post("/api/news/chat-edit", async (req, res) => {
   }
 });
 
+// Image proxy. Many publisher CDNs don't return CORS headers, so when the
+// template renderer sets `crossorigin="anonymous"` (needed so the card can be
+// exported as PNG without canvas-tainting), the browser refuses to paint the
+// image. We route external images through here, set permissive CORS headers
+// of our own, and the browser is happy. This also bypasses publisher hotlink
+// protection that rejects loads from non-publisher origins.
+app.get("/api/img-proxy", async (req, res) => {
+  const url = typeof req.query.url === "string" ? req.query.url : "";
+  if (!url || !/^https?:\/\//i.test(url)) {
+    res.status(400).send("absolute http(s) url required");
+    return;
+  }
+  try {
+    const upstream = await fetch(url, {
+      headers: {
+        "User-Agent":
+          "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Safari/537.36",
+        // Some CDNs only serve images when the Referer is from their own
+        // origin (hotlink protection). Faking it to the image's own host
+        // typically satisfies them without breaking sites that don't care.
+        "Referer": new URL(url).origin + "/",
+        "Accept": "image/*,*/*;q=0.8",
+      },
+      redirect: "follow",
+    });
+    if (!upstream.ok) {
+      res.status(upstream.status).send(`upstream ${upstream.status}`);
+      return;
+    }
+    res.set("Access-Control-Allow-Origin", "*");
+    res.set("Cache-Control", "public, max-age=3600");
+    res.set("Content-Type", upstream.headers.get("content-type") ?? "application/octet-stream");
+    res.send(Buffer.from(await upstream.arrayBuffer()));
+  } catch (err) {
+    res.status(500).send(String(err));
+  }
+});
+
 // Scrape a news article URL for its featured image + site name. Used by the
 // Person News → card flow so the resulting card can use the publisher's own
 // hero image (with attribution) instead of a generic photo search result.

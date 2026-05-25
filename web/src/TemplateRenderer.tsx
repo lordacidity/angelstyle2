@@ -71,6 +71,16 @@ function shapeSvgElement(
   }
 }
 
+// Route external image URLs through the backend image proxy so they always
+// load with proper CORS headers (canvas-safe for toPng export, and bypasses
+// publisher hotlink protection). Pass-through for data URLs and same-origin.
+function proxiedImage(url: string): string {
+  if (!url) return url;
+  // Already-proxied URLs and non-http schemes pass through untouched.
+  if (url.startsWith("/api/img-proxy") || !/^https?:\/\//i.test(url)) return url;
+  return `/api/img-proxy?url=${encodeURIComponent(url)}`;
+}
+
 // CSS clip-path expression for the shape — used to mask images. Returns
 // undefined for "rect" (we use borderRadius for rectangles instead).
 function shapeClipPath(shape: ShapeKind, w: number, h: number): string | undefined {
@@ -349,7 +359,7 @@ const ImageView = forwardRef<HTMLDivElement, {
       >
         {src && (
           <img
-            src={src}
+            src={proxiedImage(src)}
             alt=""
             crossOrigin="anonymous"
             style={{
