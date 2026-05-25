@@ -37,6 +37,11 @@ export interface BaseLayer {
   rotation: number;
   opacity: number;
   zIndex: number;
+  // When true, this layer is absolutely positioned via x/y in template-px,
+  // outside the flow. Used for image/shape layers so they can be dropped
+  // anywhere in empty space without reordering other layers. Text layers
+  // stay in flow by default so wrapped headlines push subcaptions down.
+  pinned?: boolean;
 }
 
 // Snap step for editor moves/resizes. Same value drives the grid overlay.
@@ -340,10 +345,12 @@ export function migrateToStack(doc: TemplateDoc): TemplateDoc {
 }
 
 // Group consecutive layers into rows for rendering. The first layer always
-// starts a new row; layers with sameRow=true join the row above them.
+// starts a new row; layers with sameRow=true join the row above them. Pinned
+// layers are skipped — they render absolutely positioned outside the flow.
 export function groupRows(layers: Layer[]): Layer[][] {
   const rows: Layer[][] = [];
   for (const l of layers) {
+    if (l.pinned) continue;
     if (l.sameRow && rows.length > 0) {
       rows[rows.length - 1].push(l);
     } else {
@@ -351,6 +358,10 @@ export function groupRows(layers: Layer[]): Layer[][] {
     }
   }
   return rows;
+}
+
+export function pinnedLayers(layers: Layer[]): Layer[] {
+  return layers.filter((l) => l.pinned);
 }
 
 export function newLayerId(): string {

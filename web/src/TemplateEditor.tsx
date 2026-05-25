@@ -111,11 +111,13 @@ export function TemplateEditor({ initial, onSave, onCancel }: Props) {
   };
 
   const addImage = () => {
+    // New images are pinned by default — they sit wherever the user drops
+    // them via free x/y placement, no row-flow collisions.
     const l: ImageLayer = {
       id: newLayerId(), type: "image", role: "decorative",
-      x: 40, y: 0, width: 1000, height: 600, gapTop: GRID * 2, sameRow: false,
-      rotation: 0, opacity: 1, zIndex: 1,
-      src: "https://placehold.co/1000x600/1a1a1c/666?text=Image",
+      x: 100, y: 100, width: 400, height: 400, gapTop: 0, sameRow: false,
+      rotation: 0, opacity: 1, zIndex: 5, pinned: true,
+      src: "https://placehold.co/400x400/1a1a1c/666?text=Image",
       fit: "cover", borderRadius: 12,
     };
     setDoc((d) => ({ ...d, layers: [...d.layers, l] }));
@@ -123,10 +125,11 @@ export function TemplateEditor({ initial, onSave, onCancel }: Props) {
   };
 
   const addShape = () => {
+    // Pinned by default for the same reason as images.
     const l: ShapeLayer = {
       id: newLayerId(), type: "shape", role: "decorative",
-      x: 40, y: 0, width: 1000, height: 200, gapTop: GRID * 2, sameRow: false,
-      rotation: 0, opacity: 1, zIndex: 1,
+      x: 100, y: 100, width: 200, height: 200, gapTop: 0, sameRow: false,
+      rotation: 0, opacity: 1, zIndex: 5, pinned: true,
       shape: "rect", fill: "#22c55e",
     };
     setDoc((d) => ({ ...d, layers: [...d.layers, l] }));
@@ -180,10 +183,22 @@ export function TemplateEditor({ initial, onSave, onCancel }: Props) {
       if (st.mode === "move") {
         // Horizontal: free X, snapped.
         const newX = Math.max(0, snap(st.startLayer.x + dx));
+        if (st.startLayer.pinned) {
+          // Pinned: free Y too, no reorder. The layer goes wherever the
+          // pointer is, independent of other layers.
+          const newY = Math.max(0, snap(st.startLayer.y + dy));
+          const patch: Partial<Layer> = {};
+          if (newX !== st.startLayer.x) patch.x = newX;
+          if (newY !== st.startLayer.y) patch.y = newY;
+          if (Object.keys(patch).length > 0) {
+            updateLayer(st.layerId, patch as Partial<Layer>);
+          }
+          return;
+        }
         if (newX !== st.startLayer.x) {
           updateLayer(st.layerId, { x: newX } as Partial<Layer>);
         }
-        // Vertical: reorder when pointer crosses neighbor centers.
+        // Flow layers: vertical drag reorders by crossing neighbor centers.
         reorderByPointer(st.layerId, e.clientY, st.layerCenters);
         return;
       }
@@ -203,9 +218,17 @@ export function TemplateEditor({ initial, onSave, onCancel }: Props) {
         patch = { ...patch, width: Math.max(GRID, snap(s.width + dx)) };
       }
       if (dir.includes("n")) {
-        // North edge: shrink/grow the gap above us. Can't go negative.
-        const newGap = Math.max(0, snap((s.gapTop ?? 0) + dy));
-        patch = { ...patch, gapTop: newGap };
+        if (s.pinned) {
+          // North edge on a pinned layer: move top, keep bottom fixed.
+          const newY = Math.max(0, snap(s.y + dy));
+          const dySnapped = newY - s.y;
+          const newH = Math.max(GRID, s.height - dySnapped);
+          patch = { ...patch, y: newY, height: newH };
+        } else {
+          // Flow north edge: shrink/grow the gap above us. Can't go negative.
+          const newGap = Math.max(0, snap((s.gapTop ?? 0) + dy));
+          patch = { ...patch, gapTop: newGap };
+        }
       }
       if (dir.includes("s")) {
         // South edge: only meaningful for image/shape (text is content-sized).
@@ -627,19 +650,37 @@ function PropertyEditor({
 }) {
   return (
     <div className="property-editor">
-      <div className="prop-row">
-        <NumField label="X" value={layer.x} step={GRID} onChange={(v) => onChange({ x: Math.max(0, snap(v)) } as Partial<Layer>)} />
-        <NumField label="Gap top" value={layer.gapTop ?? 0} step={GRID} min={0} onChange={(v) => onChange({ gapTop: Math.max(0, snap(v)) } as Partial<Layer>)} />
-      </div>
       <div className="prop-row" style={{ gap: 6 }}>
         <Chip
-          on={layer.sameRow}
-          onClick={() => onChange({ sameRow: !layer.sameRow } as Partial<Layer>)}
-          title="Sit side-by-side with the layer above instead of stacking below it"
+          on={!!layer.pinned}
+          onClick={() => onChange({ pinned: !layer.pinned } as Partial<Layer>)}
+          title="Free placement: position by X/Y, no flow with other layers. Off = participate in vertical stacking."
         >
-          {layer.sameRow ? "← Same row as above" : "Stack below"}
+          {layer.pinned ? "📌 Free placement" : "↕ In flow"}
         </Chip>
       </div>
+      {layer.pinned ? (
+        <div className="prop-row">
+          <NumField label="X" value={layer.x} step={GRID} onChange={(v) => onChange({ x: Math.max(0, snap(v)) } as Partial<Layer>)} />
+          <NumField label="Y" value={layer.y} step={GRID} min={0} onChange={(v) => onChange({ y: Math.max(0, snap(v)) } as Partial<Layer>)} />
+        </div>
+      ) : (
+        <>
+          <div className="prop-row">
+            <NumField label="X" value={layer.x} step={GRID} onChange={(v) => onChange({ x: Math.max(0, snap(v)) } as Partial<Layer>)} />
+            <NumField label="Gap top" value={layer.gapTop ?? 0} step={GRID} min={0} onChange={(v) => onChange({ gapTop: Math.max(0, snap(v)) } as Partial<Layer>)} />
+          </div>
+          <div className="prop-row" style={{ gap: 6 }}>
+            <Chip
+              on={layer.sameRow}
+              onClick={() => onChange({ sameRow: !layer.sameRow } as Partial<Layer>)}
+              title="Sit side-by-side with the layer above instead of stacking below it"
+            >
+              {layer.sameRow ? "← Same row as above" : "Stack below"}
+            </Chip>
+          </div>
+        </>
+      )}
       <div className="prop-row">
         <NumField label="W" value={layer.width} step={GRID} min={GRID} onChange={(v) => onChange({ width: Math.max(GRID, snap(v)) } as Partial<Layer>)} />
         {layer.type !== "text" ? (

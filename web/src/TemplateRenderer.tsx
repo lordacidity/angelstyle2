@@ -21,7 +21,7 @@ import type {
   LayoutOverrides,
   LayoutOverride,
 } from "./templateModel";
-import { resolveText, resolveImageSrc, groupRows } from "./templateModel";
+import { resolveText, resolveImageSrc, groupRows, pinnedLayers } from "./templateModel";
 
 interface Props {
   doc: TemplateDoc;
@@ -110,6 +110,59 @@ export function TemplateRenderer({
           </div>
         ))}
       </div>
+
+      {/* Pinned layers — absolutely positioned, outside the flex flow. They
+          live wherever the user dragged them. */}
+      {pinnedLayers(doc.layers).map((l) => (
+        <PinnedSlot
+          key={l.id}
+          layer={l}
+          context={context}
+          overrides={overrides}
+          layoutOverride={layoutOverrides?.[l.id] ?? null}
+          overlay={layerOverlay?.(l)}
+        />
+      ))}
+    </div>
+  );
+}
+
+// Same content as LayerSlot but absolutely positioned via the layer's x/y.
+function PinnedSlot({
+  layer,
+  context,
+  overrides,
+  layoutOverride,
+  overlay,
+}: {
+  layer: Layer;
+  context: PopulateContext | null;
+  overrides: CopyOverrides | null;
+  layoutOverride: LayoutOverride | null;
+  overlay: React.ReactNode;
+}) {
+  const xDelta = (layoutOverride?.x ?? layer.x) - layer.x;
+  const wrapStyle: React.CSSProperties = {
+    position: "absolute",
+    left: layer.x + xDelta,
+    top: layer.y,
+    width: layer.width,
+    height: layer.height,
+    opacity: layer.opacity,
+    transform: layer.rotation ? `rotate(${layer.rotation}deg)` : undefined,
+    transformOrigin: "top left",
+    zIndex: layer.zIndex,
+  };
+  return (
+    <div style={wrapStyle} data-layer-id={layer.id}>
+      {layer.type === "text" && (
+        <TextView layer={layer} context={context} overrides={overrides} />
+      )}
+      {layer.type === "image" && (
+        <ImageView layer={layer} context={context} layoutOverride={layoutOverride} />
+      )}
+      {layer.type === "shape" && <ShapeView layer={layer} />}
+      {overlay}
     </div>
   );
 }
