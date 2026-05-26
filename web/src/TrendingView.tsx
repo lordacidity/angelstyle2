@@ -55,12 +55,12 @@ function cleanHeadline(title: string): string {
   return title.replace(/\s+-\s+[^-]+$/, "").trim();
 }
 
-// Two distinct content niches the user produces marketing for, plus a
-// reusable label for the toggle. Any future industry slots into one of
-// these buckets — none should "leak" between categories.
-const HOLLYWOOD_INDUSTRIES = new Set(["Actor", "Musician", "Comedian"]);
+// Three distinct content niches the user produces marketing for. Any future
+// industry should slot into exactly one bucket — no overlap.
+const HOLLYWOOD_INDUSTRIES = new Set(["Actor", "Musician"]);
+const COMEDIAN_INDUSTRIES = new Set(["Comedian"]);
 const CREATOR_INDUSTRIES = new Set(["Streamer", "Youtuber", "Influencer", "Podcaster"]);
-type Category = "hollywood" | "creators";
+type Category = "hollywood" | "comedians" | "creators";
 
 export function TrendingView() {
   const [items, setItems] = useState<TrendingTalent[] | null>(null);
@@ -165,10 +165,13 @@ export function TrendingView() {
           </div>
         </div>
 
-        {/* Category toggle — two distinct niches the user creates content for. */}
+        {/* Category toggle — three distinct niches the user creates content for. */}
         {(() => {
-          const hollywoodCount = (items ?? []).filter((it) => it.talent.industry && HOLLYWOOD_INDUSTRIES.has(it.talent.industry)).length;
-          const creatorCount = (items ?? []).filter((it) => it.talent.industry && CREATOR_INDUSTRIES.has(it.talent.industry)).length;
+          const countOf = (set: Set<string>) =>
+            (items ?? []).filter((it) => it.talent.industry && set.has(it.talent.industry)).length;
+          const hollywoodCount = countOf(HOLLYWOOD_INDUSTRIES);
+          const comedianCount = countOf(COMEDIAN_INDUSTRIES);
+          const creatorCount = countOf(CREATOR_INDUSTRIES);
           return (
             <div className="row" style={{ marginBottom: 16, gap: 8 }}>
               <button
@@ -176,6 +179,12 @@ export function TrendingView() {
                 onClick={() => setCategory("hollywood")}
               >
                 🎬 Music & Film {items !== null && <span style={{ opacity: 0.7, marginLeft: 6 }}>({hollywoodCount})</span>}
+              </button>
+              <button
+                className={category === "comedians" ? "" : "secondary"}
+                onClick={() => setCategory("comedians")}
+              >
+                🎤 Comedians {items !== null && <span style={{ opacity: 0.7, marginLeft: 6 }}>({comedianCount})</span>}
               </button>
               <button
                 className={category === "creators" ? "" : "secondary"}
@@ -198,21 +207,17 @@ export function TrendingView() {
         )}
 
         {(() => {
-          const filtered = (items ?? []).filter((it) => {
-            const ind = it.talent.industry;
-            if (!ind) return false;
-            return category === "hollywood"
-              ? HOLLYWOOD_INDUSTRIES.has(ind)
-              : CREATOR_INDUSTRIES.has(ind);
-          });
+          const activeSet =
+            category === "hollywood" ? HOLLYWOOD_INDUSTRIES :
+            category === "comedians" ? COMEDIAN_INDUSTRIES :
+            CREATOR_INDUSTRIES;
+          const filtered = (items ?? []).filter((it) => it.talent.industry && activeSet.has(it.talent.industry));
           if (items !== null && filtered.length === 0) {
-            return (
-              <div className="card empty">
-                {category === "hollywood"
-                  ? "No actors, musicians, or comedians in the news today. Try refreshing later or switch to Creators."
-                  : "No creators in the news today. Try refreshing later or switch to Music & Film."}
-              </div>
-            );
+            const emptyMsg =
+              category === "hollywood" ? "No actors or musicians in the news today." :
+              category === "comedians" ? "No comedians in the news today." :
+              "No creators in the news today.";
+            return <div className="card empty">{emptyMsg} Try refreshing later or switch tabs.</div>;
           }
           return filtered.map((it) => {
           const isOpen = expanded.has(it.talent.ticker);

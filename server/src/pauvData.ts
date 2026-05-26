@@ -1,5 +1,8 @@
 import { createClient } from "@supabase/supabase-js";
 import ws from "ws";
+import fs from "node:fs";
+import path from "node:path";
+import { fileURLToPath } from "node:url";
 import { chat, parseJson, type ChatMessage } from "./deepseek.js";
 import { searchTweets, type Tweet } from "./twitter.js";
 import { getHandlesByIndustry } from "./newsSources.js";
@@ -1147,8 +1150,52 @@ function scoreHeadline(h: Omit<TrendingHeadline, "viralScore" | "viralBreakdown"
   return { viralScore: total, viralBreakdown: { tier, recency: Math.round(recency * 10) / 10 } };
 }
 
+// Read curated extras from server/extra-talents.json on every refresh. Edits
+// to that file take effect on the next /api/trending/talents call without a
+// server restart. Extras get a synthetic Talent shape so they merge with
+// Pauv roster talents transparently.
+function loadExtraTalents(): Talent[] {
+  try {
+    // Resolve relative to the package root regardless of CWD.
+    const here = path.dirname(fileURLToPath(import.meta.url));
+    // server/src/pauvData.ts → server/extra-talents.json
+    const file = path.resolve(here, "..", "extra-talents.json");
+    const raw = fs.readFileSync(file, "utf8");
+    const parsed = JSON.parse(raw) as {
+      talents?: Array<{ name: string; industry: string; subcategory?: string }>;
+    };
+    return (parsed.talents ?? []).map((e) => ({
+      id: `extra-${e.name.toLowerCase().replace(/\W+/g, "-")}`,
+      // Tickers are used as React keys in the UI; prefix to avoid colliding
+      // with Pauv tickers and to signal this is an extras-roster entry.
+      ticker: `ex-${e.name.toLowerCase().replace(/\W+/g, "")}`,
+      name: e.name,
+      bio: null,
+      photo_url: null,
+      industry: e.industry,
+      subcategory: e.subcategory ?? null,
+      location: null,
+      socials: {},
+      price: {
+        cents: null, usd: null, p0Cents: null, lifetimeChangePct: null,
+        holders: null, volumeLifetimeUsd: null, latestTickAt: null, frozen: false,
+      },
+      claimStatus: "unclaimed" as const,
+      delistedAt: null,
+    }));
+  } catch (err) {
+    console.warn("[extra-talents] not loaded:", err);
+    return [];
+  }
+}
+
 export async function getTrendingTalents(limit = 50): Promise<TrendingTalent[]> {
-  const talents = await listTalents();
+  const [pauvTalents, extraTalents] = [await listTalents(), loadExtraTalents()];
+  // Pauv-DB names take precedence — drop any extra with the same name to
+  // avoid double-querying. (Match is case-insensitive on full name.)
+  const pauvNames = new Set(pauvTalents.map((t) => t.name.toLowerCase()));
+  const filteredExtras = extraTalents.filter((t) => !pauvNames.has(t.name.toLowerCase()));
+  const talents = [...pauvTalents, ...filteredExtras];
   const eligible = talents.filter((t) => {
     if (!t.industry || !TRENDING_INDUSTRIES.has(t.industry)) return false;
     // Skip single-word short names (e.g. "Pink", "SZA") — too many false-
