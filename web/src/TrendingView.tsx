@@ -23,6 +23,17 @@ interface TrendingHeadline {
   pubDate: string | null;
   source: string | null;
   description: string | null;
+  viralScore: number;
+  viralBreakdown: { tier: number; recency: number };
+}
+
+// Subtle color-coding so a hot story stands out at a glance without
+// overwhelming the list.
+function heatColor(score: number): { bg: string; fg: string } {
+  if (score >= 8) return { bg: "#3a1a1a", fg: "#ff8b6b" };  // red — hot
+  if (score >= 6) return { bg: "#2d2310", fg: "#ffba5c" };  // amber — warm
+  if (score >= 4) return { bg: "#1e2615", fg: "#b6e08a" };  // green — fresh
+  return { bg: "#1c2029", fg: "#8a93a0" };                  // grey — cold
 }
 
 interface TrendingTalent {
@@ -209,6 +220,26 @@ export function TrendingView() {
                           borderBottom: idx < it.headlines.length - 1 ? "1px solid #1c2029" : undefined,
                         }}
                       >
+                        <div
+                          title={`Heat ${h.viralScore}/10 — Publisher: ${h.viralBreakdown.tier}/5 · Recency: ${h.viralBreakdown.recency}/5`}
+                          style={{
+                            flexShrink: 0,
+                            width: 38, height: 38,
+                            borderRadius: 8,
+                            background: heatColor(h.viralScore).bg,
+                            color: heatColor(h.viralScore).fg,
+                            display: "flex",
+                            flexDirection: "column",
+                            alignItems: "center",
+                            justifyContent: "center",
+                            fontWeight: 700,
+                            fontSize: 14,
+                            lineHeight: 1,
+                          }}
+                        >
+                          {h.viralScore}
+                          <span style={{ fontSize: 8, opacity: 0.7, marginTop: 2 }}>HEAT</span>
+                        </div>
                         <a
                           href={h.link}
                           target="_blank"

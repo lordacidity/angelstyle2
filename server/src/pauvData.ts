@@ -1060,6 +1060,10 @@ export interface TrendingHeadline {
   pubDate: string | null;
   source: string | null;
   description: string | null;
+  // 0-10 composite virality score (publisher tier + recency).
+  viralScore: number;
+  // Breakdown for display tooltip / debugging.
+  viralBreakdown: { tier: number; recency: number };
 }
 
 export interface TrendingTalent {
@@ -1070,6 +1074,74 @@ export interface TrendingTalent {
 
 function escapeRegex(s: string): string {
   return s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+// ---- Headline virality scoring ----
+// Hand-curated tier lists. Tier 1 = top-of-funnel entertainment trades and
+// major news wires. Tier 2 = strong general-interest outlets that often
+// break or amplify celebrity stories. Anything else gets a baseline so
+// unknown sources still score above zero.
+
+// Tier sets use the BARE outlet name (no TLD, no subdomain). The normalizer
+// strips both so we match whether the source comes as "Billboard",
+// "billboard.com", "ca.rollingstone.com", etc.
+const TIER_1 = new Set([
+  "variety", "hollywoodreporter", "rollingstone", "billboard",
+  "deadline", "ew", "pitchfork", "people",
+  "nytimes", "bbc", "reuters", "apnews",
+  // Common display-name forms that don't reduce cleanly:
+  "the hollywood reporter", "rolling stone", "associated press", "entertainment weekly",
+]);
+
+const TIER_2 = new Set([
+  "theguardian", "yahoo", "vulture", "vice", "tmz",
+  "pagesix", "usmagazine", "etonline", "popsugar",
+  "thewrap", "indiewire", "stereogum", "consequence",
+  "complex", "huffpost", "elle", "vogue", "harpersbazaar",
+  "nbcnews", "cnn", "foxnews", "cbsnews", "abcnews",
+  "independent", "dailymail", "thesun",
+  "the guardian", "us weekly", "page six", "the independent",
+]);
+
+function normalizeDomain(source: string | null): string {
+  if (!source) return "";
+  let s = source.toLowerCase().trim();
+  // Strip URL prefix + path.
+  s = s.replace(/^https?:\/\//, "").split("/")[0];
+  // Strip leading country/region subdomain like "ca." or "uk.".
+  s = s.replace(/^[a-z]{2,3}\./, "").replace(/^www\./, "");
+  // Drop trailing TLDs so "billboard.com" and "Billboard" match the same key.
+  s = s.replace(/\.(com|net|org|co\.uk|co|tv|io|news|go\.com|us|me)$/, "");
+  return s;
+}
+
+function tierScore(source: string | null): number {
+  const d = normalizeDomain(source);
+  if (TIER_1.has(d)) return 5;
+  if (TIER_2.has(d)) return 3;
+  // Unknown / long-tail blog → baseline 1. Real content from a real outlet
+  // still beats nothing, but it should be easy to outrank.
+  return source ? 1 : 0;
+}
+
+function recencyScore(pubDate: string | null): number {
+  if (!pubDate) return 2;
+  const t = Date.parse(pubDate);
+  if (!Number.isFinite(t)) return 2;
+  const ageH = (Date.now() - t) / 3_600_000;
+  if (ageH <= 0) return 5;
+  if (ageH >= 48) return 0;
+  // Linear decay from 5 (now) to 0 (48h ago).
+  return Math.max(0, Math.min(5, 5 - (ageH / 48) * 5));
+}
+
+function scoreHeadline(h: Omit<TrendingHeadline, "viralScore" | "viralBreakdown">):
+  Pick<TrendingHeadline, "viralScore" | "viralBreakdown"> {
+  const tier = tierScore(h.source);
+  const recency = recencyScore(h.pubDate);
+  // Round so the UI displays a clean integer.
+  const total = Math.round(tier + recency);
+  return { viralScore: total, viralBreakdown: { tier, recency: Math.round(recency * 10) / 10 } };
 }
 
 export async function getTrendingTalents(limit = 12): Promise<TrendingTalent[]> {
@@ -1101,18 +1173,21 @@ export async function getTrendingTalents(limit = 12): Promise<TrendingTalent[]> 
     for (const a of articles) {
       const haystack = `${a.title} ${a.description ?? ""}`;
       if (re.test(haystack)) {
-        matched.push({
+        const base = {
           title: a.title,
           link: a.link,
           pubDate: a.pubDate,
           source: a.source_id,
           description: a.description,
-        });
+        };
+        matched.push({ ...base, ...scoreHeadline(base) });
       }
     }
     if (matched.length === 0) continue;
-    // Newest headline first.
+    // Sort by viral score descending — best stories first. Recency is part
+    // of the score, so within equal-tier headlines newer ones still win.
     matched.sort((a, b) => {
+      if (b.viralScore !== a.viralScore) return b.viralScore - a.viralScore;
       const ta = a.pubDate ? Date.parse(a.pubDate) : 0;
       const tb = b.pubDate ? Date.parse(b.pubDate) : 0;
       return tb - ta;
