@@ -1,6 +1,6 @@
 // Left-rail navigation shared by Phonedeck / News / Templates pages.
 
-type Tab = "phonedeck" | "news-industry" | "news-person" | "news-trending" | "templates";
+type Tab = "phonedeck" | "news-industry" | "news-person" | "news-trending" | "templates" | "studio";
 
 const ITEMS: Array<{ key: Tab; label: string; href: string; icon: string }> = [
   { key: "phonedeck",      label: "Phonedeck",     href: "/",               icon: "📱" },
@@ -8,6 +8,7 @@ const ITEMS: Array<{ key: Tab; label: string; href: string; icon: string }> = [
   { key: "news-industry",  label: "Industry News", href: "/news/industry",  icon: "📰" },
   { key: "news-person",    label: "Person News",   href: "/news/person",    icon: "👤" },
   { key: "templates",      label: "Templates",     href: "/templates",      icon: "🎨" },
+  { key: "studio",         label: "Studio",        href: "/studio",         icon: "🎬" },
 ];
 
 export function Sidebar({ current }: { current: Tab }) {

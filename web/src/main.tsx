@@ -6,6 +6,7 @@ import { NewsCardsView } from "./NewsCardsView";
 import { PersonNewsView } from "./PersonNewsView";
 import { TrendingView } from "./TrendingView";
 import { TemplatesView } from "./TemplatesView";
+import { StudioView } from "./StudioView";
 import "./styles.css";
 
 const path = window.location.pathname;
@@ -25,6 +26,8 @@ const view = path.startsWith("/send")
   ? <NewsCardsView />
   : path.startsWith("/templates")
   ? <TemplatesView />
+  : path.startsWith("/studio")
+  ? <StudioView />
   : <App />;
 
 ReactDOM.createRoot(document.getElementById("root")!).render(
