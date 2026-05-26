@@ -47,5 +47,13 @@ export function useAuth() {
     return error?.message ?? null;
   }
 
-  return { user, loading, signIn, signUp, signOut, resetPassword, updatePassword };
+  async function changePassword(currentPassword: string, newPassword: string): Promise<string | null> {
+    if (!user?.email) return 'No user email found';
+    const { error: verifyErr } = await supabase.auth.signInWithPassword({ email: user.email, password: currentPassword });
+    if (verifyErr) return 'Current password is incorrect';
+    const { error } = await supabase.auth.updateUser({ password: newPassword });
+    return error?.message ?? null;
+  }
+
+  return { user, loading, signIn, signUp, signOut, resetPassword, updatePassword, changePassword };
 }
