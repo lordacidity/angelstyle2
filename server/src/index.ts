@@ -3,6 +3,7 @@ import cors from "cors";
 import multer from "multer";
 import path from "node:path";
 import fs from "node:fs";
+import crypto from "node:crypto";
 import os from "node:os";
 import { execFileSync } from "node:child_process";
 import dotenv from "dotenv";
@@ -508,6 +509,78 @@ app.post("/api/news/chat-edit", async (req, res) => {
     res.status(500).json({ error: String(err) });
   }
 });
+
+// One-time image cache. The live image proxy below works for most sources,
+// but some CDNs intermittently fail (bot detection, expired hotlink tokens,
+// CDN edge inconsistency). Downloading the bytes to disk once gives us a
+// truly same-origin file that is bulletproof for both <img> rendering and
+// canvas export (toPng). Used by the news-card flow when transitioning from
+// the photo step to the card step.
+const PHOTO_CACHE_DIR = path.resolve(process.cwd(), "data", "photo-cache");
+fs.mkdirSync(PHOTO_CACHE_DIR, { recursive: true });
+
+function extFromContentType(ct: string | null): string | null {
+  if (!ct) return null;
+  const t = ct.toLowerCase();
+  if (t.includes("jpeg")) return "jpg";
+  if (t.includes("png")) return "png";
+  if (t.includes("webp")) return "webp";
+  if (t.includes("gif")) return "gif";
+  if (t.includes("avif")) return "avif";
+  if (t.includes("svg")) return "svg";
+  return null;
+}
+
+function extFromUrl(url: string): string | null {
+  const m = /\.(jpg|jpeg|png|webp|gif|avif|svg)(?:\?|#|$)/i.exec(url);
+  return m ? (m[1].toLowerCase() === "jpeg" ? "jpg" : m[1].toLowerCase()) : null;
+}
+
+app.post("/api/photos/cache", async (req, res) => {
+  const url = typeof req.body?.url === "string" ? req.body.url : "";
+  if (!url || !/^https?:\/\//i.test(url)) {
+    res.status(400).json({ error: "absolute http(s) url required" });
+    return;
+  }
+  try {
+    const hash = crypto.createHash("sha256").update(url).digest("hex").slice(0, 24);
+    // Hit the on-disk cache first — same URL never downloads twice.
+    const existing = fs.readdirSync(PHOTO_CACHE_DIR).find((f) => f.startsWith(hash + "."));
+    if (existing) {
+      res.json({ localUrl: `/cached-photos/${existing}`, cached: true });
+      return;
+    }
+    const upstream = await fetch(url, {
+      headers: {
+        "User-Agent":
+          "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Safari/537.36",
+        "Referer": new URL(url).origin + "/",
+        "Accept": "image/*,*/*;q=0.8",
+      },
+      redirect: "follow",
+    });
+    if (!upstream.ok) {
+      res.status(upstream.status).json({ error: `upstream ${upstream.status}` });
+      return;
+    }
+    const ext = extFromContentType(upstream.headers.get("content-type")) ?? extFromUrl(url) ?? "jpg";
+    const filename = `${hash}.${ext}`;
+    const buf = Buffer.from(await upstream.arrayBuffer());
+    fs.writeFileSync(path.join(PHOTO_CACHE_DIR, filename), buf);
+    res.json({ localUrl: `/cached-photos/${filename}`, cached: false, bytes: buf.byteLength });
+  } catch (err) {
+    res.status(500).json({ error: String(err) });
+  }
+});
+
+// Static-serve the cache. The CORS header keeps canvas export clean if the
+// page ever moves origins (e.g. tunneled), even though same-origin would work
+// without it.
+app.use("/cached-photos", (_req, res, next) => {
+  res.set("Access-Control-Allow-Origin", "*");
+  res.set("Cache-Control", "public, max-age=86400");
+  next();
+}, express.static(PHOTO_CACHE_DIR));
 
 // Image proxy. Many publisher CDNs don't return CORS headers, so when the
 // template renderer sets `crossorigin="anonymous"` (needed so the card can be

@@ -128,6 +128,70 @@ export function NewsCardsView() {
   const [overrides, setOverrides] = useState<CopyOverrides | null>(null);
   const [layoutOverrides, setLayoutOverrides] = useState<LayoutOverrides>({});
   const [populating, setPopulating] = useState(false);
+  // True while we download the selected photo to the local server cache
+  // before advancing to the card step. This bypasses every CORS / hotlink
+  // edge case once the file is on disk.
+  const [cachingPhoto, setCachingPhoto] = useState(false);
+
+  // Run a batch of photos through the server-side cache. The cache attempts
+  // to download each URL using browser-like headers; if the download fails
+  // (CDN blocks us, hotlink protection, 404, anything), that photo is
+  // dropped. Returned photos all use local /cached-photos/ URLs that are
+  // guaranteed to render in the strip AND in the card preview AND in the
+  // PNG export. No more "looks fine in the strip but blank in the card."
+  const verifyAndCache = async (raw: Photo[]): Promise<Photo[]> => {
+    const results = await Promise.all(
+      raw.map(async (p) => {
+        // Already local — pass through untouched.
+        if (!p.url || !/^https?:\/\//i.test(p.url)) return p;
+        try {
+          const r = await fetch("/api/photos/cache", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ url: p.url }),
+          });
+          if (!r.ok) return null;
+          const data: { localUrl: string } = await r.json();
+          return { ...p, url: data.localUrl, thumbnail: data.localUrl };
+        } catch {
+          return null;
+        }
+      }),
+    );
+    return results.filter((p): p is Photo => p !== null);
+  };
+
+  // Advance to the card step. Photos in the strip are already verified +
+  // cached locally by verifyAndCache, so the selection is guaranteed to
+  // render. The only safety-net case is an external URL that somehow
+  // bypassed verification (e.g. a manual paste in the future) — we cache
+  // it on the way through so the card step is bulletproof.
+  const advanceToCardStep = async () => {
+    if (!selectedPhoto) return;
+    if (!/^https?:\/\//i.test(selectedPhoto.url)) {
+      setStep("card");
+      return;
+    }
+    setCachingPhoto(true);
+    try {
+      const r = await fetch("/api/photos/cache", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ url: selectedPhoto.url }),
+      });
+      if (r.ok) {
+        const data: { localUrl: string } = await r.json();
+        const cached: Photo = { ...selectedPhoto, url: data.localUrl, thumbnail: data.localUrl };
+        setSelectedPhoto(cached);
+        setPhotos((arr) => arr.map((p) => (p.url === selectedPhoto.url ? cached : p)));
+      }
+    } catch (e) {
+      console.warn("[photo cache] safety-net failed:", e);
+    } finally {
+      setCachingPhoto(false);
+      setStep("card");
+    }
+  };
 
   // Pull templates list on mount and any time we enter the card step so a new
   // template designed mid-session shows up without a page reload.
@@ -166,27 +230,28 @@ export function NewsCardsView() {
       };
       setSelectedItem(seed.selectedItem);
       setExtract(seed.extract);
-      // Pre-populate the photo strip with any images scraped from the
-      // article, marked with the publisher's name so the card can show
-      // attribution.
-      const articlePhotos: Photo[] = (seed.articleImages ?? []).map((url, i) => ({
-        url,
-        thumbnail: url,
-        title: i === 0 ? "Article hero image" : `Article image ${i + 1}`,
-        source: seed.articleSourceName ?? undefined,
-      }));
-      setPhotos(articlePhotos);
-      if (articlePhotos.length > 0) setSelectedPhoto(articlePhotos[0]);
       setStep("photo");
-      // Also kick off the normal SerpAPI photo search as a fallback —
-      // article scrapes are often empty (Google News redirect URLs) or
-      // hotlink-protected (publisher blocks browser <img> loads). Search
-      // results get appended after the article images so the user always
-      // has working pictures.
-      const personName = seed.extract?.person?.name;
-      if (personName) {
-        loadPhotosAppending(personName, 0, articlePhotos);
-      }
+      // Verify scraped article images first — drop any that fail to download
+      // server-side, then show only the survivors.
+      setPhotosLoading(true);
+      (async () => {
+        const articlePhotos: Photo[] = (seed.articleImages ?? []).map((url, i) => ({
+          url,
+          thumbnail: url,
+          title: i === 0 ? "Article hero image" : `Article image ${i + 1}`,
+          source: seed.articleSourceName ?? undefined,
+        }));
+        const verified = await verifyAndCache(articlePhotos);
+        setPhotos(verified);
+        if (verified.length > 0) setSelectedPhoto(verified[0]);
+        // Kick off the normal SerpAPI search to fill in fallback options.
+        const personName = seed.extract?.person?.name;
+        if (personName) {
+          await loadPhotosAppending(personName, 0, verified);
+        } else {
+          setPhotosLoading(false);
+        }
+      })();
     } catch (e) {
       console.warn("[person-news-seed] failed to parse:", e);
     }
@@ -211,11 +276,14 @@ export function NewsCardsView() {
       });
       if (!r.ok) throw new Error(await r.text());
       const fresh: Photo[] = await r.json();
-      // Skip any search result that duplicates an article image by URL.
+      // Skip any search result that duplicates an article image by URL,
+      // then run the fresh ones through the cache so only verified-working
+      // photos end up in the strip.
       const articleUrls = new Set(keepFirst.map((p) => p.url));
-      const merged: Photo[] = [...keepFirst, ...fresh.filter((p) => !articleUrls.has(p.url))];
+      const verifiedFresh = await verifyAndCache(fresh.filter((p) => !articleUrls.has(p.url)));
+      const merged: Photo[] = [...keepFirst, ...verifiedFresh];
       setPhotos(merged);
-      // If we had no article images, auto-select the first search result.
+      // If we had no article images, auto-select the first verified result.
       if (keepFirst.length === 0 && merged[0]) setSelectedPhoto(merged[0]);
       setPhotoQueryHistory((h) => (h.includes(query) ? h : [...h, query]));
     } catch (e) {
@@ -349,10 +417,14 @@ export function NewsCardsView() {
       });
       if (!r.ok) throw new Error(await r.text());
       const fresh: Photo[] = await r.json();
-      setPhotos(fresh);
+      // Cache each photo server-side and drop any that don't survive — only
+      // verified-working photos make it into the strip, so what you see is
+      // what you'll get in the card.
+      const verified = await verifyAndCache(fresh);
+      setPhotos(verified);
       // If the new batch happens to contain the currently-selected photo's URL
       // we keep it; otherwise drop the selection so the user actively re-picks.
-      setSelectedPhoto((cur) => (cur && fresh.some((p) => p.url === cur.url) ? cur : null));
+      setSelectedPhoto((cur) => (cur && verified.some((p) => p.url === cur.url) ? cur : null));
     } catch (e) {
       setError(String(e));
     } finally {
@@ -490,7 +562,16 @@ export function NewsCardsView() {
       a.download = `pauv-${ticker}-${Date.now()}.png`;
       a.click();
     } catch (e) {
-      setError(`Couldn't render card: ${e}. (Sometimes the photo's host blocks cross-origin canvas — try another photo.)`);
+      // html-to-image rejects with the raw Event from a failing <img> load,
+      // which stringifies as the useless "[object Event]". Pick out something
+      // human-readable so the user can actually debug.
+      let msg: string;
+      if (e instanceof Error) msg = e.message;
+      else if (e instanceof Event && e.target instanceof HTMLImageElement) {
+        msg = `image failed to load: ${e.target.src}`;
+      } else if (e instanceof Event) msg = `image load error (${e.type})`;
+      else msg = String(e);
+      setError(`Couldn't render card: ${msg}. (Sometimes the photo's host blocks cross-origin canvas — try another photo.)`);
     } finally {
       setSaving(false);
     }
@@ -1061,10 +1142,10 @@ export function NewsCardsView() {
             {selectedPhoto && (
               <div className="row" style={{ marginTop: 16 }}>
                 <button
-                  onClick={() => setStep("card")}
-                  disabled={!extract?.talent || !selectedPhoto}
+                  onClick={advanceToCardStep}
+                  disabled={!extract?.talent || !selectedPhoto || cachingPhoto}
                 >
-                  Build card →
+                  {cachingPhoto ? "Downloading photo…" : "Build card →"}
                 </button>
               </div>
             )}
