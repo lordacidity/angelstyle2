@@ -343,6 +343,19 @@ export function useRecording(config: UseRecordingConfig) {
       }
 
       setRecStatus('Rendering frames...');
+
+      // Ensure logo is loaded with crossOrigin=anonymous — the preview canvas may have
+      // cached it without CORS, which would taint the OffscreenCanvas and fail VideoSample.
+      if (overlayLogoSrc && (!logoImgRef.current?.crossOrigin)) {
+        await new Promise<void>((resolve) => {
+          const img = new Image();
+          img.crossOrigin = 'anonymous';
+          img.onload = () => { logoImgRef.current = img; resolve(); };
+          img.onerror = () => resolve();
+          img.src = overlayLogoSrc;
+        });
+      }
+
       await output.start();
 
       const offscreen = new OffscreenCanvas(CANVAS_W, CANVAS_H);

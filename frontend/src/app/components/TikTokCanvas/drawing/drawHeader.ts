@@ -60,6 +60,7 @@ export function drawHeaderOnContext({
   let logo = logoImgRef.current;
   if (!logo) {
     logo = new Image();
+    logo.crossOrigin = 'anonymous';
     logo.src = overlayLogoSrc;
     logoImgRef.current = logo;
   }
