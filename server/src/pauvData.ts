@@ -1033,26 +1033,29 @@ export async function chatEdit(
 }
 
 // ============================================================================
-// Trending: today's most-talked-about Pauv talents in music & film.
+// Trending: today's most-talked-about Pauv talents across music, film, and
+// the modern Hollywood-adjacent space (podcasters, YouTubers, influencers).
 //
-// Approach: fetch the day's top entertainment headlines from Google News (free,
-// no quota), then count name-mentions per Pauv talent restricted to music/film
-// industries. Talents with more mentions across more headlines today rank
-// higher. No external sentiment model required — frequency across reputable
-// entertainment outlets is a strong proxy for "what's trending."
+// Strategy: for every eligible talent we fire a quoted Google News query in
+// parallel (e.g. `"Sydney Sweeney"`). This guarantees that if there is any
+// news about that talent in the past 48h, we surface it — no relying on
+// broad queries to randomly happen to mention them. Quantity over precision:
+// we want as many talents as possible appearing in the feed so the user has
+// content to choose from.
 // ============================================================================
 
-// Industries we consider for the "music & film" trending feed.
-const TRENDING_INDUSTRIES = new Set(["Actor", "Musician", "Comedian"]);
-
-// Broad queries that surface high-volume entertainment headlines without
-// constraining to a single publication.
-const TRENDING_QUERIES = [
-  "entertainment news",
-  "celebrity",
-  "Hollywood",
-  "music news",
-];
+// Industries that count as "Hollywood / music / entertainment" for trending
+// purposes. Anything that produces shareable celebrity stories should be in
+// here. (Athletes / Politicians / Entrepreneurs intentionally aren't.)
+const TRENDING_INDUSTRIES = new Set([
+  "Actor",
+  "Musician",
+  "Comedian",
+  "Podcaster",
+  "Youtuber",
+  "Streamer",
+  "Influencer",
+]);
 
 export interface TrendingHeadline {
   title: string;
@@ -1144,35 +1147,33 @@ function scoreHeadline(h: Omit<TrendingHeadline, "viralScore" | "viralBreakdown"
   return { viralScore: total, viralBreakdown: { tier, recency: Math.round(recency * 10) / 10 } };
 }
 
-export async function getTrendingTalents(limit = 12): Promise<TrendingTalent[]> {
-  const [talents, ...articleLists] = await Promise.all([
-    listTalents(),
-    ...TRENDING_QUERIES.map((q) => searchGoogleNews({ q, timeframeHours: 24 }).catch(() => [] as NewsArticle[])),
-  ]);
+export async function getTrendingTalents(limit = 30): Promise<TrendingTalent[]> {
+  const talents = await listTalents();
+  const eligible = talents.filter((t) => {
+    if (!t.industry || !TRENDING_INDUSTRIES.has(t.industry)) return false;
+    // Skip single-word short names (e.g. "Pink", "SZA") — too many false-
+    // positive substring hits. Two-word or 5+ char names are safe.
+    if (t.name.length < 5 && !t.name.includes(" ")) return false;
+    return true;
+  });
 
-  // Dedupe articles by link.
-  const seenLinks = new Set<string>();
-  const articles: NewsArticle[] = [];
-  for (const list of articleLists) {
-    for (const a of list) {
-      if (!a.link || seenLinks.has(a.link)) continue;
-      seenLinks.add(a.link);
-      articles.push(a);
-    }
-  }
-
-  // For each talent in the trending industries, find which articles mention them.
-  const results: TrendingTalent[] = [];
-  for (const t of talents) {
-    if (!t.industry || !TRENDING_INDUSTRIES.has(t.industry)) continue;
-    // Require at least a two-word name OR a name >= 5 chars to dodge ambiguous
-    // single-name matches like "Drake" matching "Drake University."
-    if (t.name.length < 5 && !t.name.includes(" ")) continue;
-    const re = new RegExp(`\\b${escapeRegex(t.name)}\\b`, "i");
-    const matched: TrendingHeadline[] = [];
-    for (const a of articles) {
-      const haystack = `${a.title} ${a.description ?? ""}`;
-      if (re.test(haystack)) {
+  // Fire one Google News query per eligible talent in parallel. Each query
+  // is a quoted exact-name match so we don't false-positive on partial
+  // substrings. With ~30-50 eligible talents this finishes in a few seconds.
+  const perTalent = await Promise.all(eligible.map(async (t) => {
+    try {
+      const articles = await searchGoogleNews({
+        q: `"${t.name}"`,
+        timeframeHours: 48,
+      });
+      if (articles.length === 0) return null;
+      // Belt-and-suspenders name filter on the title — Google News very
+      // occasionally returns adjacent articles when the quoted term appears
+      // in a related context. Drop those.
+      const re = new RegExp(`\\b${escapeRegex(t.name)}\\b`, "i");
+      const verified = articles.filter((a) => re.test(`${a.title} ${a.description ?? ""}`));
+      if (verified.length === 0) return null;
+      const headlines: TrendingHeadline[] = verified.map((a) => {
         const base = {
           title: a.title,
           link: a.link,
@@ -1180,21 +1181,29 @@ export async function getTrendingTalents(limit = 12): Promise<TrendingTalent[]> 
           source: a.source_id,
           description: a.description,
         };
-        matched.push({ ...base, ...scoreHeadline(base) });
-      }
+        return { ...base, ...scoreHeadline(base) };
+      });
+      // Highest viral score first; tie-break by recency.
+      headlines.sort((a, b) => {
+        if (b.viralScore !== a.viralScore) return b.viralScore - a.viralScore;
+        const ta = a.pubDate ? Date.parse(a.pubDate) : 0;
+        const tb = b.pubDate ? Date.parse(b.pubDate) : 0;
+        return tb - ta;
+      });
+      return { talent: t, mentionCount: headlines.length, headlines };
+    } catch {
+      return null;
     }
-    if (matched.length === 0) continue;
-    // Sort by viral score descending — best stories first. Recency is part
-    // of the score, so within equal-tier headlines newer ones still win.
-    matched.sort((a, b) => {
-      if (b.viralScore !== a.viralScore) return b.viralScore - a.viralScore;
-      const ta = a.pubDate ? Date.parse(a.pubDate) : 0;
-      const tb = b.pubDate ? Date.parse(b.pubDate) : 0;
-      return tb - ta;
-    });
-    results.push({ talent: t, mentionCount: matched.length, headlines: matched });
-  }
+  }));
 
-  results.sort((a, b) => b.mentionCount - a.mentionCount);
+  // Rank talents by the strength of their best headline first (so a single
+  // 10/10 story beats a pile of 3/10 mentions), then by mention count.
+  const results = perTalent.filter((r): r is TrendingTalent => r !== null);
+  results.sort((a, b) => {
+    const aTop = a.headlines[0]?.viralScore ?? 0;
+    const bTop = b.headlines[0]?.viralScore ?? 0;
+    if (bTop !== aTop) return bTop - aTop;
+    return b.mentionCount - a.mentionCount;
+  });
   return results.slice(0, limit);
 }
