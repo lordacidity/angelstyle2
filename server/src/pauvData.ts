@@ -1279,3 +1279,95 @@ export async function chatEdit(
     newTalent,
   };
 }
+
+// ============================================================================
+// Trending: today's most-talked-about Pauv talents in music & film.
+//
+// Approach: fetch the day's top entertainment headlines from Google News (free,
+// no quota), then count name-mentions per Pauv talent restricted to music/film
+// industries. Talents with more mentions across more headlines today rank
+// higher. No external sentiment model required — frequency across reputable
+// entertainment outlets is a strong proxy for "what's trending."
+// ============================================================================
+
+// Industries we consider for the "music & film" trending feed.
+const TRENDING_INDUSTRIES = new Set(["Actor", "Musician", "Comedian"]);
+
+// Broad queries that surface high-volume entertainment headlines without
+// constraining to a single publication.
+const TRENDING_QUERIES = [
+  "entertainment news",
+  "celebrity",
+  "Hollywood",
+  "music news",
+];
+
+export interface TrendingHeadline {
+  title: string;
+  link: string;
+  pubDate: string | null;
+  source: string | null;
+  description: string | null;
+}
+
+export interface TrendingTalent {
+  talent: Talent;
+  mentionCount: number;
+  headlines: TrendingHeadline[];
+}
+
+function escapeRegex(s: string): string {
+  return s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+export async function getTrendingTalents(limit = 12): Promise<TrendingTalent[]> {
+  const [talents, ...articleLists] = await Promise.all([
+    listTalents(),
+    ...TRENDING_QUERIES.map((q) => searchGoogleNews({ q, timeframeHours: 24 }).catch(() => [] as NewsArticle[])),
+  ]);
+
+  // Dedupe articles by link.
+  const seenLinks = new Set<string>();
+  const articles: NewsArticle[] = [];
+  for (const list of articleLists) {
+    for (const a of list) {
+      if (!a.link || seenLinks.has(a.link)) continue;
+      seenLinks.add(a.link);
+      articles.push(a);
+    }
+  }
+
+  // For each talent in the trending industries, find which articles mention them.
+  const results: TrendingTalent[] = [];
+  for (const t of talents) {
+    if (!t.industry || !TRENDING_INDUSTRIES.has(t.industry)) continue;
+    // Require at least a two-word name OR a name >= 5 chars to dodge ambiguous
+    // single-name matches like "Drake" matching "Drake University."
+    if (t.name.length < 5 && !t.name.includes(" ")) continue;
+    const re = new RegExp(`\\b${escapeRegex(t.name)}\\b`, "i");
+    const matched: TrendingHeadline[] = [];
+    for (const a of articles) {
+      const haystack = `${a.title} ${a.description ?? ""}`;
+      if (re.test(haystack)) {
+        matched.push({
+          title: a.title,
+          link: a.link,
+          pubDate: a.pubDate,
+          source: a.source_id,
+          description: a.description,
+        });
+      }
+    }
+    if (matched.length === 0) continue;
+    // Newest headline first.
+    matched.sort((a, b) => {
+      const ta = a.pubDate ? Date.parse(a.pubDate) : 0;
+      const tb = b.pubDate ? Date.parse(b.pubDate) : 0;
+      return tb - ta;
+    });
+    results.push({ talent: t, mentionCount: matched.length, headlines: matched });
+  }
+
+  results.sort((a, b) => b.mentionCount - a.mentionCount);
+  return results.slice(0, limit);
+}

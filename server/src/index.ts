@@ -24,7 +24,7 @@ dotenv.config({ path: path.resolve(HERE, "..", "..", "..", ".env") });
 
 // Dynamic import AFTER dotenv runs, so pauvData sees the env vars when it
 // constructs its module-level Supabase client.
-const { listTalents, searchNews, newsForTalent, listIndustries, lookupNews, lookupAllNews, lookupPersonNews, latestArticlesByIndustry, extractPerson, chatEdit } =
+const { listTalents, searchNews, newsForTalent, listIndustries, lookupNews, lookupAllNews, lookupPersonNews, latestArticlesByIndustry, extractPerson, chatEdit, getTrendingTalents } =
   await import("./pauvData.js");
 const { imageSearch } = await import("./serpapi.js");
 const { getHandlesByIndustry, listIndustriesWithCounts } = await import("./newsSources.js");
@@ -394,6 +394,17 @@ app.post("/api/push-theme", async (req, res) => {
 app.get("/api/talents", async (_req, res) => {
   try {
     res.json(await listTalents());
+  } catch (err) {
+    res.status(500).json({ error: String(err) });
+  }
+});
+
+// Today's most-mentioned music & film Pauv talents, with their headlines.
+// Backs the Trending tab.
+app.get("/api/trending/talents", async (req, res) => {
+  try {
+    const limit = req.query.limit ? Math.min(50, Math.max(1, Number(req.query.limit))) : 12;
+    res.json(await getTrendingTalents(limit));
   } catch (err) {
     res.status(500).json({ error: String(err) });
   }

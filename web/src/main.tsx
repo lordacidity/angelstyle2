@@ -5,6 +5,7 @@ import { SenderView } from "./SenderView";
 import { NewsCardsView } from "./NewsCardsView";
 import { AllNewsView } from "./AllNewsView";
 import { PersonNewsView } from "./PersonNewsView";
+import { TrendingView } from "./TrendingView";
 import { TemplatesView } from "./TemplatesView";
 import "./styles.css";
 
@@ -17,6 +18,8 @@ if (path === "/news" || path === "/news/") {
 
 const view = path.startsWith("/send")
   ? <SenderView />
+  : path.startsWith("/news/trending")
+  ? <TrendingView />
   : path.startsWith("/news/all")
   ? <AllNewsView />
   : path.startsWith("/news/person")
