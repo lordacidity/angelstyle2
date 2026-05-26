@@ -1008,6 +1008,7 @@ const CarouselCanvas = forwardRef<CarouselCanvasRef, CarouselCanvasProps>(
       (settings.dividerSubSlots ?? []).forEach((sub, i) => {
         if (sub?.type === 'image' && !subImgRefsArr.current[i]) {
           const img = new Image();
+          img.crossOrigin = 'anonymous';
           img.onload = () => { subImgRefsArr.current[i] = img; redraw(cachedImgRef.current); };
           img.src = sub.url;
         }
@@ -1020,6 +1021,7 @@ const CarouselCanvas = forwardRef<CarouselCanvasRef, CarouselCanvasProps>(
       (settings.zoneLogoSlots ?? []).forEach((logoUrl, fi) => {
         if (!logoUrl) { zoneLogoImgsRef.current[fi] = null; return; }
         const img = new Image();
+        img.crossOrigin = 'anonymous';
         img.onload = () => { zoneLogoImgsRef.current[fi] = img; redraw(cachedImgRef.current); };
         img.src = logoUrl;
         if (img.complete && img.naturalWidth > 0) { zoneLogoImgsRef.current[fi] = img; redraw(cachedImgRef.current); }
@@ -1031,6 +1033,7 @@ const CarouselCanvas = forwardRef<CarouselCanvasRef, CarouselCanvasProps>(
       (settings.logoRowSlots ?? []).forEach((logoUrl, idx) => {
         if (!logoUrl) { logoImgsRef.current[idx] = null; return; }
         const img = new Image();
+        img.crossOrigin = 'anonymous';
         const apply = () => {
           logoImgsRef.current[idx] = img;
           const next = [...slotsRef.current] as (SlotContent | null)[];
@@ -1048,6 +1051,7 @@ const CarouselCanvas = forwardRef<CarouselCanvasRef, CarouselCanvasProps>(
     function selectBrandLogo(idx: number) {
       if (!brandLogoSrc) return;
       const img = new Image();
+      img.crossOrigin = 'anonymous';
       let applied = false;
       const apply = () => {
         if (applied) return;
@@ -1104,6 +1108,7 @@ const CarouselCanvas = forwardRef<CarouselCanvasRef, CarouselCanvasProps>(
       if (!brandLogoSrc) return;
       const fi = row * 3 + ziFromZone(zone);
       const img = new Image();
+      img.crossOrigin = 'anonymous';
       let applied = false;
       const apply = () => {
         if (applied) return;
@@ -1210,6 +1215,7 @@ const CarouselCanvas = forwardRef<CarouselCanvasRef, CarouselCanvasProps>(
     function selectSubBrandLogo(idx: number) {
       if (!brandLogoSrc) return;
       const img = new Image();
+      img.crossOrigin = 'anonymous';
       let applied = false;
       const apply = () => {
         if (applied) return;
@@ -1335,6 +1341,7 @@ const CarouselCanvas = forwardRef<CarouselCanvasRef, CarouselCanvasProps>(
     useEffect(() => {
       if (!fgMaskSrc) { fgMaskImgRef.current = null; return; }
       const img = new Image();
+      img.crossOrigin = 'anonymous';
       img.onload = () => { fgMaskImgRef.current = img; redraw(cachedImgRef.current); };
       img.src = fgMaskSrc;
     }, [fgMaskSrc, redraw]);
@@ -1344,12 +1351,14 @@ const CarouselCanvas = forwardRef<CarouselCanvasRef, CarouselCanvasProps>(
     useEffect(() => {
       if (!circleSrc0) { circleImgRefsArr.current[0] = null; redraw(cachedImgRef.current); return; }
       const img = new Image();
+      img.crossOrigin = 'anonymous';
       img.onload = () => { circleImgRefsArr.current[0] = img; redraw(cachedImgRef.current); };
       img.src = circleSrc0;
     }, [circleSrc0, redraw]);
     useEffect(() => {
       if (!circleSrc1) { circleImgRefsArr.current[1] = null; redraw(cachedImgRef.current); return; }
       const img = new Image();
+      img.crossOrigin = 'anonymous';
       img.onload = () => { circleImgRefsArr.current[1] = img; redraw(cachedImgRef.current); };
       img.src = circleSrc1;
     }, [circleSrc1, redraw]);
