@@ -3,7 +3,6 @@ import ReactDOM from "react-dom/client";
 import { App } from "./App";
 import { SenderView } from "./SenderView";
 import { NewsCardsView } from "./NewsCardsView";
-import { AllNewsView } from "./AllNewsView";
 import { PersonNewsView } from "./PersonNewsView";
 import { TrendingView } from "./TrendingView";
 import { TemplatesView } from "./TemplatesView";
@@ -20,8 +19,6 @@ const view = path.startsWith("/send")
   ? <SenderView />
   : path.startsWith("/news/trending")
   ? <TrendingView />
-  : path.startsWith("/news/all")
-  ? <AllNewsView />
   : path.startsWith("/news/person")
   ? <PersonNewsView />
   : path.startsWith("/news")

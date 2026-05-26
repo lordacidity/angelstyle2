@@ -25,7 +25,7 @@ dotenv.config({ path: path.resolve(HERE, "..", "..", "..", ".env") });
 
 // Dynamic import AFTER dotenv runs, so pauvData sees the env vars when it
 // constructs its module-level Supabase client.
-const { listTalents, searchNews, newsForTalent, listIndustries, lookupNews, lookupAllNews, lookupPersonNews, latestArticlesByIndustry, extractPerson, chatEdit, getTrendingTalents } =
+const { listTalents, searchNews, newsForTalent, listIndustries, lookupNews, lookupPersonNews, latestArticlesByIndustry, extractPerson, chatEdit, getTrendingTalents } =
   await import("./pauvData.js");
 const { imageSearch } = await import("./serpapi.js");
 const { getHandlesByIndustry, listIndustriesWithCounts } = await import("./newsSources.js");
@@ -458,16 +458,6 @@ app.post("/api/news/lookup", async (req, res) => {
     if (!industry) { res.status(400).json({ error: "industry required" }); return; }
     const ex = Array.isArray(exclude) ? exclude.filter((x) => typeof x === "string") : [];
     res.json(await lookupNews(industry, !!pauvOnly, ex));
-  } catch (err) {
-    res.status(500).json({ error: String(err) });
-  }
-});
-
-app.post("/api/news/all-lookup", async (req, res) => {
-  try {
-    const { exclude } = (req.body ?? {}) as { exclude?: string[] };
-    const ex = Array.isArray(exclude) ? exclude.filter((x) => typeof x === "string") : [];
-    res.json(await lookupAllNews(ex));
   } catch (err) {
     res.status(500).json({ error: String(err) });
   }
