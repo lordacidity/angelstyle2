@@ -1762,12 +1762,6 @@ const CarouselCanvas = forwardRef<CarouselCanvasRef, CarouselCanvasProps>(
 
         for (let i = 0; i < videoSamples.length; i++) {
           if (signal.aborted) { decoder.close(); throw new Error('Cancelled'); }
-          // Backpressure — yield to the event loop when the decoder queue
-          // is full so its output callback can drain. Without this, the
-          // for-loop deterministically hangs partway through a long video.
-          while (decoder.decodeQueueSize > 16) {
-            await new Promise<void>((r) => setTimeout(r, 0));
-          }
           const vs = videoSamples[i];
           // @ts-ignore
           await decoder.decode(new EncodedVideoChunk({ type: vs.isKeyframe ? 'key' : 'delta', timestamp: vs.timestamp * 1_000_000, data: vs.data }));
