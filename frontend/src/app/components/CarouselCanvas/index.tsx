@@ -107,17 +107,7 @@ const CarouselCanvas = forwardRef<CarouselCanvasRef, CarouselCanvasProps>(
     const subImgRefsArr   = useRef<(HTMLImageElement | null)[]>(Array(3).fill(null));
 
     // ── Rect mode state (replaces both circles when rectMode=true) ────────────
-    const [rectSrc, setRectSrc]           = useState<string | null>(null);
-    const rectImgRef                      = useRef<HTMLImageElement | null>(null);
-    const rectInputRef                    = useRef<HTMLInputElement>(null);
-    const rectImgOffsetRef                = useRef({ x: 0, y: 0 });
-    const rectImgScaleRef                 = useRef(1);
-    const [rectEditMode, setRectEditMode] = useState(false);
-    const [rectImgDragging, setRectImgDragging] = useState(false);
-    const rectImgDragStart                = useRef({ mx: 0, my: 0, ox: 0, oy: 0 });
-    const [rectZoomDragging, setRectZoomDragging] = useState(false);
-    const rectZoomDragStart               = useRef({ my: 0, scale: 1 });
-    // Stores the preview-px band [top, bottom, left, right] between the top-3 and bottom-3 tag slots
+    // Stores the preview-px band [top, bottom, left, right] between the top-3 and bottom-3 tag slots (rectMode)
     const rectBandRef                     = useRef({ top: 0, bottom: 0, left: 0, right: 0 });
 
     const [circleSrcs, setCircleSrcs] = useState<(string|null)[]>([null, null]);
@@ -266,7 +256,7 @@ const CarouselCanvas = forwardRef<CarouselCanvasRef, CarouselCanvasProps>(
             }
           };
           const drawRect = () => {
-            const _rImg = rectImgRef.current;
+            const _rImg = circleImgRefsArr.current[0];
             if (!_rImg) return;
             const { top: _rtPv, bottom: _rbPv, left: _rlPv } = rectBandRef.current;
             const _rl  = _rlPv / DISPLAY_SCALE;
@@ -274,16 +264,17 @@ const CarouselCanvas = forwardRef<CarouselCanvasRef, CarouselCanvasProps>(
             const _rw  = W - _rl * 2;
             const _rh  = (_rbPv - _rtPv) / DISPLAY_SCALE;
             const SHIFT_CV = Math.round(50 / DISPLAY_SCALE);
-            const _cr  = Math.min(_rh, _rw) / 2 - Math.round(4 / DISPLAY_SCALE);
-            const _cx  = W / 2 + SHIFT_CV;
-            const _cy  = _rt + _rh / 2;
+            const _pos = circlePosRefsArr.current[0];
+            const _cr  = _pos ? circleRadsArr.current[0] : Math.min(_rh, _rw) / 2 - Math.round(4 / DISPLAY_SCALE);
+            const _cx  = _pos ? _pos.x / DISPLAY_SCALE : W / 2 + SHIFT_CV;
+            const _cy  = _pos ? _pos.y / DISPLAY_SCALE : _rt + _rh / 2;
             ctx.save();
             ctx.beginPath(); ctx.arc(_cx, _cy, _cr, 0, Math.PI * 2); ctx.clip();
             const _cs  = Math.max((_cr * 2) / _rImg.naturalWidth, (_cr * 2) / _rImg.naturalHeight);
-            const _ecs = _cs * rectImgScaleRef.current;
-            const _off = rectImgOffsetRef.current;
+            const _ecs = _cs * circleImgScalesArr.current[0];
+            const _off = circleImgOffsetsArr.current[0];
             const _cdw = _rImg.naturalWidth * _ecs, _cdh = _rImg.naturalHeight * _ecs;
-            ctx.drawImage(_rImg, _cx - _cdw / 2 + _off.x / DISPLAY_SCALE, _cy - _cdh / 2 + _off.y / DISPLAY_SCALE, _cdw, _cdh);
+            ctx.drawImage(_rImg, _cx - _cdw / 2 + _off.x, _cy - _cdh / 2 + _off.y, _cdw, _cdh);
             ctx.restore();
           };
 
@@ -709,6 +700,7 @@ const CarouselCanvas = forwardRef<CarouselCanvasRef, CarouselCanvasProps>(
       // Circle images (drawn between top and bottom slot rows)
       const circleCY = (logoCY_top + LOGO_CH + logoCY_above) / 2; // midpoint between slot 0 and slot 1
       [0, 1].forEach(ci => {
+        if (rectMode && ci === 0) return; // rectMode ci=0 handled by drawRect() in bgBlur path and rect block below
         const circleImg = circleImgRefsArr.current[ci];
         if (!circleImg || (s.bgBlurEnabled && fgMaskImgRef.current) || videoModeRef.current) return;
         const pos = circlePosRefsArr.current[ci];
@@ -750,6 +742,31 @@ const CarouselCanvas = forwardRef<CarouselCanvasRef, CarouselCanvasProps>(
           ctx.restore();
         }
       });
+
+      // Rect-mode circle — non-bgBlur path (bgBlur path uses drawRect inside layer loop)
+      if (rectMode) {
+        const rImg = circleImgRefsArr.current[0];
+        if (rImg && !(s.bgBlurEnabled && fgMaskImgRef.current) && !videoModeRef.current) {
+          const { top: _rtPv, bottom: _rbPv, left: _rlPv } = rectBandRef.current;
+          const _rl  = _rlPv / DISPLAY_SCALE;
+          const _rt  = _rtPv / DISPLAY_SCALE;
+          const _rw  = W - _rl * 2;
+          const _rh  = (_rbPv - _rtPv) / DISPLAY_SCALE;
+          const SHIFT_CV = Math.round(50 / DISPLAY_SCALE);
+          const _pos = circlePosRefsArr.current[0];
+          const _cr  = _pos ? circleRadsArr.current[0] : Math.min(_rh, _rw) / 2 - Math.round(4 / DISPLAY_SCALE);
+          const _cx  = _pos ? _pos.x / DISPLAY_SCALE : W / 2 + SHIFT_CV;
+          const _cy  = _pos ? _pos.y / DISPLAY_SCALE : _rt + _rh / 2;
+          ctx.save();
+          ctx.beginPath(); ctx.arc(_cx, _cy, _cr, 0, Math.PI * 2); ctx.clip();
+          const _cs  = Math.max((_cr * 2) / rImg.naturalWidth, (_cr * 2) / rImg.naturalHeight);
+          const _ecs = _cs * circleImgScalesArr.current[0];
+          const _off = circleImgOffsetsArr.current[0];
+          const _cdw = rImg.naturalWidth * _ecs, _cdh = rImg.naturalHeight * _ecs;
+          ctx.drawImage(rImg, _cx - _cdw / 2 + _off.x, _cy - _cdh / 2 + _off.y, _cdw, _cdh);
+          ctx.restore();
+        }
+      }
 
       ctx.textBaseline = 'alphabetic';
 
@@ -1477,36 +1494,6 @@ const CarouselCanvas = forwardRef<CarouselCanvasRef, CarouselCanvasProps>(
       });
       return () => cleanups.forEach(c => c());
     }, [circleSrcs, redraw]);
-
-    // Rect image pan
-    useEffect(() => {
-      if (!rectImgDragging) return;
-      function onMove(e: MouseEvent) {
-        const dx = e.clientX - rectImgDragStart.current.mx;
-        const dy = e.clientY - rectImgDragStart.current.my;
-        rectImgOffsetRef.current = { x: rectImgDragStart.current.ox + dx, y: rectImgDragStart.current.oy + dy };
-        redraw(cachedImgRef.current);
-      }
-      function onUp() { setRectImgDragging(false); }
-      window.addEventListener('mousemove', onMove);
-      window.addEventListener('mouseup', onUp);
-      return () => { window.removeEventListener('mousemove', onMove); window.removeEventListener('mouseup', onUp); };
-    }, [rectImgDragging, redraw]);
-
-    // Rect image zoom drag
-    useEffect(() => {
-      if (!rectZoomDragging) return;
-      function onMove(e: MouseEvent) {
-        const dy = e.clientY - rectZoomDragStart.current.my;
-        const newScale = Math.max(0.5, Math.min(10, rectZoomDragStart.current.scale * Math.exp(-dy / 80)));
-        rectImgScaleRef.current = newScale;
-        redraw(cachedImgRef.current);
-      }
-      function onUp() { setRectZoomDragging(false); }
-      window.addEventListener('mousemove', onMove);
-      window.addEventListener('mouseup', onUp);
-      return () => { window.removeEventListener('mousemove', onMove); window.removeEventListener('mouseup', onUp); };
-    }, [rectZoomDragging, redraw]);
 
     // Escape exits circle image edit mode
     useEffect(() => {
@@ -2643,117 +2630,16 @@ const CarouselCanvas = forwardRef<CarouselCanvasRef, CarouselCanvasProps>(
         })()}
 
         {/* ── Circle placeholder (rectMode) — sits between top-3 and bottom-3 tag slots ── */}
-        {rectMode && !videoSrc && (() => {
-          const RECT_GAP   = 8;
-          const bandTop    = padXPv + LOGO_PH + RECT_GAP;
-          const bandBottom = aboveHLTop - RECT_GAP;
-          const bandH      = Math.max(0, bandBottom - bandTop);
-          // Keep ref in sync for canvas draw
-          rectBandRef.current = { top: bandTop, bottom: bandBottom, left: padXPv, right: CAROUSEL_PREVIEW_W - padXPv };
-          const SHIFT_PV   = 50;
-          const circR      = Math.min(Math.floor(bandH / 2) - 4, 90);
-          const circCxPv   = Math.round(CAROUSEL_PREVIEW_W / 2 + SHIFT_PV);
-          const circCyPv   = Math.round((bandTop + bandBottom) / 2);
-          const d          = circR * 2;
-          return (
-            <React.Fragment>
-              <div
-                data-carousel-slot=""
-                onMouseDown={e => {
-                  if (!rectSrc || !rectEditMode) return;
-                  e.preventDefault();
-                  rectImgDragStart.current = { mx: e.clientX, my: e.clientY, ox: rectImgOffsetRef.current.x, oy: rectImgOffsetRef.current.y };
-                  setRectImgDragging(true);
-                }}
-                style={{
-                  position: 'absolute',
-                  left: circCxPv - circR, top: circCyPv - circR,
-                  width: d, height: d,
-                  borderRadius: '50%',
-                  zIndex: 3,
-                  cursor: rectSrc && rectEditMode ? (rectImgDragging ? 'grabbing' : 'grab') : 'default',
-                  outline: rectEditMode ? '2px dashed rgba(255,255,255,0.5)' : undefined,
-                  outlineOffset: 3,
-                }}
-              >
-                {rectSrc ? (
-                  <>
-                    {/* eslint-disable-next-line @next/next/no-img-element */}
-                    <img src={rectSrc} alt="" style={{ width: '100%', height: '100%', objectFit: 'cover', display: 'block', borderRadius: '50%', pointerEvents: 'none' }} />
-                    {!rectEditMode && (
-                      <button
-                        onMouseDown={e => e.stopPropagation()}
-                        onClick={() => { setRectSrc(null); rectImgRef.current = null; rectImgOffsetRef.current = { x: 0, y: 0 }; rectImgScaleRef.current = 1; redraw(cachedImgRef.current); }}
-                        className="absolute -top-1 -right-1 w-5 h-5 rounded-full bg-black/80 border border-zinc-600 text-zinc-300 text-[10px] flex items-center justify-center hover:bg-red-900/90 hover:border-red-600 transition-colors leading-none z-10"
-                      >×</button>
-                    )}
-                  </>
-                ) : (
-                  <button
-                    onMouseDown={e => e.stopPropagation()}
-                    onClick={() => rectInputRef.current?.click()}
-                    className="group w-full h-full flex items-center justify-center transition-colors text-white/40 hover:text-white/70 relative"
-                  >
-                    <svg width={d} height={d} className="absolute inset-0" style={{ pointerEvents: 'none' }}>
-                      <circle
-                        cx={circR} cy={circR} r={circR - 0.5}
-                        fill="rgba(255,255,255,0.10)" strokeWidth="1" strokeDasharray="3 3"
-                        className="stroke-white/40 group-hover:stroke-white/70 transition-colors"
-                      />
-                    </svg>
-                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round">
-                      <line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/>
-                    </svg>
-                  </button>
-                )}
-              </div>
-
-              {/* Edit / Done toolbar */}
-              {rectSrc && (
-                <div data-carousel-slot="" style={{ position: 'absolute', left: circCxPv, top: circCyPv + circR + 5, transform: 'translateX(-50%)', display: 'flex', gap: 3, zIndex: 10 }}>
-                  {rectEditMode ? (
-                    <button onMouseDown={e => e.stopPropagation()} onClick={() => setRectEditMode(false)}
-                      style={{ padding: '2px 9px', background: '#fff', border: 'none', borderRadius: 4, color: '#000', fontSize: 10, fontWeight: 700, cursor: 'pointer' }}>Done</button>
-                  ) : (
-                    <button onMouseDown={e => e.stopPropagation()} onClick={() => setRectEditMode(true)}
-                      style={{ display: 'flex', alignItems: 'center', gap: 3, padding: '2px 6px', background: 'rgba(0,0,0,0.6)', border: '1px solid rgba(255,255,255,0.22)', borderRadius: 4, color: 'rgba(255,255,255,0.8)', fontSize: 9, cursor: 'pointer' }}>
-                      <svg width="9" height="9" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
-                        <circle cx="12" cy="12" r="3"/><line x1="12" y1="2" x2="12" y2="5"/><line x1="12" y1="19" x2="12" y2="22"/>
-                        <line x1="2" y1="12" x2="5" y2="12"/><line x1="19" y1="12" x2="22" y2="12"/>
-                      </svg>
-                      Edit
-                    </button>
-                  )}
-                </div>
-              )}
-
-              {/* Zoom handle — SE of circle */}
-              {rectSrc && !rectEditMode && (
-                <div data-carousel-slot=""
-                  onMouseDown={e => { e.stopPropagation(); e.preventDefault(); rectZoomDragStart.current = { my: e.clientY, scale: rectImgScaleRef.current }; setRectZoomDragging(true); }}
-                  title="Drag up to zoom in, down to zoom out"
-                  style={{ position: 'absolute', left: circCxPv + Math.round(circR * 0.707) - 5, top: circCyPv + Math.round(circR * 0.707) - 5, width: 10, height: 10, background: '#a3e635', border: '1.5px solid rgba(0,0,0,0.4)', borderRadius: 3, cursor: 'ns-resize', zIndex: 10 }}
-                />
-              )}
-
-              <input ref={rectInputRef} type="file" accept="image/*" className="hidden"
-                onChange={e => {
-                  const f = e.target.files?.[0];
-                  if (!f) return;
-                  rectImgOffsetRef.current = { x: 0, y: 0 }; rectImgScaleRef.current = 1;
-                  setRectEditMode(false);
-                  const url = URL.createObjectURL(f);
-                  const img = new Image(); img.onload = () => { rectImgRef.current = img; redraw(cachedImgRef.current); };
-                  img.src = url; setRectSrc(url);
-                  e.target.value = '';
-                }}
-              />
-            </React.Fragment>
-          );
-        })()}
-
         {/* ── Circle placeholders — hidden in video mode ── */}
-        {!videoSrc && !rectMode && [0, 1].map(ci => {
+        {!videoSrc && (rectMode ? [0] : [0, 1]).map(ci => {
+          const RECT_GAP    = 8;
+          const _bandTop    = padXPv + LOGO_PH + RECT_GAP;
+          const _bandBottom = aboveHLTop - RECT_GAP;
+          const _bandH      = Math.max(0, _bandBottom - _bandTop);
+          if (rectMode) {
+            // Keep band ref in sync for canvas drawRect
+            rectBandRef.current = { top: _bandTop, bottom: _bandBottom, left: padXPv, right: CAROUSEL_PREVIEW_W - padXPv };
+          }
           const circleSrc       = circleSrcs[ci];
           const circlePos       = circlePoses[ci];
           const circleRadius    = circleRadii[ci];
@@ -2761,8 +2647,8 @@ const CarouselCanvas = forwardRef<CarouselCanvasRef, CarouselCanvasProps>(
           const circleInputRef  = ci === 0 ? circleInput0Ref : circleInput1Ref;
           const editMode        = circleImgEditModes[ci];
           const isImgDragging   = activeImgDragCircle === ci;
-          const defaultX        = ci === 0 ? Math.round(CAROUSEL_PREVIEW_W / 4) : Math.round(CAROUSEL_PREVIEW_W * 3 / 4);
-          const defaultCy       = (padXPv + LOGO_PH + aboveHLTop) / 2;
+          const defaultX        = rectMode ? Math.round(CAROUSEL_PREVIEW_W / 2 + 50) : (ci === 0 ? Math.round(CAROUSEL_PREVIEW_W / 4) : Math.round(CAROUSEL_PREVIEW_W * 3 / 4));
+          const defaultCy       = rectMode ? Math.round((_bandTop + _bandBottom) / 2) : (padXPv + LOGO_PH + aboveHLTop) / 2;
           const circleCxPv      = circlePos?.x ?? defaultX;
           const circleCyPv      = circlePos?.y ?? defaultCy;
           const r               = circleRadius;
