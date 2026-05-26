@@ -103,6 +103,98 @@ function shapeClipPath(shape: ShapeKind, w: number, h: number): string | undefin
   }
 }
 
+// ---- Headline auto-bolding ----
+// Roughly 10% of a headline's content words get bolded — research-backed
+// heuristic for "skimmable" social-media headlines. Selection is purely
+// rule-based (no LLM call): numbers and money outrank power words outrank
+// proper nouns outrank length. Stop words are excluded entirely.
+
+const STOP_WORDS = new Set([
+  "a", "an", "the", "and", "or", "but", "of", "in", "on", "at", "to", "for",
+  "with", "by", "from", "as", "is", "are", "was", "were", "be", "been", "being",
+  "has", "have", "had", "do", "does", "did", "will", "would", "could", "should",
+  "may", "might", "must", "shall", "can", "this", "that", "these", "those",
+  "i", "you", "he", "she", "it", "we", "they", "them", "their", "his", "her",
+  "its", "our", "your", "my", "me", "him", "us", "what", "which", "who", "whom",
+  "where", "when", "why", "how", "not", "no", "so", "if", "than", "then",
+  "into", "onto", "over", "under", "out", "up", "down", "off", "about", "after",
+  "before", "between", "through", "during", "while", "because",
+]);
+
+// Words that, when present in a news headline, signal urgency / virality.
+// Boosted in the bold-selection ranking.
+const POWER_WORDS = new Set([
+  "record", "history", "first", "breaks", "breaking", "shocks", "shocked",
+  "reveals", "revealed", "denies", "denied", "exclusive", "leaked", "secret",
+  "shocking", "stunning", "surprising", "biggest", "best", "worst", "top",
+  "highest", "lowest", "ever", "never", "now", "today", "just", "finally",
+  "viral", "trending", "blasts", "slams", "calls", "responds", "fires",
+  "quits", "joins", "wins", "loses", "beats", "tops", "claims", "admits",
+  "confirms", "announces", "drops", "releases", "dies", "killed", "arrested",
+  "sued", "charged", "banned", "fired", "hired", "married", "divorced",
+  "pregnant", "engaged", "split", "dating",
+]);
+
+function scoreHeadlineWord(word: string, idx: number): number {
+  const lower = word.toLowerCase().replace(/[^a-z]/g, "");
+  if (!lower || STOP_WORDS.has(lower)) return -1;
+  let score = lower.length * 0.1;            // base: length proxy for content
+  if (/\d/.test(word)) score += 5;            // numbers
+  if (/[$€£%]/.test(word)) score += 4;        // money / percent
+  if (POWER_WORDS.has(lower)) score += 3;     // urgency word
+  if (idx > 0 && /^[A-Z]/.test(word)) score += 2; // proper noun (not sentence-start)
+  return score;
+}
+
+function pickBoldWordIndices(text: string, ratio = 0.1): Set<number> {
+  const words = text.split(/\s+/).filter(Boolean);
+  if (words.length === 0) return new Set();
+  const eligible: Array<{ idx: number; score: number }> = [];
+  for (let i = 0; i < words.length; i++) {
+    const s = scoreHeadlineWord(words[i], i);
+    if (s > 0) eligible.push({ idx: i, score: s });
+  }
+  if (eligible.length === 0) return new Set();
+  // At least 1 word always bolded once we have any eligible candidate, so
+  // short headlines (5-7 words) still get a visual anchor.
+  const target = Math.max(1, Math.round(eligible.length * ratio));
+  eligible.sort((a, b) => b.score - a.score);
+  return new Set(eligible.slice(0, target).map((x) => x.idx));
+}
+
+function renderHeadline(text: string): React.ReactNode[] {
+  // split keeping whitespace so spaces and line breaks are preserved.
+  const tokens = text.split(/(\s+)/);
+  // 25% of eligible words get bolded — pushed up from 10% so headlines have
+  // more visual punch.
+  const bold = pickBoldWordIndices(text, 0.25);
+  let wordIdx = -1;
+  return tokens.map((tok, i) => {
+    if (tok === "") return null;
+    if (/^\s+$/.test(tok)) return tok;
+    wordIdx++;
+    if (bold.has(wordIdx)) {
+      // Bolded word: max weight.
+      return (
+        <strong key={i} style={{ fontWeight: 900 }}>
+          {tok}
+        </strong>
+      );
+    }
+    // Non-bold word: explicitly thinner so the bolded keywords pop by
+    // weight contrast alone (no opacity tricks). 500 is "medium" — still
+    // confident, but visibly lighter than the 900 bolded words. The
+    // template's layer.fontWeight is overridden per-word for headlines, so
+    // the bolded vs non-bolded contrast is consistent regardless of what
+    // the template author picked.
+    return (
+      <span key={i} style={{ fontWeight: 500 }}>
+        {tok}
+      </span>
+    );
+  });
+}
+
 interface Props {
   doc: TemplateDoc;
   context?: PopulateContext | null;          // when present, role-tagged layers are populated
@@ -304,10 +396,37 @@ function TextView({
   overrides: CopyOverrides | null;
 }) {
   const content = resolveText(layer, context, overrides);
+  const isHeadline = layer.role === "headline";
   const justify =
     layer.verticalAlign === "middle" ? "center" :
     layer.verticalAlign === "bottom" ? "flex-end" :
     "flex-start";
+  // Headlines get two special treatments:
+  //   1. auto-bold ~10% of words (numbers, money, power words, proper nouns)
+  //   2. hard cap at 3 lines, with ellipsis if the content overflows
+  const innerStyle: React.CSSProperties = {
+    width: "100%",
+    color: layer.color,
+    fontFamily: layer.fontFamily,
+    fontSize: layer.fontSize,
+    fontWeight: layer.fontWeight,
+    fontStyle: layer.italic ? "italic" : "normal",
+    textAlign: layer.textAlign,
+    lineHeight: layer.lineHeight,
+    letterSpacing: layer.letterSpacing,
+    textTransform: layer.uppercase ? "uppercase" : "none",
+    textShadow: layer.shadow ? "0 2px 12px rgba(0,0,0,0.6)" : undefined,
+    whiteSpace: "pre-wrap",
+    wordBreak: "break-word",
+    ...(isHeadline
+      ? {
+          display: "-webkit-box",
+          WebkitLineClamp: 3,
+          WebkitBoxOrient: "vertical" as const,
+          overflow: "hidden",
+        }
+      : {}),
+  };
   return (
     <div
       style={{
@@ -322,24 +441,8 @@ function TextView({
         justifyContent: justify,
       }}
     >
-      <div
-        style={{
-          width: "100%",
-          color: layer.color,
-          fontFamily: layer.fontFamily,
-          fontSize: layer.fontSize,
-          fontWeight: layer.fontWeight,
-          fontStyle: layer.italic ? "italic" : "normal",
-          textAlign: layer.textAlign,
-          lineHeight: layer.lineHeight,
-          letterSpacing: layer.letterSpacing,
-          textTransform: layer.uppercase ? "uppercase" : "none",
-          textShadow: layer.shadow ? "0 2px 12px rgba(0,0,0,0.6)" : undefined,
-          whiteSpace: "pre-wrap",
-          wordBreak: "break-word",
-        }}
-      >
-        {content}
+      <div style={innerStyle}>
+        {isHeadline ? renderHeadline(content) : content}
       </div>
     </div>
   );
