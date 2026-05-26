@@ -304,6 +304,14 @@ export function useRecording(config: UseRecordingConfig) {
           for (const { frame } of decodedFrames) frame.close();
           throw new Error('Cancelled');
         }
+        // Backpressure: when the decoder's internal queue saturates, Chrome
+        // silently pauses input — the next decode() call then hangs and the
+        // UI freezes at a deterministic ~30% with no console error. Yield
+        // to the event loop so the decoder can drain (its output callback
+        // can fire and clear queued chunks).
+        while (decoder.decodeQueueSize > 16) {
+          await new Promise<void>((r) => setTimeout(r, 0));
+        }
         const s = videoSamples[i];
         await decoder.decode(new EncodedVideoChunk({ type: s.isKeyframe ? 'key' : 'delta', timestamp: s.timestamp * 1_000_000, data: s.data }));
         setRecProgress(0.1 + (i / videoSamples.length) * 0.3);
