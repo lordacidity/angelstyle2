@@ -1684,22 +1684,10 @@ const CarouselCanvas = forwardRef<CarouselCanvasRef, CarouselCanvasProps>(
         let audioTrackId: number | null = null;
         let videoTimescale = 90000;
         let audioTimescale = 44100;
-        // Same fix as useRecording.ts: pull codec + dimensions from the parsed
-        // track instead of hardcoding avc1.64001F / 1080x1920 (which hung the
-        // decoder for any video that didn't match exactly).
-        let videoCodec = 'avc1.64001F';
-        let videoWidth = 1080;
-        let videoHeight = 1920;
 
         MP4BoxFile.onReady = (info: any) => {
           for (const track of info.tracks || []) {
-            if (track.type === 'video' && !videoTrackId) {
-              videoTrackId = track.id;
-              videoTimescale = track.timescale || 90000;
-              if (track.codec) videoCodec = track.codec;
-              if (track.video?.width)  videoWidth  = track.video.width;
-              if (track.video?.height) videoHeight = track.video.height;
-            }
+            if (track.type === 'video' && !videoTrackId) { videoTrackId = track.id; videoTimescale = track.timescale || 90000; }
             if (track.type === 'audio' && !audioTrackId) { audioTrackId = track.id; audioTimescale = track.timescale || 44100; }
           }
           if (videoTrackId) MP4BoxFile.setExtractionOptions(videoTrackId, null, { nbSamples: Infinity });
@@ -1770,7 +1758,7 @@ const CarouselCanvas = forwardRef<CarouselCanvasRef, CarouselCanvasProps>(
         }
 
         // @ts-ignore
-        decoder.configure({ codec: videoCodec, codedWidth: videoWidth, codedHeight: videoHeight, description });
+        decoder.configure({ codec: 'avc1.64001F', codedWidth: 1080, codedHeight: 1920, description });
 
         for (let i = 0; i < videoSamples.length; i++) {
           if (signal.aborted) { decoder.close(); throw new Error('Cancelled'); }

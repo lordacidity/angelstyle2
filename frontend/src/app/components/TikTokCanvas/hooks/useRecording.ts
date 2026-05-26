@@ -220,24 +220,10 @@ export function useRecording(config: UseRecordingConfig) {
       let audioTrackId: number | null = null;
       let videoTimescale = 90000;
       let audioTimescale = 44100;
-      // Capture codec + dimensions from the actual parsed track. These used to
-      // be hardcoded to avc1.64001F / 1080x1920 which silently failed for any
-      // video that wasn't H.264 High@L3.1 at exactly vertical 1080p (e.g. a
-      // 16:9 movie clip from a TikTok repost) — VideoDecoder error callback
-      // fires but flush() never resolves, so the UI hangs on "Decoding video...".
-      let videoCodec = 'avc1.64001F';
-      let videoWidth = 1080;
-      let videoHeight = 1920;
 
       MP4BoxFile.onReady = (info: any) => {
         for (const track of info.tracks || []) {
-          if (track.type === 'video' && !videoTrackId) {
-            videoTrackId = track.id;
-            videoTimescale = track.timescale || 90000;
-            if (track.codec) videoCodec = track.codec;
-            if (track.video?.width)  videoWidth  = track.video.width;
-            if (track.video?.height) videoHeight = track.video.height;
-          }
+          if (track.type === 'video' && !videoTrackId) { videoTrackId = track.id; videoTimescale = track.timescale || 90000; }
           if (track.type === 'audio' && !audioTrackId) { audioTrackId = track.id; audioTimescale = track.timescale || 44100; }
         }
         if (videoTrackId) MP4BoxFile.setExtractionOptions(videoTrackId, null, { nbSamples: Infinity });
@@ -310,7 +296,7 @@ export function useRecording(config: UseRecordingConfig) {
       }
 
       // @ts-ignore
-      decoder.configure({ codec: videoCodec, codedWidth: videoWidth, codedHeight: videoHeight, description });
+      decoder.configure({ codec: 'avc1.64001F', codedWidth: 1080, codedHeight: 1920, description });
 
       for (let i = 0; i < videoSamples.length; i++) {
         if (signal.aborted) {
