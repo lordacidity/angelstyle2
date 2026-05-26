@@ -28,10 +28,10 @@ export async function POST(req: NextRequest) {
       { json: true, temperature: 0.6 },
     );
 
-    const parsed = parseJson<{ headline?: string; subheadline?: string }>(raw);
+    const result = parseJson<{ headline?: string; subheadline?: string }>(raw);
     return NextResponse.json({
-      headline: parsed.headline ?? headline,
-      subheadline: parsed.subheadline ?? '',
+      headline: result.headline ?? headline,
+      subheadline: result.subheadline ?? '',
     });
   } catch (err) {
     return NextResponse.json({ error: String(err) }, { status: 500 });
