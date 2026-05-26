@@ -105,7 +105,7 @@ export function TemplateEditor({ initial, onSave, onCancel }: Props) {
       content: "New text",
       fontFamily: "system-ui, -apple-system, 'Segoe UI', sans-serif",
       fontSize: 40, fontWeight: 600, color: "#fafafa",
-      textAlign: "left", lineHeight: 1.2, letterSpacing: 0,
+      textAlign: "left", verticalAlign: "top", lineHeight: 1.2, letterSpacing: 0,
       italic: false, uppercase: false, shadow: false,
     };
     setDoc((d) => ({ ...d, layers: [...d.layers, l] }));
@@ -233,10 +233,10 @@ export function TemplateEditor({ initial, onSave, onCancel }: Props) {
         }
       }
       if (dir.includes("s")) {
-        // South edge: only meaningful for image/shape (text is content-sized).
-        if (s.type !== "text") {
-          patch = { ...patch, height: Math.max(GRID, snap(s.height + dy)) };
-        }
+        // South edge: grow/shrink the layer's box height. Text layers now
+        // honor explicit height too — the box becomes a fixed container that
+        // text aligns within (top / middle / bottom).
+        patch = { ...patch, height: Math.max(GRID, snap(s.height + dy)) };
       }
       if (Object.keys(patch).length > 0) {
         updateLayer(st.layerId, patch);
@@ -685,11 +685,7 @@ function PropertyEditor({
       )}
       <div className="prop-row">
         <NumField label="W" value={layer.width} step={GRID} min={GRID} onChange={(v) => onChange({ width: Math.max(GRID, snap(v)) } as Partial<Layer>)} />
-        {layer.type !== "text" ? (
-          <NumField label="H" value={layer.height} step={GRID} min={GRID} onChange={(v) => onChange({ height: Math.max(GRID, snap(v)) } as Partial<Layer>)} />
-        ) : (
-          <NumField label="H (auto)" value={0} onChange={() => {}} />
-        )}
+        <NumField label="H" value={layer.height} step={GRID} min={GRID} onChange={(v) => onChange({ height: Math.max(GRID, snap(v)) } as Partial<Layer>)} />
       </div>
       <div className="prop-row">
         <NumField label="Rotate" value={layer.rotation} onChange={(v) => onChange({ rotation: v } as Partial<Layer>)} />
@@ -743,12 +739,31 @@ function TextProps({ layer, onChange }: { layer: TextLayer; onChange: (p: Partia
       <PanelField label="Color">
         <input type="color" value={layer.color} onChange={(e) => onChange({ color: e.target.value })} />
       </PanelField>
-      <PanelField label="Align">
+      <PanelField label="Align (horizontal)">
         <select value={layer.textAlign} onChange={(e) => onChange({ textAlign: e.target.value as TextLayer["textAlign"] })}>
           <option value="left">Left</option>
           <option value="center">Center</option>
           <option value="right">Right</option>
         </select>
+      </PanelField>
+      <PanelField label="Align (vertical)">
+        <div className="prop-row" style={{ gap: 6, margin: 0 }}>
+          <Chip
+            on={(layer.verticalAlign ?? "top") === "top"}
+            onClick={() => onChange({ verticalAlign: "top" })}
+            title="Top of box"
+          >⤒ Top</Chip>
+          <Chip
+            on={layer.verticalAlign === "middle"}
+            onClick={() => onChange({ verticalAlign: "middle" })}
+            title="Middle of box"
+          >↕ Middle</Chip>
+          <Chip
+            on={layer.verticalAlign === "bottom"}
+            onClick={() => onChange({ verticalAlign: "bottom" })}
+            title="Bottom of box"
+          >⤓ Bottom</Chip>
+        </div>
       </PanelField>
       <div className="prop-row">
         <NumField label="Line h" value={layer.lineHeight} step={0.05} onChange={(v) => onChange({ lineHeight: v })} />

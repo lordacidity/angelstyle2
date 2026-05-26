@@ -57,6 +57,10 @@ export interface TextLayer extends BaseLayer {
   fontWeight: number;
   color: string;
   textAlign: "left" | "center" | "right";
+  // Vertical position of text within the layer's box. Optional for
+  // backward compatibility with templates created before this field existed
+  // — renderer treats undefined as "top".
+  verticalAlign?: "top" | "middle" | "bottom";
   lineHeight: number;
   letterSpacing: number;
   italic: boolean;

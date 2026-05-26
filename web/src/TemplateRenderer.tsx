@@ -304,28 +304,43 @@ function TextView({
   overrides: CopyOverrides | null;
 }) {
   const content = resolveText(layer, context, overrides);
+  const justify =
+    layer.verticalAlign === "middle" ? "center" :
+    layer.verticalAlign === "bottom" ? "flex-end" :
+    "flex-start";
   return (
     <div
       style={{
+        // Outer wrapper: an explicit-height flex column that positions the
+        // text vertically within the layer's box. Pinned text layers get
+        // their box height from the wrapper; in-flow text gets its height
+        // from the row, but we still honor verticalAlign within it.
         width: "100%",
-        // Text height is content-driven — this is the whole point of the
-        // stacked flow. The layer's stored `height` is only used for resize
-        // affordance sizing in the editor; it does not constrain the box.
-        color: layer.color,
-        fontFamily: layer.fontFamily,
-        fontSize: layer.fontSize,
-        fontWeight: layer.fontWeight,
-        fontStyle: layer.italic ? "italic" : "normal",
-        textAlign: layer.textAlign,
-        lineHeight: layer.lineHeight,
-        letterSpacing: layer.letterSpacing,
-        textTransform: layer.uppercase ? "uppercase" : "none",
-        textShadow: layer.shadow ? "0 2px 12px rgba(0,0,0,0.6)" : undefined,
-        whiteSpace: "pre-wrap",
-        wordBreak: "break-word",
+        height: layer.height,
+        display: "flex",
+        flexDirection: "column",
+        justifyContent: justify,
       }}
     >
-      {content}
+      <div
+        style={{
+          width: "100%",
+          color: layer.color,
+          fontFamily: layer.fontFamily,
+          fontSize: layer.fontSize,
+          fontWeight: layer.fontWeight,
+          fontStyle: layer.italic ? "italic" : "normal",
+          textAlign: layer.textAlign,
+          lineHeight: layer.lineHeight,
+          letterSpacing: layer.letterSpacing,
+          textTransform: layer.uppercase ? "uppercase" : "none",
+          textShadow: layer.shadow ? "0 2px 12px rgba(0,0,0,0.6)" : undefined,
+          whiteSpace: "pre-wrap",
+          wordBreak: "break-word",
+        }}
+      >
+        {content}
+      </div>
     </div>
   );
 }
