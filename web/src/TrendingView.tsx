@@ -55,17 +55,27 @@ function cleanHeadline(title: string): string {
   return title.replace(/\s+-\s+[^-]+$/, "").trim();
 }
 
+// Two distinct content niches the user produces marketing for, plus a
+// reusable label for the toggle. Any future industry slots into one of
+// these buckets — none should "leak" between categories.
+const HOLLYWOOD_INDUSTRIES = new Set(["Actor", "Musician", "Comedian"]);
+const CREATOR_INDUSTRIES = new Set(["Streamer", "Youtuber", "Influencer", "Podcaster"]);
+type Category = "hollywood" | "creators";
+
 export function TrendingView() {
   const [items, setItems] = useState<TrendingTalent[] | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
   const [buildingFor, setBuildingFor] = useState<string | null>(null);
+  const [category, setCategory] = useState<Category>("hollywood");
 
   const load = async () => {
     setError(null);
     setItems(null);
     try {
-      const r = await fetch("/api/trending/talents?limit=12");
+      // Pull everything in one call (limit=50). We filter into the two
+      // categories client-side so the toggle is instant.
+      const r = await fetch("/api/trending/talents?limit=50");
       if (!r.ok) throw new Error(await r.text());
       const data: TrendingTalent[] = await r.json();
       setItems(data);
@@ -144,7 +154,7 @@ export function TrendingView() {
           <div>
             <h1>Trending Now</h1>
             <div className="subtitle">
-              Today's most-mentioned music &amp; film talents across entertainment outlets.
+              Today's most-mentioned talents across entertainment outlets.
               Click a name to see their recent headlines, then build a card from any story.
             </div>
           </div>
@@ -154,6 +164,28 @@ export function TrendingView() {
             </button>
           </div>
         </div>
+
+        {/* Category toggle — two distinct niches the user creates content for. */}
+        {(() => {
+          const hollywoodCount = (items ?? []).filter((it) => it.talent.industry && HOLLYWOOD_INDUSTRIES.has(it.talent.industry)).length;
+          const creatorCount = (items ?? []).filter((it) => it.talent.industry && CREATOR_INDUSTRIES.has(it.talent.industry)).length;
+          return (
+            <div className="row" style={{ marginBottom: 16, gap: 8 }}>
+              <button
+                className={category === "hollywood" ? "" : "secondary"}
+                onClick={() => setCategory("hollywood")}
+              >
+                🎬 Music & Film {items !== null && <span style={{ opacity: 0.7, marginLeft: 6 }}>({hollywoodCount})</span>}
+              </button>
+              <button
+                className={category === "creators" ? "" : "secondary"}
+                onClick={() => setCategory("creators")}
+              >
+                🎮 Creators {items !== null && <span style={{ opacity: 0.7, marginLeft: 6 }}>({creatorCount})</span>}
+              </button>
+            </div>
+          );
+        })()}
 
         {error && (
           <div className="status err" style={{ whiteSpace: "pre-wrap", marginBottom: 16 }}>
@@ -165,13 +197,24 @@ export function TrendingView() {
           <div className="card empty">Scanning today's entertainment headlines…</div>
         )}
 
-        {items !== null && items.length === 0 && (
-          <div className="card empty">
-            No mentions found across today's entertainment outlets. Try refreshing in a few hours.
-          </div>
-        )}
-
-        {items?.map((it) => {
+        {(() => {
+          const filtered = (items ?? []).filter((it) => {
+            const ind = it.talent.industry;
+            if (!ind) return false;
+            return category === "hollywood"
+              ? HOLLYWOOD_INDUSTRIES.has(ind)
+              : CREATOR_INDUSTRIES.has(ind);
+          });
+          if (items !== null && filtered.length === 0) {
+            return (
+              <div className="card empty">
+                {category === "hollywood"
+                  ? "No actors, musicians, or comedians in the news today. Try refreshing later or switch to Creators."
+                  : "No creators in the news today. Try refreshing later or switch to Music & Film."}
+              </div>
+            );
+          }
+          return filtered.map((it) => {
           const isOpen = expanded.has(it.talent.ticker);
           return (
             <div className="file" key={it.talent.ticker}>
@@ -266,7 +309,8 @@ export function TrendingView() {
               )}
             </div>
           );
-        })}
+        });
+        })()}
       </div>
     </div>
   );

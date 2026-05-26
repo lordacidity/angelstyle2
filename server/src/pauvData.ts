@@ -1147,7 +1147,7 @@ function scoreHeadline(h: Omit<TrendingHeadline, "viralScore" | "viralBreakdown"
   return { viralScore: total, viralBreakdown: { tier, recency: Math.round(recency * 10) / 10 } };
 }
 
-export async function getTrendingTalents(limit = 30): Promise<TrendingTalent[]> {
+export async function getTrendingTalents(limit = 50): Promise<TrendingTalent[]> {
   const talents = await listTalents();
   const eligible = talents.filter((t) => {
     if (!t.industry || !TRENDING_INDUSTRIES.has(t.industry)) return false;
