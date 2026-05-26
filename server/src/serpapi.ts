@@ -49,7 +49,7 @@ export async function imageSearch(
   if (!res.ok) throw new Error(`serpapi ${res.status}: ${await res.text()}`);
   const json = (await res.json()) as SerpResponse;
   if (json.error) throw new Error(`serpapi: ${json.error}`);
-  const images = (json.images_results ?? []).filter((i) => i.original);
+  const images = (json.images_results ?? []).filter(isUsableImage);
   return images.slice(within, within + count).map((i) => ({
     url: i.original!,
     thumbnail: i.thumbnail ?? i.original!,
@@ -58,4 +58,31 @@ export async function imageSearch(
     width: i.original_width,
     height: i.original_height,
   }));
+}
+
+// Drop garbage results from Google's image search — branded UI artifacts,
+// tiny icons, etc. — so the photo strip only contains things that actually
+// look like photos of the person.
+function isUsableImage(i: SerpImage): boolean {
+  if (!i.original) return false;
+  const url = i.original.toLowerCase();
+  const source = (i.source ?? "").toLowerCase();
+  // Filter Google's own infrastructure URLs (logos, icons, app branding).
+  const BANNED_HOSTS = [
+    "google.com/logos",
+    "gstatic.com",
+    "googleusercontent.com/proxy",
+    "google.com/imgres",
+    "google.com/url",
+    "ssl.gstatic.com",
+    "lh3.googleusercontent.com/d/", // Drive file thumbnails
+  ];
+  if (BANNED_HOSTS.some((p) => url.includes(p))) return false;
+  if (source.endsWith("google.com") || source === "google") return false;
+  // Filter SVG icons — they're almost always logos.
+  if (url.endsWith(".svg") || url.includes(".svg?")) return false;
+  // Filter tiny thumbnails (favicon-sized). Real portrait photos are 200×200+.
+  if (i.original_width != null && i.original_width < 200) return false;
+  if (i.original_height != null && i.original_height < 200) return false;
+  return true;
 }

@@ -81,6 +81,24 @@ interface Photo { url: string; thumbnail: string; title?: string; source?: strin
 
 type Step = "industry" | "stories" | "photo" | "card";
 
+// Strip HTML tags and decode entities from raw Google News RSS descriptions
+// so they display as plain text in the photo step. The RSS feed returns
+// HTML like `<a href="...">Title</a>&nbsp;&nbsp;<font color="#6f6f6f">Source</font>`
+// which is useless to show verbatim.
+function stripHtmlForDisplay(s: string): string {
+  return s
+    .replace(/<[^>]+>/g, "")            // drop all tags
+    .replace(/&nbsp;/g, " ")
+    .replace(/&amp;/g, "&")
+    .replace(/&quot;/g, '"')
+    .replace(/&#39;/g, "'")
+    .replace(/&apos;/g, "'")
+    .replace(/&lt;/g, "<")
+    .replace(/&gt;/g, ">")
+    .replace(/\s+/g, " ")               // collapse whitespace
+    .trim();
+}
+
 // ---- component ----
 
 export function NewsCardsView() {
@@ -908,8 +926,19 @@ export function NewsCardsView() {
               {selectedItem.likeCount != null ? ` · ♥ ${selectedItem.likeCount.toLocaleString()}` : ""}
             </div>
             {selectedItem.rawText && selectedItem.rawText !== selectedItem.caption && (
-              <div style={{ marginTop: 8, fontSize: 14, opacity: 0.8, fontStyle: "italic" }}>
-                "{selectedItem.rawText}"
+              <div
+                style={{
+                  marginTop: 8,
+                  fontSize: 11,
+                  lineHeight: 1.4,
+                  opacity: 0.7,
+                  fontStyle: "italic",
+                  wordBreak: "break-word",
+                  overflow: "hidden",
+                  maxHeight: "4.5em", // ~3 lines at lineHeight 1.4
+                }}
+              >
+                "{stripHtmlForDisplay(selectedItem.rawText)}"
               </div>
             )}
             {extractLoading && <div className="empty">DeepSeek is identifying the person…</div>}
