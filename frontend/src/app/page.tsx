@@ -42,7 +42,7 @@ export default function Home() {
   const [activeSection, setActiveSection] = useState<AppSection>('template');
   const [selectedTemplate, setSelectedTemplate] = useState<VideoMode | null>(null);
   const [carouselSettingsMap, setCarouselSettingsMap] = useState<Record<string, CarouselSettings>>({});
-  const { user, loading: authLoading, signIn, signUp, signOut } = useAuth();
+  const { user, loading: authLoading, signIn, signUp, signOut, resetPassword } = useAuth();
   const { brand, setBrand, saving, uploading, loading, error, setError, save, uploadLogo, deleteLogo, selectLogo } = useBrandKit(user?.id ?? null);
 
   const {
@@ -124,6 +124,7 @@ export default function Home() {
             authLoading={authLoading}
             onSignIn={signIn}
             onSignUp={signUp}
+            onResetPassword={resetPassword}
             onSignOut={signOut}
             onSave={save}
             onUploadLogo={uploadLogo}

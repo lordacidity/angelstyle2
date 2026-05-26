@@ -98,6 +98,7 @@ interface TemplateSelectorProps {
   authLoading?: boolean;
   onSignIn: (email: string, password: string) => Promise<string | null>;
   onSignUp: (email: string, password: string) => Promise<string | null>;
+  onResetPassword: (email: string) => Promise<string | null>;
   onSignOut: () => void;
   onSave: (displayName: string, handle: string) => Promise<boolean>;
   onUploadLogo: (file: File) => void;
@@ -109,7 +110,7 @@ interface TemplateSelectorProps {
 export function TemplateSelector({
   selected, onSelect, onSelectWithAi, onGoToBuilder,
   brand, loading, saving, uploading, error,
-  user, authLoading, onSignIn, onSignUp, onSignOut,
+  user, authLoading, onSignIn, onSignUp, onResetPassword, onSignOut,
   onSave, onUploadLogo, onDeleteLogo, onSelectLogo, onClearError,
 }: TemplateSelectorProps) {
   const fileRef = useRef<HTMLInputElement>(null);
@@ -163,7 +164,7 @@ export function TemplateSelector({
   if (!user) {
     return (
       <div className="flex flex-col items-center pt-16 gap-10">
-        <AuthForm onSignIn={onSignIn} onSignUp={onSignUp} />
+        <AuthForm onSignIn={onSignIn} onSignUp={onSignUp} onResetPassword={onResetPassword} />
       </div>
     );
   }
