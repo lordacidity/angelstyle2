@@ -63,6 +63,76 @@
     { "name": "Frank Ocean",          "industry": "Musician", "subcategory": "R&B" },
     { "name": "The Weeknd",           "industry": "Musician", "subcategory": "R&B" },
     { "name": "Lana Del Rey",         "industry": "Musician", "subcategory": "Indie" },
-    { "name": "Ariana Grande",        "industry": "Musician", "subcategory": "Pop" }
+    { "name": "Ariana Grande",        "industry": "Musician", "subcategory": "Pop" },
+
+    { "name": "Stephen Curry",        "industry": "Athlete",  "subcategory": "NBA" },
+    { "name": "Nikola Jokic",         "industry": "Athlete",  "subcategory": "NBA" },
+    { "name": "Jayson Tatum",         "industry": "Athlete",  "subcategory": "NBA" },
+    { "name": "Luka Doncic",          "industry": "Athlete",  "subcategory": "NBA" },
+    { "name": "Giannis Antetokounmpo","industry": "Athlete",  "subcategory": "NBA" },
+    { "name": "Anthony Edwards",      "industry": "Athlete",  "subcategory": "NBA" },
+    { "name": "Kevin Durant",         "industry": "Athlete",  "subcategory": "NBA" },
+    { "name": "Devin Booker",         "industry": "Athlete",  "subcategory": "NBA" },
+    { "name": "Joel Embiid",          "industry": "Athlete",  "subcategory": "NBA" },
+    { "name": "Damian Lillard",       "industry": "Athlete",  "subcategory": "NBA" },
+    { "name": "Anthony Davis",        "industry": "Athlete",  "subcategory": "NBA" },
+
+    { "name": "Patrick Mahomes",      "industry": "Athlete",  "subcategory": "NFL" },
+    { "name": "Josh Allen",           "industry": "Athlete",  "subcategory": "NFL" },
+    { "name": "Lamar Jackson",        "industry": "Athlete",  "subcategory": "NFL" },
+    { "name": "Joe Burrow",           "industry": "Athlete",  "subcategory": "NFL" },
+    { "name": "Tyreek Hill",          "industry": "Athlete",  "subcategory": "NFL" },
+    { "name": "Justin Jefferson",     "industry": "Athlete",  "subcategory": "NFL" },
+    { "name": "Christian McCaffrey",  "industry": "Athlete",  "subcategory": "NFL" },
+
+    { "name": "Lionel Messi",         "industry": "Athlete",  "subcategory": "Soccer" },
+    { "name": "Kylian Mbappé",        "industry": "Athlete",  "subcategory": "Soccer" },
+    { "name": "Erling Haaland",       "industry": "Athlete",  "subcategory": "Soccer" },
+    { "name": "Vinicius Junior",      "industry": "Athlete",  "subcategory": "Soccer" },
+    { "name": "Jude Bellingham",      "industry": "Athlete",  "subcategory": "Soccer" },
+    { "name": "Mohamed Salah",        "industry": "Athlete",  "subcategory": "Soccer" },
+    { "name": "Harry Kane",           "industry": "Athlete",  "subcategory": "Soccer" },
+    { "name": "Bukayo Saka",          "industry": "Athlete",  "subcategory": "Soccer" },
+    { "name": "Robert Lewandowski",   "industry": "Athlete",  "subcategory": "Soccer" },
+
+    { "name": "Islam Makhachev",      "industry": "Athlete",  "subcategory": "UFC / MMA" },
+    { "name": "Dustin Poirier",       "industry": "Athlete",  "subcategory": "UFC / MMA" },
+    { "name": "Israel Adesanya",      "industry": "Athlete",  "subcategory": "UFC / MMA" },
+    { "name": "Alex Pereira",         "industry": "Athlete",  "subcategory": "UFC / MMA" },
+    { "name": "Conor McGregor",       "industry": "Athlete",  "subcategory": "UFC / MMA" },
+    { "name": "Jon Jones",            "industry": "Athlete",  "subcategory": "UFC / MMA" },
+    { "name": "Charles Oliveira",     "industry": "Athlete",  "subcategory": "UFC / MMA" },
+
+    { "name": "Canelo Alvarez",       "industry": "Athlete",  "subcategory": "Boxing" },
+    { "name": "Terence Crawford",     "industry": "Athlete",  "subcategory": "Boxing" },
+    { "name": "Tyson Fury",           "industry": "Athlete",  "subcategory": "Boxing" },
+    { "name": "Anthony Joshua",       "industry": "Athlete",  "subcategory": "Boxing" },
+    { "name": "Naoya Inoue",          "industry": "Athlete",  "subcategory": "Boxing" },
+
+    { "name": "Lewis Hamilton",       "industry": "Athlete",  "subcategory": "F1" },
+    { "name": "Lando Norris",         "industry": "Athlete",  "subcategory": "F1" },
+    { "name": "Charles Leclerc",      "industry": "Athlete",  "subcategory": "F1" },
+    { "name": "George Russell",       "industry": "Athlete",  "subcategory": "F1" },
+    { "name": "Oscar Piastri",        "industry": "Athlete",  "subcategory": "F1" },
+
+    { "name": "Novak Djokovic",       "industry": "Athlete",  "subcategory": "Tennis" },
+    { "name": "Jannik Sinner",        "industry": "Athlete",  "subcategory": "Tennis" },
+    { "name": "Iga Swiatek",          "industry": "Athlete",  "subcategory": "Tennis" },
+    { "name": "Coco Gauff",           "industry": "Athlete",  "subcategory": "Tennis" },
+    { "name": "Aryna Sabalenka",      "industry": "Athlete",  "subcategory": "Tennis" },
+
+    { "name": "Scottie Scheffler",    "industry": "Athlete",  "subcategory": "Golf" },
+    { "name": "Rory McIlroy",         "industry": "Athlete",  "subcategory": "Golf" },
+    { "name": "Tiger Woods",          "industry": "Athlete",  "subcategory": "Golf" },
+    { "name": "Jon Rahm",             "industry": "Athlete",  "subcategory": "Golf" },
+    { "name": "Xander Schauffele",    "industry": "Athlete",  "subcategory": "Golf" },
+
+    { "name": "A'ja Wilson",          "industry": "Athlete",  "subcategory": "WNBA" },
+    { "name": "Breanna Stewart",      "industry": "Athlete",  "subcategory": "WNBA" },
+    { "name": "Sabrina Ionescu",      "industry": "Athlete",  "subcategory": "WNBA" },
+
+    { "name": "Connor McDavid",       "industry": "Athlete",  "subcategory": "NHL" },
+    { "name": "Auston Matthews",      "industry": "Athlete",  "subcategory": "NHL" },
+    { "name": "Nathan MacKinnon",     "industry": "Athlete",  "subcategory": "NHL" }
   ]
 }

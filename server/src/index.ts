@@ -404,7 +404,10 @@ app.get("/api/talents", async (_req, res) => {
 // Backs the Trending tab.
 app.get("/api/trending/talents", async (req, res) => {
   try {
-    const limit = req.query.limit ? Math.min(50, Math.max(1, Number(req.query.limit))) : 12;
+    // Cap at 500 — the actual cost is the per-talent Google News fan-out,
+    // which runs for every eligible talent regardless of limit. Slicing
+    // more or fewer at the end is essentially free.
+    const limit = req.query.limit ? Math.min(500, Math.max(1, Number(req.query.limit))) : 12;
     res.json(await getTrendingTalents(limit));
   } catch (err) {
     res.status(500).json({ error: String(err) });

@@ -1047,9 +1047,9 @@ export async function chatEdit(
 // content to choose from.
 // ============================================================================
 
-// Industries that count as "Hollywood / music / entertainment" for trending
-// purposes. Anything that produces shareable celebrity stories should be in
-// here. (Athletes / Politicians / Entrepreneurs intentionally aren't.)
+// Industries that show up in the Trending feed. The UI groups these into
+// four tabs (Music & Film / Comedians / Creators / Athletes). Politicians
+// and Entrepreneurs are intentionally still excluded.
 const TRENDING_INDUSTRIES = new Set([
   "Actor",
   "Musician",
@@ -1058,6 +1058,7 @@ const TRENDING_INDUSTRIES = new Set([
   "Youtuber",
   "Streamer",
   "Influencer",
+  "Athlete",
 ]);
 
 export interface TrendingHeadline {

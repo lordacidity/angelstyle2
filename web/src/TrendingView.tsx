@@ -42,25 +42,18 @@ interface TrendingTalent {
   headlines: TrendingHeadline[];
 }
 
-// Route absolute http(s) image URLs through the backend proxy so CORS-strict
-// CDNs (and Supabase storage with restrictive policies) still render.
-function proxiedImage(url: string | null): string | undefined {
-  if (!url) return undefined;
-  if (url.startsWith("/api/img-proxy") || !/^https?:\/\//i.test(url)) return url;
-  return `/api/img-proxy?url=${encodeURIComponent(url)}`;
-}
-
 // Google News titles trail "  - Source Name" — strip for cleaner display.
 function cleanHeadline(title: string): string {
   return title.replace(/\s+-\s+[^-]+$/, "").trim();
 }
 
-// Three distinct content niches the user produces marketing for. Any future
+// Four distinct content niches the user produces marketing for. Any future
 // industry should slot into exactly one bucket — no overlap.
 const HOLLYWOOD_INDUSTRIES = new Set(["Actor", "Musician"]);
 const COMEDIAN_INDUSTRIES = new Set(["Comedian"]);
 const CREATOR_INDUSTRIES = new Set(["Streamer", "Youtuber", "Influencer", "Podcaster"]);
-type Category = "hollywood" | "comedians" | "creators";
+const ATHLETE_INDUSTRIES = new Set(["Athlete"]);
+type Category = "hollywood" | "comedians" | "creators" | "athletes";
 
 export function TrendingView() {
   const [items, setItems] = useState<TrendingTalent[] | null>(null);
@@ -73,9 +66,11 @@ export function TrendingView() {
     setError(null);
     setItems(null);
     try {
-      // Pull everything in one call (limit=50). We filter into the two
-      // categories client-side so the toggle is instant.
-      const r = await fetch("/api/trending/talents?limit=50");
+      // Pull everything in one call (limit=200, well above the realistic
+      // ceiling of ~150 matched talents). We filter into the four
+      // categories client-side so the toggle is instant and no category
+      // gets squeezed out by another.
+      const r = await fetch("/api/trending/talents?limit=200");
       if (!r.ok) throw new Error(await r.text());
       const data: TrendingTalent[] = await r.json();
       setItems(data);
@@ -165,13 +160,14 @@ export function TrendingView() {
           </div>
         </div>
 
-        {/* Category toggle — three distinct niches the user creates content for. */}
+        {/* Category toggle — four distinct niches the user creates content for. */}
         {(() => {
           const countOf = (set: Set<string>) =>
             (items ?? []).filter((it) => it.talent.industry && set.has(it.talent.industry)).length;
           const hollywoodCount = countOf(HOLLYWOOD_INDUSTRIES);
           const comedianCount = countOf(COMEDIAN_INDUSTRIES);
           const creatorCount = countOf(CREATOR_INDUSTRIES);
+          const athleteCount = countOf(ATHLETE_INDUSTRIES);
           return (
             <div className="row" style={{ marginBottom: 16, gap: 8 }}>
               <button
@@ -192,6 +188,12 @@ export function TrendingView() {
               >
                 🎮 Creators {items !== null && <span style={{ opacity: 0.7, marginLeft: 6 }}>({creatorCount})</span>}
               </button>
+              <button
+                className={category === "athletes" ? "" : "secondary"}
+                onClick={() => setCategory("athletes")}
+              >
+                🏆 Athletes {items !== null && <span style={{ opacity: 0.7, marginLeft: 6 }}>({athleteCount})</span>}
+              </button>
             </div>
           );
         })()}
@@ -210,12 +212,14 @@ export function TrendingView() {
           const activeSet =
             category === "hollywood" ? HOLLYWOOD_INDUSTRIES :
             category === "comedians" ? COMEDIAN_INDUSTRIES :
+            category === "athletes"  ? ATHLETE_INDUSTRIES :
             CREATOR_INDUSTRIES;
           const filtered = (items ?? []).filter((it) => it.talent.industry && activeSet.has(it.talent.industry));
           if (items !== null && filtered.length === 0) {
             const emptyMsg =
               category === "hollywood" ? "No actors or musicians in the news today." :
               category === "comedians" ? "No comedians in the news today." :
+              category === "athletes"  ? "No athletes in the news today." :
               "No creators in the news today.";
             return <div className="card empty">{emptyMsg} Try refreshing later or switch tabs.</div>;
           }
@@ -228,17 +232,6 @@ export function TrendingView() {
                 style={{ alignItems: "center", cursor: "pointer", gap: 12 }}
                 onClick={() => toggle(it.talent.ticker)}
               >
-                {it.talent.photo_url && (
-                  <img
-                    src={proxiedImage(it.talent.photo_url)}
-                    alt={it.talent.name}
-                    style={{
-                      width: 48, height: 48, borderRadius: "50%",
-                      objectFit: "cover", flexShrink: 0,
-                      border: "1px solid #2e3340",
-                    }}
-                  />
-                )}
                 <div style={{ flex: 1 }}>
                   <div className="file-name">{it.talent.name}</div>
                   <div className="file-meta">
