@@ -30,9 +30,10 @@ interface Props {
   onChange: (next: LayoutOverrides) => void;
 }
 
-// % of objectPosition shift per template-pixel of pan-drag. Tuned by feel —
-// at 0.15, a ~200px drag panes the photo about a third of its overflow.
-const PAN_SENSITIVITY = 0.15;
+// % of objectPosition shift per template-pixel of pan-drag. Bumped from
+// 0.15 → 0.3 for a more direct "drag the photo where I want it" feel.
+// Half the photo's height of drag now shifts about 50% of the overflow.
+const PAN_SENSITIVITY = 0.3;
 
 const clamp = (v: number, min: number, max: number) => Math.max(min, Math.min(max, v));
 
@@ -147,11 +148,44 @@ export function CardLayoutOverlay({ doc, overrides, cardEl, scale, onChange }: P
               width: b.width,
               height: b.height,
               cursor: mode === "pan" ? "grab" : "ew-resize",
-              border: "1px dashed rgba(34, 197, 94, 0.55)",
+              // CRITICAL: layer wrappers in the rendered card have explicit
+              // z-indexes (photo=1, headline=10, etc.). Without a z-index of
+              // our own, those layers paint ABOVE our overlay and our clicks
+              // land on the image / text instead of the drag handler. 9999
+              // beats anything a user might put in a template.
+              zIndex: 9999,
+              // Photo gets a bolder gold border so it's clearly distinguishable
+              // from the green text-drag overlays — and there's a label inside
+              // making the affordance unmistakable.
+              border: isMainPhoto
+                ? "3px dashed rgba(255, 200, 0, 0.75)"
+                : "1px dashed rgba(34, 197, 94, 0.55)",
               boxSizing: "border-box",
               touchAction: "none",
             }}
-          />
+          >
+            {isMainPhoto && (
+              <div
+                style={{
+                  position: "absolute",
+                  top: 20,
+                  left: 20,
+                  background: "rgba(0, 0, 0, 0.75)",
+                  color: "#ffd700",
+                  padding: "10px 18px",
+                  borderRadius: 8,
+                  fontSize: 32,
+                  fontWeight: 700,
+                  letterSpacing: 0.5,
+                  pointerEvents: "none", // clicks pass through to the drag handler
+                  userSelect: "none",
+                  whiteSpace: "nowrap",
+                }}
+              >
+                ↕ Drag to reframe photo
+              </div>
+            )}
+          </div>
         );
       })}
     </>
