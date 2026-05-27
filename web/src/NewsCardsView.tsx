@@ -1094,8 +1094,8 @@ export function NewsCardsView() {
                     placeholder="Search query"
                     style={{
                       flex: 1, minWidth: 0,
-                      background: "#0f1115", border: "1px solid #242832",
-                      color: "#e6e8eb", padding: "7px 10px", borderRadius: 6,
+                      background: "#09090b", border: "1px solid #27272a",
+                      color: "#fafafa", padding: "7px 10px", borderRadius: 6,
                       fontSize: 13, fontFamily: "inherit",
                     }}
                   />

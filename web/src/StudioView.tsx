@@ -18,7 +18,7 @@ export function StudioView() {
         <div
           style={{
             padding: "12px 24px",
-            borderBottom: "1px solid #242832",
+            borderBottom: "1px solid #27272a",
             display: "flex",
             justifyContent: "space-between",
             alignItems: "center",
@@ -41,9 +41,9 @@ export function StudioView() {
             style={{
               display: "inline-block",
               padding: "8px 14px",
-              border: "1px solid #2e3340",
+              border: "1px solid #27272a",
               borderRadius: 6,
-              color: "#c2c8d0",
+              color: "#d4d4d8",
               textDecoration: "none",
               fontSize: 13,
               whiteSpace: "nowrap",
@@ -60,7 +60,7 @@ export function StudioView() {
             border: "none",
             flex: 1,
             width: "100%",
-            background: "#0f1115",
+            background: "#000",
           }}
         />
       </div>

@@ -108,10 +108,10 @@ export function ImagesView() {
             style={{
               flex: 1,
               padding: "8px 12px",
-              background: "#1c2029",
-              border: "1px solid #2e3340",
+              background: "#09090b",
+              border: "1px solid #27272a",
               borderRadius: 6,
-              color: "#e2e6eb",
+              color: "#fafafa",
               fontSize: 14,
             }}
           />
@@ -161,10 +161,10 @@ export function ImagesView() {
                         ? "2px solid #4ade80"
                         : state === "error"
                         ? "2px solid #ef4444"
-                        : "1px solid #2e3340",
+                        : "1px solid #27272a",
                       borderRadius: 8,
                       overflow: "hidden",
-                      background: "#0f1115",
+                      background: "#000",
                       cursor: state === "downloading" ? "wait" : "pointer",
                       aspectRatio: "1 / 1",
                     }}
@@ -191,7 +191,7 @@ export function ImagesView() {
                           background: "rgba(0,0,0,0.7)",
                           color:
                             state === "done"  ? "#4ade80" :
-                            state === "error" ? "#ef4444" : "#e2e6eb",
+                            state === "error" ? "#ef4444" : "#fafafa",
                           fontSize: 11,
                           borderRadius: 4,
                           textAlign: "center",

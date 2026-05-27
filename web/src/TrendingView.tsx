@@ -33,7 +33,7 @@ function heatColor(score: number): { bg: string; fg: string } {
   if (score >= 8) return { bg: "#3a1a1a", fg: "#ff8b6b" };  // red — hot
   if (score >= 6) return { bg: "#2d2310", fg: "#ffba5c" };  // amber — warm
   if (score >= 4) return { bg: "#1e2615", fg: "#b6e08a" };  // green — fresh
-  return { bg: "#1c2029", fg: "#8a93a0" };                  // grey — cold
+  return { bg: "#18181b", fg: "#71717a" };                  // grey — cold
 }
 
 interface TrendingTalent {
@@ -247,7 +247,7 @@ export function TrendingView() {
               </div>
 
               {isOpen && (
-                <div style={{ marginTop: 12, paddingTop: 12, borderTop: "1px solid #242832" }}>
+                <div style={{ marginTop: 12, paddingTop: 12, borderTop: "1px solid #27272a" }}>
                   {it.headlines.map((h, idx) => {
                     const isBuilding = buildingFor === h.link;
                     return (
@@ -258,7 +258,7 @@ export function TrendingView() {
                           alignItems: "flex-start",
                           gap: 12,
                           padding: "8px 0",
-                          borderBottom: idx < it.headlines.length - 1 ? "1px solid #1c2029" : undefined,
+                          borderBottom: idx < it.headlines.length - 1 ? "1px solid #18181b" : undefined,
                         }}
                       >
                         <div

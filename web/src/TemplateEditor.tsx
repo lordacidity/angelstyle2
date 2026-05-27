@@ -531,7 +531,7 @@ function LayerOverlay({
         position: "absolute",
         inset: 0,
         cursor: "move",
-        outline: selected ? "2px solid #2e7dd1" : "1px dashed rgba(46,125,209,0.35)",
+        outline: selected ? "2px solid #fafafa" : "1px dashed rgba(250,250,250,0.25)",
         outlineOffset: 0,
       }}
     >
@@ -601,7 +601,7 @@ function Handle({
     width: size,
     height: size,
     background: "#fff",
-    border: "2px solid #2e7dd1",
+    border: "2px solid #000",
     borderRadius: 3,
     cursor,
   };
