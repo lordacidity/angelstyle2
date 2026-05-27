@@ -12,6 +12,7 @@ import type { BrandProps, BrandLogo } from '../types';
 import { BTN_ICON, BTN_TEXT } from '@/lib/ui-constants';
 import { useCarouselTemplates } from '../hooks/useCarouselTemplates';
 import type { SlideType } from '../hooks/useCarouselTemplates';
+import { EditablePct } from './EditablePct';
 
 // ── Divider library ───────────────────────────────────────────────────────────
 
@@ -930,9 +931,11 @@ export function BuilderGrid({ brand, onSelectLogo, userId }: { brand: BrandProps
                           }}
                           className="w-20 h-1 accent-white cursor-pointer"
                         />
-                        <span className="text-[10px] text-zinc-500 w-8 text-right tabular-nums shrink-0">
-                          {Math.round(slide.scale * 100)}%
-                        </span>
+                        <EditablePct
+                          value={Math.round(slide.scale * 100)}
+                          min={20} max={800} step={5}
+                          onCommit={pct => canvasRefs.current[id]?.setZoom(pct / 100)}
+                        />
                       </div>
 
                       {/* Crop / Split / BG Blur */}

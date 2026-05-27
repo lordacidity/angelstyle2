@@ -12,6 +12,7 @@ import { useCarouselTemplates } from '../hooks/useCarouselTemplates';
 import type { VideoEntry, BrandProps, SlideType } from '../types';
 import type { RecordingState } from './TikTokCanvas/types';
 import { VideoControlsBar } from './VideoControlsBar';
+import { EditablePct } from './EditablePct';
 import { bestVideoUrl } from '@/lib/utils';
 import { BTN_ICON, BTN_TEXT } from '@/lib/ui-constants';
 import {
@@ -715,9 +716,11 @@ export function CanvasGrid({
                             }}
                             className="w-20 h-1 accent-white cursor-pointer"
                           />
-                          <span className="text-[10px] text-zinc-500 w-8 text-right tabular-nums shrink-0">
-                            {Math.round(scale * 100)}%
-                          </span>
+                          <EditablePct
+                            value={Math.round(scale * 100)}
+                            min={20} max={800} step={5}
+                            onCommit={pct => carouselRefsMap.current.get(entry.id)?.setZoom(pct / 100)}
+                          />
                         </div>
 
                         {/* Crop / Split / BG Blur */}
@@ -742,9 +745,11 @@ export function CanvasGrid({
                           onChange={e => applyVideoZoom(entry.id, parseInt(e.target.value) / 100)}
                           className="w-20 h-1 accent-white cursor-pointer"
                         />
-                        <span className="text-[10px] text-zinc-500 w-8 text-right tabular-nums shrink-0">
-                          {Math.round(getVideoZoom(entry.id) * 100)}%
-                        </span>
+                        <EditablePct
+                          value={Math.round(getVideoZoom(entry.id) * 100)}
+                          min={50} max={300} step={5}
+                          onCommit={pct => applyVideoZoom(entry.id, pct / 100)}
+                        />
                         <div className="flex items-center gap-1.5 ml-auto">
                           <button
                             onClick={() => canvasRefsMap.current.get(entry.id)?.resetTrim()}
