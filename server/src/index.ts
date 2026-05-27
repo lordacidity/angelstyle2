@@ -253,6 +253,14 @@ app.post("/api/scrcpy/all", async (_req, res) => {
         title: `${friendly ?? d.model ?? d.serial}  ·  ${d.serial.slice(-4)}`,
         borderless: s.borderless,
         alwaysOnTop: s.alwaysOnTop,
+        // Multi-phone mode: cap resolution/fps/bitrate so 4× streams don't
+        // choke the GPU and USB bus. Single-phone /api/scrcpy keeps native
+        // quality. 800px longest edge looks fine in a tiled window and cuts
+        // the pixel count roughly in half vs native 1080×2400.
+        maxSize: 800,
+        maxFps: 30,
+        videoBitRate: "4M",
+        noAudio: true,
       });
       if (i < ready.length - 1) await sleep(s.staggerMs);
     }

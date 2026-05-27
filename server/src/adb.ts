@@ -62,14 +62,19 @@ export function pushFile(serial: string, localPath: string, remoteDir: string): 
 }
 
 // Trigger a media scan so the gallery picks up the new file immediately.
-export function mediaScan(serial: string, remotePath: string): Promise<void> {
+// Android 10+ silently ignores the old MEDIA_SCANNER_SCAN_FILE broadcast for
+// security reasons, so we call the MediaProvider's scan_volume method instead —
+// it rescans external storage and Google Photos picks the file up right away.
+// remotePath is unused but kept for call-site compatibility.
+export function mediaScan(serial: string, _remotePath: string): Promise<void> {
   return new Promise((resolve) => {
     const args = [
       "-s", serial,
       "shell",
-      "am", "broadcast",
-      "-a", "android.intent.action.MEDIA_SCANNER_SCAN_FILE",
-      "-d", `file://${remotePath}`,
+      "content", "call",
+      "--uri", "content://media/external/file",
+      "--method", "scan_volume",
+      "--arg", "external_primary",
     ];
     const child = spawn(config.adbPath, args);
     child.on("close", () => resolve());
@@ -85,6 +90,13 @@ export interface ScrcpyWindowOpts {
   title?: string;
   borderless?: boolean;
   alwaysOnTop?: boolean;
+  // Performance knobs — undefined means use scrcpy's native default (full
+  // resolution / 60fps / ~8Mbps). Set these when launching multiple phones at
+  // once so the host doesn't choke on 4× full-res H.264 streams.
+  maxSize?: number;        // cap longest edge in px (e.g. 800)
+  maxFps?: number;         // cap framerate (e.g. 30)
+  videoBitRate?: string;   // e.g. "4M"
+  noAudio?: boolean;       // skip the audio stream entirely
 }
 
 export function launchScrcpy(serial: string, opts: ScrcpyWindowOpts = {}): void {
@@ -96,6 +108,10 @@ export function launchScrcpy(serial: string, opts: ScrcpyWindowOpts = {}): void 
   if (opts.title) args.push(`--window-title=${opts.title}`);
   if (opts.borderless) args.push("--window-borderless");
   if (opts.alwaysOnTop) args.push("--always-on-top");
+  if (opts.maxSize !== undefined) args.push(`--max-size=${opts.maxSize}`);
+  if (opts.maxFps !== undefined) args.push(`--max-fps=${opts.maxFps}`);
+  if (opts.videoBitRate) args.push(`--video-bit-rate=${opts.videoBitRate}`);
+  if (opts.noAudio) args.push("--no-audio");
   // IMPORTANT: don't combine detached:true with windowsHide:true. They map
   // to mutually exclusive Win32 flags (DETACHED_PROCESS vs CREATE_NO_WINDOW);
   // when DETACHED wins, scrcpy has no console and every child adb call it
