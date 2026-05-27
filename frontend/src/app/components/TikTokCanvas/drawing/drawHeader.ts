@@ -2,7 +2,7 @@ import {
   BASE_HEADER_HEIGHT,
   CAPTION_LINE_HEIGHT,
   CAPTION_TOP_PADDING,
-  HEADER_PADDING_X,
+  SONOTRADE_PADDING_X,
   HEADER_PADDING_TOP,
   SONOTRADE_AVATAR_SIZE,
   SONOTRADE_TEXT_X,
@@ -17,7 +17,7 @@ const CHIRP = 'Chirp, "Twitter Chirp", -apple-system, BlinkMacSystemFont, "Segoe
 // Proportionally matches X's shape-square-rx-16 (16px on 40px = 40% corner radius)
 const AVATAR_SIZE = SONOTRADE_AVATAR_SIZE;           // 108
 const AVATAR_RADIUS = 16;
-const TEXT_X_OFFSET = SONOTRADE_TEXT_X;              // 168 from canvas left
+const TEXT_X_OFFSET = SONOTRADE_TEXT_X;              // 198 from canvas left
 
 // Scaled from Twitter's 15px @ ~390px content width → 1080px canvas
 const NAME_SIZE = 42;
@@ -54,7 +54,7 @@ export function drawHeaderOnContext({
   ctx.fillRect(cx, cy, cw, headerHeight);
 
   // ── Avatar ──────────────────────────────────────────────────────────────────
-  const avatarX = cx + HEADER_PADDING_X;
+  const avatarX = cx + SONOTRADE_PADDING_X;
   const avatarY = cy + HEADER_PADDING_TOP;
 
   let logo = logoImgRef.current;
@@ -121,7 +121,7 @@ export function drawHeaderOnContext({
 
   // ── Tweet body (caption) — full width, starts at avatar left edge ──────────
   if (overlayCaption) {
-    const captionX = cx + HEADER_PADDING_X;
+    const captionX = cx + SONOTRADE_PADDING_X;
     const captionBaseline = handleBaseline + CAP_GAP + CAP_SIZE;
 
     ctx.font = SONOTRADE_CAP_FONT;

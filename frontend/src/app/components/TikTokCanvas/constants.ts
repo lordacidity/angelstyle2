@@ -17,8 +17,9 @@ export const HEADER_PADDING_TOP = 18;
 
 // Sonotrade (Twitter) template — caption lives in the right column (same X as name)
 export const SONOTRADE_AVATAR_SIZE = 108;
-export const SONOTRADE_TEXT_X = HEADER_PADDING_X + SONOTRADE_AVATAR_SIZE + 28; // 32+108+28 = 168
-export const SONOTRADE_CAPTION_MAX_W = CANVAS_W - HEADER_PADDING_X * 2; // 1080-64 = 1016 (full-width, same as avatar left edge)
+export const SONOTRADE_PADDING_X = HEADER_PADDING_X + 30; // 62 — matches reference template
+export const SONOTRADE_TEXT_X = SONOTRADE_PADDING_X + SONOTRADE_AVATAR_SIZE + 28; // 62+108+28 = 198
+export const SONOTRADE_CAPTION_MAX_W = CANVAS_W - SONOTRADE_PADDING_X * 2; // 1080-124 = 956
 export const SONOTRADE_CAPTION_FONT = 'Chirp, "Twitter Chirp", -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif';
 
 export const CURSORS: Record<string, string> = {
