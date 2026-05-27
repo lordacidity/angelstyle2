@@ -61,6 +61,67 @@ export function App() {
   const [themes, setThemes] = useState<Theme[]>([]);
   const [fileThemes, setFileThemes] = useState<Record<string, string[]>>({});
   const [manualMode, setManualMode] = useState<Record<string, boolean>>({});
+  // Uploads initiated directly from this computer (Computer 2 — phones-side).
+  // Backend route is identical to the SenderView's: POST /api/upload with the
+  // file(s) under field name "files", multer writes them to the watch dir,
+  // and the SSE feed pushes them back as new Incoming files.
+  const [uploads, setUploads] = useState<Array<{ id: number; name: string; size: number; loaded: number; status: "uploading" | "done" | "error"; error?: string }>>([]);
+  const [dragOver, setDragOver] = useState(false);
+  const fileInputRef = useRef<HTMLInputElement>(null);
+  const nextUploadId = useRef(1);
+
+  // Must mirror server/src/watcher.ts MEDIA_EXT — anything else is silently
+  // ignored by the watcher, so uploads of other types would "disappear" with
+  // no feedback. Reject client-side instead.
+  const MEDIA_EXTS = [
+    ".mp4", ".mov", ".mkv", ".webm", ".m4v", ".avi", ".3gp",
+    ".jpg", ".jpeg", ".png", ".gif", ".webp", ".heic", ".heif",
+  ];
+
+  const uploadOne = (file: File) => {
+    const id = nextUploadId.current++;
+    const ext = "." + (file.name.split(".").pop() ?? "").toLowerCase();
+    if (!MEDIA_EXTS.includes(ext)) {
+      setUploads((u) => [
+        ...u,
+        { id, name: file.name, size: file.size, loaded: 0, status: "error", error: `not supported (${MEDIA_EXTS.join(", ")})` },
+      ]);
+      return;
+    }
+    setUploads((u) => [...u, { id, name: file.name, size: file.size, loaded: 0, status: "uploading" }]);
+    const form = new FormData();
+    form.append("files", file);
+    const xhr = new XMLHttpRequest();
+    xhr.open("POST", "/api/upload");
+    xhr.upload.onprogress = (e) => {
+      if (!e.lengthComputable) return;
+      setUploads((u) => u.map((j) => (j.id === id ? { ...j, loaded: e.loaded } : j)));
+    };
+    xhr.onload = () => {
+      const ok = xhr.status >= 200 && xhr.status < 300;
+      setUploads((u) =>
+        u.map((j) =>
+          j.id === id
+            ? { ...j, loaded: file.size, status: ok ? "done" : "error", error: ok ? undefined : xhr.statusText }
+            : j,
+        ),
+      );
+      // Don't auto-clear — the user wants to see it land in Incoming and
+      // decide which phone to send it to. The SSE feed will surface it there
+      // momentarily; the upload row staying visible is the bridge between
+      // "uploading" and "now in Incoming."
+      if (ok) setTimeout(() => setUploads((u) => u.filter((j) => j.id !== id)), 6000);
+    };
+    xhr.onerror = () => {
+      setUploads((u) => u.map((j) => (j.id === id ? { ...j, status: "error", error: "network error" } : j)));
+    };
+    xhr.send(form);
+  };
+
+  const onFilesPicked = (fileList: FileList | null) => {
+    if (!fileList) return;
+    for (const f of Array.from(fileList)) uploadOne(f);
+  };
   // Track filenames we've seen so we can detect arrivals on the SSE stream.
   // Read inside the SSE callback so it isn't captured stale.
   const seenNames = useRef<Set<string> | null>(null);
@@ -112,7 +173,7 @@ export function App() {
           if (!seenNames.current.has(f.name) && f.status === "new" && f.diskState === "present") {
             const prefs = notifyPrefs.current;
             if (prefs.desktop) {
-              showDesktopNotification("Phonedeck — new video", `${f.name} · ${formatSize(f.size)}`, f.name);
+              showDesktopNotification("Phonedeck — new media", `${f.name} · ${formatSize(f.size)}`, f.name);
             }
             if (prefs.sound) playDing();
           }
@@ -258,7 +319,7 @@ export function App() {
       <div className="app-header">
         <div>
           <h1>Phonedeck</h1>
-          <div className="subtitle">Incoming videos arrive from the sender. Save or send to phones.</div>
+          <div className="subtitle">Incoming videos &amp; images arrive from the sender. Save or send to phones.</div>
         </div>
         <div className="row">
           <button className="secondary" onClick={() => setAccountsOpen(true)}>Accounts</button>
@@ -357,6 +418,52 @@ export function App() {
                 <h2>Incoming ({incoming.length})</h2>
                 {incoming.length === 0 && <div className="card empty">No new files. Drag one to the sender on Computer 1.</div>}
                 {incoming.map(renderFile)}
+
+                <h2 style={{ marginTop: 24 }}>Upload from this computer</h2>
+                <div
+                  className={`dropzone${dragOver ? " over" : ""}`}
+                  onDragOver={(e) => { e.preventDefault(); setDragOver(true); }}
+                  onDragLeave={() => setDragOver(false)}
+                  onDrop={(e) => {
+                    e.preventDefault();
+                    setDragOver(false);
+                    onFilesPicked(e.dataTransfer.files);
+                  }}
+                  onClick={() => fileInputRef.current?.click()}
+                >
+                  <div className="dropzone-title">Drop videos or images here or click to browse</div>
+                  <div className="dropzone-sub">Videos: .mp4, .mov, .mkv, .webm, .m4v, .avi, .3gp · Images: .jpg, .png, .gif, .webp, .heic — lands in Incoming, then pick phones + Send.</div>
+                  <input
+                    ref={fileInputRef}
+                    type="file"
+                    multiple
+                    accept="video/*,image/*,.mp4,.mov,.mkv,.webm,.m4v,.avi,.3gp,.jpg,.jpeg,.png,.gif,.webp,.heic,.heif"
+                    style={{ display: "none" }}
+                    onChange={(e) => {
+                      onFilesPicked(e.target.files);
+                      e.target.value = "";
+                    }}
+                  />
+                </div>
+                {uploads.length > 0 && (
+                  <div className="uploads">
+                    {uploads.map((u) => {
+                      const pct = u.size > 0 ? Math.round((u.loaded / u.size) * 100) : 0;
+                      return (
+                        <div
+                          key={u.id}
+                          className={`upload${u.status === "done" ? " upload-done" : ""}`}
+                          style={{ color: u.status === "error" ? "#ff8b6b" : undefined }}
+                        >
+                          {u.name} · {formatSize(u.size)}
+                          {u.status === "uploading" && ` · ${pct}%`}
+                          {u.status === "done"      && " · ✓ uploaded"}
+                          {u.status === "error"     && ` · ✗ ${u.error ?? "failed"}`}
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
 
                 <h2 style={{ marginTop: 24 }}>Past files ({past.length})</h2>
                 {past.length === 0 && <div className="card empty">Nothing yet — saved/sent files will appear here.</div>}

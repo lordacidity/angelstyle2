@@ -72,13 +72,13 @@ export function SenderView() {
         }}
         onClick={() => fileInputRef.current?.click()}
       >
-        <div className="sender-drop-title">Drop video files here</div>
+        <div className="sender-drop-title">Drop videos or images here</div>
         <div className="sender-drop-sub">or click to browse</div>
         <input
           ref={fileInputRef}
           type="file"
           multiple
-          accept="video/*"
+          accept="video/*,image/*"
           style={{ display: "none" }}
           onChange={(e) => { onFilesPicked(e.target.files); e.target.value = ""; }}
         />

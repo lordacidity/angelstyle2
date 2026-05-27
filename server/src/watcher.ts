@@ -3,7 +3,14 @@ import fs from "node:fs/promises";
 import path from "node:path";
 import * as filesStore from "./filesStore.js";
 
-const VIDEO_EXT = new Set([".mp4", ".mov", ".mkv", ".webm", ".m4v", ".avi", ".3gp"]);
+// Media types that get pushed to phones — videos AND images, since images
+// land in the same Google Photos library after the media rescan.
+const MEDIA_EXT = new Set([
+  // video
+  ".mp4", ".mov", ".mkv", ".webm", ".m4v", ".avi", ".3gp",
+  // image
+  ".jpg", ".jpeg", ".png", ".gif", ".webp", ".heic", ".heif",
+]);
 
 // Bridges the filesystem to filesStore. No internal state — the store is the
 // single source of truth.
@@ -27,7 +34,7 @@ export class IncomingWatcher {
 
   private async handleAdd(filePath: string): Promise<void> {
     const ext = path.extname(filePath).toLowerCase();
-    if (!VIDEO_EXT.has(ext)) return;
+    if (!MEDIA_EXT.has(ext)) return;
     try {
       const stat = await fs.stat(filePath);
       filesStore.onFilePresent(path.basename(filePath), stat.size);
