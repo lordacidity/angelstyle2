@@ -35,7 +35,7 @@ export function useVideoEntries() {
     setEntries(prev => prev.map(e => e.id === id ? { ...e, mode } : e));
   }
 
-  function updateEntry(id: string, field: 'url' | 'caption', value: string) {
+  function updateEntry(id: string, field: 'url' | 'caption' | 'context', value: string) {
     setEntries(prev => prev.map(e => e.id === id ? { ...e, [field]: value } : e));
   }
 

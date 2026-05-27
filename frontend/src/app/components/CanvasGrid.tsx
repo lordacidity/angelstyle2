@@ -31,7 +31,7 @@ interface CanvasGridProps {
   onRemoveRow: (id: string) => void;
   onDownloadAll: () => void;
   onHandleVideoError: (id: string) => void;
-  onUpdateEntry: (id: string, field: 'url' | 'caption', value: string) => void;
+  onUpdateEntry: (id: string, field: 'url' | 'caption' | 'context', value: string) => void;
   onUpdateCarouselEntry: (id: string, field: 'imageSrc' | 'headline' | 'subheadline' | 'articleUrl', value: string) => void;
   onUpdateLocalVideo: (id: string, src: string, name: string) => void;
   onFetchVideo: (id: string) => void;
@@ -244,7 +244,7 @@ function VideoInputCard({
   onFetch,
 }: {
   entry: VideoEntry;
-  onUpdateField: (field: 'url' | 'caption', value: string) => void;
+  onUpdateField: (field: 'url' | 'caption' | 'context', value: string) => void;
   onUpdateLocalVideo: (src: string, name: string) => void;
   onFetch: () => void;
 }) {
@@ -319,7 +319,7 @@ function VideoInputCard({
           )}
         </div>
 
-        <div className="px-3 py-2">
+        <div className="px-3 py-2 border-b border-zinc-800">
           <textarea
             value={entry.caption}
             onChange={e => onUpdateField('caption', e.target.value)}
@@ -327,6 +327,21 @@ function VideoInputCard({
             placeholder="Caption…"
             rows={2}
             className="w-full bg-transparent text-sm text-white placeholder-zinc-600 outline-none resize-none leading-relaxed"
+          />
+        </div>
+
+        {/* Optional context fed to the social-caption generator — background,
+            vibe, the angle to take. Smaller + muted so it reads as a hint, not
+            a primary input. Empty string is fine; the generator just uses URL
+            title/caption when this is blank. */}
+        <div className="px-3 py-2">
+          <textarea
+            value={entry.context ?? ''}
+            onChange={e => onUpdateField('context', e.target.value)}
+            onKeyDown={e => { if ((e.metaKey || e.ctrlKey) && e.key === 'z') e.preventDefault(); }}
+            placeholder="Context…"
+            rows={2}
+            className="w-full bg-transparent text-[11px] text-zinc-400 placeholder-zinc-700 outline-none resize-none leading-relaxed"
           />
         </div>
       </div>
@@ -494,6 +509,60 @@ export function CanvasGrid({
   const [canvasRefVersion,          setCanvasRefVersion]          = useState(0);
   const [carouselRefVersion,        setCarouselRefVersion]        = useState(0);
   const [videoZoomMap,              setVideoZoomMap]              = useState<Record<string, number>>({});
+  // Per-entry social-caption state. Keyed by entry.id. Lives in CanvasGrid
+  // (not VideoEntry) because it's purely UI/transient — no need to persist or
+  // round-trip through hooks.
+  const [socialCaptionMap, setSocialCaptionMap] = useState<Record<string, { text: string; loading: boolean; error: string | null; copied: boolean }>>({});
+
+  const generateSocialCaption = useCallback(async (entry: VideoEntry) => {
+    setSocialCaptionMap(prev => ({
+      ...prev,
+      [entry.id]: { text: prev[entry.id]?.text ?? '', loading: true, error: null, copied: false },
+    }));
+    try {
+      const r = await fetch('/api/ai/social-caption', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          url:        entry.url || undefined,
+          caption:    entry.caption || undefined,
+          context:    entry.context || undefined,
+          videoTitle: entry.data?.title || undefined,
+          author:     entry.data?.author?.nickname || undefined,
+        }),
+      });
+      if (!r.ok) throw new Error(await r.text());
+      const data = await r.json() as { caption?: string; error?: string };
+      if (data.error || !data.caption) throw new Error(data.error ?? 'no caption returned');
+      setSocialCaptionMap(prev => ({
+        ...prev,
+        [entry.id]: { text: data.caption!, loading: false, error: null, copied: false },
+      }));
+    } catch (e) {
+      setSocialCaptionMap(prev => ({
+        ...prev,
+        [entry.id]: { text: prev[entry.id]?.text ?? '', loading: false, error: String(e), copied: false },
+      }));
+    }
+  }, []);
+
+  const copySocialCaption = useCallback(async (entryId: string) => {
+    const text = socialCaptionMap[entryId]?.text;
+    if (!text) return;
+    try {
+      await navigator.clipboard.writeText(text);
+      setSocialCaptionMap(prev => ({ ...prev, [entryId]: { ...prev[entryId]!, copied: true } }));
+      setTimeout(() => {
+        setSocialCaptionMap(prev => {
+          const cur = prev[entryId];
+          if (!cur) return prev;
+          return { ...prev, [entryId]: { ...cur, copied: false } };
+        });
+      }, 1800);
+    } catch {
+      // ignore — user can select+copy manually as a fallback
+    }
+  }, [socialCaptionMap]);
 
   const { savedSlides } = useCarouselTemplates(isCarousel ? userId : null);
   const savedSlidesRef  = useRef(savedSlides);
@@ -895,6 +964,80 @@ export function CanvasGrid({
                         />
                       )}
                     </div>
+
+                    {/* Social caption generator — only for video-mode posts.
+                        Lives directly below the rendered preview so the user
+                        can generate, edit, and copy a long-form post caption
+                        without leaving the row. */}
+                    {!isEntryCarousel && (() => {
+                      const sc = socialCaptionMap[entry.id];
+                      return (
+                        <div className="rounded-lg bg-zinc-950 border border-zinc-800 overflow-hidden">
+                          <div className="flex items-center justify-between gap-3 px-3 py-2 border-b border-zinc-800">
+                            <div className="flex items-center gap-2 min-w-0">
+                              <span className="text-[11px] font-semibold text-zinc-300 uppercase tracking-wider">Post caption</span>
+                            </div>
+                            <div className="flex items-center gap-1.5 shrink-0">
+                              {sc?.text && (
+                                <button
+                                  onClick={() => copySocialCaption(entry.id)}
+                                  className="flex items-center gap-1.5 h-7 px-2.5 rounded-md bg-zinc-950 border border-zinc-800 text-zinc-400 hover:text-zinc-200 hover:border-zinc-600 transition-colors text-[10px] font-medium"
+                                  title="Copy to clipboard"
+                                >
+                                  {sc.copied ? (
+                                    <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                                      <polyline points="20 6 9 17 4 12"/>
+                                    </svg>
+                                  ) : (
+                                    <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                                      <rect x="9" y="9" width="13" height="13" rx="2" ry="2"/>
+                                      <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/>
+                                    </svg>
+                                  )}
+                                  {sc.copied ? 'Copied' : 'Copy'}
+                                </button>
+                              )}
+                              <button
+                                onClick={() => generateSocialCaption(entry)}
+                                disabled={sc?.loading}
+                                className="flex items-center gap-1.5 h-7 px-2.5 rounded-md bg-white text-black hover:bg-zinc-100 disabled:opacity-40 disabled:cursor-not-allowed transition-colors text-[10px] font-semibold"
+                                title="Generate caption with AI"
+                              >
+                                {sc?.loading ? (
+                                  <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" style={{ animation: 'spin 1s linear infinite' }}>
+                                    <path d="M21 12a9 9 0 1 1-6.219-8.56"/>
+                                  </svg>
+                                ) : (
+                                  <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                                    <polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/>
+                                  </svg>
+                                )}
+                                {sc?.loading ? 'Generating…' : sc?.text ? 'Regenerate' : 'Generate'}
+                              </button>
+                            </div>
+                          </div>
+                          <div className="px-3 py-2.5">
+                            {sc?.error ? (
+                              <span className="text-xs text-red-400">{sc.error}</span>
+                            ) : sc?.text ? (
+                              <textarea
+                                value={sc.text}
+                                onChange={e => setSocialCaptionMap(prev => ({
+                                  ...prev,
+                                  [entry.id]: { ...prev[entry.id]!, text: e.target.value, copied: false },
+                                }))}
+                                rows={Math.min(14, Math.max(6, sc.text.split('\n').length + Math.ceil(sc.text.length / 70)))}
+                                className="w-full bg-transparent text-[12px] text-zinc-200 placeholder-zinc-700 outline-none resize-y leading-relaxed"
+                              />
+                            ) : (
+                              <span className="text-[11px] text-zinc-600">
+                                Click Generate to draft a long-form caption. Edit the Context field above to steer it.
+                              </span>
+                            )}
+                          </div>
+                        </div>
+                      );
+                    })()}
                   </div>
                 )}
               </div>

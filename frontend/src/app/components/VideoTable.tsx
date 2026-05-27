@@ -9,7 +9,7 @@ interface VideoTableProps {
   onRemoveRow: (id: string) => void;
   onFetchAllVideos: () => void;
   onFetchVideo: (id: string) => void;
-  onUpdateEntry: (id: string, field: 'url' | 'caption', value: string) => void;
+  onUpdateEntry: (id: string, field: 'url' | 'caption' | 'context', value: string) => void;
   onUpdateCarouselEntry: (id: string, field: 'imageSrc' | 'headline' | 'subheadline' | 'articleUrl', value: string) => void;
   onUpdateLocalVideo: (id: string, src: string, name: string) => void;
 }
