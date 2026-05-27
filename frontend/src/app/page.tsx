@@ -55,6 +55,13 @@ export default function Home() {
 
   const [pendingAiSeed, setPendingAiSeed] = useState<{ imageSrc: string; headline: string; subheadline: string; subheadline2?: string; articleUrl?: string } | null>(null);
 
+  // Once the user has visited AI Cards, keep that section mounted (just hidden)
+  // so its internal state — picked talent, fetched stories, drafted headline,
+  // chosen photo — survives navigating away and back via the media-tab back
+  // arrow. Without this, AiCardsSection unmounts and resets to step 1.
+  const [aiEverVisited, setAiEverVisited] = useState(false);
+  useEffect(() => { if (activeSection === 'ai') setAiEverVisited(true); }, [activeSection]);
+
   useEffect(() => {
     const raw = sessionStorage.getItem('ai-card-seed');
     if (!raw) return;
@@ -100,13 +107,15 @@ export default function Home() {
 
       <main className="flex-1 ml-[72px] min-h-screen">
 
-        {activeSection === 'ai' && (
-          <Suspense fallback={<SectionLoader />}>
-            <AiCardsSection
-              onBuildCard={handleBuildCard}
-              onCancel={() => setActiveSection('template')}
-            />
-          </Suspense>
+        {aiEverVisited && (
+          <div style={{ display: activeSection === 'ai' ? undefined : 'none' }}>
+            <Suspense fallback={<SectionLoader />}>
+              <AiCardsSection
+                onBuildCard={handleBuildCard}
+                onCancel={() => setActiveSection('template')}
+              />
+            </Suspense>
+          </div>
         )}
 
         {activeSection === 'template' && (
@@ -157,6 +166,7 @@ export default function Home() {
                 setSettingsMap={setCarouselSettingsMap}
                 pendingAiSeed={pendingAiSeed}
                 onAiSeedConsumed={() => setPendingAiSeed(null)}
+                onBackToAi={() => setActiveSection('ai')}
               />
             </GridSection>
           </div>

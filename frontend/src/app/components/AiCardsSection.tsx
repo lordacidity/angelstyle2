@@ -172,6 +172,9 @@ export function AiCardsSection({ onBuildCard, onCancel }: AiCardsSectionProps) {
       // field pre-populates instead of needing a manual paste.
       articleUrl: selectedItem?.url,
     });
+    // Snap back to step 2 so when the user clicks the back-arrow in the media
+    // tab, they land on AI News (not the Photo step they were just on).
+    setStep('ai');
   };
 
   const restart = () => {

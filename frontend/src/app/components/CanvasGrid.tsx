@@ -41,6 +41,10 @@ interface CanvasGridProps {
   setSettingsMap: Dispatch<SetStateAction<Record<string, CarouselSettings>>>;
   pendingAiSeed?: { imageSrc: string; headline: string; subheadline: string; subheadline2?: string; articleUrl?: string } | null;
   onAiSeedConsumed?: () => void;
+  // Optional — when provided, renders a back arrow in the toolbar that
+  // returns the user to the AI Cards flow (headline + photo picker) for the
+  // same person. Placeholder behaviour for now: re-enters the AI section.
+  onBackToAi?: () => void;
 }
 
 // ── Carousel input card ───────────────────────────────────────────────────────
@@ -471,7 +475,7 @@ export function CanvasGrid({
   onUpdateEntry, onUpdateCarouselEntry, onUpdateLocalVideo,
   onFetchVideo, onSetCarouselSubMode, userId,
   settingsMap, setSettingsMap,
-  pendingAiSeed, onAiSeedConsumed,
+  pendingAiSeed, onAiSeedConsumed, onBackToAi,
 }: CanvasGridProps) {
   const isCarousel = entries.length > 0 && entries[0].mode === 'carousel';
 
@@ -653,8 +657,20 @@ export function CanvasGrid({
 
       {/* ── Toolbar ── */}
       <div className="flex items-center justify-between gap-4 px-4 py-3 border-b border-zinc-800 shrink-0 bg-zinc-950">
-        {/* View zoom */}
+        {/* Back to AI Cards + view zoom */}
         <div className="flex items-center gap-2">
+          {onBackToAi && (
+            <button
+              onClick={onBackToAi}
+              title="Back to headline + photo"
+              className="flex items-center justify-center w-7 h-7 rounded-md text-zinc-500 hover:text-zinc-200 hover:bg-zinc-800 transition-colors"
+            >
+              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
+                <path d="M19 12H5"/>
+                <polyline points="12 19 5 12 12 5"/>
+              </svg>
+            </button>
+          )}
           <span className="text-[10px] text-zinc-600 select-none tabular-nums w-8 text-right">{Math.round(viewScale * 100)}%</span>
           <input
             type="range" min={40} max={150} step={10}
