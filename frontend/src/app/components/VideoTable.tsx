@@ -10,7 +10,7 @@ interface VideoTableProps {
   onFetchAllVideos: () => void;
   onFetchVideo: (id: string) => void;
   onUpdateEntry: (id: string, field: 'url' | 'caption', value: string) => void;
-  onUpdateCarouselEntry: (id: string, field: 'imageSrc' | 'headline' | 'subheadline', value: string) => void;
+  onUpdateCarouselEntry: (id: string, field: 'imageSrc' | 'headline' | 'subheadline' | 'articleUrl', value: string) => void;
   onUpdateLocalVideo: (id: string, src: string, name: string) => void;
 }
 
@@ -165,7 +165,7 @@ function CarouselRow({
   index: number;
   showRemove: boolean;
   onRemove: () => void;
-  onUpdateCarousel: (field: 'imageSrc' | 'headline' | 'subheadline', value: string) => void;
+  onUpdateCarousel: (field: 'imageSrc' | 'headline' | 'subheadline' | 'articleUrl', value: string) => void;
 }) {
   const fileRef = useRef<HTMLInputElement>(null);
 

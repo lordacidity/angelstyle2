@@ -32,14 +32,14 @@ interface CanvasGridProps {
   onDownloadAll: () => void;
   onHandleVideoError: (id: string) => void;
   onUpdateEntry: (id: string, field: 'url' | 'caption', value: string) => void;
-  onUpdateCarouselEntry: (id: string, field: 'imageSrc' | 'headline' | 'subheadline', value: string) => void;
+  onUpdateCarouselEntry: (id: string, field: 'imageSrc' | 'headline' | 'subheadline' | 'articleUrl', value: string) => void;
   onUpdateLocalVideo: (id: string, src: string, name: string) => void;
   onFetchVideo: (id: string) => void;
   onSetCarouselSubMode: (id: string, mode: 'image' | 'video') => void;
   userId: string | null;
   settingsMap: Record<string, CarouselSettings>;
   setSettingsMap: Dispatch<SetStateAction<Record<string, CarouselSettings>>>;
-  pendingAiSeed?: { imageSrc: string; headline: string; subheadline: string; subheadline2?: string } | null;
+  pendingAiSeed?: { imageSrc: string; headline: string; subheadline: string; subheadline2?: string; articleUrl?: string } | null;
   onAiSeedConsumed?: () => void;
 }
 
@@ -55,7 +55,7 @@ function CarouselInputCard({
   onRemove,
 }: {
   entry: VideoEntry;
-  onUpdateCarousel: (field: 'imageSrc' | 'headline' | 'subheadline', value: string) => void;
+  onUpdateCarousel: (field: 'imageSrc' | 'headline' | 'subheadline' | 'articleUrl', value: string) => void;
   onUpdateUrl: (url: string) => void;
   onUpdateLocalVideo: (src: string, name: string) => void;
   onFetch: () => void;
@@ -168,6 +168,39 @@ function CarouselInputCard({
           </>
         )}
       </div>
+
+      {/* Source article — small + muted, sits above the headline so the user
+          keeps track of the story this card was built from. Main slide only —
+          supporting slides inherit the same article and don't need the field
+          repeated. Always editable; clickable ↗ icon appears once a URL is in. */}
+      {(entry.carouselSlideType ?? 'main') === 'main' && (
+        <div className="px-3 py-1.5 border-b border-zinc-800 flex items-center gap-2">
+          <LinkIcon size={11} className="text-zinc-600 shrink-0" />
+          <input
+            type="text"
+            value={entry.articleUrl ?? ''}
+            onChange={e => onUpdateCarousel('articleUrl', e.target.value)}
+            placeholder="Source article link (optional)…"
+            className="flex-1 bg-transparent text-[11px] text-zinc-500 placeholder-zinc-700 outline-none min-w-0"
+          />
+          {entry.articleUrl && (
+            <a
+              href={entry.articleUrl}
+              target="_blank"
+              rel="noreferrer"
+              className="shrink-0 text-zinc-600 hover:text-zinc-300 transition-colors"
+              title="Open article in new tab"
+              onClick={e => e.stopPropagation()}
+            >
+              <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/>
+                <polyline points="15 3 21 3 21 9"/>
+                <line x1="10" y1="14" x2="21" y2="3"/>
+              </svg>
+            </a>
+          )}
+        </div>
+      )}
 
       {/* Headline */}
       <div className="px-3 py-2 border-b border-zinc-800">
@@ -496,6 +529,9 @@ export function CanvasGrid({
     onUpdateCarouselEntry(entry.id, 'imageSrc',    pendingAiSeed.imageSrc);
     onUpdateCarouselEntry(entry.id, 'headline',    pendingAiSeed.headline);
     onUpdateCarouselEntry(entry.id, 'subheadline', pendingAiSeed.subheadline);
+    if (pendingAiSeed.articleUrl) {
+      onUpdateCarouselEntry(entry.id, 'articleUrl', pendingAiSeed.articleUrl);
+    }
 
     // For subheadline2 → supporting_1 slide: if the entry already exists update it,
     // otherwise store in ref and add the row; the effect below will apply it.

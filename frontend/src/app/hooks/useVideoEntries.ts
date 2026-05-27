@@ -39,7 +39,7 @@ export function useVideoEntries() {
     setEntries(prev => prev.map(e => e.id === id ? { ...e, [field]: value } : e));
   }
 
-  function updateCarouselEntry(id: string, field: 'imageSrc' | 'headline' | 'subheadline', value: string) {
+  function updateCarouselEntry(id: string, field: 'imageSrc' | 'headline' | 'subheadline' | 'articleUrl', value: string) {
     setEntries(prev => prev.map(e => e.id === id ? { ...e, [field]: value } : e));
   }
 

@@ -53,14 +53,14 @@ export default function Home() {
 
   const googleSheets = useGoogleSheets({ onImport: setEntries });
 
-  const [pendingAiSeed, setPendingAiSeed] = useState<{ imageSrc: string; headline: string; subheadline: string; subheadline2?: string } | null>(null);
+  const [pendingAiSeed, setPendingAiSeed] = useState<{ imageSrc: string; headline: string; subheadline: string; subheadline2?: string; articleUrl?: string } | null>(null);
 
   useEffect(() => {
     const raw = sessionStorage.getItem('ai-card-seed');
     if (!raw) return;
     sessionStorage.removeItem('ai-card-seed');
     try {
-      const seed = JSON.parse(raw) as { imageSrc: string; headline: string; subheadline: string; subheadline2?: string };
+      const seed = JSON.parse(raw) as { imageSrc: string; headline: string; subheadline: string; subheadline2?: string; articleUrl?: string };
       setPendingAiSeed(seed);
       // Go through the normal carousel template flow so savedSlides loads before we apply content
       setSelectedTemplate('carousel');
@@ -75,7 +75,7 @@ export default function Home() {
     setTimeout(() => setActiveSection('media'), 400);
   }
 
-  function handleBuildCard(seed: { imageSrc: string; headline: string; subheadline: string; subheadline2?: string }) {
+  function handleBuildCard(seed: { imageSrc: string; headline: string; subheadline: string; subheadline2?: string; articleUrl?: string }) {
     setPendingAiSeed(seed);
     handleTemplateSelect('carousel');
   }

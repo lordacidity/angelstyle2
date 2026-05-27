@@ -19,7 +19,7 @@ type Step = 'market' | 'ai' | 'photo';
 
 
 interface AiCardsSectionProps {
-  onBuildCard: (seed: { imageSrc: string; headline: string; subheadline: string; subheadline2?: string }) => void;
+  onBuildCard: (seed: { imageSrc: string; headline: string; subheadline: string; subheadline2?: string; articleUrl?: string }) => void;
   onCancel: () => void;
 }
 
@@ -165,7 +165,13 @@ export function AiCardsSection({ onBuildCard, onCancel }: AiCardsSectionProps) {
       } catch (e) { console.warn('[cache]', e); }
       finally { setCachingPhoto(false); }
     }
-    onBuildCard({ imageSrc, headline, subheadline, subheadline2: subheadline2 || undefined });
+    onBuildCard({
+      imageSrc, headline, subheadline,
+      subheadline2: subheadline2 || undefined,
+      // Carry the source story's URL through so the media tab's article link
+      // field pre-populates instead of needing a manual paste.
+      articleUrl: selectedItem?.url,
+    });
   };
 
   const restart = () => {

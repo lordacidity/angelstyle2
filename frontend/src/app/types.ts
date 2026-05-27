@@ -55,6 +55,9 @@ export interface VideoEntry {
   imageSrc?: string;
   headline?: string;
   subheadline?: string;
+  // Optional link to the source article that this card was built from — shown
+  // as small greyed-out text above the headline in the media tab.
+  articleUrl?: string;
   carouselSubMode?: 'image' | 'video';
   carouselSlideType?: SlideType;
 }
