@@ -6,6 +6,7 @@ import { NewsCardsView } from "./NewsCardsView";
 import { PersonNewsView } from "./PersonNewsView";
 import { TrendingView } from "./TrendingView";
 import { TemplatesView } from "./TemplatesView";
+import { ImagesView } from "./ImagesView";
 import { StudioView } from "./StudioView";
 import "./styles.css";
 
@@ -26,6 +27,8 @@ const view = path.startsWith("/send")
   ? <NewsCardsView />
   : path.startsWith("/templates")
   ? <TemplatesView />
+  : path.startsWith("/images")
+  ? <ImagesView />
   : path.startsWith("/studio")
   ? <StudioView />
   : <App />;

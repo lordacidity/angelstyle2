@@ -812,6 +812,57 @@ app.post("/api/photos/search", async (req, res) => {
   }
 });
 
+// Download a found image straight to the user's Downloads/copyright free images
+// folder, bucketed by today's date (MM-DD-YYYY) so the inbox stays organised
+// without any manual filing. Used by the standalone Images tab — one click
+// saves locally, no browser "save as" dialog.
+const COPYRIGHT_FREE_DIR = path.join(os.homedir(), "Downloads", "copyright free images");
+
+// Local-time date stamp (NOT UTC) — "today" should match the user's wall clock.
+function todayFolderName(): string {
+  const d = new Date();
+  const mm = String(d.getMonth() + 1).padStart(2, "0");
+  const dd = String(d.getDate()).padStart(2, "0");
+  const yyyy = d.getFullYear();
+  return `${mm}-${dd}-${yyyy}`;
+}
+
+app.post("/api/images/download", async (req, res) => {
+  const { url, query } = (req.body ?? {}) as { url?: string; query?: string };
+  if (!url || !/^https?:\/\//i.test(url)) {
+    res.status(400).json({ error: "absolute http(s) url required" });
+    return;
+  }
+  try {
+    const targetDir = path.join(COPYRIGHT_FREE_DIR, todayFolderName());
+    fs.mkdirSync(targetDir, { recursive: true });
+    const upstream = await fetch(url, {
+      headers: {
+        "User-Agent":
+          "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Safari/537.36",
+        "Referer": new URL(url).origin + "/",
+        "Accept": "image/*,*/*;q=0.8",
+      },
+      redirect: "follow",
+    });
+    if (!upstream.ok) {
+      res.status(upstream.status).json({ error: `upstream ${upstream.status}` });
+      return;
+    }
+    const ext = extFromContentType(upstream.headers.get("content-type")) ?? extFromUrl(url) ?? "jpg";
+    // Hash so re-downloading the same URL overwrites instead of piling up.
+    const hash = crypto.createHash("sha256").update(url).digest("hex").slice(0, 12);
+    const slug = (query ?? "image").toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "").slice(0, 40) || "image";
+    const filename = `${slug}-${hash}.${ext}`;
+    const filePath = path.join(targetDir, filename);
+    const buf = Buffer.from(await upstream.arrayBuffer());
+    fs.writeFileSync(filePath, buf);
+    res.json({ ok: true, filename, dir: targetDir, bytes: buf.byteLength });
+  } catch (err) {
+    res.status(500).json({ error: String(err) });
+  }
+});
+
 // DeepSeek suggests a different Google Images query so the user can swap
 // "Drake" → "Drake rapper Toronto stage 2024" when generic results aren't
 // matching. We send the prior tries so it doesn't loop back to the same one.
