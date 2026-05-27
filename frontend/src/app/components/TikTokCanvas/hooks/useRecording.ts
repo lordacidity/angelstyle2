@@ -200,17 +200,25 @@ export function useRecording(config: UseRecordingConfig) {
         ? videoSrcUrl
         : `/api/proxy?url=${encodeURIComponent(videoSrcUrl)}&stream=1`;
 
+      console.log('[EXPORT] === Starting export ===');
+      console.log('[EXPORT] video.src:', videoSrcUrl);
+      console.log('[EXPORT] fetching via:', videoUrl);
+
       setRecStatus('Downloading video file...');
       let arrayBuffer: ArrayBuffer;
       try {
         const response = await fetch(videoUrl);
+        console.log('[EXPORT] response status:', response.status, 'content-type:', response.headers.get('content-type'), 'content-length:', response.headers.get('content-length'));
         if (!response.ok) throw new Error(`HTTP ${response.status}: ${response.statusText}`);
         arrayBuffer = await response.arrayBuffer();
+        console.log('[EXPORT] downloaded bytes:', arrayBuffer.byteLength);
       } catch (fetchError) {
+        console.error('[EXPORT] ❌ Download failed:', fetchError);
         throw new Error(`Failed to download video: ${fetchError instanceof Error ? fetchError.message : 'Unknown error'}`);
       }
 
       setRecStatus('Parsing video file...');
+      console.log('[EXPORT] parsing with MP4Box...');
 
       // @ts-ignore
       const MP4BoxFile = MP4Box.createFile();
@@ -222,10 +230,12 @@ export function useRecording(config: UseRecordingConfig) {
       let audioTimescale = 44100;
 
       MP4BoxFile.onReady = (info: any) => {
+        console.log('[EXPORT] MP4Box onReady, tracks:', info.tracks?.map((t: any) => ({ id: t.id, type: t.type, codec: t.codec, timescale: t.timescale, duration: t.duration, w: t.video?.width, h: t.video?.height })));
         for (const track of info.tracks || []) {
           if (track.type === 'video' && !videoTrackId) { videoTrackId = track.id; videoTimescale = track.timescale || 90000; }
           if (track.type === 'audio' && !audioTrackId) { audioTrackId = track.id; audioTimescale = track.timescale || 44100; }
         }
+        console.log('[EXPORT] selected videoTrackId:', videoTrackId, 'audioTrackId:', audioTrackId);
         if (videoTrackId) MP4BoxFile.setExtractionOptions(videoTrackId, null, { nbSamples: Infinity });
         if (audioTrackId) MP4BoxFile.setExtractionOptions(audioTrackId, null, { nbSamples: Infinity });
         MP4BoxFile.start();
@@ -241,7 +251,7 @@ export function useRecording(config: UseRecordingConfig) {
       };
 
       // @ts-ignore
-      MP4BoxFile.onError = (e: any) => console.error('[MP4Box error]', e);
+      MP4BoxFile.onError = (e: any) => console.error('[EXPORT] ❌ MP4Box error:', e);
 
       const copy = arrayBuffer.slice(0);
       // @ts-ignore
@@ -259,6 +269,8 @@ export function useRecording(config: UseRecordingConfig) {
         }, 100);
       });
 
+      console.log('[EXPORT] extracted samples — video:', videoSamples.length, 'audio:', audioSamples.length);
+      console.log('[EXPORT] videoTimescale:', videoTimescale, 'audioTimescale:', audioTimescale);
       if (videoSamples.length === 0) throw new Error('No video samples found');
 
       const lastSample = videoSamples[videoSamples.length - 1];
@@ -268,14 +280,9 @@ export function useRecording(config: UseRecordingConfig) {
       const clipDuration = Math.max(0.1, clipEnd - clipStart);
       const totalFrames = Math.floor(clipDuration * EXPORT_FPS);
 
-      setRecStatus('Decoding video...');
+      console.log('[EXPORT] fullDuration:', fullDuration, 'clipStart:', clipStart, 'clipEnd:', clipEnd, 'clipDuration:', clipDuration, 'totalFrames:', totalFrames);
 
-      const decodedFrames: Array<{ frame: VideoFrame; timestamp: number }> = [];
-      const decoder = new VideoDecoder({
-        output: (frame: VideoFrame) => { decodedFrames.push({ frame, timestamp: frame.timestamp / 1_000_000 }); },
-        error: (e: Error) => console.error('[VideoDecoder]', e),
-      });
-
+      // ── Extract AVC decoder description from MP4Box ──────────────────────────
       let description: Uint8Array | undefined;
       // @ts-ignore
       if (typeof MP4BoxFile.getSampleDescription === 'function') {
@@ -292,25 +299,13 @@ export function useRecording(config: UseRecordingConfig) {
           if (entry?.avcC?.config?.length > 0) description = new Uint8Array(entry.avcC.config);
           else if (typeof entry?.avcC?.subarray === 'function') description = entry.avcC.subarray();
           else if (typeof entry?.avcC?.start !== 'undefined' && entry?.avcC?.size) description = new Uint8Array(arrayBuffer, entry.avcC.start + 8, entry.avcC.size - 8);
-        } catch { /* ignore */ }
+        } catch (descErr) { console.warn('[EXPORT] description extraction fallback failed:', descErr); }
       }
+      const hexDesc = description ? Array.from(description.slice(0, Math.min(32, description.length))).map(b => b.toString(16).padStart(2, '0')).join(' ') : '<none>';
+      console.log('[EXPORT] decoder config — codec: avc1.64001F, description length:', description?.byteLength ?? 0, 'first bytes:', hexDesc);
+      if (!description) console.warn('[EXPORT] ⚠️ no AVC description extracted — decoder will likely fail');
 
-      // @ts-ignore
-      decoder.configure({ codec: 'avc1.64001F', codedWidth: 1080, codedHeight: 1920, description });
-
-      for (let i = 0; i < videoSamples.length; i++) {
-        if (signal.aborted) {
-          decoder.close();
-          for (const { frame } of decodedFrames) frame.close();
-          throw new Error('Cancelled');
-        }
-        const s = videoSamples[i];
-        await decoder.decode(new EncodedVideoChunk({ type: s.isKeyframe ? 'key' : 'delta', timestamp: s.timestamp * 1_000_000, data: s.data }));
-        setRecProgress(0.1 + (i / videoSamples.length) * 0.3);
-      }
-      await decoder.flush();
-      decoder.close();
-
+      // ── Set up output container + audio BEFORE decoding so we can stream ─────
       setRecStatus('Preparing audio...');
 
       const output = new Output({ format: new Mp4OutputFormat(), target: new BufferTarget() });
@@ -342,8 +337,6 @@ export function useRecording(config: UseRecordingConfig) {
         } catch (e) { console.error('[audio setup]', e); }
       }
 
-      setRecStatus('Rendering frames...');
-
       // Ensure logo is loaded with crossOrigin=anonymous — the preview canvas may have
       // cached it without CORS, which would taint the OffscreenCanvas and fail VideoSample.
       if (overlayLogoSrc && (!logoImgRef.current?.crossOrigin)) {
@@ -358,110 +351,224 @@ export function useRecording(config: UseRecordingConfig) {
 
       await output.start();
 
+      // ── Streaming decode + render ────────────────────────────────────────────
+      // The previous design queued ALL chunks then awaited flush(), which
+      // deadlocks: the decoder's GPU frame pool fills up after a handful of
+      // outputs, and frames never get closed until flush returns. Now we
+      // consume + close frames as they arrive so the pool stays drained.
+      setRecStatus('Encoding...');
+      console.log('[EXPORT] === Streaming decode + render ===');
+
+      const frameQueue: Array<{ frame: VideoFrame; ts: number }> = [];
+      let decoderError: Error | null = null;
+      let producerDone = false;
+      let outputCount = 0;
+      let consumerWaiter: (() => void) | null = null;
+      let producerWaiter: (() => void) | null = null;
+      const wakeConsumer = () => { const r = consumerWaiter; consumerWaiter = null; r?.(); };
+      const wakeProducer = () => { const r = producerWaiter; producerWaiter = null; r?.(); };
+
+      const decoder = new VideoDecoder({
+        output: (frame: VideoFrame) => {
+          frameQueue.push({ frame, ts: frame.timestamp / 1_000_000 });
+          outputCount++;
+          if (outputCount === 1 || outputCount % 60 === 0) {
+            console.log('[EXPORT] decoded #', outputCount, 'ts:', (frame.timestamp / 1_000_000).toFixed(3), 'queue:', frameQueue.length);
+          }
+          wakeConsumer();
+        },
+        error: (e: Error) => {
+          decoderError = e;
+          console.error('[EXPORT] ❌ VideoDecoder error:', e, 'name:', (e as any)?.name, 'message:', e?.message);
+          wakeConsumer();
+          wakeProducer();
+        },
+      });
+
+      // @ts-ignore
+      decoder.configure({ codec: 'avc1.64001F', codedWidth: 1080, codedHeight: 1920, description });
+
+      // Cap how many decoded frames sit in memory before the producer waits.
+      // Empirically Chromium's H.264 decoder needs ~4-8 frames in flight for
+      // reorder buffer; 12 leaves headroom without blowing GPU memory.
+      const MAX_BUFFERED = 12;
+
+      const producer = (async () => {
+        try {
+          for (let i = 0; i < videoSamples.length; i++) {
+            if (signal.aborted) throw new Error('Cancelled');
+            if (decoderError) throw decoderError;
+            while (frameQueue.length >= MAX_BUFFERED) {
+              await new Promise<void>((r) => { producerWaiter = r; });
+              if (signal.aborted) throw new Error('Cancelled');
+              if (decoderError) throw decoderError;
+            }
+            const s = videoSamples[i];
+            decoder.decode(new EncodedVideoChunk({
+              type: s.isKeyframe ? 'key' : 'delta',
+              timestamp: s.timestamp * 1_000_000,
+              data: s.data,
+            }));
+            setRecProgress(0.05 + (i / videoSamples.length) * 0.1);
+          }
+          console.log('[EXPORT] all samples submitted, flushing...');
+          await decoder.flush();
+          console.log('[EXPORT] flush done, total decoded:', outputCount);
+        } finally {
+          producerDone = true;
+          wakeConsumer();
+        }
+      })();
+      // Surface producer failure to the consumer loop.
+      producer.catch((e) => {
+        if (!decoderError) decoderError = e instanceof Error ? e : new Error(String(e));
+        producerDone = true;
+        wakeConsumer();
+      });
+
       const offscreen = new OffscreenCanvas(CANVAS_W, CANVAS_H);
       const offCtx = offscreen.getContext('2d')!;
+      let currentFrame: { frame: VideoFrame; ts: number } | null = null;
 
-      for (let frameIdx = 0; frameIdx < totalFrames; frameIdx++) {
-        if (signal.aborted) {
-          for (const { frame } of decodedFrames) frame.close();
-          await output.finalize();
-          throw new Error('Cancelled');
-        }
+      // Advance `currentFrame` to the latest decoded frame with ts <= targetTs,
+      // closing earlier frames as we step past them. Waits for the producer if
+      // nothing's available yet.
+      const advanceTo = async (targetTs: number): Promise<void> => {
+        while (true) {
+          if (decoderError) throw decoderError;
+          if (signal.aborted) throw new Error('Cancelled');
 
-        const targetTs = frameIdx * EXPORT_FRAME_DURATION + clipStart;
-        let sourceFrame = decodedFrames[0];
-        for (const f of decodedFrames) {
-          if (f.timestamp <= targetTs) sourceFrame = f;
-          else break;
-        }
-
-        if (isClean) {
-          // ── Caption template: white bg, caption above, video in crop box ──
-          offCtx.fillStyle = '#fff';
-          offCtx.fillRect(0, 0, CANVAS_W, CANVAS_H);
-
-          const cropBox = boxRef.current;
-          const { x: ox, y: oy } = videoOffsetRef.current;
-
-          if (overlayCaption) {
-            const captionLines = countCaptionLines(offCtx as any, overlayCaption);
-            const CAPTION_BOTTOM_OFFSET = 18;
-            const CLEAN_PAD_TOP = 44;
-            const CLEAN_PAD_BOT = 40;
-            const captionAreaH = CLEAN_PAD_TOP + (captionLines * CAPTION_LINE_HEIGHT) + CLEAN_PAD_BOT - CAPTION_BOTTOM_OFFSET;
-            const captionAreaY = Math.max(0, cropBox.y - captionAreaH + 4);
-
-            offCtx.font = `400 44px Chirp, "Twitter Chirp", -apple-system, BlinkMacSystemFont, sans-serif`;
-            offCtx.fillStyle = '#000';
-            const padX = HEADER_PADDING_X + 43;
-            const maxWidth = CANVAS_W - padX * 2;
-            let cy = captionAreaY + CLEAN_PAD_TOP + CAPTION_LINE_HEIGHT - 10;
-
-            for (const userLine of overlayCaption.split('\n')) {
-              if (!userLine) { cy += CAPTION_LINE_HEIGHT; continue; }
-              let line = '';
-              for (const word of userLine.split(' ')) {
-                const test = line + word + ' ';
-                if (offCtx.measureText(test).width > maxWidth && line) {
-                  offCtx.fillText(line.trimEnd(), padX, cy);
-                  line = word + ' '; cy += CAPTION_LINE_HEIGHT;
-                } else { line = test; }
-              }
-              offCtx.fillText(line.trimEnd(), padX, cy);
-              cy += CAPTION_LINE_HEIGHT;
-            }
+          while (frameQueue.length > 0 && frameQueue[0].ts <= targetTs) {
+            if (currentFrame) currentFrame.frame.close();
+            currentFrame = frameQueue.shift()!;
+            wakeProducer();
           }
 
-          const vw = video?.videoWidth || 1080;
-          const vh = video?.videoHeight || 1920;
-          const scale = (CANVAS_W / vw) * videoScaleRef.current;
-          const dx = (CANVAS_W - vw * scale) / 2 + ox;
-          const dy = (CANVAS_H - vh * scale) / 2 + oy;
+          // Queue head (if any) has ts > targetTs — we're settled.
+          if (frameQueue.length > 0) {
+            // First-frame edge case: no current frame because the first decoded
+            // frame's ts is already past targetTs. Adopt it anyway.
+            if (!currentFrame) {
+              currentFrame = frameQueue.shift()!;
+              wakeProducer();
+            }
+            return;
+          }
 
-          offCtx.save();
-          offCtx.beginPath();
-          offCtx.rect(cropBox.x, cropBox.y, cropBox.w, cropBox.h);
-          offCtx.clip();
-          offCtx.drawImage(sourceFrame.frame, dx, dy, vw * scale, vh * scale);
-          offCtx.restore();
+          // Queue empty + producer done → no more frames coming.
+          if (producerDone) return;
 
-        } else {
-          // ── Twitter template: black bg, X header, video below ──
-          offCtx.fillStyle = '#000';
-          offCtx.fillRect(0, 0, CANVAS_W, CANVAS_H);
-
-          const cropBox = boxRef.current;
-          const { x: ox, y: oy } = videoOffsetRef.current;
-          const vw = video?.videoWidth || 1080;
-          const vh = video?.videoHeight || 1920;
-          const scale = Math.min(1000 / vw, CANVAS_H / vh) * videoScaleRef.current;
-          const dx = (CANVAS_W - vw * scale) / 2 + ox;
-          const dy = (CANVAS_H - vh * scale) / 2 + oy;
-
-          offCtx.save();
-          offCtx.beginPath();
-          offCtx.rect(cropBox.x, cropBox.y, cropBox.w, cropBox.h);
-          offCtx.clip();
-          offCtx.drawImage(sourceFrame.frame, dx, dy, vw * scale, vh * scale);
-          offCtx.restore();
-
-          const captionLines = overlayCaption ? countSonotradeCaptionLines(offCtx as any, overlayCaption) : 0;
-          const headerHeight = overlayCaption
-            ? BASE_HEADER_HEIGHT + CAPTION_TOP_PADDING + (captionLines * CAPTION_LINE_HEIGHT) - 18
-            : BASE_HEADER_HEIGHT;
-          const headerY = Math.max(0, cropBox.y - headerHeight + 4);
-
-          // @ts-ignore
-          drawHeaderOnContext({ ctx: offCtx as any, cx: 0, cy: headerY, cw: CANVAS_W, ...headerDrawOpts });
+          // Wait for the next decoded frame.
+          await new Promise<void>((r) => { consumerWaiter = r; });
         }
+      };
 
-        const sample = new VideoSample(offscreen, { timestamp: targetTs, duration: EXPORT_FRAME_DURATION });
-        await videoSource.add(sample);
-        sample.close();
-        setRecProgress(0.4 + (frameIdx / totalFrames) * 0.4);
+      try {
+        for (let frameIdx = 0; frameIdx < totalFrames; frameIdx++) {
+          if (signal.aborted) throw new Error('Cancelled');
+
+          const targetTs = frameIdx * EXPORT_FRAME_DURATION + clipStart;
+          await advanceTo(targetTs);
+          if (!currentFrame) {
+            console.warn('[EXPORT] no frame available at idx', frameIdx, '— stopping render early');
+            break;
+          }
+
+          if (isClean) {
+            // ── Caption template: white bg, caption above, video in crop box ──
+            offCtx.fillStyle = '#fff';
+            offCtx.fillRect(0, 0, CANVAS_W, CANVAS_H);
+
+            const cropBox = boxRef.current;
+            const { x: ox, y: oy } = videoOffsetRef.current;
+
+            if (overlayCaption) {
+              const captionLines = countCaptionLines(offCtx as any, overlayCaption);
+              const CAPTION_BOTTOM_OFFSET = 18;
+              const CLEAN_PAD_TOP = 44;
+              const CLEAN_PAD_BOT = 40;
+              const captionAreaH = CLEAN_PAD_TOP + (captionLines * CAPTION_LINE_HEIGHT) + CLEAN_PAD_BOT - CAPTION_BOTTOM_OFFSET;
+              const captionAreaY = Math.max(0, cropBox.y - captionAreaH + 4);
+
+              offCtx.font = `400 44px Chirp, "Twitter Chirp", -apple-system, BlinkMacSystemFont, sans-serif`;
+              offCtx.fillStyle = '#000';
+              const padX = HEADER_PADDING_X + 43;
+              const maxWidth = CANVAS_W - padX * 2;
+              let cy = captionAreaY + CLEAN_PAD_TOP + CAPTION_LINE_HEIGHT - 10;
+
+              for (const userLine of overlayCaption.split('\n')) {
+                if (!userLine) { cy += CAPTION_LINE_HEIGHT; continue; }
+                let line = '';
+                for (const word of userLine.split(' ')) {
+                  const test = line + word + ' ';
+                  if (offCtx.measureText(test).width > maxWidth && line) {
+                    offCtx.fillText(line.trimEnd(), padX, cy);
+                    line = word + ' '; cy += CAPTION_LINE_HEIGHT;
+                  } else { line = test; }
+                }
+                offCtx.fillText(line.trimEnd(), padX, cy);
+                cy += CAPTION_LINE_HEIGHT;
+              }
+            }
+
+            const vw = video?.videoWidth || 1080;
+            const vh = video?.videoHeight || 1920;
+            const scale = (CANVAS_W / vw) * videoScaleRef.current;
+            const dx = (CANVAS_W - vw * scale) / 2 + ox;
+            const dy = (CANVAS_H - vh * scale) / 2 + oy;
+
+            offCtx.save();
+            offCtx.beginPath();
+            offCtx.rect(cropBox.x, cropBox.y, cropBox.w, cropBox.h);
+            offCtx.clip();
+            offCtx.drawImage(currentFrame.frame, dx, dy, vw * scale, vh * scale);
+            offCtx.restore();
+
+          } else {
+            // ── Twitter template: black bg, X header, video below ──
+            offCtx.fillStyle = '#000';
+            offCtx.fillRect(0, 0, CANVAS_W, CANVAS_H);
+
+            const cropBox = boxRef.current;
+            const { x: ox, y: oy } = videoOffsetRef.current;
+            const vw = video?.videoWidth || 1080;
+            const vh = video?.videoHeight || 1920;
+            const scale = Math.min(1000 / vw, CANVAS_H / vh) * videoScaleRef.current;
+            const dx = (CANVAS_W - vw * scale) / 2 + ox;
+            const dy = (CANVAS_H - vh * scale) / 2 + oy;
+
+            offCtx.save();
+            offCtx.beginPath();
+            offCtx.rect(cropBox.x, cropBox.y, cropBox.w, cropBox.h);
+            offCtx.clip();
+            offCtx.drawImage(currentFrame.frame, dx, dy, vw * scale, vh * scale);
+            offCtx.restore();
+
+            const captionLines = overlayCaption ? countSonotradeCaptionLines(offCtx as any, overlayCaption) : 0;
+            const headerHeight = overlayCaption
+              ? BASE_HEADER_HEIGHT + CAPTION_TOP_PADDING + (captionLines * CAPTION_LINE_HEIGHT) - 18
+              : BASE_HEADER_HEIGHT;
+            const headerY = Math.max(0, cropBox.y - headerHeight + 4);
+
+            // @ts-ignore
+            drawHeaderOnContext({ ctx: offCtx as any, cx: 0, cy: headerY, cw: CANVAS_W, ...headerDrawOpts });
+          }
+
+          const sample = new VideoSample(offscreen, { timestamp: targetTs, duration: EXPORT_FRAME_DURATION });
+          await videoSource.add(sample);
+          sample.close();
+          setRecProgress(0.15 + (frameIdx / totalFrames) * 0.7);
+        }
+      } finally {
+        if (currentFrame) { currentFrame.frame.close(); currentFrame = null; }
+        while (frameQueue.length > 0) frameQueue.shift()!.frame.close();
+        wakeProducer(); // in case it's still waiting on backpressure
       }
 
-      for (const { frame } of decodedFrames) frame.close();
+      // Wait for producer (decode + flush) to complete before closing decoder.
+      try { await producer; } catch { /* already surfaced via decoderError */ }
+      if (decoderError) throw decoderError;
+      try { decoder.close(); } catch { /* may already be closed */ }
 
       if (audioSource && audioPackets.length > 0) {
         setRecStatus('Adding audio...');
@@ -487,9 +594,10 @@ export function useRecording(config: UseRecordingConfig) {
 
     } catch (error) {
       if (error instanceof Error && error.message !== 'Cancelled') {
-        console.error('[startRecording] Export failed:', error);
+        console.error('[EXPORT] ❌ EXPORT FAILED:', error);
+        console.error('[EXPORT] stack:', error.stack);
         setRecStatus(`Error: ${error.message}`);
-        setTimeout(() => setRecStatus(''), 3000);
+        setTimeout(() => setRecStatus(''), 8000);
         throw error;
       }
     } finally {
