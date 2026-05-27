@@ -265,7 +265,7 @@ const CarouselCanvas = forwardRef<CarouselCanvasRef, CarouselCanvasProps>(
             const _rh  = (_rbPv - _rtPv) / DISPLAY_SCALE;
             const SHIFT_CV = Math.round(50 / DISPLAY_SCALE);
             const _pos = circlePosRefsArr.current[0];
-            const _cr  = _pos ? circleRadsArr.current[0] : Math.min(_rh, _rw) / 2 - Math.round(4 / DISPLAY_SCALE);
+            const _cr  = _pos ? Math.round(circleRadsArr.current[0] / DISPLAY_SCALE) : Math.min(_rh, _rw) / 2 - Math.round(4 / DISPLAY_SCALE);
             const _cx  = _pos ? _pos.x / DISPLAY_SCALE : W / 2 + SHIFT_CV;
             const _cy  = _pos ? _pos.y / DISPLAY_SCALE : _rt + _rh / 2;
             ctx.save();
@@ -754,7 +754,7 @@ const CarouselCanvas = forwardRef<CarouselCanvasRef, CarouselCanvasProps>(
           const _rh  = (_rbPv - _rtPv) / DISPLAY_SCALE;
           const SHIFT_CV = Math.round(50 / DISPLAY_SCALE);
           const _pos = circlePosRefsArr.current[0];
-          const _cr  = _pos ? circleRadsArr.current[0] : Math.min(_rh, _rw) / 2 - Math.round(4 / DISPLAY_SCALE);
+          const _cr  = _pos ? Math.round(circleRadsArr.current[0] / DISPLAY_SCALE) : Math.min(_rh, _rw) / 2 - Math.round(4 / DISPLAY_SCALE);
           const _cx  = _pos ? _pos.x / DISPLAY_SCALE : W / 2 + SHIFT_CV;
           const _cy  = _pos ? _pos.y / DISPLAY_SCALE : _rt + _rh / 2;
           ctx.save();
