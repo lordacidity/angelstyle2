@@ -17,7 +17,7 @@ const CHIRP = 'Chirp, "Twitter Chirp", -apple-system, BlinkMacSystemFont, "Segoe
 // Proportionally matches X's shape-square-rx-16 (16px on 40px = 40% corner radius)
 const AVATAR_SIZE = SONOTRADE_AVATAR_SIZE;           // 108
 const AVATAR_RADIUS = 16;
-const TEXT_X_OFFSET = SONOTRADE_TEXT_X;              // 198 from canvas left
+const TEXT_X_OFFSET = SONOTRADE_TEXT_X;              // 195 from canvas left
 
 // Scaled from Twitter's 15px @ ~390px content width → 1080px canvas
 const NAME_SIZE = 42;
