@@ -586,10 +586,37 @@ export function useRecording(config: UseRecordingConfig) {
       if (includeEditRef.current) buffer = await mergeWithEdit(buffer, clipDuration);
 
       const blob = new Blob([buffer], { type: 'video/mp4' });
-      const url = URL.createObjectURL(blob);
-      const filename = `row-${String(rowNumber + 1).padStart(2, '0')}-${videoId ?? 'export'}.mp4`;
-      Object.assign(document.createElement('a'), { href: url, download: filename }).click();
-      URL.revokeObjectURL(url);
+
+      // Filename = short, readable version of the on-card caption (word-boundary
+      // truncated). Falls back to the old row/id naming when there's no caption.
+      const captionBase = (overlayCaption || '').replace(/\s+/g, ' ').trim();
+      let nameBase = captionBase;
+      if (nameBase.length > 60) {
+        const cut = nameBase.slice(0, 60);
+        const lastSpace = cut.lastIndexOf(' ');
+        nameBase = (lastSpace > 30 ? cut.slice(0, lastSpace) : cut).trim();
+      }
+      if (!nameBase) nameBase = `row-${String(rowNumber + 1).padStart(2, '0')}-${videoId ?? 'export'}`;
+
+      // Save straight to ~/Downloads/copyright free images/MM-DD-YYYY/ via the
+      // local Studio server. Fall back to a normal browser download if that
+      // fails, so an export is never lost.
+      try {
+        const resp = await fetch(`/api/export/save?name=${encodeURIComponent(nameBase)}`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'video/mp4' },
+          body: blob,
+        });
+        if (!resp.ok) throw new Error(await resp.text());
+        const data = await resp.json() as { filename?: string };
+        setRecStatus(`Saved: ${data.filename ?? nameBase + '.mp4'}`);
+        setTimeout(() => setRecStatus(''), 4000);
+      } catch (saveErr) {
+        console.warn('[EXPORT] save-to-folder failed, falling back to browser download:', saveErr);
+        const url = URL.createObjectURL(blob);
+        Object.assign(document.createElement('a'), { href: url, download: `${nameBase}.mp4` }).click();
+        URL.revokeObjectURL(url);
+      }
       setRecProgress(1);
 
     } catch (error) {
