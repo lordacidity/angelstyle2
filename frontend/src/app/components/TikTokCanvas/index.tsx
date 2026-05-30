@@ -8,6 +8,7 @@ import {
 } from './constants';
 import type { Box, TikTokCanvasProps, TikTokCanvasRef } from './types';
 import { drawHeaderOnContext } from './drawing/drawHeader';
+import { drawMarketRow } from './drawing/drawMarketRow';
 import { countCaptionLines, countSonotradeCaptionLines } from './drawing/countCaptionLines';
 import { VideoOverlays } from './ui/VideoOverlays';
 import { CanvasHandles } from './ui/CanvasHandles';
@@ -16,7 +17,7 @@ import { usePanZoom } from './hooks/usePanZoom';
 import { useDrag } from './hooks/useDrag';
 import { useRecording } from './hooks/useRecording';
 
-export type { TikTokCanvasRef } from './types';
+export type { TikTokCanvasRef, MarketData, SparkPoint } from './types';
 
 export const TikTokCanvas = forwardRef<TikTokCanvasRef, TikTokCanvasProps>(function TikTokCanvas({
   videoSrc,
@@ -29,6 +30,7 @@ export const TikTokCanvas = forwardRef<TikTokCanvasRef, TikTokCanvasProps>(funct
   overlayHandle = '@SonotradeHQ',
   overlayVerified = true,
   overlayCaption = '',
+  marketData = null,
   onRecordingStateChange,
 }: TikTokCanvasProps, ref) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
@@ -37,6 +39,8 @@ export const TikTokCanvas = forwardRef<TikTokCanvasRef, TikTokCanvasProps>(funct
 
   const verifiedImgRef = useRef<HTMLImageElement | null>(null);
   const logoImgRef = useRef<HTMLImageElement | null>(null);
+  const marketAvatarImgRef = useRef<HTMLImageElement | null>(null);
+  const marketAvatarUrlRef = useRef<string | null>(null);
 
   const videoOffsetRef = useRef<{ x: number; y: number }>({ x: 0, y: 0 });
   const videoScaleRef = useRef<number>(1);
@@ -73,6 +77,7 @@ export const TikTokCanvas = forwardRef<TikTokCanvasRef, TikTokCanvasProps>(funct
     trimStartRef, trimEndRef, includeEditRef,
     logoImgRef, verifiedImgRef,
     overlayCaption, overlayLogoSrc, overlayDisplayName, overlayHandle, overlayVerified,
+    marketData, marketAvatarImgRef, marketAvatarUrlRef,
   });
 
   useImperativeHandle(ref, () => ({
@@ -238,6 +243,20 @@ export const TikTokCanvas = forwardRef<TikTokCanvasRef, TikTokCanvasProps>(funct
         ctx.clip();
         ctx.drawImage(video, dx, dy, drawW, drawH);
         ctx.restore();
+
+        if (marketData) {
+          drawMarketRow({
+            ctx, cx: 0, videoBottomY: y + h, cw: CANVAS_W,
+            name: marketData.name,
+            subtitle: marketData.industry ?? marketData.subcategory ?? '—',
+            photo_url: marketData.photo_url,
+            priceUsd: marketData.price.usd,
+            lifetimeChangePct: marketData.price.lifetimeChangePct,
+            sparkline: marketData.sparkline,
+            avatarImgRef: marketAvatarImgRef,
+            lastPhotoUrlRef: marketAvatarUrlRef,
+          });
+        }
       }
     }
 
@@ -246,7 +265,7 @@ export const TikTokCanvas = forwardRef<TikTokCanvasRef, TikTokCanvasProps>(funct
   // videoScale intentionally omitted: the draw loop reads videoScaleRef.current directly,
   // so including it would restart the RAF loop on every zoom step causing a visible frame drop.
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [videoSrc, overlayDisplayName, overlayHandle, overlayVerified, overlayCaption, brand, overlayLogoSrc]);
+  }, [videoSrc, overlayDisplayName, overlayHandle, overlayVerified, overlayCaption, brand, overlayLogoSrc, marketData]);
 
   // ── Interaction handlers ──────────────────────────────────────────────────────
 

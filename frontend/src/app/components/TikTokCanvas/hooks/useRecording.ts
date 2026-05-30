@@ -11,8 +11,9 @@ import {
   HEADER_PADDING_X,
 } from '../constants';
 import { drawHeaderOnContext } from '../drawing/drawHeader';
+import { drawMarketRow } from '../drawing/drawMarketRow';
 import { countCaptionLines, countSonotradeCaptionLines } from '../drawing/countCaptionLines';
-import type { Box } from '../types';
+import type { Box, MarketData } from '../types';
 
 export interface UseRecordingConfig {
   canvasRef: RefObject<HTMLCanvasElement | null>;
@@ -33,6 +34,9 @@ export interface UseRecordingConfig {
   overlayDisplayName: string;
   overlayHandle: string;
   overlayVerified: boolean;
+  marketData?: MarketData | null;
+  marketAvatarImgRef?: MutableRefObject<HTMLImageElement | null>;
+  marketAvatarUrlRef?: MutableRefObject<string | null>;
 }
 
 export function useRecording(config: UseRecordingConfig) {
@@ -48,6 +52,7 @@ export function useRecording(config: UseRecordingConfig) {
       trimStartRef, trimEndRef, includeEditRef,
       logoImgRef, verifiedImgRef,
       overlayCaption, overlayLogoSrc, overlayDisplayName, overlayHandle, overlayVerified,
+      marketData, marketAvatarImgRef, marketAvatarUrlRef,
     } = config;
 
     const canvas = canvasRef.current;
@@ -349,6 +354,17 @@ export function useRecording(config: UseRecordingConfig) {
         });
       }
 
+      // Pre-load market avatar with CORS so it doesn't taint the OffscreenCanvas.
+      if (marketData?.photo_url && marketAvatarImgRef) {
+        await new Promise<void>((resolve) => {
+          const img = new Image();
+          img.crossOrigin = 'anonymous';
+          img.onload = () => { marketAvatarImgRef.current = img; resolve(); };
+          img.onerror = () => resolve();
+          img.src = marketData.photo_url!;
+        });
+      }
+
       await output.start();
 
       // ── Streaming decode + render ────────────────────────────────────────────
@@ -552,6 +568,23 @@ export function useRecording(config: UseRecordingConfig) {
 
             // @ts-ignore
             drawHeaderOnContext({ ctx: offCtx as any, cx: 0, cy: headerY, cw: CANVAS_W, ...headerDrawOpts });
+
+            if (marketData && marketAvatarImgRef && marketAvatarUrlRef) {
+              drawMarketRow({
+                ctx: offCtx as any,
+                cx: 0,
+                videoBottomY: cropBox.y + cropBox.h,
+                cw: CANVAS_W,
+                name: marketData.name,
+                subtitle: marketData.industry ?? marketData.subcategory ?? '—',
+                photo_url: marketData.photo_url,
+                priceUsd: marketData.price.usd,
+                lifetimeChangePct: marketData.price.lifetimeChangePct,
+                sparkline: marketData.sparkline,
+                avatarImgRef: marketAvatarImgRef,
+                lastPhotoUrlRef: marketAvatarUrlRef,
+              });
+            }
           }
 
           const sample = new VideoSample(offscreen, { timestamp: targetTs, duration: EXPORT_FRAME_DURATION });

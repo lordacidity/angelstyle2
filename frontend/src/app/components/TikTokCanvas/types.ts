@@ -30,6 +30,7 @@ export interface TikTokCanvasProps {
   overlayHandle?: string;
   overlayVerified?: boolean;
   overlayCaption?: string;
+  marketData?: MarketData | null;
   onRecordingStateChange?: (state: RecordingState) => void;
 }
 
@@ -50,6 +51,21 @@ export interface TikTokCanvasRef {
   setIncludeEdit: (v: boolean) => void;
   getVideoElement: () => HTMLVideoElement | null;
   getTrimState: () => VideoTrimState;
+}
+
+export interface SparkPoint { value: number; timestamp: number }
+
+export interface MarketData {
+  name: string;
+  ticker: string;
+  photo_url: string | null;
+  industry: string | null;
+  subcategory: string | null;
+  sparkline?: SparkPoint[] | null;
+  price: {
+    usd: number | null;
+    lifetimeChangePct: number | null;
+  };
 }
 
 export interface DrawHeaderOptions {

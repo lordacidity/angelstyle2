@@ -3,7 +3,7 @@
 import type { MutableRefObject, Dispatch, SetStateAction } from 'react';
 import { useState, useRef, useEffect, useMemo, useCallback, memo } from 'react';
 import { TikTokCanvas } from './TikTokCanvas';
-import type { TikTokCanvasRef } from './TikTokCanvas';
+import type { TikTokCanvasRef, MarketData, SparkPoint } from './TikTokCanvas';
 import CarouselCanvas, { CAROUSEL_PREVIEW_W } from './CarouselCanvas';
 import { CarouselSettingsPanel } from './CarouselSettingsPanel';
 import { defaultCarouselSettings } from './carouselTypes';
@@ -21,6 +21,25 @@ import {
 } from '@/lib/icons';
 
 const CARD_W = CAROUSEL_PREVIEW_W; // 410 — same width as canvas preview
+
+interface Talent {
+  id: string;
+  ticker: string;
+  name: string;
+  bio: string | null;
+  photo_url: string | null;
+  industry: string | null;
+  subcategory: string | null;
+  location: string | null;
+  price: {
+    usd: number | null;
+    lifetimeChangePct: number | null;
+    holders: number | null;
+    volumeLifetimeUsd: number | null;
+    latestTickAt: string | null;
+    frozen: boolean;
+  };
+}
 
 interface CanvasGridProps {
   entries: VideoEntry[];
@@ -514,6 +533,121 @@ export function CanvasGrid({
   // round-trip through hooks.
   const [socialCaptionMap, setSocialCaptionMap] = useState<Record<string, { text: string; loading: boolean; error: string | null; copied: boolean }>>({});
 
+  const [talentsForMarket,        setTalentsForMarket]        = useState<Talent[]>([]);
+  const [talentsLoadingForMarket, setTalentsLoadingForMarket] = useState(true);
+  const [marketMap,               setMarketMap]               = useState<Record<string, Talent | null>>({});
+  const [marketSearchMap,         setMarketSearchMap]         = useState<Record<string, string>>({});
+  const talentsForMarketFetchedRef = useRef(false);
+
+  // Per-entry user overrides for the selected market's display fields
+  interface MarketOverride {
+    name: string; industry: string; photo_url: string | null;
+    priceUsd: string; lifetimeChangePct: string;
+  }
+  const [marketOverrideMap, setMarketOverrideMap] = useState<Record<string, MarketOverride>>({});
+
+  // Per-entry sparkline data (fetched when a market is selected)
+  const [sparklineMap, setSparklineMap] = useState<Record<string, SparkPoint[]>>({});
+
+  // Deterministic pseudo-random sparkline (LCG seeded on ticker) used as
+  // an immediate placeholder until the real history arrives.
+  function generateFallbackSparkline(ticker: string): SparkPoint[] {
+    let seed = ticker.split('').reduce((a, c) => (a * 31 + c.charCodeAt(0)) | 0, 0x1234) >>> 0;
+    const rand = () => { seed = (seed * 1664525 + 1013904223) >>> 0; return seed / 0xffffffff; };
+    let v = 0.5;
+    return Array.from({ length: 20 }, (_, i) => {
+      v = Math.max(0.05, Math.min(0.95, v + (rand() - 0.48) * 0.25));
+      return { value: v, timestamp: i };
+    });
+  }
+
+  const fetchSparkline = useCallback(async (entryId: string, ticker: string) => {
+    try {
+      const r = await fetch(`/api/markets/batch-history?slugs=${encodeURIComponent(ticker)}&window=all`);
+      const data = await r.json() as Record<string, Array<{ price: number; timestamp: string }>>;
+      const pts = data[ticker];
+      if (Array.isArray(pts) && pts.length > 0) {
+        setSparklineMap(prev => ({
+          ...prev,
+          [entryId]: pts.map(p => ({ value: p.price, timestamp: new Date(p.timestamp).getTime() })),
+        }));
+      }
+    } catch { /* non-fatal */ }
+  }, []);
+
+  // Photo picker popup state
+  interface PickerPhoto { url: string; thumbnail: string; title?: string }
+  const [photoPickerEntryId,  setPhotoPickerEntryId]  = useState<string | null>(null);
+  const [photoPickerPhotos,   setPhotoPickerPhotos]   = useState<PickerPhoto[]>([]);
+  const [photoPickerLoading,  setPhotoPickerLoading]  = useState(false);
+  const [photoPickerQuery,    setPhotoPickerQuery]    = useState('');
+  const [photoPickerOffset,   setPhotoPickerOffset]   = useState(0);
+  const [photoPickerMore,     setPhotoPickerMore]     = useState(false);
+
+  const searchPickerPhotos = useCallback(async (query: string, offset: number, append: boolean) => {
+    if (!query.trim()) return;
+    setPhotoPickerLoading(true);
+    setPhotoPickerQuery(query);
+    try {
+      const r = await fetch('/api/ai/photos/search', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ query, count: 9, offset }),
+      });
+      const fresh = await r.json() as PickerPhoto[];
+      setPhotoPickerPhotos(prev => append ? [...prev, ...fresh] : fresh);
+      setPhotoPickerOffset(offset + fresh.length);
+    } finally { setPhotoPickerLoading(false); }
+  }, []);
+
+  const openPhotoPicker = useCallback((entryId: string, initialQuery: string) => {
+    setPhotoPickerEntryId(entryId);
+    setPhotoPickerPhotos([]);
+    setPhotoPickerOffset(0);
+    setPhotoPickerQuery(initialQuery);
+    if (initialQuery.trim()) {
+      setPhotoPickerLoading(true);
+      fetch('/api/ai/photos/search', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ query: initialQuery, count: 9, offset: 0 }),
+      }).then(r => r.json()).then((photos: PickerPhoto[]) => {
+        setPhotoPickerPhotos(photos);
+        setPhotoPickerOffset(photos.length);
+      }).finally(() => setPhotoPickerLoading(false));
+    }
+  }, []);
+
+  // Build a MarketData object merging the selected talent with any user overrides
+  const getMarketData = useCallback((entryId: string): MarketData | null => {
+    const sel = marketMap[entryId];
+    if (!sel) return null;
+    const ov = marketOverrideMap[entryId];
+    const spark = sparklineMap[entryId] ?? generateFallbackSparkline(sel.ticker);
+    if (!ov) return { ...(sel as unknown as MarketData), sparkline: spark };
+    const priceNum = ov.priceUsd !== '' ? parseFloat(ov.priceUsd) : null;
+    const pctNum   = ov.lifetimeChangePct !== '' ? parseFloat(ov.lifetimeChangePct) : null;
+    return {
+      name:        ov.name  || sel.name,
+      ticker:      sel.ticker,
+      photo_url:   ov.photo_url,
+      industry:    ov.industry || null,
+      subcategory: sel.subcategory,
+      sparkline: spark,
+      price: {
+        usd:              !isNaN(priceNum ?? NaN) ? priceNum : sel.price.usd,
+        lifetimeChangePct: !isNaN(pctNum ?? NaN) ? pctNum  : sel.price.lifetimeChangePct,
+      },
+    };
+  }, [marketMap, marketOverrideMap, sparklineMap]);
+
+  useEffect(() => {
+    if (talentsForMarketFetchedRef.current) return;
+    talentsForMarketFetchedRef.current = true;
+    fetch('/api/ai/talents')
+      .then(r => r.json())
+      .then((d: unknown) => { if (Array.isArray(d)) setTalentsForMarket(d as Talent[]); setTalentsLoadingForMarket(false); })
+      .catch(() => setTalentsLoadingForMarket(false));
+  }, []);
+
   const generateSocialCaption = useCallback(async (entry: VideoEntry) => {
     setSocialCaptionMap(prev => ({
       ...prev,
@@ -958,12 +1092,240 @@ export function CanvasGrid({
                           overlayHandle={brand.handle || '@SonotradeHQ'}
                           overlayVerified={true}
                           overlayCaption={entry.caption}
+                          marketData={entry.mode === 'twitter' ? getMarketData(entry.id) : null}
                           onRecordingStateChange={state =>
                             setRecordingStateMap(prev => ({ ...prev, [entry.id]: state }))
                           }
                         />
                       )}
                     </div>
+
+                    {/* Market selector — Twitter template only.
+                        Lets the user pick a Pauv market and renders its
+                        details row on the canvas below the video box.
+                        Selected state and list rows match the ArtistRow
+                        design from pauv-the-app/MobileTradeList.tsx. */}
+                    {entry.mode === 'twitter' && (() => {
+                      const selected = marketMap[entry.id] ?? null;
+                      const search = marketSearchMap[entry.id] ?? '';
+                      const q = search.trim().toLowerCase();
+                      const filtered = q
+                        ? talentsForMarket.filter(t =>
+                            t.name.toLowerCase().includes(q) || t.ticker.toLowerCase().includes(q)
+                          )
+                        : talentsForMarket.slice(0, 8);
+                      return (
+                        <div className="rounded-lg bg-zinc-950 border border-zinc-800 overflow-hidden">
+                          <div className="flex items-center justify-between gap-3 px-3 py-2 border-b border-zinc-800">
+                            <span className="text-[11px] font-semibold text-zinc-300 uppercase tracking-wider">Market</span>
+                            {selected && (
+                              <button
+                                onClick={() => {
+                                  setMarketMap(prev => ({ ...prev, [entry.id]: null }));
+                                  setMarketOverrideMap(prev => { const n = { ...prev }; delete n[entry.id]; return n; });
+                                }}
+                                className="text-[10px] text-zinc-600 hover:text-zinc-400 transition-colors"
+                              >
+                                Clear
+                              </button>
+                            )}
+                          </div>
+                          {selected ? (() => {
+                            const ov = marketOverrideMap[entry.id] ?? {
+                              name: selected.name, industry: selected.industry ?? '',
+                              photo_url: selected.photo_url,
+                              priceUsd: selected.price.usd?.toFixed(2) ?? '',
+                              lifetimeChangePct: selected.price.lifetimeChangePct?.toFixed(2) ?? '',
+                            };
+                            const setOv = (patch: Partial<typeof ov>) =>
+                              setMarketOverrideMap(prev => ({ ...prev, [entry.id]: { ...ov, ...patch } }));
+                            const displayPhoto = ov.photo_url;
+                            const pctVal = parseFloat(ov.lifetimeChangePct);
+                            const isPos = !isNaN(pctVal) ? pctVal >= 0 : (selected.price.lifetimeChangePct ?? 0) >= 0;
+                            const changeColor = isPos ? '#04df9d' : '#FF4B4B';
+                            return (
+                              <div>
+                                {/* Preview row (ArtistRow style, read from overrides) */}
+                                <div className="flex items-center" style={{ gap: 12, padding: '10px 12px', borderBottom: '1px solid #1a1a1a' }}>
+                                  {/* Avatar — click to open photo picker */}
+                                  <button
+                                    onClick={() => openPhotoPicker(entry.id, ov.name || selected.name)}
+                                    title="Change photo"
+                                    className="relative shrink-0 flex items-center justify-center rounded-full overflow-hidden group"
+                                    style={{ width: 42, height: 42, background: '#1e1e1e', border: '1px solid #2a2a2a' }}
+                                  >
+                                    <span style={{ fontSize: 10, color: '#52525b', fontWeight: 600 }}>
+                                      {(ov.name || selected.name).split(' ').map((w: string) => w[0]).filter(Boolean).slice(0, 2).join('').toUpperCase()}
+                                    </span>
+                                    {displayPhoto && (
+                                      // eslint-disable-next-line @next/next/no-img-element
+                                      <img src={displayPhoto} alt="" className="absolute inset-0 w-full h-full object-cover" />
+                                    )}
+                                    <div className="absolute inset-0 bg-black/50 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center">
+                                      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="2" strokeLinecap="round"><path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z"/><circle cx="12" cy="13" r="4"/></svg>
+                                    </div>
+                                  </button>
+                                  {/* Name + Industry */}
+                                  <div className="flex-1 min-w-0 flex flex-col" style={{ gap: 3 }}>
+                                    <span style={{ fontSize: 15, fontWeight: 600, color: '#fff', letterSpacing: '-0.015em' }}>{ov.name || '—'}</span>
+                                    <span style={{ fontSize: 12, color: '#71717a' }}>{ov.industry || '—'}</span>
+                                  </div>
+                                  {/* Sparkline — 80×30, between name/industry and price/change (SXSparkline) */}
+                                  {(() => {
+                                    const spark = sparklineMap[entry.id] ?? generateFallbackSparkline(ov.name || selected.name);
+                                    const isPosSpark = spark[spark.length - 1]!.value >= spark[0]!.value;
+                                    const sparkColor = isPosSpark ? '#04df9d' : '#FF4B4B';
+                                    const W = 96, H = 32, pad = 2;
+                                    const paddedSpark = spark.length === 1 ? [spark[0]!, spark[0]!] : spark;
+                                    const vals = paddedSpark.map(p => p.value);
+                                    const vMin = Math.min(...vals), vMax = Math.max(...vals);
+                                    const vRange = vMax - vMin;
+                                    const pts = paddedSpark.map((p, i) => ({
+                                      x: (i / (paddedSpark.length - 1)) * W,
+                                      y: vRange === 0 ? H / 2 : pad + (1 - (p.value - vMin) / vRange) * (H - pad * 2),
+                                    }));
+                                    let d = `M${pts[0]!.x.toFixed(1)},${pts[0]!.y.toFixed(1)}`;
+                                    for (let i = 0; i < pts.length - 1; i++) {
+                                      d += ` H${pts[i+1]!.x.toFixed(1)} V${pts[i+1]!.y.toFixed(1)}`;
+                                    }
+                                    return (
+                                      <div style={{ width: 80, height: 30, flexShrink: 0, marginRight: 8 }}>
+                                        <svg viewBox={`0 0 ${W} ${H}`} preserveAspectRatio="none" width="100%" height="100%" style={{ display: 'block', overflow: 'visible' }}>
+                                          <path d={d} fill="none" stroke={sparkColor} strokeWidth="1.5" strokeLinecap="square" strokeLinejoin="miter" vectorEffect="non-scaling-stroke" />
+                                        </svg>
+                                      </div>
+                                    );
+                                  })()}
+                                  {/* Price + Change */}
+                                  <div className="flex flex-col items-end shrink-0" style={{ gap: 4 }}>
+                                    <span style={{ fontFamily: 'var(--font-geist-mono)', fontSize: 15, fontWeight: 600, color: '#fff' }}>
+                                      {ov.priceUsd !== '' && !isNaN(parseFloat(ov.priceUsd))
+                                        ? parseFloat(ov.priceUsd).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
+                                        : '—'}
+                                    </span>
+                                    <div className="flex items-center" style={{ gap: 3 }}>
+                                      {ov.lifetimeChangePct !== '' && !isNaN(pctVal) && (
+                                        <>
+                                          <svg viewBox="0 0 24 18" width="13" height="13" style={{ color: changeColor, flexShrink: 0, transform: `rotate(${isPos ? '0' : '180'}deg)` }}>
+                                            <path fill="currentColor" d="m12 0 10.392 14.25H1.608z" />
+                                          </svg>
+                                          <span style={{ fontFamily: 'var(--font-geist-mono)', fontSize: 12, fontWeight: 500, color: changeColor }}>
+                                            {Math.abs(pctVal).toFixed(1)}%
+                                          </span>
+                                        </>
+                                      )}
+                                    </div>
+                                  </div>
+                                </div>
+                                {/* Edit fields */}
+                                <div className="px-3 py-2.5 flex flex-col gap-2">
+                                  <div className="flex gap-2">
+                                    <input value={ov.name} onChange={e => setOv({ name: e.target.value })}
+                                      placeholder="Name" className="flex-1 min-w-0 bg-zinc-900 border border-zinc-800 rounded px-2 py-1 text-xs text-zinc-200 placeholder-zinc-600 outline-none focus:border-zinc-600" />
+                                    <input value={ov.industry} onChange={e => setOv({ industry: e.target.value })}
+                                      placeholder="Industry" className="flex-1 min-w-0 bg-zinc-900 border border-zinc-800 rounded px-2 py-1 text-xs text-zinc-200 placeholder-zinc-600 outline-none focus:border-zinc-600" />
+                                  </div>
+                                  <div className="flex gap-2">
+                                    <input value={ov.priceUsd} onChange={e => setOv({ priceUsd: e.target.value })}
+                                      placeholder="Price (USD)" type="number" step="0.01"
+                                      className="flex-1 min-w-0 bg-zinc-900 border border-zinc-800 rounded px-2 py-1 text-xs text-zinc-200 placeholder-zinc-600 outline-none focus:border-zinc-600 font-mono" />
+                                    <input value={ov.lifetimeChangePct} onChange={e => setOv({ lifetimeChangePct: e.target.value })}
+                                      placeholder="Change %" type="number" step="0.01"
+                                      className="flex-1 min-w-0 bg-zinc-900 border border-zinc-800 rounded px-2 py-1 text-xs text-zinc-200 placeholder-zinc-600 outline-none focus:border-zinc-600 font-mono" />
+                                  </div>
+                                </div>
+                              </div>
+                            );
+                          })() : (
+                            /* Search + list — each result is an ArtistRow */
+                            <div>
+                              <div className="px-3 pt-2.5 pb-1.5">
+                                <input
+                                  value={search}
+                                  onChange={e => setMarketSearchMap(prev => ({ ...prev, [entry.id]: e.target.value }))}
+                                  placeholder="Search market…"
+                                  className="w-full bg-zinc-900 border border-zinc-800 rounded-md px-2.5 py-1.5 text-xs text-zinc-200 placeholder-zinc-600 outline-none focus:border-zinc-600 transition-colors"
+                                />
+                              </div>
+                              <div className="max-h-52 overflow-y-auto px-3">
+                                {talentsLoadingForMarket ? (
+                                  <div className="text-[11px] text-zinc-600 py-3">Loading markets…</div>
+                                ) : filtered.length === 0 ? (
+                                  <div className="text-[11px] text-zinc-600 py-3">No results for &ldquo;{search}&rdquo;</div>
+                                ) : (
+                                  filtered.map(t => {
+                                    const isPos = (t.price.lifetimeChangePct ?? 0) >= 0;
+                                    const changeColor = isPos ? '#04df9d' : '#FF4B4B';
+                                    return (
+                                      <button
+                                        key={t.id}
+                                        onClick={() => {
+                                          setMarketMap(prev => ({ ...prev, [entry.id]: t }));
+                                          setMarketSearchMap(prev => ({ ...prev, [entry.id]: '' }));
+                                          setSparklineMap(prev => ({ ...prev, [entry.id]: prev[entry.id] ?? generateFallbackSparkline(t.ticker) }));
+                                          fetchSparkline(entry.id, t.ticker);
+                                          setMarketOverrideMap(prev => ({
+                                            ...prev,
+                                            [entry.id]: {
+                                              name: t.name, industry: t.industry ?? '',
+                                              photo_url: t.photo_url,
+                                              priceUsd: t.price.usd?.toFixed(2) ?? '',
+                                              lifetimeChangePct: t.price.lifetimeChangePct?.toFixed(2) ?? '',
+                                            },
+                                          }));
+                                        }}
+                                        className="flex items-center w-full text-left transition-colors hover:bg-[#18181b]"
+                                        style={{ gap: 12, padding: '14px 0', borderBottom: '1px solid #1a1a1a' }}
+                                      >
+                                        {/* Avatar */}
+                                        <div className="relative shrink-0 flex items-center justify-center rounded-full overflow-hidden"
+                                          style={{ width: 42, height: 42, background: '#1e1e1e', border: '1px solid #2a2a2a' }}>
+                                          <span style={{ fontSize: 10, color: '#52525b', fontWeight: 600 }}>
+                                            {t.name.split(' ').map((w: string) => w[0]).filter(Boolean).slice(0, 2).join('').toUpperCase()}
+                                          </span>
+                                          {t.photo_url && (
+                                            // eslint-disable-next-line @next/next/no-img-element
+                                            <img src={t.photo_url} alt={t.name}
+                                              className="absolute inset-0 w-full h-full object-cover"
+                                              onError={(e) => { e.currentTarget.style.display = 'none'; }} />
+                                          )}
+                                        </div>
+                                        {/* Name + Industry */}
+                                        <div className="flex-1 min-w-0 flex flex-col" style={{ gap: 3 }}>
+                                          <span style={{ fontSize: 15, fontWeight: 600, color: '#fff', letterSpacing: '-0.015em', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                                            {t.name}
+                                          </span>
+                                          <span style={{ fontSize: 12, color: '#71717a' }}>
+                                            {t.industry ?? '—'}
+                                          </span>
+                                        </div>
+                                        {/* Price + Change */}
+                                        <div className="flex flex-col items-end shrink-0" style={{ gap: 4 }}>
+                                          <span style={{ fontFamily: 'var(--font-geist-mono)', fontSize: 15, fontWeight: 600, color: '#fff' }}>
+                                            {t.price.usd != null
+                                              ? t.price.usd.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
+                                              : '—'}
+                                          </span>
+                                          <div className="flex items-center" style={{ gap: 3 }}>
+                                            <svg viewBox="0 0 24 18" width="13" height="13"
+                                              style={{ color: changeColor, flexShrink: 0, transform: `rotate(${isPos ? '0' : '180'}deg)` }}>
+                                              <path fill="currentColor" d="m12 0 10.392 14.25H1.608z" />
+                                            </svg>
+                                            <span style={{ fontFamily: 'var(--font-geist-mono)', fontSize: 12, fontWeight: 500, color: changeColor }}>
+                                              {t.price.lifetimeChangePct != null ? `${Math.abs(t.price.lifetimeChangePct).toFixed(1)}%` : '—'}
+                                            </span>
+                                          </div>
+                                        </div>
+                                      </button>
+                                    );
+                                  })
+                                )}
+                              </div>
+                            </div>
+                          )}
+                        </div>
+                      );
+                    })()}
 
                     {/* Social caption generator — only for video-mode posts.
                         Lives directly below the rendered preview so the user
@@ -1061,6 +1423,77 @@ export function CanvasGrid({
           videoSrc={activeVideoSrc}
         />
       </div>
+
+      {/* ── Photo picker modal — opens when user clicks an avatar in the market selector ── */}
+      {photoPickerEntryId && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70" onClick={() => setPhotoPickerEntryId(null)}>
+          <div className="bg-zinc-900 border border-zinc-700 rounded-xl w-[520px] max-h-[80vh] flex flex-col shadow-2xl" onClick={e => e.stopPropagation()}>
+            {/* Header */}
+            <div className="flex items-center justify-between px-4 py-3 border-b border-zinc-800 shrink-0">
+              <span className="text-sm font-semibold text-zinc-100">Pick a photo</span>
+              <button onClick={() => setPhotoPickerEntryId(null)} className="text-zinc-500 hover:text-zinc-200 transition-colors">
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+              </button>
+            </div>
+            {/* Search */}
+            <div className="flex gap-2 px-4 py-3 border-b border-zinc-800 shrink-0">
+              <input
+                value={photoPickerQuery}
+                onChange={e => setPhotoPickerQuery(e.target.value)}
+                onKeyDown={e => { if (e.key === 'Enter') searchPickerPhotos(photoPickerQuery, 0, false); }}
+                placeholder="Search photos…"
+                className="flex-1 bg-zinc-800 border border-zinc-700 rounded-md px-3 py-1.5 text-sm text-zinc-200 placeholder-zinc-500 outline-none focus:border-zinc-500"
+              />
+              <button
+                onClick={() => searchPickerPhotos(photoPickerQuery, 0, false)}
+                disabled={!photoPickerQuery.trim() || photoPickerLoading}
+                className="px-3 py-1.5 rounded-md bg-zinc-800 border border-zinc-700 text-zinc-300 hover:text-white hover:border-zinc-500 disabled:opacity-40 text-sm transition-colors"
+              >Search</button>
+            </div>
+            {/* Grid */}
+            <div className="overflow-y-auto flex-1 p-4">
+              {photoPickerLoading && (
+                <div className="flex flex-wrap gap-3">
+                  {[1,2,3,4,5,6].map(i => <div key={i} className="rounded-lg bg-zinc-800 animate-pulse" style={{ width: 140, height: 140 }} />)}
+                </div>
+              )}
+              {!photoPickerLoading && photoPickerPhotos.length === 0 && (
+                <p className="text-sm text-zinc-600 text-center py-8">Search for a photo above.</p>
+              )}
+              {!photoPickerLoading && photoPickerPhotos.length > 0 && (
+                <div className="flex flex-wrap gap-3">
+                  {photoPickerPhotos.map(p => (
+                    <button
+                      key={p.url}
+                      onClick={() => {
+                        setMarketOverrideMap(prev => ({
+                          ...prev,
+                          [photoPickerEntryId!]: { ...(prev[photoPickerEntryId!] ?? { name: '', industry: '', photo_url: null, priceUsd: '', lifetimeChangePct: '' }), photo_url: p.url },
+                        }));
+                        setPhotoPickerEntryId(null);
+                      }}
+                      className="rounded-lg overflow-hidden border-2 border-transparent hover:border-white transition-colors"
+                      style={{ width: 140, height: 140 }}
+                    >
+                      {/* eslint-disable-next-line @next/next/no-img-element */}
+                      <img src={p.thumbnail} alt={p.title ?? ''} className="w-full h-full object-cover" onError={e => { (e.currentTarget as HTMLImageElement).style.display = 'none'; }} />
+                    </button>
+                  ))}
+                  <button
+                    onClick={() => { setPhotoPickerMore(true); searchPickerPhotos(photoPickerQuery, photoPickerOffset, true).finally(() => setPhotoPickerMore(false)); }}
+                    disabled={photoPickerMore}
+                    className="flex flex-col items-center justify-center gap-1 rounded-lg border-2 border-dashed border-zinc-700 hover:border-zinc-500 hover:bg-zinc-800 disabled:opacity-40 transition-colors text-zinc-600 hover:text-zinc-300"
+                    style={{ width: 140, height: 140 }}
+                  >
+                    <span className="text-2xl leading-none">+</span>
+                    <span className="text-xs">More</span>
+                  </button>
+                </div>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* ── Settings panel — fixed right column ── */}
       {isSelectedCarousel && selectedEntry && (
