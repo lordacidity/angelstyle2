@@ -177,6 +177,12 @@ app.post("/api/files/:name/save", (req, res) => {
   res.json(rec);
 });
 
+app.post("/api/files/:name/backlog", (req, res) => {
+  const rec = filesStore.markBacklog(req.params.name);
+  if (!rec) { res.status(404).json({ error: "not found" }); return; }
+  res.json(rec);
+});
+
 app.get("/api/devices", async (_req, res) => {
   try {
     const devices = await listDevices();
@@ -186,6 +192,31 @@ app.get("/api/devices", async (_req, res) => {
     res.status(500).json({ error: String(err) });
   }
 });
+
+// Local "reel catalogue" — every successful push spawns a copy at
+// ~/Downloads/reel catalogue/MM-DD-YYYY/<phone-name>/<filename>. This is the
+// single archive of what was actually distributed (not just what was exported),
+// organised by day and by recipient phone so the user can find any clip by
+// "when did I send it and to whom?". Studio video exports, Computer-1 sends,
+// uploads, and Backlog pushes all archive through this same path.
+const REEL_CATALOGUE_DIR = path.join(os.homedir(), "Downloads", "reel catalogue");
+
+function reelCatalogueDateFolder(): string {
+  const d = new Date();
+  const mm = String(d.getMonth() + 1).padStart(2, "0");
+  const dd = String(d.getDate()).padStart(2, "0");
+  return `${mm}-${dd}-${d.getFullYear()}`;
+}
+
+// Sanitize for use as a directory name on Windows.
+function safeDirName(raw: string): string {
+  return raw
+    .replace(/[<>:"/\\|?*]/g, "")
+    .replace(/\s+/g, " ")
+    .trim()
+    .replace(/[. ]+$/g, "")
+    .slice(0, 60) || "phone";
+}
 
 app.post("/api/push", async (req, res) => {
   const { fileName, serials } = req.body as { fileName: string; serials: string[] };
@@ -210,6 +241,22 @@ app.post("/api/push", async (req, res) => {
         mediaScan(r.serial, phoneTargetDir.replace(/\/$/, "") + "/" + fileName),
       ),
   );
+
+  // Archive a copy per successful recipient in the reel catalogue. Failures
+  // are logged but don't fail the push — the phones got the file, which is
+  // the primary outcome the user cares about.
+  const dateDir = path.join(REEL_CATALOGUE_DIR, reelCatalogueDateFolder());
+  for (const r of results.filter((x) => x.ok)) {
+    try {
+      const phoneName = safeDirName(store.getPhoneName(r.serial) ?? r.serial.slice(-4));
+      const phoneDir = path.join(dateDir, phoneName);
+      fs.mkdirSync(phoneDir, { recursive: true });
+      fs.copyFileSync(filePath, path.join(phoneDir, fileName));
+    } catch (err) {
+      console.warn(`[reel catalogue] failed to archive ${fileName} for ${r.serial}:`, err);
+    }
+  }
+
   const okCount = results.filter((r) => r.ok).length;
   filesStore.recordSent(fileName, {
     at: Date.now(),

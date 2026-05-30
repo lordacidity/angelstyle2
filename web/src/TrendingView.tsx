@@ -47,20 +47,21 @@ function cleanHeadline(title: string): string {
   return title.replace(/\s+-\s+[^-]+$/, "").trim();
 }
 
-// Four distinct content niches the user produces marketing for. Any future
+// Three distinct content niches the user produces marketing for. Any future
 // industry should slot into exactly one bucket — no overlap.
-const HOLLYWOOD_INDUSTRIES = new Set(["Actor", "Musician"]);
-const COMEDIAN_INDUSTRIES = new Set(["Comedian"]);
-const CREATOR_INDUSTRIES = new Set(["Streamer", "Youtuber", "Influencer", "Podcaster"]);
+// Markets = creators + comedians + film/actors (everything entertainment-adjacent
+// outside of music + sports). Music is its own bucket; athletes is its own.
+const MUSIC_INDUSTRIES = new Set(["Musician"]);
+const MARKETS_INDUSTRIES = new Set(["Actor", "Comedian", "Streamer", "Youtuber", "Influencer", "Podcaster"]);
 const ATHLETE_INDUSTRIES = new Set(["Athlete"]);
-type Category = "hollywood" | "comedians" | "creators" | "athletes";
+type Category = "music" | "markets" | "athletes";
 
 export function TrendingView() {
   const [items, setItems] = useState<TrendingTalent[] | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
   const [buildingFor, setBuildingFor] = useState<string | null>(null);
-  const [category, setCategory] = useState<Category>("hollywood");
+  const [category, setCategory] = useState<Category>("music");
 
   const load = async () => {
     setError(null);
@@ -160,33 +161,26 @@ export function TrendingView() {
           </div>
         </div>
 
-        {/* Category toggle — four distinct niches the user creates content for. */}
+        {/* Category toggle — three distinct niches the user creates content for. */}
         {(() => {
           const countOf = (set: Set<string>) =>
             (items ?? []).filter((it) => it.talent.industry && set.has(it.talent.industry)).length;
-          const hollywoodCount = countOf(HOLLYWOOD_INDUSTRIES);
-          const comedianCount = countOf(COMEDIAN_INDUSTRIES);
-          const creatorCount = countOf(CREATOR_INDUSTRIES);
+          const musicCount = countOf(MUSIC_INDUSTRIES);
+          const marketsCount = countOf(MARKETS_INDUSTRIES);
           const athleteCount = countOf(ATHLETE_INDUSTRIES);
           return (
             <div className="row" style={{ marginBottom: 16, gap: 8 }}>
               <button
-                className={category === "hollywood" ? "" : "secondary"}
-                onClick={() => setCategory("hollywood")}
+                className={category === "music" ? "" : "secondary"}
+                onClick={() => setCategory("music")}
               >
-                🎬 Music & Film {items !== null && <span style={{ opacity: 0.7, marginLeft: 6 }}>({hollywoodCount})</span>}
+                🎵 Music {items !== null && <span style={{ opacity: 0.7, marginLeft: 6 }}>({musicCount})</span>}
               </button>
               <button
-                className={category === "comedians" ? "" : "secondary"}
-                onClick={() => setCategory("comedians")}
+                className={category === "markets" ? "" : "secondary"}
+                onClick={() => setCategory("markets")}
               >
-                🎤 Comedians {items !== null && <span style={{ opacity: 0.7, marginLeft: 6 }}>({comedianCount})</span>}
-              </button>
-              <button
-                className={category === "creators" ? "" : "secondary"}
-                onClick={() => setCategory("creators")}
-              >
-                🎮 Creators {items !== null && <span style={{ opacity: 0.7, marginLeft: 6 }}>({creatorCount})</span>}
+                📈 Markets {items !== null && <span style={{ opacity: 0.7, marginLeft: 6 }}>({marketsCount})</span>}
               </button>
               <button
                 className={category === "athletes" ? "" : "secondary"}
@@ -210,17 +204,15 @@ export function TrendingView() {
 
         {(() => {
           const activeSet =
-            category === "hollywood" ? HOLLYWOOD_INDUSTRIES :
-            category === "comedians" ? COMEDIAN_INDUSTRIES :
-            category === "athletes"  ? ATHLETE_INDUSTRIES :
-            CREATOR_INDUSTRIES;
+            category === "music"    ? MUSIC_INDUSTRIES :
+            category === "athletes" ? ATHLETE_INDUSTRIES :
+            MARKETS_INDUSTRIES;
           const filtered = (items ?? []).filter((it) => it.talent.industry && activeSet.has(it.talent.industry));
           if (items !== null && filtered.length === 0) {
             const emptyMsg =
-              category === "hollywood" ? "No actors or musicians in the news today." :
-              category === "comedians" ? "No comedians in the news today." :
-              category === "athletes"  ? "No athletes in the news today." :
-              "No creators in the news today.";
+              category === "music"    ? "No musicians in the news today." :
+              category === "athletes" ? "No athletes in the news today." :
+              "No film, comedy, or creator names in the news today.";
             return <div className="card empty">{emptyMsg} Try refreshing later or switch tabs.</div>;
           }
           return filtered.map((it) => {

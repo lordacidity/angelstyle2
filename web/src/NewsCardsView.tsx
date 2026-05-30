@@ -719,7 +719,7 @@ export function NewsCardsView() {
 
   return (
     <div className="layout">
-      <Sidebar current="news-industry" />
+      <Sidebar current="news-trending" />
       <div className="layout-main">
       <div className="app-header">
         <div>

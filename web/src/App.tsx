@@ -1,7 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { SettingsModal } from "./Settings";
-import { AccountsModal, type Theme } from "./Accounts";
-import { ThemePicker } from "./ThemePicker";
+import { AccountsModal } from "./Accounts";
 import { Sidebar } from "./Sidebar";
 import { ensureNotificationPermission, playDing, showDesktopNotification } from "./notify";
 
@@ -17,7 +16,7 @@ interface FileRecord {
   name: string;
   size: number;
   receivedAt: number;
-  status: "new" | "saved";
+  status: "new" | "saved" | "backlog";
   diskState: "present" | "deleted";
   sentEvents: SentEvent[];
 }
@@ -58,9 +57,6 @@ export function App() {
   const [busy, setBusy] = useState<Record<string, boolean>>({});
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [accountsOpen, setAccountsOpen] = useState(false);
-  const [themes, setThemes] = useState<Theme[]>([]);
-  const [fileThemes, setFileThemes] = useState<Record<string, string[]>>({});
-  const [manualMode, setManualMode] = useState<Record<string, boolean>>({});
   // Uploads initiated directly from this computer (Computer 2 — phones-side).
   // Backend route is identical to the SenderView's: POST /api/upload with the
   // file(s) under field name "files", multer writes them to the watch dir,
@@ -125,7 +121,7 @@ export function App() {
   // Track filenames we've seen so we can detect arrivals on the SSE stream.
   // Read inside the SSE callback so it isn't captured stale.
   const seenNames = useRef<Set<string> | null>(null);
-  // Latest notification prefs, read inside SSE callback. Polled alongside themes.
+  // Latest notification prefs, read inside SSE callback. Polled periodically.
   const notifyPrefs = useRef({ sound: true, desktop: true });
 
   // Ask for notification permission once on mount.
@@ -145,16 +141,6 @@ export function App() {
     };
     fetchPrefs();
     const t = setInterval(fetchPrefs, 5000);
-    return () => clearInterval(t);
-  }, []);
-
-  const reloadThemes = async () => {
-    const r = await fetch("/api/themes");
-    setThemes(await r.json());
-  };
-  useEffect(() => {
-    reloadThemes();
-    const t = setInterval(reloadThemes, 5000);
     return () => clearInterval(t);
   }, []);
 
@@ -246,42 +232,6 @@ export function App() {
   const nameFor = (serial: string) =>
     devices.find((d) => d.serial === serial)?.name ?? shortSerial(serial);
 
-  const pushTheme = async (fileName: string) => {
-    const themeIds = fileThemes[fileName] ?? [];
-    if (themeIds.length === 0) return;
-    const themeNames = themes.filter((t) => themeIds.includes(t.id)).map((t) => t.name);
-    const label = themeNames.length === 1 ? `"${themeNames[0]}"` : `${themeNames.length} themes`;
-    setBusy((b) => ({ ...b, [fileName]: true }));
-    setStatuses((s) => ({ ...s, [fileName]: { ok: true, msg: `Sending to ${label}...` } }));
-    try {
-      const r = await fetch("/api/push-theme", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ fileName, themeIds }),
-      });
-      const data: { results: PushResult[]; serials: string[]; unreachable: string[] } = await r.json();
-      if (data.results.length === 0) {
-        setStatuses((s) => ({
-          ...s,
-          [fileName]: { ok: false, msg: `No connected phones in ${label}.` },
-        }));
-        return;
-      }
-      const allOk = data.results.every((x) => x.ok);
-      const lines = data.results.map((x) =>
-        x.ok ? `OK  ${nameFor(x.serial)}` : `ERR ${nameFor(x.serial)}: ${x.stderr.trim() || "failed"}`,
-      );
-      if (data.unreachable.length > 0) {
-        lines.push(`(unreachable: ${data.unreachable.map(nameFor).join(", ")})`);
-      }
-      setStatuses((s) => ({ ...s, [fileName]: { ok: allOk, msg: lines.join("\n") } }));
-    } catch (err) {
-      setStatuses((s) => ({ ...s, [fileName]: { ok: false, msg: String(err) } }));
-    } finally {
-      setBusy((b) => ({ ...b, [fileName]: false }));
-    }
-  };
-
   const remove = async (fileName: string) => {
     if (!confirm(`Delete ${fileName} from the watch folder?`)) return;
     await fetch(`/api/files/${encodeURIComponent(fileName)}`, { method: "DELETE" });
@@ -312,6 +262,15 @@ export function App() {
     await fetch(`/api/files/${encodeURIComponent(fileName)}/save`, { method: "POST" });
   };
 
+  const backlogFile = async (fileName: string) => {
+    await fetch(`/api/files/${encodeURIComponent(fileName)}/backlog`, { method: "POST" });
+  };
+
+  // Backlog + Past Files sections are collapsed by default so the lists stay
+  // out of sight when you're focused on what's new.
+  const [backlogOpen, setBacklogOpen] = useState(false);
+  const [pastOpen, setPastOpen] = useState(false);
+
   return (
     <div className="layout">
       <Sidebar current="phonedeck" />
@@ -329,7 +288,7 @@ export function App() {
       <SettingsModal open={settingsOpen} onClose={() => setSettingsOpen(false)} />
       <AccountsModal
         open={accountsOpen}
-        onClose={() => { setAccountsOpen(false); reloadThemes(); }}
+        onClose={() => setAccountsOpen(false)}
       />
 
       <div className="grid">
@@ -337,6 +296,7 @@ export function App() {
           {(() => {
             const incoming = files.filter((f) => f.status === "new" && f.diskState === "present");
             const past = files.filter((f) => f.status === "saved");
+            const backlog = files.filter((f) => f.status === "backlog");
             const renderFile = (f: FileRecord) => {
               const sel = selections[f.name] ?? new Set<string>();
               const st = statuses[f.name];
@@ -353,7 +313,7 @@ export function App() {
                     <div className="file-meta">{formatSize(f.size)} · {formatTime(f.receivedAt)}</div>
                   </div>
 
-                  {onDisk && manualMode[f.name] ? (
+                  {onDisk ? (
                     <>
                       <div className="phones">
                         {ready.length === 0 && <span className="file-meta">No phones connected.</span>}
@@ -373,38 +333,22 @@ export function App() {
                         </button>
                         <button className="secondary" onClick={() => selectAll(f.name)} disabled={ready.length === 0}>Select all</button>
                         <button className="secondary" onClick={() => clearSel(f.name)} disabled={sel.size === 0}>Clear</button>
-                        <button className="secondary" onClick={() => setManualMode((m) => ({ ...m, [f.name]: false }))}>
-                          ← Back to themes
-                        </button>
+                        {f.status === "new" && (
+                          <button className="secondary" onClick={() => saveFile(f.name)}>Save</button>
+                        )}
+                        {f.status === "new" && (
+                          <button
+                            className="secondary small"
+                            onClick={() => backlogFile(f.name)}
+                            title="Park in Backlog — out of Incoming but still on disk"
+                          >BL</button>
+                        )}
                         <button className="danger" onClick={() => remove(f.name)}>Delete</button>
                       </div>
                     </>
                   ) : (
                     <div className="row">
-                      {onDisk ? (
-                        <>
-                          <ThemePicker
-                            themes={themes}
-                            selected={fileThemes[f.name] ?? []}
-                            onChange={(next) => setFileThemes((m) => ({ ...m, [f.name]: next }))}
-                            onManual={() => setManualMode((m) => ({ ...m, [f.name]: true }))}
-                          />
-                          <button
-                            onClick={() => pushTheme(f.name)}
-                            disabled={(fileThemes[f.name] ?? []).length === 0 || busy[f.name]}
-                          >
-                            {busy[f.name]
-                              ? "Sending..."
-                              : `Send${(fileThemes[f.name] ?? []).length > 0 ? ` (${(fileThemes[f.name] ?? []).length})` : ""}`}
-                          </button>
-                          {f.status === "new" && (
-                            <button className="secondary" onClick={() => saveFile(f.name)}>Save</button>
-                          )}
-                          <button className="danger" onClick={() => remove(f.name)}>Delete</button>
-                        </>
-                      ) : (
-                        <button className="danger" onClick={() => remove(f.name)}>Remove from history</button>
-                      )}
+                      <button className="danger" onClick={() => remove(f.name)}>Remove from history</button>
                     </div>
                   )}
 
@@ -415,92 +359,135 @@ export function App() {
 
             return (
               <>
-                <h2>Incoming ({incoming.length})</h2>
-                {incoming.length === 0 && <div className="card empty">No new files. Drag one to the sender on Computer 1.</div>}
-                {incoming.map(renderFile)}
-
-                <h2 style={{ marginTop: 24 }}>Upload from this computer</h2>
-                <div
-                  className={`dropzone${dragOver ? " over" : ""}`}
-                  onDragOver={(e) => { e.preventDefault(); setDragOver(true); }}
-                  onDragLeave={() => setDragOver(false)}
-                  onDrop={(e) => {
-                    e.preventDefault();
-                    setDragOver(false);
-                    onFilesPicked(e.dataTransfer.files);
-                  }}
-                  onClick={() => fileInputRef.current?.click()}
+                {/* Backlog — parked files, hidden by default. Header matches the
+                    H2 aesthetic of the other sections but is clickable to expand. */}
+                <h2
+                  onClick={() => setBacklogOpen((o) => !o)}
+                  style={{ cursor: "pointer", userSelect: "none", display: "flex", alignItems: "center", gap: 8 }}
+                  title={backlogOpen ? "Collapse Backlog" : "Expand Backlog"}
                 >
-                  <div className="dropzone-title">Drop videos or images here or click to browse</div>
-                  <div className="dropzone-sub">Videos: .mp4, .mov, .mkv, .webm, .m4v, .avi, .3gp · Images: .jpg, .png, .gif, .webp, .heic — lands in Incoming, then pick phones + Send.</div>
-                  <input
-                    ref={fileInputRef}
-                    type="file"
-                    multiple
-                    accept="video/*,image/*,.mp4,.mov,.mkv,.webm,.m4v,.avi,.3gp,.jpg,.jpeg,.png,.gif,.webp,.heic,.heif"
-                    style={{ display: "none" }}
-                    onChange={(e) => {
-                      onFilesPicked(e.target.files);
-                      e.target.value = "";
-                    }}
-                  />
-                </div>
-                {uploads.length > 0 && (
-                  <div className="uploads">
-                    {uploads.map((u) => {
-                      const pct = u.size > 0 ? Math.round((u.loaded / u.size) * 100) : 0;
-                      return (
-                        <div
-                          key={u.id}
-                          className={`upload${u.status === "done" ? " upload-done" : ""}`}
-                          style={{ color: u.status === "error" ? "#ff8b6b" : undefined }}
-                        >
-                          {u.name} · {formatSize(u.size)}
-                          {u.status === "uploading" && ` · ${pct}%`}
-                          {u.status === "done"      && " · ✓ uploaded"}
-                          {u.status === "error"     && ` · ✗ ${u.error ?? "failed"}`}
-                        </div>
-                      );
-                    })}
-                  </div>
+                  <span style={{ fontSize: 9, opacity: 0.6 }}>{backlogOpen ? "▾" : "▸"}</span>
+                  Backlog ({backlog.length})
+                </h2>
+                {backlogOpen && (
+                  <>
+                    {backlog.length === 0 && (
+                      <div className="card empty">
+                        Nothing parked yet. Hit BL on an Incoming file to park it here.
+                      </div>
+                    )}
+                    {backlog.map(renderFile)}
+                  </>
                 )}
 
-                <h2 style={{ marginTop: 24 }}>Past files ({past.length})</h2>
-                {past.length === 0 && <div className="card empty">Nothing yet — saved/sent files will appear here.</div>}
-                {past.map(renderFile)}
+                <h2 style={{ marginTop: 24 }}>Incoming ({incoming.length})</h2>
+                {incoming.length === 0 && <div className="card empty">No new files.</div>}
+                {incoming.map(renderFile)}
+
+                <h2
+                  onClick={() => setPastOpen((o) => !o)}
+                  style={{ marginTop: 24, cursor: "pointer", userSelect: "none", display: "flex", alignItems: "center", gap: 8 }}
+                  title={pastOpen ? "Collapse Past files" : "Expand Past files"}
+                >
+                  <span style={{ fontSize: 9, opacity: 0.6 }}>{pastOpen ? "▾" : "▸"}</span>
+                  Past files ({past.length})
+                </h2>
+                {pastOpen && (
+                  <>
+                    {past.length === 0 && <div className="card empty">Nothing yet. Saved/sent files will appear here.</div>}
+                    {past.map(renderFile)}
+                  </>
+                )}
               </>
             );
           })()}
         </div>
 
-        <div className="card">
-          <div className="card-header">
-            <h2>Phones ({ready.length})</h2>
-            <button
-              className="secondary"
-              onClick={launchAllScrcpy}
-              disabled={ready.length === 0 || openingAll}
-              title="Launch scrcpy on every connected phone"
-            >
-              {openingAll ? "Opening..." : "Open all"}
-            </button>
-          </div>
-          {devices.length === 0 && <div className="empty">No devices.</div>}
-          {devices.map((d) => (
-            <div className="device-row" key={d.serial}>
-              <div className="device-info">
-                <div className="device-model">{d.name ?? d.model ?? "Unknown"}</div>
-                <div className="device-serial">{d.serial} · {d.state}</div>
-              </div>
+        {/* Right column — Phones card + Upload card stacked. Each card sizes
+            to its content (the grid's `align-items: start` keeps the column
+            itself from stretching; the inner flex with `align-items: stretch`
+            keeps the two cards at the same 320px width). */}
+        <div style={{ display: "flex", flexDirection: "column", gap: 16, minWidth: 0 }}>
+          <div className="card">
+            <div className="card-header">
+              <h2>Phones ({ready.length})</h2>
               <button
                 className="secondary"
-                disabled={d.state !== "device"}
-                onClick={() => launchScrcpy(d.serial)}
+                onClick={launchAllScrcpy}
+                disabled={ready.length === 0 || openingAll}
+                title="Launch scrcpy on every connected phone"
               >
-                scrcpy
+                {openingAll ? "Opening..." : "Open all"}
               </button>
             </div>
-          ))}
+            {devices.length === 0 && <div className="empty">No devices.</div>}
+            {devices.map((d) => (
+              <div className="device-row" key={d.serial}>
+                <div className="device-info">
+                  <div className="device-model">{d.name ?? d.model ?? "Unknown"}</div>
+                  <div className="device-serial">{d.serial} · {d.state}</div>
+                </div>
+                <button
+                  className="secondary"
+                  disabled={d.state !== "device"}
+                  onClick={() => launchScrcpy(d.serial)}
+                >
+                  scrcpy
+                </button>
+              </div>
+            ))}
+          </div>
+
+          <div className="card">
+            <div className="card-header">
+              <h2>Upload from this computer</h2>
+            </div>
+            <div
+              className={`dropzone${dragOver ? " over" : ""}`}
+              style={{ marginBottom: 0 }}
+              onDragOver={(e) => { e.preventDefault(); setDragOver(true); }}
+              onDragLeave={() => setDragOver(false)}
+              onDrop={(e) => {
+                e.preventDefault();
+                setDragOver(false);
+                onFilesPicked(e.dataTransfer.files);
+              }}
+              onClick={() => fileInputRef.current?.click()}
+            >
+              <div className="dropzone-title">Drop videos or images here or click to browse</div>
+              <div className="dropzone-sub">Lands in Incoming.</div>
+              <input
+                ref={fileInputRef}
+                type="file"
+                multiple
+                accept="video/*,image/*,.mp4,.mov,.mkv,.webm,.m4v,.avi,.3gp,.jpg,.jpeg,.png,.gif,.webp,.heic,.heif"
+                style={{ display: "none" }}
+                onChange={(e) => {
+                  onFilesPicked(e.target.files);
+                  e.target.value = "";
+                }}
+              />
+            </div>
+            {uploads.length > 0 && (
+              <div className="uploads" style={{ marginTop: 12, marginBottom: 0 }}>
+                {uploads.map((u) => {
+                  const pct = u.size > 0 ? Math.round((u.loaded / u.size) * 100) : 0;
+                  return (
+                    <div
+                      key={u.id}
+                      className={`upload${u.status === "done" ? " upload-done" : ""}`}
+                      style={{ color: u.status === "error" ? "#ff8b6b" : undefined }}
+                    >
+                      {u.name} · {formatSize(u.size)}
+                      {u.status === "uploading" && ` · ${pct}%`}
+                      {u.status === "done"      && " · ✓ uploaded"}
+                      {u.status === "error"     && ` · ✗ ${u.error ?? "failed"}`}
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+          </div>
         </div>
       </div>
       </div>

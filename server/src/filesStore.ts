@@ -11,7 +11,11 @@ export interface SentEvent {
   errCount: number;
 }
 
-export type FileStatus = "new" | "saved";
+// "backlog" is a parking-lot shelf — file stays on disk but is hidden from
+// the Incoming list. User can expand the Backlog section to send/save/delete
+// later. Sending a backlog file flips it to "saved" via recordSent (same flow
+// as sending an incoming file).
+export type FileStatus = "new" | "saved" | "backlog";
 export type DiskState = "present" | "deleted";
 
 export interface FileRecord {
@@ -91,6 +95,14 @@ export function onFileMissing(name: string): void {
 export function markSaved(name: string): FileRecord | null {
   if (!records[name]) return null;
   records[name].status = "saved";
+  persist();
+  notify();
+  return records[name];
+}
+
+export function markBacklog(name: string): FileRecord | null {
+  if (!records[name]) return null;
+  records[name].status = "backlog";
   persist();
   notify();
   return records[name];
