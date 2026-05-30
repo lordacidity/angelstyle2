@@ -609,8 +609,9 @@ export function useRecording(config: UseRecordingConfig) {
         });
         if (!resp.ok) throw new Error(await resp.text());
         const data = await resp.json() as { filename?: string };
-        setRecStatus(`Saved: ${data.filename ?? nameBase + '.mp4'}`);
-        setTimeout(() => setRecStatus(''), 4000);
+        const fname = data.filename ?? nameBase + '.mp4';
+        setRecStatus(`In Phonedeck Incoming: ${fname}`);
+        setTimeout(() => setRecStatus(''), 5000);
       } catch (saveErr) {
         console.warn('[EXPORT] save-to-folder failed, falling back to browser download:', saveErr);
         const url = URL.createObjectURL(blob);

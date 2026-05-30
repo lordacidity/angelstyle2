@@ -1,30 +1,19 @@
-// Save an exported video straight to disk instead of going through the
-// browser's download folder. Mirrors Phonedeck's image-download behaviour:
-// files land in ~/Downloads/copyright free images/MM-DD-YYYY/. The Studio's
-// Next.js server runs locally on the user's machine, so it can write there
-// directly. Body = raw video bytes; ?name= = desired (pre-extension) filename.
+// Studio video export → Phonedeck Incoming. That's the entire job of this
+// route now: take the rendered mp4 bytes and forward them as a multipart
+// upload to Phonedeck's /api/upload. The "reel catalogue" archive happens
+// downstream on the Phonedeck side — per phone, on actual push — so files are
+// catalogued by distribution event, not by export event.
+//
+// Body = raw video bytes. Query: ?name= = desired (pre-extension) filename.
 
 import { NextRequest, NextResponse } from 'next/server';
-import fs from 'node:fs';
-import path from 'node:path';
-import os from 'node:os';
 
 export const runtime = 'nodejs';
 
-const BASE_DIR = path.join(os.homedir(), 'Downloads', 'copyright free images');
+// Override via env if Phonedeck is on a different host/port. Default matches
+// the local dev setup (server/src/config.ts → PHONEDECK_PORT=8080).
+const PHONEDECK_URL = process.env.PHONEDECK_URL ?? 'http://localhost:8080';
 
-// Local-time date bucket (NOT UTC) so "today" matches the user's wall clock —
-// must stay in lockstep with Phonedeck's todayFolderName().
-function todayFolderName(): string {
-  const d = new Date();
-  const mm = String(d.getMonth() + 1).padStart(2, '0');
-  const dd = String(d.getDate()).padStart(2, '0');
-  return `${mm}-${dd}-${d.getFullYear()}`;
-}
-
-// Strip characters Windows forbids in filenames, collapse whitespace, cap
-// length, and drop trailing dots/spaces (Windows silently removes them).
-// Keeps it human-readable — spaces and hyphens are fine in filenames.
 function safeName(raw: string): string {
   const cleaned = raw
     .replace(/[<>:"/\\|?*]/g, '')
@@ -44,21 +33,19 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: 'empty body' }, { status: 400 });
     }
 
-    const dir = path.join(BASE_DIR, todayFolderName());
-    fs.mkdirSync(dir, { recursive: true });
+    const filename = `${safeName(rawName)}.mp4`;
 
-    // Avoid clobbering an earlier export with the same caption — append (N).
-    const base = safeName(rawName);
-    let filename = `${base}.mp4`;
-    let target = path.join(dir, filename);
-    let n = 1;
-    while (fs.existsSync(target)) {
-      filename = `${base} (${n}).mp4`;
-      target = path.join(dir, filename);
-      n++;
+    // Forward to Phonedeck. multer handles dedupe ("foo (1).mp4") on its end
+    // and the IncomingWatcher picks the file up + pushes a live SSE update.
+    const form = new FormData();
+    const blob = new Blob([buf], { type: 'video/mp4' });
+    form.append('files', blob, filename);
+    const r = await fetch(`${PHONEDECK_URL}/api/upload`, { method: 'POST', body: form });
+    if (!r.ok) {
+      const detail = await r.text().catch(() => '');
+      return NextResponse.json({ error: `phonedeck ${r.status}: ${detail}` }, { status: 502 });
     }
-    fs.writeFileSync(target, buf);
-    return NextResponse.json({ ok: true, dir, filename });
+    return NextResponse.json({ ok: true, filename });
   } catch (err) {
     return NextResponse.json({ error: String(err) }, { status: 500 });
   }
