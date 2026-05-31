@@ -561,6 +561,14 @@ export function CanvasGrid({
     });
   }
 
+  // MARKETING: derive the displayed lifetime-change % from the same synthetic
+  // sparkline so the chart slope and the percentage agree. Spread × 200 keeps
+  // it in a believable 10–180% range — no more random 9900% spikes.
+  function syntheticPctForTicker(ticker: string): number {
+    const vals = generateFallbackSparkline(ticker).map(p => p.value);
+    return (Math.max(...vals) - Math.min(...vals)) * 200;
+  }
+
   const fetchSparkline = useCallback(async (entryId: string, ticker: string) => {
     try {
       const r = await fetch(`/api/markets/batch-history?slugs=${encodeURIComponent(ticker)}&window=all`);
@@ -621,8 +629,20 @@ export function CanvasGrid({
     const sel = marketMap[entryId];
     if (!sel) return null;
     const ov = marketOverrideMap[entryId];
-    const spark = sparklineMap[entryId] ?? generateFallbackSparkline(sel.ticker);
-    if (!ov) return { ...(sel as unknown as MarketData), sparkline: spark };
+    // MARKETING: always use the synthetic ticker-seeded fallback so every
+    // market gets a healthy-looking upward green curve. Real API data is
+    // unreliable for our purpose — some markets return a single point or all
+    // identical values, which renders as a flat line and undercuts the buy
+    // signal we want the post to send.
+    const spark = generateFallbackSparkline(sel.ticker);
+    const syntheticPct = syntheticPctForTicker(sel.ticker);
+    if (!ov) {
+      return {
+        ...(sel as unknown as MarketData),
+        sparkline: spark,
+        price: { ...sel.price, lifetimeChangePct: syntheticPct },
+      };
+    }
     const priceNum = ov.priceUsd !== '' ? parseFloat(ov.priceUsd) : null;
     const pctNum   = ov.lifetimeChangePct !== '' ? parseFloat(ov.lifetimeChangePct) : null;
     return {
@@ -634,7 +654,7 @@ export function CanvasGrid({
       sparkline: spark,
       price: {
         usd:              !isNaN(priceNum ?? NaN) ? priceNum : sel.price.usd,
-        lifetimeChangePct: !isNaN(pctNum ?? NaN) ? pctNum  : sel.price.lifetimeChangePct,
+        lifetimeChangePct: !isNaN(pctNum ?? NaN) ? pctNum  : syntheticPct,
       },
     };
   }, [marketMap, marketOverrideMap, sparklineMap]);
@@ -1141,8 +1161,10 @@ export function CanvasGrid({
                               setMarketOverrideMap(prev => ({ ...prev, [entry.id]: { ...ov, ...patch } }));
                             const displayPhoto = ov.photo_url;
                             const pctVal = parseFloat(ov.lifetimeChangePct);
-                            const isPos = !isNaN(pctVal) ? pctVal >= 0 : (selected.price.lifetimeChangePct ?? 0) >= 0;
-                            const changeColor = isPos ? '#04df9d' : '#FF4B4B';
+                            // MARKETING: always render as positive (green + up arrow) so the
+                            // preview always encourages buying, regardless of real direction.
+                            const isPos = true;
+                            const changeColor = '#04df9d';
                             return (
                               <div>
                                 {/* Preview row (ArtistRow style, read from overrides) */}
@@ -1172,11 +1194,15 @@ export function CanvasGrid({
                                   </div>
                                   {/* Sparkline — 80×30, between name/industry and price/change (SXSparkline) */}
                                   {(() => {
-                                    const spark = sparklineMap[entry.id] ?? generateFallbackSparkline(ov.name || selected.name);
-                                    const isPosSpark = spark[spark.length - 1]!.value >= spark[0]!.value;
-                                    const sparkColor = isPosSpark ? '#04df9d' : '#FF4B4B';
+                                    // MARKETING: always synthetic, ticker-seeded so the picker
+                                    // shows the exact same green upward curve that will appear
+                                    // in the exported video. Never trust the real API data here
+                                    // — it would diverge between picker and export.
+                                    const spark = generateFallbackSparkline(selected.ticker);
+                                    const sparkColor = '#04df9d';
                                     const W = 96, H = 32, pad = 2;
-                                    const paddedSpark = spark.length === 1 ? [spark[0]!, spark[0]!] : spark;
+                                    const sortedSpark = [...spark].sort((a, b) => a.value - b.value);
+                                    const paddedSpark = sortedSpark.length === 1 ? [sortedSpark[0]!, sortedSpark[0]!] : sortedSpark;
                                     const vals = paddedSpark.map(p => p.value);
                                     const vMin = Math.min(...vals), vMax = Math.max(...vals);
                                     const vRange = vMax - vMin;
@@ -1254,8 +1280,10 @@ export function CanvasGrid({
                                   <div className="text-[11px] text-zinc-600 py-3">No results for &ldquo;{search}&rdquo;</div>
                                 ) : (
                                   filtered.map(t => {
-                                    const isPos = (t.price.lifetimeChangePct ?? 0) >= 0;
-                                    const changeColor = isPos ? '#04df9d' : '#FF4B4B';
+                                    // MARKETING: always green + up in the picker list too, so
+                                    // every option looks like an upward bet.
+                                    const isPos = true;
+                                    const changeColor = '#04df9d';
                                     return (
                                       <button
                                         key={t.id}
@@ -1270,7 +1298,10 @@ export function CanvasGrid({
                                               name: t.name, industry: t.industry ?? '',
                                               photo_url: t.photo_url,
                                               priceUsd: t.price.usd?.toFixed(2) ?? '',
-                                              lifetimeChangePct: t.price.lifetimeChangePct?.toFixed(2) ?? '',
+                                              // MARKETING: pre-fill with synthetic % derived from
+                                              // the ticker's synthetic sparkline so the picker's
+                                              // edit field defaults to a believable number.
+                                              lifetimeChangePct: syntheticPctForTicker(t.ticker).toFixed(1),
                                             },
                                           }));
                                         }}

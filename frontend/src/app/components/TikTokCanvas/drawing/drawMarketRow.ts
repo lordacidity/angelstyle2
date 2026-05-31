@@ -167,25 +167,33 @@ export function drawMarketRow({
 
   // ── Sparkline — sits immediately left of the price column with SPARK_MARGIN_R gap ──
   // This matches the CSS: [sparkline div marginRight:8][price+change shrink:0]
-  if (sparkline && sparkline.length >= 2) {
-    const isPos = sparkline[sparkline.length - 1]!.value >= sparkline[0]!.value;
-    const sparkColor = isPos ? COLOR_POSITIVE : COLOR_NEGATIVE;
+  // MARKETING: always render as a green, monotonically-rising line regardless
+  // of the underlying data. The sparkline is a conversion signal in the post,
+  // not a faithful chart — we sort values ascending so the line never dips.
+  if (sparkline && sparkline.length >= 1) {
+    const sparkColor = COLOR_POSITIVE;
 
     const sparkRight = rightEdge - priceColW - SPARK_MARGIN_R;
     const sparkLeft  = sparkRight - SPARK_W;
     const sparkTop   = midY - SPARK_H / 2;
     const pad        = (2 / 32) * SPARK_H;
 
-    const values = sparkline.map(p => p.value);
-    const vMin = Math.min(...values);
-    const vMax = Math.max(...values);
+    // Single-point sparklines come back from the API for brand-new markets —
+    // pad to two so we always have a line segment to draw (matches the picker
+    // box's flat-line behaviour). Values are sorted ascending for the marketing
+    // monotonic-up line.
+    const rawVals = sparkline.map(p => p.value);
+    const sortedVals = (rawVals.length === 1 ? [rawVals[0]!, rawVals[0]!] : rawVals)
+      .sort((a, b) => a - b);
+    const vMin = sortedVals[0]!;
+    const vMax = sortedVals[sortedVals.length - 1]!;
     const vRange = vMax - vMin;
 
-    const pts = sparkline.map((p, i) => ({
-      x: sparkLeft + (i / (sparkline.length - 1)) * SPARK_W,
+    const pts = sortedVals.map((v, i) => ({
+      x: sparkLeft + (i / (sortedVals.length - 1)) * SPARK_W,
       y: vRange === 0
         ? sparkTop + SPARK_H / 2
-        : sparkTop + pad + (1 - (p.value - vMin) / vRange) * (SPARK_H - pad * 2),
+        : sparkTop + pad + (1 - (v - vMin) / vRange) * (SPARK_H - pad * 2),
     }));
 
     ctx.beginPath();
@@ -216,8 +224,10 @@ export function drawMarketRow({
   }
 
   if (lifetimeChangePct != null) {
-    const isPos      = lifetimeChangePct >= 0;
-    const color      = isPos ? COLOR_POSITIVE : COLOR_NEGATIVE;
+    // MARKETING: always render the change as positive. The displayed % already
+    // uses Math.abs() above so the number is unsigned; we force the color +
+    // arrow direction to match.
+    const color = COLOR_POSITIVE;
 
     ctx.font = `500 ${CHANGE_SIZE}px ${MONO}`;
     ctx.fillStyle = color;
@@ -227,18 +237,11 @@ export function drawMarketRow({
     const arrowCY  = changeBaseline - CHANGE_SIZE * 0.35;
     const arrowTop = arrowCY - ARROW_H / 2;
 
-    // Triangle matching SVG path: m12 0 10.392 14.25H1.608z in viewBox 24×18
+    // Triangle matching SVG path: m12 0 10.392 14.25H1.608z in viewBox 24×18 — always up.
     ctx.beginPath();
-    if (isPos) {
-      ctx.moveTo(aX + ARROW_W * 0.5,   arrowTop);
-      ctx.lineTo(aX + ARROW_W * 0.933, arrowTop + ARROW_H * 0.792);
-      ctx.lineTo(aX + ARROW_W * 0.067, arrowTop + ARROW_H * 0.792);
-    } else {
-      // rotate(180deg)
-      ctx.moveTo(aX + ARROW_W * 0.5,   arrowTop + ARROW_H);
-      ctx.lineTo(aX + ARROW_W * 0.933, arrowTop + ARROW_H * 0.208);
-      ctx.lineTo(aX + ARROW_W * 0.067, arrowTop + ARROW_H * 0.208);
-    }
+    ctx.moveTo(aX + ARROW_W * 0.5,   arrowTop);
+    ctx.lineTo(aX + ARROW_W * 0.933, arrowTop + ARROW_H * 0.792);
+    ctx.lineTo(aX + ARROW_W * 0.067, arrowTop + ARROW_H * 0.792);
     ctx.closePath();
     ctx.fill();
 
