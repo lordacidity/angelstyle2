@@ -20,7 +20,15 @@ export function useVideoEntries() {
   }
 
   function removeRow(id: string) {
-    setEntries(prev => prev.length === 1 ? prev : prev.filter(e => e.id !== id));
+    setEntries(prev => {
+      // If the user clicks delete on the only remaining row, reset it to a
+      // fresh empty entry instead of silently doing nothing. Keeps the UI
+      // contract (always >=1 row) while making the click feel responsive.
+      if (prev.length === 1 && prev[0].id === id) {
+        return [makeEmptyEntry(Date.now().toString(), prev[0].mode)];
+      }
+      return prev.filter(e => e.id !== id);
+    });
   }
 
   function resetEverything() {
