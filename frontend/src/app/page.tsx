@@ -12,6 +12,7 @@ import { CanvasGrid } from './components/CanvasGrid';
 import { ErrorBoundary } from './components/ErrorBoundary';
 import { GoogleSheetsModal } from './components/GoogleSheetsModal';
 import { GRID_BG_STYLE } from '@/lib/ui-constants';
+import { makeEmptyEntry } from '@/lib/entry';
 import type { AppSection, VideoMode } from './types';
 
 const AiCardsSection = lazy(() =>
@@ -93,6 +94,13 @@ export default function Home() {
     setActiveSection('template');
   }
 
+  // "Clear" in the media toolbar: wipe all rows back to one empty entry (keeping
+  // the current template mode) and stay on the media insert screen, so the user
+  // lands right back at the empty link / caption / context form.
+  function handleClearAll() {
+    setEntries(prev => [makeEmptyEntry('1', prev[0]?.mode ?? 'twitter')]);
+  }
+
   return (
     <div className="flex min-h-screen bg-black text-white">
       <Sidebar
@@ -154,6 +162,7 @@ export default function Home() {
                 brand={brand}
                 onAddRow={addRow}
                 onRemoveRow={removeRow}
+                onClearAll={handleClearAll}
                 onDownloadAll={downloadAll}
                 onHandleVideoError={handleVideoError}
                 onUpdateEntry={updateEntry}

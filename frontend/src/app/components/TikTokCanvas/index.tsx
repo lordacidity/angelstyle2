@@ -10,7 +10,8 @@ import {
 import type { Box, TikTokCanvasProps, TikTokCanvasRef } from './types';
 import { drawHeaderOnContext } from './drawing/drawHeader';
 import { drawMarketRow, MARKET_ROW_H, MARKET_ROW_H_SMALL, CTA_TOP_GAP, CTA_LINK_AREA_H } from './drawing/drawMarketRow';
-import { countCaptionLines, countSonotradeCaptionLines } from './drawing/countCaptionLines';
+import { countCaptionLines, countSonotradeCaptionLines, CAPTION_EMOJI_SIZE } from './drawing/countCaptionLines';
+import { wrapRichText, drawRichLine } from '@/lib/emoji';
 import { VideoOverlays } from './ui/VideoOverlays';
 import { CanvasHandles } from './ui/CanvasHandles';
 import { useVideoLoading } from './hooks/useVideoLoading';
@@ -20,6 +21,12 @@ import { useRecording } from './hooks/useRecording';
 
 export type { TikTokCanvasRef, MarketData, SparkPoint } from './types';
 
+// Vertical split of the leftover black space around the block: the space ABOVE
+// the block is 1.5 parts to the 2 parts BELOW it (top : bottom = 1.5 : 2).
+const TOP_RATIO = 1.5;
+const BOTTOM_RATIO = 2;
+const TOP_FRAC = TOP_RATIO / (TOP_RATIO + BOTTOM_RATIO); // ≈ 0.4286
+
 export const TikTokCanvas = forwardRef<TikTokCanvasRef, TikTokCanvasProps>(function TikTokCanvas({
   videoSrc,
   videoId,
@@ -27,8 +34,8 @@ export const TikTokCanvas = forwardRef<TikTokCanvasRef, TikTokCanvasProps>(funct
   onVideoError,
   brand = 'sonotrade',
   overlayLogoSrc = '/templatelogo.png',
-  overlayDisplayName = 'Sonotrade',
-  overlayHandle = '@SonotradeHQ',
+  overlayDisplayName = 'Pauv',
+  overlayHandle = '@Pauv',
   overlayVerified = true,
   overlayCaption = '',
   marketData = null,
@@ -172,17 +179,7 @@ export const TikTokCanvas = forwardRef<TikTokCanvasRef, TikTokCanvasProps>(funct
       ctx.font = '400 42px Chirp, "Comic Sans MS", cursive';
       for (const userLine of overlayCaption.split('\n')) {
         if (!userLine) { captionGroups.push(null); continue; }
-        const words = userLine.split(' ');
-        const wrapped: string[] = [];
-        let cur = '';
-        for (const word of words) {
-          const test = cur + word + ' ';
-          if (ctx.measureText(test).width > CAPTION_MAX_W && cur) {
-            wrapped.push(cur); cur = word + ' ';
-          } else { cur = test; }
-        }
-        if (cur) wrapped.push(cur);
-        captionGroups.push(wrapped);
+        captionGroups.push(wrapRichText(ctx, userLine, CAPTION_MAX_W, CAPTION_EMOJI_SIZE));
       }
     }
     const captionLineCount = captionGroups.reduce((n, g) => n + (g === null ? 1 : g.length), 0);
@@ -230,7 +227,7 @@ export const TikTokCanvas = forwardRef<TikTokCanvasRef, TikTokCanvasProps>(funct
               const isLastGroup = gi === captionGroups.length - 1;
               if (group === null) { cy += CAPTION_LINE_HEIGHT; continue; }
               for (let wi = 0; wi < group.length; wi++) {
-                ctx.fillText(group[wi], CAPTION_PAD_X, cy);
+                drawRichLine(ctx, group[wi], CAPTION_PAD_X, cy, CAPTION_EMOJI_SIZE);
                 if (wi < group.length - 1) cy += CAPTION_LINE_HEIGHT;
               }
               if (!isLastGroup) cy += CAPTION_LINE_HEIGHT;
@@ -340,12 +337,14 @@ export const TikTokCanvas = forwardRef<TikTokCanvasRef, TikTokCanvasProps>(funct
   }
 
   // Auto-size + position the crop box so the whole block (header → video → CTA)
-  // sits with the black space ABOVE it always half the black space below it
-  // (top : bottom = 1 : 2). The fixed chrome (header + CTA) is constant, so the
-  // leftover black space is CANVAS_H - chrome - videoHeight; split 1/3 above and
-  // 2/3 below it gives blockTop = leftover / 3. The video is shown at the
-  // template's full width; its height is the natural height at that width, capped
-  // to the frame so nothing is cut off and blockTop never goes negative. The draw
+  // sits with the black space ABOVE it 1.5 parts to the 2 parts below it
+  // (top : bottom = 1.5 : 2). The fixed chrome (header + CTA) is constant, so the
+  // leftover black space is CANVAS_H - splitChrome - videoHeight; blockTop is
+  // TOP_FRAC of that leftover. The "link in bio" line is intentionally left OUT
+  // of splitChrome so it reads as part of the bottom black space, not the block.
+  // The video is shown at the template's full width; its height is the natural
+  // height at that width, capped to the frame (using the FULL chrome incl. the
+  // link line) so nothing is cut off and blockTop never goes negative. The draw
   // loop cover-fills this box, so the frame is always tight around the video — no
   // black bars, no distortion. The header draws at `y - headerHeight + 4`, so
   // y = blockTop + headerHeight - 4 puts the header's top edge exactly at blockTop.
@@ -353,9 +352,11 @@ export const TikTokCanvas = forwardRef<TikTokCanvasRef, TikTokCanvasProps>(funct
     const video = videoRef.current;
     const headerHeight = computeHeaderHeight();
     const chrome = headerHeight + ctaHeight();
+    // Chrome for the top:bottom split excludes the "link in bio" line.
+    const splitChrome = chrome - (marketData ? CTA_LINK_AREA_H : 0);
 
     if (!video || !video.videoWidth || !video.videoHeight) {
-      const blockTop = Math.max(0, (CANVAS_H - chrome) / 3);
+      const blockTop = Math.max(0, (CANVAS_H - splitChrome) * TOP_FRAC);
       const b = { ...boxRef.current, y: blockTop + headerHeight - 4 };
       boxRef.current = b;
       setBox({ ...b });
@@ -365,7 +366,7 @@ export const TikTokCanvas = forwardRef<TikTokCanvasRef, TikTokCanvasProps>(funct
     const boxW = brand === 'clean' ? CANVAS_W : VIDEO_TARGET_W;
     const naturalH = video.videoHeight * (boxW / video.videoWidth);
     const boxH = Math.max(MIN_DIM, Math.min(naturalH, CANVAS_H - chrome));
-    const blockTop = Math.max(0, (CANVAS_H - chrome - boxH) / 3);
+    const blockTop = Math.max(0, (CANVAS_H - splitChrome - boxH) * TOP_FRAC);
     const y = blockTop + headerHeight - 4;
 
     const b = { x: (CANVAS_W - boxW) / 2, y, w: boxW, h: boxH };
@@ -373,7 +374,7 @@ export const TikTokCanvas = forwardRef<TikTokCanvasRef, TikTokCanvasProps>(funct
     setBox({ ...b });
   }
 
-  // Re-apply the 1:2 top:bottom split using the CURRENT photo size (unlike
+  // Re-apply the 1.5:2 top:bottom split using the CURRENT photo size (unlike
   // anchorBlockTop, which re-fits the photo to its natural height). Used when the
   // chrome changes height — CTA toggled small/large, caption edited — or after a
   // manual resize, so the block re-centers vertically without resetting the size
@@ -381,8 +382,10 @@ export const TikTokCanvas = forwardRef<TikTokCanvasRef, TikTokCanvasProps>(funct
   function repositionBlock() {
     const headerHeight = computeHeaderHeight();
     const chrome = headerHeight + ctaHeight();
+    // Chrome for the top:bottom split excludes the "link in bio" line.
+    const splitChrome = chrome - (marketData ? CTA_LINK_AREA_H : 0);
     const boxH = boxRef.current.h;
-    const blockTop = Math.max(0, (CANVAS_H - chrome - boxH) / 3);
+    const blockTop = Math.max(0, (CANVAS_H - splitChrome - boxH) * TOP_FRAC);
     const b = { ...boxRef.current, y: blockTop + headerHeight - 4 };
     boxRef.current = b;
     setBox({ ...b });

@@ -1,7 +1,8 @@
 'use client';
 
-import type { MutableRefObject, Dispatch, SetStateAction } from 'react';
+import type { MutableRefObject, Dispatch, SetStateAction, RefObject } from 'react';
 import { useState, useRef, useEffect, useMemo, useCallback, memo } from 'react';
+import { createPortal } from 'react-dom';
 import { TikTokCanvas } from './TikTokCanvas';
 import type { TikTokCanvasRef, MarketData, SparkPoint } from './TikTokCanvas';
 import CarouselCanvas, { CAROUSEL_PREVIEW_W } from './CarouselCanvas';
@@ -14,6 +15,7 @@ import type { RecordingState } from './TikTokCanvas/types';
 import { VideoControlsBar } from './VideoControlsBar';
 import { EditablePct } from './EditablePct';
 import { bestVideoUrl } from '@/lib/utils';
+import { EMOJIS, emojiSrc, emojiSrcForChar, splitEmojiTokens, preloadEmojiImages } from '@/lib/emoji';
 import { BTN_ICON, BTN_TEXT } from '@/lib/ui-constants';
 import {
   UploadIcon, ArrowRightIcon, SpinnerIcon,
@@ -48,6 +50,7 @@ interface CanvasGridProps {
   brand: BrandProps;
   onAddRow: (carouselSlideType?: SlideType) => void;
   onRemoveRow: (id: string) => void;
+  onClearAll: () => void;
   onDownloadAll: () => void;
   onHandleVideoError: (id: string) => void;
   onUpdateEntry: (id: string, field: 'url' | 'caption' | 'context', value: string) => void;
@@ -254,6 +257,101 @@ function ImagePlaceholderIcon() {
   );
 }
 
+// ── Emoji picker (Apple glyphs) ────────────────────────────────────────────────
+// Opens under the caption box when the user types "@". Pinned emoji (😂 🔥) sort
+// to the front; a search box at the top filters by name/keyword. Picking inserts
+// the unicode char back into the caption (replacing the "@query").
+
+function EmojiPicker({
+  anchorRef,
+  query,
+  onQueryChange,
+  onPick,
+  onClose,
+}: {
+  anchorRef: RefObject<HTMLTextAreaElement | null>;
+  query: string;
+  onQueryChange: (q: string) => void;
+  onPick: (char: string) => void;
+  onClose: () => void;
+}) {
+  const ref = useRef<HTMLDivElement>(null);
+  // Track the caption box position so the portal can sit just under it. Recompute
+  // on scroll/resize so it stays anchored.
+  const [rect, setRect] = useState<DOMRect | null>(null);
+  useEffect(() => {
+    const el = anchorRef.current;
+    if (!el) return;
+    const update = () => setRect(el.getBoundingClientRect());
+    update();
+    window.addEventListener('scroll', update, true);
+    window.addEventListener('resize', update);
+    return () => {
+      window.removeEventListener('scroll', update, true);
+      window.removeEventListener('resize', update);
+    };
+  }, [anchorRef]);
+
+  useEffect(() => {
+    function onDocMouseDown(e: MouseEvent) {
+      const t = e.target as Node;
+      if (ref.current && !ref.current.contains(t) && anchorRef.current && !anchorRef.current.contains(t)) onClose();
+    }
+    document.addEventListener('mousedown', onDocMouseDown);
+    return () => document.removeEventListener('mousedown', onDocMouseDown);
+  }, [onClose, anchorRef]);
+
+  if (!rect || typeof document === 'undefined') return null;
+
+  const q = query.trim().toLowerCase();
+  const results = EMOJIS
+    .filter(e => !q || e.name.toLowerCase().includes(q) || e.keywords.some(k => k.includes(q)))
+    .sort((a, b) => (b.pinned ? 1 : 0) - (a.pinned ? 1 : 0));
+
+  // Rendered in a portal on document.body so no ancestor's `overflow-hidden`
+  // clips it — it floats on top of everything.
+  return createPortal(
+    <div
+      ref={ref}
+      className="fixed z-[1000] rounded-lg bg-zinc-900 border border-zinc-700 shadow-2xl overflow-hidden"
+      style={{ left: rect.left, top: rect.bottom + 4, width: Math.max(rect.width, 300) }}
+    >
+      <div className="p-2 border-b border-zinc-800">
+        <input
+          value={query}
+          onChange={e => onQueryChange(e.target.value)}
+          placeholder="Search emoji…"
+          className="w-full bg-zinc-800 border border-zinc-700 rounded-md px-2.5 py-1.5 text-xs text-zinc-200 placeholder-zinc-500 outline-none focus:border-zinc-500"
+        />
+      </div>
+      <div className="p-2 max-h-[220px] overflow-y-auto">
+        {results.length === 0 ? (
+          <p className="text-xs text-zinc-600 text-center py-4">No emoji found.</p>
+        ) : (
+          <div className="grid grid-cols-8 gap-1">
+            {results.map(e => (
+              <button
+                key={e.unified}
+                type="button"
+                title={e.name}
+                onMouseDown={ev => ev.preventDefault()}
+                onClick={() => onPick(e.char)}
+                className="relative flex items-center justify-center rounded-md hover:bg-zinc-800 transition-colors"
+                style={{ width: 34, height: 34 }}
+              >
+                {e.pinned && <span className="absolute top-0.5 right-0.5 w-1 h-1 rounded-full bg-amber-400" />}
+                {/* eslint-disable-next-line @next/next/no-img-element */}
+                <img src={emojiSrc(e.unified)} alt={e.name} width={24} height={24} draggable={false} />
+              </button>
+            ))}
+          </div>
+        )}
+      </div>
+    </div>,
+    document.body,
+  );
+}
+
 // ── Video input card ──────────────────────────────────────────────────────────
 
 function VideoInputCard({
@@ -269,6 +367,44 @@ function VideoInputCard({
 }) {
   const fileRef = useRef<HTMLInputElement>(null);
   const hasLocal = !!entry.localVideoSrc;
+
+  // ── Emoji picker (type "@" in the caption) ──────────────────────────────────
+  const captionRef = useRef<HTMLTextAreaElement>(null);
+  const captionOverlayRef = useRef<HTMLDivElement>(null);
+  // When set, the picker is open: `start` is the index of the triggering "@",
+  // `query` is the text typed after it (used as the search term).
+  const [emojiTrigger, setEmojiTrigger] = useState<{ start: number; query: string } | null>(null);
+
+  useEffect(() => { preloadEmojiImages(); }, []);
+
+  // Detect an active "@word" being typed right before the caret. The "@" must be
+  // at the start of the caption or follow whitespace, so emails/handles inside a
+  // word don't trigger it.
+  function detectEmojiTrigger() {
+    const ta = captionRef.current;
+    if (!ta) return;
+    const caret = ta.selectionStart ?? 0;
+    const value = ta.value;
+    let i = caret - 1;
+    while (i >= 0 && value[i] !== '@' && !/\s/.test(value[i])) i--;
+    if (i < 0 || value[i] !== '@' || (i > 0 && !/\s/.test(value[i - 1]))) {
+      setEmojiTrigger(null);
+      return;
+    }
+    setEmojiTrigger({ start: i, query: value.slice(i + 1, caret) });
+  }
+
+  function insertEmoji(char: string) {
+    const ta = captionRef.current;
+    if (!ta || !emojiTrigger) return;
+    const caret = ta.selectionStart ?? ta.value.length;
+    const before = ta.value.slice(0, emojiTrigger.start);
+    const after = ta.value.slice(caret);
+    onUpdateField('caption', before + char + after);
+    setEmojiTrigger(null);
+    const pos = before.length + char.length;
+    requestAnimationFrame(() => { ta.focus(); ta.setSelectionRange(pos, pos); });
+  }
 
   function handleFile(e: React.ChangeEvent<HTMLInputElement>) {
     const file = e.target.files?.[0];
@@ -338,15 +474,56 @@ function VideoInputCard({
           )}
         </div>
 
-        <div className="px-3 py-2 border-b border-zinc-800">
-          <textarea
-            value={entry.caption}
-            onChange={e => onUpdateField('caption', e.target.value)}
-            onKeyDown={e => { if ((e.metaKey || e.ctrlKey) && e.key === 'z') e.preventDefault(); }}
-            placeholder="Caption…"
-            rows={2}
-            className="w-full bg-transparent text-sm text-white placeholder-zinc-600 outline-none resize-none leading-relaxed"
-          />
+        <div className="px-3 py-2 border-b border-zinc-800 relative">
+          {/* The textarea handles editing/caret/selection but renders OS (blob)
+              emoji, so its text is made transparent and an aligned overlay behind
+              it paints the same text with Apple emoji PNGs. */}
+          <div className="relative">
+            <div
+              ref={captionOverlayRef}
+              aria-hidden
+              className="absolute inset-0 z-0 pointer-events-none overflow-hidden text-sm text-white leading-relaxed"
+              style={{ whiteSpace: 'pre-wrap', overflowWrap: 'break-word', wordBreak: 'break-word' }}
+            >
+              {entry.caption
+                ? splitEmojiTokens(entry.caption).map((tok, i) => {
+                    if (tok.type === 'text') return <span key={i}>{tok.value}</span>;
+                    const src = emojiSrcForChar(tok.value);
+                    return src
+                      ? (
+                        // eslint-disable-next-line @next/next/no-img-element
+                        <img key={i} src={src} alt={tok.value} draggable={false}
+                          style={{ display: 'inline-block', width: '1.25em', height: '1.25em', verticalAlign: '-0.3em' }} />
+                      )
+                      : <span key={i}>{tok.value}</span>;
+                  })
+                : null}
+            </div>
+            <textarea
+              ref={captionRef}
+              value={entry.caption}
+              onChange={e => { onUpdateField('caption', e.target.value); detectEmojiTrigger(); }}
+              onKeyUp={detectEmojiTrigger}
+              onClick={detectEmojiTrigger}
+              onScroll={() => { if (captionOverlayRef.current && captionRef.current) captionOverlayRef.current.scrollTop = captionRef.current.scrollTop; }}
+              onKeyDown={e => {
+                if ((e.metaKey || e.ctrlKey) && e.key === 'z') e.preventDefault();
+                if (e.key === 'Escape' && emojiTrigger) { e.preventDefault(); setEmojiTrigger(null); }
+              }}
+              placeholder="Caption…  (type @ for emoji)"
+              rows={2}
+              className="relative z-10 w-full p-0 border-0 bg-transparent text-sm text-transparent caret-white placeholder-zinc-600 outline-none resize-none leading-relaxed"
+            />
+          </div>
+          {emojiTrigger && (
+            <EmojiPicker
+              anchorRef={captionRef}
+              query={emojiTrigger.query}
+              onQueryChange={q => setEmojiTrigger(t => (t ? { ...t, query: q } : t))}
+              onPick={insertEmoji}
+              onClose={() => setEmojiTrigger(null)}
+            />
+          )}
         </div>
 
         {/* Optional context fed to the social-caption generator — background,
@@ -505,7 +682,7 @@ const CAROUSEL_SLIDE_TYPES: SlideType[] = ['main', 'supporting_1', 'supporting_2
 
 export function CanvasGrid({
   entries, canvasRefsMap, carouselRefsMap, brand,
-  onAddRow, onRemoveRow, onDownloadAll, onHandleVideoError,
+  onAddRow, onRemoveRow, onClearAll, onDownloadAll, onHandleVideoError,
   onUpdateEntry, onUpdateCarouselEntry, onUpdateLocalVideo,
   onFetchVideo, onSetCarouselSubMode, userId,
   settingsMap, setSettingsMap,
@@ -640,6 +817,68 @@ export function CanvasGrid({
     }
   }, []);
 
+  // Person picker popup state — lets the user manually override whoever the CTA
+  // auto-pick chose. The full Pauv roster is fetched once and cached, then
+  // filtered client-side by name / ticker / industry.
+  const [personPickerEntryId, setPersonPickerEntryId] = useState<string | null>(null);
+  const [personPickerQuery,   setPersonPickerQuery]   = useState('');
+  const [allTalents,          setAllTalents]          = useState<Talent[] | null>(null);
+  const [talentsLoading,      setTalentsLoading]      = useState(false);
+
+  const openPersonPicker = useCallback((entryId: string) => {
+    setPersonPickerEntryId(entryId);
+    setPersonPickerQuery('');
+    setAllTalents(prev => {
+      if (prev) return prev;            // already cached — don't refetch
+      setTalentsLoading(true);
+      fetch('/api/ai/talents')
+        .then(r => r.json())
+        .then((data: Talent[] | { error?: string }) => { if (Array.isArray(data)) setAllTalents(data); })
+        .catch(() => {})
+        .finally(() => setTalentsLoading(false));
+      return prev;
+    });
+  }, []);
+
+  // Drop a chosen talent into the Market widget for an entry — mirrors exactly
+  // what the auto-pick does so a manual override behaves identically.
+  const applyTalent = useCallback((entryId: string, t: Talent) => {
+    setMarketMap(prev => ({ ...prev, [entryId]: t }));
+    setSparklineMap(prev => ({ ...prev, [entryId]: prev[entryId] ?? generateFallbackSparkline(t.ticker) }));
+    fetchSparkline(entryId, t.ticker);
+    setMarketOverrideMap(prev => ({
+      ...prev,
+      [entryId]: {
+        name: t.name, industry: t.industry ?? '',
+        photo_url: t.photo_url,
+        priceUsd: t.price.usd?.toFixed(2) ?? '',
+        lifetimeChangePct: syntheticPctForTicker(t.ticker).toFixed(1),
+      },
+    }));
+    setPersonPickerEntryId(null);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [fetchSparkline]);
+
+  // "Clear" (top-right) — wipe every per-entry working state and reset the rows
+  // to a single fresh entry, dropping the user back to the empty insert form
+  // (link + caption + context). The parent resets `entries`; we clear the
+  // transient maps CanvasGrid owns so nothing from the old run lingers.
+  const handleClearAll = useCallback(() => {
+    setScaleMap({});
+    setBgStateMap({});
+    setRecordingStateMap({});
+    setCarouselRecordingStateMap({});
+    setVideoZoomMap({});
+    setBlockTopPctMap({});
+    setSocialCaptionMap({});
+    setMarketMap({});
+    setMarketSizeMap({});
+    setMarketOverrideMap({});
+    setSparklineMap({});
+    setSelectedId('1');
+    onClearAll();
+  }, [onClearAll]);
+
   // Build a MarketData object merging the selected talent with any user overrides
   const getMarketData = useCallback((entryId: string): MarketData | null => {
     const sel = marketMap[entryId];
@@ -720,6 +959,10 @@ export function CanvasGrid({
             videoTitle:       entry.data?.title || undefined,
             author:           entry.data?.author?.nickname || undefined,
             context:          entry.context || undefined,
+            brand: {
+              displayName: brand.displayName || 'Pauv',
+              handle:      brand.handle || '@Pauv',
+            },
           }),
         });
         if (cr.ok) {
@@ -762,7 +1005,7 @@ export function CanvasGrid({
       }));
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [fetchSparkline]);
+  }, [fetchSparkline, brand.displayName, brand.handle]);
 
   // "Next" in the media tab: fetch the video, then — for video posts — auto-run
   // the caption generator (which itself chains the CTA pick). One action instead
@@ -994,6 +1237,15 @@ export function CanvasGrid({
             </button>
           )}
           {/* Download All moved into the export bar (bottom-right) — appears after Export is pressed. */}
+          {/* Clear — reset everything back to the empty insert form. */}
+          <button
+            onClick={handleClearAll}
+            title="Clear everything and start over"
+            className="flex items-center gap-1.5 rounded-md border border-zinc-800 px-2.5 py-1.5 text-xs font-medium text-zinc-400 hover:text-zinc-100 hover:border-zinc-600 transition-colors"
+          >
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M3 6h18"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg>
+            Clear
+          </button>
         </div>
       </div>
 
@@ -1192,8 +1444,8 @@ export function CanvasGrid({
                           onVideoError={() => onHandleVideoError(entry.id)}
                           brand={entry.mode === 'caption' ? 'clean' : 'sonotrade'}
                           overlayLogoSrc={brand.logoSrc || '/templatelogo.png'}
-                          overlayDisplayName={brand.displayName || 'Sonotrade'}
-                          overlayHandle={brand.handle || '@SonotradeHQ'}
+                          overlayDisplayName={brand.displayName || 'Pauv'}
+                          overlayHandle={brand.handle || '@Pauv'}
                           overlayVerified={true}
                           overlayCaption={entry.caption}
                           marketData={entry.mode === 'twitter' ? getMarketData(entry.id) : null}
@@ -1236,6 +1488,15 @@ export function CanvasGrid({
                                   );
                                 })}
                               </div>
+                              {/* Change person — manually override the auto-picked talent. */}
+                              <button
+                                onClick={() => openPersonPicker(entry.id)}
+                                title="Pick a different person from the Pauv roster"
+                                className="flex items-center gap-1 px-2 py-0.5 rounded-md border border-zinc-800 text-[10px] font-medium text-zinc-400 hover:text-zinc-100 hover:border-zinc-600 transition-colors"
+                              >
+                                <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="m22 8-3 3-1.5-1.5"/></svg>
+                                Change
+                              </button>
                               {selected && (
                                 <button
                                   onClick={() => {
@@ -1343,8 +1604,8 @@ export function CanvasGrid({
                                     );
                                   })()}
                                 </div>
-                                {/* "Link in bio" — light grey, centered under the CTA */}
-                                <div style={{ textAlign: 'center', color: 'rgba(255,255,255,0.5)', fontSize: 12, paddingBottom: 8 }}>Link in bio</div>
+                                {/* "link in bio to trade" — light grey, centered under the CTA */}
+                                <div style={{ textAlign: 'center', color: 'rgba(255,255,255,0.5)', fontSize: 12, paddingBottom: 8 }}>link in bio to trade</div>
                                 {/* Edit fields */}
                                 <div className="px-3 py-2.5 flex flex-col gap-2">
                                   <div className="flex gap-2">
@@ -1537,6 +1798,71 @@ export function CanvasGrid({
           </div>
         </div>
       )}
+
+      {/* Person picker — manually choose which Pauv talent the CTA features. */}
+      {personPickerEntryId && (() => {
+        const q = personPickerQuery.trim().toLowerCase();
+        const results = (allTalents ?? [])
+          .filter(t => !q
+            || t.name.toLowerCase().includes(q)
+            || t.ticker.toLowerCase().includes(q)
+            || (t.industry ?? '').toLowerCase().includes(q))
+          .slice(0, 60);
+        return (
+          <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70" onClick={() => setPersonPickerEntryId(null)}>
+            <div className="bg-zinc-900 border border-zinc-700 rounded-xl w-[520px] max-h-[80vh] flex flex-col shadow-2xl" onClick={e => e.stopPropagation()}>
+              {/* Header */}
+              <div className="flex items-center justify-between px-4 py-3 border-b border-zinc-800 shrink-0">
+                <span className="text-sm font-semibold text-zinc-100">Change person</span>
+                <button onClick={() => setPersonPickerEntryId(null)} className="text-zinc-500 hover:text-zinc-200 transition-colors">
+                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+                </button>
+              </div>
+              {/* Search */}
+              <div className="px-4 py-3 border-b border-zinc-800 shrink-0">
+                <input
+                  autoFocus
+                  value={personPickerQuery}
+                  onChange={e => setPersonPickerQuery(e.target.value)}
+                  placeholder="Search by name, ticker, or industry…"
+                  className="w-full bg-zinc-800 border border-zinc-700 rounded-md px-3 py-1.5 text-sm text-zinc-200 placeholder-zinc-500 outline-none focus:border-zinc-500"
+                />
+              </div>
+              {/* List */}
+              <div className="overflow-y-auto flex-1 p-2">
+                {talentsLoading && (
+                  <p className="text-sm text-zinc-600 text-center py-8">Loading roster…</p>
+                )}
+                {!talentsLoading && results.length === 0 && (
+                  <p className="text-sm text-zinc-600 text-center py-8">No matches.</p>
+                )}
+                {!talentsLoading && results.map(t => (
+                  <button
+                    key={t.id}
+                    onClick={() => applyTalent(personPickerEntryId, t)}
+                    className="w-full flex items-center gap-3 px-2 py-2 rounded-lg hover:bg-zinc-800 transition-colors text-left"
+                  >
+                    <span className="relative shrink-0 flex items-center justify-center rounded-lg overflow-hidden" style={{ width: 36, height: 36, background: '#1e1e1e', border: '1px solid #2a2a2a' }}>
+                      <span style={{ fontSize: 9, color: '#52525b', fontWeight: 600 }}>
+                        {t.name.split(' ').map(w => w[0]).filter(Boolean).slice(0, 2).join('').toUpperCase()}
+                      </span>
+                      {t.photo_url && (
+                        // eslint-disable-next-line @next/next/no-img-element
+                        <img src={t.photo_url} alt="" className="absolute inset-0 w-full h-full object-cover" onError={e => { (e.currentTarget as HTMLImageElement).style.display = 'none'; }} />
+                      )}
+                    </span>
+                    <span className="flex-1 min-w-0 flex flex-col">
+                      <span className="text-sm text-zinc-100 truncate">{t.name}</span>
+                      <span className="text-[11px] text-zinc-500 truncate">{t.industry || 'Unknown'}</span>
+                    </span>
+                    <span className="shrink-0 text-[11px] font-mono text-zinc-500">{t.ticker}</span>
+                  </button>
+                ))}
+              </div>
+            </div>
+          </div>
+        );
+      })()}
 
       {/* ── Settings panel — fixed right column ── */}
       {isSelectedCarousel && selectedEntry && (

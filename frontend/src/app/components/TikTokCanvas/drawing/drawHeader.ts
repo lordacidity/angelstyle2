@@ -10,7 +10,8 @@ import {
   VERIFIED_TICK_SVG,
 } from '../constants';
 import type { DrawHeaderOptions } from '../types';
-import { countSonotradeCaptionLines, SONOTRADE_CAP_FONT } from './countCaptionLines';
+import { countSonotradeCaptionLines, SONOTRADE_CAP_FONT, CAPTION_EMOJI_SIZE } from './countCaptionLines';
+import { wrapRichText, drawRichLine } from '@/lib/emoji';
 
 const CHIRP = 'Chirp, "Twitter Chirp", -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif';
 
@@ -130,20 +131,8 @@ export function drawHeaderOnContext({
     ctx.fillStyle = 'rgb(231, 233, 234)';
 
     let y = captionBaseline;
-    for (const userLine of overlayCaption.split('\n')) {
-      if (!userLine) { y += CAPTION_LINE_HEIGHT; continue; }
-      let line = '';
-      for (const word of userLine.split(' ')) {
-        const test = line + word + ' ';
-        if (ctx.measureText(test).width > SONOTRADE_CAPTION_MAX_W && line) {
-          ctx.fillText(line.trimEnd(), captionX, y);
-          line = word + ' ';
-          y += CAPTION_LINE_HEIGHT;
-        } else {
-          line = test;
-        }
-      }
-      ctx.fillText(line.trimEnd(), captionX, y);
+    for (const line of wrapRichText(ctx, overlayCaption, SONOTRADE_CAPTION_MAX_W, CAPTION_EMOJI_SIZE)) {
+      drawRichLine(ctx, line, captionX, y, CAPTION_EMOJI_SIZE);
       y += CAPTION_LINE_HEIGHT;
     }
   }

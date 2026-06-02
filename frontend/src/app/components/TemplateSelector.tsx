@@ -361,7 +361,7 @@ export function TemplateSelector({
               type="text"
               value={displayName}
               onChange={e => setDisplayName(e.target.value)}
-              placeholder="e.g. Sonotrade"
+              placeholder="e.g. Pauv"
               className="w-full bg-zinc-900 border border-zinc-800 focus:border-zinc-600 rounded-lg px-3 py-2.5 text-sm text-white placeholder-zinc-600 outline-none transition-colors"
             />
           </div>
@@ -371,7 +371,7 @@ export function TemplateSelector({
               type="text"
               value={handle}
               onChange={e => setHandle(e.target.value)}
-              placeholder="e.g. @SonotradeHQ"
+              placeholder="e.g. @Pauv"
               className="w-full bg-zinc-900 border border-zinc-800 focus:border-zinc-600 rounded-lg px-3 py-2.5 text-sm text-white placeholder-zinc-600 outline-none transition-colors"
             />
           </div>

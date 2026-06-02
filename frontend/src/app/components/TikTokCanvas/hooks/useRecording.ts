@@ -12,7 +12,8 @@ import {
 } from '../constants';
 import { drawHeaderOnContext } from '../drawing/drawHeader';
 import { drawMarketRow } from '../drawing/drawMarketRow';
-import { countCaptionLines, countSonotradeCaptionLines } from '../drawing/countCaptionLines';
+import { countCaptionLines, countSonotradeCaptionLines, CAPTION_EMOJI_SIZE } from '../drawing/countCaptionLines';
+import { wrapRichText, drawRichLine, preloadEmojiImages } from '@/lib/emoji';
 import type { Box, MarketData } from '../types';
 
 export interface UseRecordingConfig {
@@ -66,6 +67,10 @@ export function useRecording(config: UseRecordingConfig) {
     setIsRecording(true);
     setRecProgress(0);
     setRecStatus('Initializing...');
+
+    // Ensure Apple emoji images are decoded before any frame is drawn, so a
+    // caption with emoji never exports with a missing/native glyph.
+    if (overlayCaption) await preloadEmojiImages();
 
     const isClean = brand === 'clean';
 
@@ -499,30 +504,25 @@ export function useRecording(config: UseRecordingConfig) {
             const { x: ox, y: oy } = videoOffsetRef.current;
 
             if (overlayCaption) {
-              const captionLines = countCaptionLines(offCtx as any, overlayCaption);
+              const CLEAN_EXPORT_FONT = `400 44px Chirp, "Twitter Chirp", -apple-system, BlinkMacSystemFont, sans-serif`;
+              const CLEAN_EXPORT_EMOJI = 44;
+              const padX = HEADER_PADDING_X + 43;
+              const maxWidth = CANVAS_W - padX * 2;
+              // Count + draw with identical font/width/emoji size so the reserved
+              // caption area matches what's actually painted (incl. emoji).
+              const captionLines = countCaptionLines(offCtx as any, overlayCaption, CLEAN_EXPORT_FONT, maxWidth, CLEAN_EXPORT_EMOJI);
               const CAPTION_BOTTOM_OFFSET = 18;
               const CLEAN_PAD_TOP = 44;
               const CLEAN_PAD_BOT = 40;
               const captionAreaH = CLEAN_PAD_TOP + (captionLines * CAPTION_LINE_HEIGHT) + CLEAN_PAD_BOT - CAPTION_BOTTOM_OFFSET;
               const captionAreaY = Math.max(0, cropBox.y - captionAreaH + 4);
 
-              offCtx.font = `400 44px Chirp, "Twitter Chirp", -apple-system, BlinkMacSystemFont, sans-serif`;
+              offCtx.font = CLEAN_EXPORT_FONT;
               offCtx.fillStyle = '#000';
-              const padX = HEADER_PADDING_X + 43;
-              const maxWidth = CANVAS_W - padX * 2;
               let cy = captionAreaY + CLEAN_PAD_TOP + CAPTION_LINE_HEIGHT - 10;
 
-              for (const userLine of overlayCaption.split('\n')) {
-                if (!userLine) { cy += CAPTION_LINE_HEIGHT; continue; }
-                let line = '';
-                for (const word of userLine.split(' ')) {
-                  const test = line + word + ' ';
-                  if (offCtx.measureText(test).width > maxWidth && line) {
-                    offCtx.fillText(line.trimEnd(), padX, cy);
-                    line = word + ' '; cy += CAPTION_LINE_HEIGHT;
-                  } else { line = test; }
-                }
-                offCtx.fillText(line.trimEnd(), padX, cy);
+              for (const line of wrapRichText(offCtx as any, overlayCaption, maxWidth, CLEAN_EXPORT_EMOJI)) {
+                drawRichLine(offCtx as any, line, padX, cy, CLEAN_EXPORT_EMOJI);
                 cy += CAPTION_LINE_HEIGHT;
               }
             }

@@ -137,7 +137,7 @@ export function drawMarketRow({
   const drawLinkInBio = () => {
     ctx.font = `500 ${LINK_SIZE}px ${SANS}`;
     ctx.fillStyle = COLOR_LINK;
-    const txt = 'Link in bio';
+    const txt = 'link in bio to trade';
     const w = ctx.measureText(txt).width;
     ctx.fillText(txt, cx + cw / 2 - w / 2, cy + rowH + LINK_GAP + LINK_SIZE);
   };
