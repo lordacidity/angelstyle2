@@ -12,8 +12,10 @@ export interface VideoCanvasRef {
   resetTrim: () => void;
   resetBox: () => void;
   centerBox: () => void;
+  // Only the TikTok video canvas supports a tunable top anchor; carousel doesn't.
+  setBlockTopPct?: (pct: number) => void;
   getVideoElement: () => HTMLVideoElement | null;
-  getTrimState: () => { trimStart: number; trimEnd: number; duration: number };
+  getTrimState: () => { trimStart: number; trimEnd: number; duration: number; blockTopPct?: number };
   startDownload: () => Promise<void>;
   cancelExport: () => void;
 }
@@ -134,9 +136,15 @@ interface VideoControlsBarProps {
   activeRef:      VideoCanvasRef | null;
   recordingState: RecordingState | null;
   videoSrc:       string | null;
+  onDownloadAll:  () => void;
 }
 
-export function VideoControlsBar({ entryId, activeRef, recordingState, videoSrc }: VideoControlsBarProps) {
+export function VideoControlsBar({ entryId, activeRef, recordingState, videoSrc, onDownloadAll }: VideoControlsBarProps) {
+  // Once Export is pressed for this entry, the full timeline collapses to a slim
+  // status bar (export progress + Download All). Reset whenever the selected
+  // entry changes so each video starts in the full editor again.
+  const [hasExported, setHasExported] = useState(false);
+  useEffect(() => { setHasExported(false); }, [entryId]);
   const [isPlaying,    setIsPlaying]    = useState(false);
   const [currentTime,  setCurrentTime]  = useState(0);
   const [duration,     setDuration]     = useState(0);
@@ -144,6 +152,8 @@ export function VideoControlsBar({ entryId, activeRef, recordingState, videoSrc 
   const [frames,       setFrames]       = useState<string[]>([]);
   const [timelineZoom, setTimelineZoom] = useState(1.0);
   const [selection,    setSelection]    = useState<string | null>(null);
+  // Vertical anchor of the block top, shown as a whole-number percentage.
+  const [topPct,       setTopPct]       = useState(15);
 
   const trimStartRef    = useRef(0);
   const trimEndRef      = useRef(0);
@@ -179,6 +189,7 @@ export function VideoControlsBar({ entryId, activeRef, recordingState, videoSrc 
     const ref = activeRefRef.current;
     if (!ref) return;
     const state = ref.getTrimState();
+    setTopPct(Math.round((state.blockTopPct ?? 0.15) * 100));
     setFrames([]); setTimelineZoom(1.0); timelineZoomRef.current = 1.0;
     setSelection(null);
     setSegments([]); segmentsRef.current = [];
@@ -420,6 +431,39 @@ export function VideoControlsBar({ entryId, activeRef, recordingState, videoSrc 
   const recProgress = recordingState?.recProgress ?? 0;
   const recStatus   = recordingState?.recStatus   ?? '';
 
+  // ── Collapsed export bar — shown once Export is pressed: a single line with
+  // export status on the left and Download All on the right (no timeline).
+  if (hasExported) {
+    return (
+      <div className="shrink-0 mx-3 mb-3 rounded-lg border border-zinc-800 bg-zinc-950 px-5 py-3 flex items-center gap-3">
+        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="text-zinc-500 shrink-0">
+          <circle cx="12" cy="12" r="9" /><circle cx="12" cy="12" r="3" />
+        </svg>
+        {isRecording ? (
+          <>
+            <div className="w-32 h-1 rounded-full bg-zinc-800 overflow-hidden">
+              <div className="h-full bg-[#fe2c55] transition-all duration-100" style={{ width: `${Math.round(recProgress * 100)}%` }} />
+            </div>
+            <span className="text-[11px] text-zinc-400 tabular-nums">{recStatus || `Exporting… ${Math.round(recProgress * 100)}%`}</span>
+            <button onClick={() => activeRef.cancelExport()} className="text-[11px] text-red-400 hover:text-red-300 transition-colors">Cancel</button>
+          </>
+        ) : (
+          <span className="text-[11px] text-zinc-400">Export complete — saved to your downloads.</span>
+        )}
+        <div className="flex-1" />
+        <button onClick={() => setHasExported(false)} className="text-[11px] text-zinc-600 hover:text-zinc-300 transition-colors">Edit</button>
+        <button
+          onClick={onDownloadAll}
+          className="flex items-center gap-1.5 rounded-full bg-white px-4 py-1.5 text-xs font-semibold text-black hover:bg-zinc-100 transition-colors shrink-0">
+          <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+            <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" /><polyline points="7 10 12 15 17 10" /><line x1="12" y1="15" x2="12" y2="3" />
+          </svg>
+          Download All
+        </button>
+      </div>
+    );
+  }
+
   const sortedSegs = [...segments].sort((a, b) => a.start - b.start);
   const trimStart  = sortedSegs[0]?.start ?? 0;
   const trimEnd    = sortedSegs[sortedSegs.length - 1]?.end ?? duration;
@@ -612,31 +656,6 @@ export function VideoControlsBar({ entryId, activeRef, recordingState, videoSrc 
         )}
       </div>
 
-      {/* ── Audio track ──────────────────────────────────────────────────── */}
-      <div className="relative w-full rounded-md overflow-hidden border border-dashed border-zinc-800 bg-zinc-900/50" style={{ height: STRIP_H }}>
-        <div className="absolute inset-0 flex items-center justify-center pointer-events-none gap-1.5">
-          <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" className="text-zinc-700">
-            <path d="M9 18V5l12-2v13"/>
-            <circle cx="6" cy="18" r="3"/><circle cx="18" cy="16" r="3"/>
-          </svg>
-          <span className="text-[10px] text-zinc-700 select-none">Audio — drop or paste URL</span>
-        </div>
-        <div className="absolute inset-y-0 w-px bg-white/20 pointer-events-none" style={{ left: `${curPct}%` }} />
-      </div>
-
-      {/* ── Text & Stickers track ─────────────────────────────────────────── */}
-      <div className="relative w-full rounded-md overflow-hidden border border-dashed border-zinc-800 bg-zinc-900/50" style={{ height: STRIP_H }}>
-        <div className="absolute inset-0 flex items-center justify-center pointer-events-none gap-1.5">
-          <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" className="text-zinc-700">
-            <polyline points="4 7 4 4 20 4 20 7"/>
-            <line x1="9" y1="20" x2="15" y2="20"/>
-            <line x1="12" y1="4" x2="12" y2="20"/>
-          </svg>
-          <span className="text-[10px] text-zinc-700 select-none">Text &amp; stickers</span>
-        </div>
-        <div className="absolute inset-y-0 w-px bg-white/20 pointer-events-none" style={{ left: `${curPct}%` }} />
-      </div>
-
       {/* ── Bottom controls ───────────────────────────────────────────────── */}
       <div className="flex items-center gap-3">
         <span className="text-[10px] text-zinc-600 tabular-nums">{fmtTime(trimStart)}–{fmtTime(trimEnd)}</span>
@@ -651,7 +670,22 @@ export function VideoControlsBar({ entryId, activeRef, recordingState, videoSrc 
           className="text-[10px] text-zinc-600 hover:text-zinc-400 transition-colors">Reset trim</button>
         <div className="w-px h-3 bg-zinc-800" />
         <button onClick={() => activeRef.resetBox()}  className="text-[10px] text-zinc-600 hover:text-zinc-400 transition-colors">Reset box</button>
-        <button onClick={() => activeRef.centerBox()} className="text-[10px] text-zinc-600 hover:text-zinc-400 transition-colors">Center</button>
+        {activeRef.setBlockTopPct && (
+          <label className="flex items-center gap-1 text-[10px] text-zinc-600" title="Distance of the block's top edge from the top of the frame">
+            <span>Top</span>
+            <input
+              type="number" min={0} max={100} step={1}
+              value={topPct}
+              onChange={e => {
+                const n = Math.max(0, Math.min(100, parseInt(e.target.value || '0', 10) || 0));
+                setTopPct(n);
+                activeRef.setBlockTopPct?.(n / 100);
+              }}
+              className="w-10 bg-zinc-900 border border-zinc-800 rounded px-1 py-0.5 text-zinc-300 text-right tabular-nums outline-none focus:border-zinc-600"
+            />
+            <span>%</span>
+          </label>
+        )}
         <div className="flex-1" />
         {isRecording ? (
           <div className="flex items-center gap-3 shrink-0">
@@ -662,7 +696,7 @@ export function VideoControlsBar({ entryId, activeRef, recordingState, videoSrc 
             <button onClick={() => activeRef.cancelExport()} className="text-[10px] text-red-400 hover:text-red-300 transition-colors">Cancel</button>
           </div>
         ) : (
-          <button onClick={() => activeRef.startDownload()}
+          <button onClick={() => { setHasExported(true); activeRef.startDownload(); }}
             className="flex items-center gap-1.5 rounded-full bg-white px-4 py-1.5 text-xs font-semibold text-black hover:bg-zinc-100 transition-colors shrink-0">
             <svg width="11" height="11" viewBox="0 0 24 24" fill="currentColor">
               <circle cx="12" cy="12" r="9" fill="none" stroke="currentColor" strokeWidth="2"/><circle cx="12" cy="12" r="4"/>

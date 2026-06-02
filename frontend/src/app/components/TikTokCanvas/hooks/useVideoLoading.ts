@@ -2,22 +2,22 @@
 
 import { useState, useEffect, useRef } from 'react';
 import type { RefObject, MutableRefObject } from 'react';
-import { CANVAS_W, CANVAS_H, VIDEO_TARGET_W, BASE_HEADER_HEIGHT } from '../constants';
+import { CANVAS_W, CANVAS_H, VIDEO_TARGET_W } from '../constants';
 import type { Box } from '../types';
 
+// Provisional box on metadata load — a width-fitted, centered rect. The canvas
+// immediately re-runs its intelligent auto-fit via onPlaced(), so this is just a
+// sane starting value (and avoids a flash before that runs in the same tick).
 function calcVideoBox(vw: number, vh: number, currentBrand: string): Box {
   if (currentBrand === 'clean') {
     const scale = CANVAS_W / vw;
     const drawH = vh * scale;
-    const y = (CANVAS_H - drawH) / 2;
-    return { x: 0, y, w: CANVAS_W, h: drawH };
+    return { x: 0, y: (CANVAS_H - drawH) / 2, w: CANVAS_W, h: drawH };
   }
   const scale = Math.min(VIDEO_TARGET_W / vw, CANVAS_H / vh);
   const drawW = vw * scale;
   const drawH = vh * scale;
-  const x = (CANVAS_W - drawW) / 2;
-  const y = (CANVAS_H - drawH) / 2;
-  return { x, y, w: drawW, h: drawH };
+  return { x: (CANVAS_W - drawW) / 2, y: (CANVAS_H - drawH) / 2, w: drawW, h: drawH };
 }
 
 interface UseVideoLoadingParams {
@@ -32,11 +32,15 @@ interface UseVideoLoadingParams {
   videoScaleRef: MutableRefObject<number>;
   setVideoScale: (s: number) => void;
   onVideoError?: () => void;
+  // Called right after the box is (re)placed, so the canvas can run its
+  // intelligent auto-fit with full knowledge of header/CTA/top-anchor.
+  onPlaced?: () => void;
 }
 
 export function useVideoLoading({
   videoRef, videoSrc, brand, rowNumber, videoId,
   boxRef, setBox, videoOffsetRef, videoScaleRef, setVideoScale, onVideoError,
+  onPlaced,
 }: UseVideoLoadingParams) {
   const [isVideoLoading, setIsVideoLoading] = useState(false);
   const [videoError, setVideoError] = useState<string | null>(null);
@@ -46,6 +50,10 @@ export function useVideoLoading({
   const [currentTime, setCurrentTime] = useState(0);
   const trimStartRef = useRef(0);
   const trimEndRef = useRef(0);
+
+  // Keep the latest onPlaced callable without re-firing the load effects.
+  const onPlacedRef = useRef(onPlaced);
+  onPlacedRef.current = onPlaced;
 
   // Recalculate box on brand change (for already-loaded video)
   useEffect(() => {
@@ -57,6 +65,7 @@ export function useVideoLoading({
     videoOffsetRef.current = { x: 0, y: 0 };
     videoScaleRef.current = 1;
     setVideoScale(1);
+    onPlacedRef.current?.();
   }, [brand]);
 
   // Set box and duration on metadata load
@@ -74,6 +83,7 @@ export function useVideoLoading({
         videoOffsetRef.current = { x: 0, y: 0 };
         videoScaleRef.current = 1;
         setVideoScale(1);
+        onPlacedRef.current?.();
       }
       const dur = isFinite(video.duration) ? video.duration : 0;
       setVideoDuration(dur);

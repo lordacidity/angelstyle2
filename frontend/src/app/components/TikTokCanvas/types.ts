@@ -16,6 +16,7 @@ export interface VideoTrimState {
   duration: number;
   includeEdit: boolean;
   videoScale: number;
+  blockTopPct: number;
 }
 
 export interface TikTokCanvasProps {
@@ -48,6 +49,7 @@ export interface TikTokCanvasRef {
   setZoom: (scale: number) => void;
   resetBox: () => void;
   centerBox: () => void;
+  setBlockTopPct: (pct: number) => void;
   setIncludeEdit: (v: boolean) => void;
   getVideoElement: () => HTMLVideoElement | null;
   getTrimState: () => VideoTrimState;
@@ -62,6 +64,8 @@ export interface MarketData {
   industry: string | null;
   subcategory: string | null;
   sparkline?: SparkPoint[] | null;
+  /** CTA widget size: 'large' = full row, 'small' = one-line. Defaults to 'large'. */
+  size?: 'large' | 'small';
   price: {
     usd: number | null;
     lifetimeChangePct: number | null;

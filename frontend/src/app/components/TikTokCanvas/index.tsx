@@ -3,12 +3,13 @@
 import { useRef, useEffect, useState, forwardRef, useImperativeHandle } from 'react';
 
 import {
-  CANVAS_W, CANVAS_H, VIDEO_TARGET_W, DISPLAY_SCALE,
+  CANVAS_W, CANVAS_H, VIDEO_TARGET_W, DISPLAY_SCALE, MIN_DIM,
   BASE_HEADER_HEIGHT, CAPTION_LINE_HEIGHT, CAPTION_TOP_PADDING, HEADER_PADDING_X,
+  BLOCK_TOP_PCT, BLOCK_BOTTOM_MARGIN,
 } from './constants';
 import type { Box, TikTokCanvasProps, TikTokCanvasRef } from './types';
 import { drawHeaderOnContext } from './drawing/drawHeader';
-import { drawMarketRow } from './drawing/drawMarketRow';
+import { drawMarketRow, MARKET_ROW_H, MARKET_ROW_H_SMALL } from './drawing/drawMarketRow';
 import { countCaptionLines, countSonotradeCaptionLines } from './drawing/countCaptionLines';
 import { VideoOverlays } from './ui/VideoOverlays';
 import { CanvasHandles } from './ui/CanvasHandles';
@@ -52,6 +53,10 @@ export const TikTokCanvas = forwardRef<TikTokCanvasRef, TikTokCanvasProps>(funct
   const [includeEdit, setIncludeEdit] = useState(false);
   const includeEditRef = useRef(false);
 
+  // Vertical position of the block's top edge, as a fraction of canvas height.
+  // Editable per video via the "Top %" field in the controls bar.
+  const blockTopPctRef = useRef(BLOCK_TOP_PCT);
+
   const [isPlaying, setIsPlaying] = useState(false);
 
   useEffect(() => { logoImgRef.current = null; }, [overlayLogoSrc]);
@@ -65,6 +70,7 @@ export const TikTokCanvas = forwardRef<TikTokCanvasRef, TikTokCanvasProps>(funct
   } = useVideoLoading({
     videoRef, videoSrc, brand, rowNumber, videoId,
     boxRef, setBox, videoOffsetRef, videoScaleRef, setVideoScale, onVideoError,
+    onPlaced: () => anchorBlockTop(),
   });
 
   usePanZoom({ canvasRef, videoScaleRef, setVideoScale });
@@ -98,11 +104,15 @@ export const TikTokCanvas = forwardRef<TikTokCanvasRef, TikTokCanvasProps>(funct
     zoomIn, zoomOut, resetZoom,
     setZoom: (s: number) => { const c = Math.max(0.5, Math.min(3, s)); videoScaleRef.current = c; setVideoScale(c); },
     resetBox,
-    centerBox: centerEverything,
+    centerBox: anchorBlockTop,
+    setBlockTopPct: (pct: number) => {
+      blockTopPctRef.current = Math.max(0, Math.min(1, pct));
+      anchorBlockTop();
+    },
     setIncludeEdit: (v: boolean) => { setIncludeEdit(v); includeEditRef.current = v; },
     getVideoElement: () => videoRef.current,
-    getTrimState: () => ({ trimStart, trimEnd, duration: videoDuration, includeEdit, videoScale }),
-  }), [isRecording, startRecording, cancelRecording, videoDuration, trimStart, trimEnd, includeEdit, videoScale, zoomIn, zoomOut, resetZoom]);
+    getTrimState: () => ({ trimStart, trimEnd, duration: videoDuration, includeEdit, videoScale, blockTopPct: blockTopPctRef.current }),
+  }), [isRecording, startRecording, cancelRecording, videoDuration, trimStart, trimEnd, includeEdit, videoScale, zoomIn, zoomOut, resetZoom, overlayCaption, brand]);
 
   const onRecordingStateChangeRef = useRef(onRecordingStateChange);
   useEffect(() => { onRecordingStateChangeRef.current = onRecordingStateChange; });
@@ -110,6 +120,16 @@ export const TikTokCanvas = forwardRef<TikTokCanvasRef, TikTokCanvasProps>(funct
   useEffect(() => {
     onRecordingStateChangeRef.current?.({ isRecording, recProgress, recStatus });
   }, [isRecording, recProgress, recStatus]);
+
+  // Keep the top of the block anchored at BLOCK_TOP_PCT as the header height
+  // changes (caption generated/edited, brand switched). The header grows above
+  // the video, so without this the logo would drift up off the 10% mark.
+  useEffect(() => {
+    const v = videoRef.current;
+    if (!v || !v.videoWidth || !v.videoHeight) return;
+    anchorBlockTop();
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [overlayCaption, brand, marketData]);
 
   // ── Main draw loop ────────────────────────────────────────────────────────────
 
@@ -204,11 +224,13 @@ export const TikTokCanvas = forwardRef<TikTokCanvasRef, TikTokCanvasProps>(funct
             }
           }
 
-          const scale = (CANVAS_W / video.videoWidth) * videoScaleRef.current;
-          const drawW = video.videoWidth * scale;
-          const drawH = video.videoHeight * scale;
-          const dx = (CANVAS_W - drawW) / 2 + ox;
-          const dy = (CANVAS_H - drawH) / 2 + oy;
+          // Cover-fill the box: the box already carries the intended size +
+          // aspect, so the video fills it (no black bars), zoom/pan adjust within.
+          const cover = Math.max(w / video.videoWidth, h / video.videoHeight) * videoScaleRef.current;
+          const drawW = video.videoWidth * cover;
+          const drawH = video.videoHeight * cover;
+          const dx = x + (w - drawW) / 2 + ox;
+          const dy = y + (h - drawH) / 2 + oy;
 
           ctx.save();
           ctx.beginPath();
@@ -231,11 +253,13 @@ export const TikTokCanvas = forwardRef<TikTokCanvasRef, TikTokCanvasProps>(funct
         const headerY = Math.max(0, y - sonotradeHeaderHeight + 4);
         drawHeaderOnContext({ ctx, cx: 0, cy: headerY, cw: CANVAS_W, ...drawOpts });
 
-        const scale = Math.min(VIDEO_TARGET_W / video.videoWidth, CANVAS_H / video.videoHeight) * videoScaleRef.current;
-        const drawW = video.videoWidth * scale;
-        const drawH = video.videoHeight * scale;
-        const dx = (CANVAS_W - drawW) / 2 + ox;
-        const dy = (CANVAS_H - drawH) / 2 + oy;
+        // Cover-fill the box: the box already carries the intended size +
+        // aspect, so the video fills it (no black bars), zoom/pan adjust within.
+        const cover = Math.max(w / video.videoWidth, h / video.videoHeight) * videoScaleRef.current;
+        const drawW = video.videoWidth * cover;
+        const drawH = video.videoHeight * cover;
+        const dx = x + (w - drawW) / 2 + ox;
+        const dy = y + (h - drawH) / 2 + oy;
 
         ctx.save();
         ctx.beginPath();
@@ -253,6 +277,7 @@ export const TikTokCanvas = forwardRef<TikTokCanvasRef, TikTokCanvasProps>(funct
             priceUsd: marketData.price.usd,
             lifetimeChangePct: marketData.price.lifetimeChangePct,
             sparkline: marketData.sparkline,
+            size: marketData.size ?? 'large',
             avatarImgRef: marketAvatarImgRef,
             lastPhotoUrlRef: marketAvatarUrlRef,
           });
@@ -269,45 +294,64 @@ export const TikTokCanvas = forwardRef<TikTokCanvasRef, TikTokCanvasProps>(funct
 
   // ── Interaction handlers ──────────────────────────────────────────────────────
 
+  // Clear any manual pan/zoom and re-run the intelligent auto-fit.
   function resetBox() {
-    const video = videoRef.current;
-    if (video && video.videoWidth && video.videoHeight) {
-      const scale = Math.min(VIDEO_TARGET_W / video.videoWidth, CANVAS_H / video.videoHeight);
-      const b = {
-        x: (CANVAS_W - video.videoWidth * scale) / 2,
-        y: (CANVAS_H - video.videoHeight * scale) / 2,
-        w: video.videoWidth * scale,
-        h: video.videoHeight * scale,
-      };
-      boxRef.current = b;
-      setBox(b);
-    } else {
-      const b = { x: 0, y: 0, w: CANVAS_W, h: CANVAS_H };
-      boxRef.current = b;
-      setBox(b);
-    }
     videoOffsetRef.current = { x: 0, y: 0 };
     videoScaleRef.current = 1;
     setVideoScale(1);
+    anchorBlockTop();
   }
 
-  function centerEverything() {
-    let headerHeight = BASE_HEADER_HEIGHT;
-    if (overlayCaption && brand !== 'clean') {
-      const canvas = canvasRef.current;
-      if (canvas) {
-        const ctx = canvas.getContext('2d');
-        if (ctx) {
-          const captionLines = countSonotradeCaptionLines(ctx, overlayCaption);
-          const CAPTION_BOTTOM_OFFSET = 18;
-          headerHeight = BASE_HEADER_HEIGHT + CAPTION_TOP_PADDING + (captionLines * CAPTION_LINE_HEIGHT) - CAPTION_BOTTOM_OFFSET;
-        }
-      }
+  // Height of the header/caption block drawn above the video for the current
+  // brand + caption. Mirrors the draw loop so the anchor matches what's painted.
+  function computeHeaderHeight(): number {
+    const ctx = canvasRef.current?.getContext('2d');
+    if (brand === 'clean') {
+      if (!overlayCaption || !ctx) return 0;
+      const captionLines = countCaptionLines(ctx, overlayCaption);
+      if (captionLines <= 0) return 0;
+      const CLEAN_PAD_TOP = 44, CLEAN_PAD_BOT = 40, CAPTION_BOT_OFF = 18;
+      return CLEAN_PAD_TOP + (captionLines * CAPTION_LINE_HEIGHT) + CLEAN_PAD_BOT - CAPTION_BOT_OFF;
     }
-    const currentBox = boxRef.current;
-    const totalHeight = headerHeight + currentBox.h;
-    const newY = (CANVAS_H - totalHeight) / 2 - 60 + headerHeight;
-    const b = { x: currentBox.x, y: newY, w: currentBox.w, h: currentBox.h };
+    if (!overlayCaption || !ctx) return BASE_HEADER_HEIGHT;
+    const captionLines = countSonotradeCaptionLines(ctx, overlayCaption);
+    const CAPTION_BOTTOM_OFFSET = 18;
+    return BASE_HEADER_HEIGHT + CAPTION_TOP_PADDING + (captionLines * CAPTION_LINE_HEIGHT) - CAPTION_BOTTOM_OFFSET;
+  }
+
+  // Height the CTA (market row) reserves below the video, 0 when there's none.
+  function ctaHeight(): number {
+    if (!marketData) return 0;
+    return (marketData.size ?? 'large') === 'small' ? MARKET_ROW_H_SMALL : MARKET_ROW_H;
+  }
+
+  // Auto-size + position the crop box so the whole block (header → video → CTA)
+  // is anchored BLOCK_TOP_PCT down from the top and fits the frame. The video is
+  // shown at the template's full width; its height is the natural height at that
+  // width, capped to the space left after the header + CTA so nothing is cut off
+  // by the canvas. The draw loop cover-fills this box, so the frame is always
+  // tight around the video — no black bars, no distortion — and manual
+  // drag/resize is rarely needed. The header draws at `y - headerHeight + 4`, so
+  // y = blockTop + headerHeight - 4 puts the header's top edge exactly at blockTop.
+  function anchorBlockTop() {
+    const video = videoRef.current;
+    const headerHeight = computeHeaderHeight();
+    const blockTop = blockTopPctRef.current * CANVAS_H;
+    const y = blockTop + headerHeight - 4;
+
+    if (!video || !video.videoWidth || !video.videoHeight) {
+      const b = { ...boxRef.current, y };
+      boxRef.current = b;
+      setBox({ ...b });
+      return;
+    }
+
+    const boxW = brand === 'clean' ? CANVAS_W : VIDEO_TARGET_W;
+    const naturalH = video.videoHeight * (boxW / video.videoWidth);
+    const availableH = CANVAS_H - y - ctaHeight() - BLOCK_BOTTOM_MARGIN;
+    const boxH = Math.max(MIN_DIM, Math.min(naturalH, availableH));
+
+    const b = { x: (CANVAS_W - boxW) / 2, y, w: boxW, h: boxH };
     boxRef.current = b;
     setBox({ ...b });
   }

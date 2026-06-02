@@ -9,7 +9,7 @@ import { CarouselSettingsPanel } from './CarouselSettingsPanel';
 import { defaultCarouselSettings } from './carouselTypes';
 import type { CarouselCanvasRef, CarouselSettings, CarouselBgLayerState } from './carouselTypes';
 import { useCarouselTemplates } from '../hooks/useCarouselTemplates';
-import type { VideoEntry, BrandProps, SlideType } from '../types';
+import type { VideoEntry, BrandProps, SlideType, VideoData } from '../types';
 import type { RecordingState } from './TikTokCanvas/types';
 import { VideoControlsBar } from './VideoControlsBar';
 import { EditablePct } from './EditablePct';
@@ -53,7 +53,7 @@ interface CanvasGridProps {
   onUpdateEntry: (id: string, field: 'url' | 'caption' | 'context', value: string) => void;
   onUpdateCarouselEntry: (id: string, field: 'imageSrc' | 'headline' | 'subheadline' | 'articleUrl', value: string) => void;
   onUpdateLocalVideo: (id: string, src: string, name: string) => void;
-  onFetchVideo: (id: string) => void;
+  onFetchVideo: (id: string) => Promise<VideoData | null>;
   onSetCarouselSubMode: (id: string, mode: 'image' | 'video') => void;
   userId: string | null;
   settingsMap: Record<string, CarouselSettings>;
@@ -513,12 +513,6 @@ export function CanvasGrid({
 }: CanvasGridProps) {
   const isCarousel = entries.length > 0 && entries[0].mode === 'carousel';
 
-  const videoRenderEntries = entries.filter(e =>
-    e.mode !== 'carousel' && !e.loading && (
-      e.localVideoSrc || (e.data && !(e.data.images && e.data.images.length > 0))
-    )
-  );
-
   const [selectedId,                setSelectedId]                = useState<string>(entries[0]?.id ?? '');
   const [scaleMap,                  setScaleMap]                  = useState<Record<string, number>>({});
   const [bgStateMap,                setBgStateMap]                = useState<Record<string, CarouselBgLayerState>>({});
@@ -528,16 +522,17 @@ export function CanvasGrid({
   const [canvasRefVersion,          setCanvasRefVersion]          = useState(0);
   const [carouselRefVersion,        setCarouselRefVersion]        = useState(0);
   const [videoZoomMap,              setVideoZoomMap]              = useState<Record<string, number>>({});
+  // Per-entry vertical anchor of the block top, as a whole-number percent (default 15).
+  const [blockTopPctMap,            setBlockTopPctMap]            = useState<Record<string, number>>({});
   // Per-entry social-caption state. Keyed by entry.id. Lives in CanvasGrid
   // (not VideoEntry) because it's purely UI/transient — no need to persist or
   // round-trip through hooks.
   const [socialCaptionMap, setSocialCaptionMap] = useState<Record<string, { text: string; loading: boolean; error: string | null; copied: boolean }>>({});
 
-  const [talentsForMarket,        setTalentsForMarket]        = useState<Talent[]>([]);
-  const [talentsLoadingForMarket, setTalentsLoadingForMarket] = useState(true);
   const [marketMap,               setMarketMap]               = useState<Record<string, Talent | null>>({});
-  const [marketSearchMap,         setMarketSearchMap]         = useState<Record<string, string>>({});
-  const talentsForMarketFetchedRef = useRef(false);
+  // CTA widget size per entry: 'large' (full row w/ industry + sparkline) or
+  // 'small' (one-line: photo, name, price, change). Defaults to 'large'.
+  const [marketSizeMap,           setMarketSizeMap]           = useState<Record<string, 'large' | 'small'>>({});
 
   // Per-entry user overrides for the selected market's display fields
   interface MarketOverride {
@@ -549,24 +544,42 @@ export function CanvasGrid({
   // Per-entry sparkline data (fetched when a market is selected)
   const [sparklineMap, setSparklineMap] = useState<Record<string, SparkPoint[]>>({});
 
-  // Deterministic pseudo-random sparkline (LCG seeded on ticker) used as
-  // an immediate placeholder until the real history arrives.
+  // Deterministic pseudo-random sparkline (LCG seeded on ticker). MARKETING:
+  // a wandering line that has genuine ups AND downs but trends upward and ends
+  // higher than it started — a believable rising chart, not an extreme straight
+  // climb. Drawn in natural order (the canvas no longer sorts it ascending).
   function generateFallbackSparkline(ticker: string): SparkPoint[] {
     let seed = ticker.split('').reduce((a, c) => (a * 31 + c.charCodeAt(0)) | 0, 0x1234) >>> 0;
     const rand = () => { seed = (seed * 1664525 + 1013904223) >>> 0; return seed / 0xffffffff; };
-    let v = 0.5;
-    return Array.from({ length: 20 }, (_, i) => {
-      v = Math.max(0.05, Math.min(0.95, v + (rand() - 0.48) * 0.25));
-      return { value: v, timestamp: i };
-    });
+    const N = 16;
+    // Kalshi-style step chart: a MOMENTUM walk (autocorrelated shocks → sustained
+    // runs / legs, real pullbacks — not white noise, not a straight ramp) plus an
+    // upward trend so it clearly closes higher, normalized to fill the box. Fewer
+    // points → chunkier steps. Seeded → unique per ticker.
+    const raw: number[] = [];
+    let v = 0, m = 0;
+    for (let i = 0; i < N; i++) {
+      m = m * 0.68 + (rand() - 0.5) * 0.6;   // momentum: shocks persist into legs
+      v += m;
+      raw.push(v);
+    }
+    const span = Math.max(1e-6, Math.max(...raw) - Math.min(...raw));
+    const trend = (1.05 + rand() * 0.6) * span;         // upward pull — a touch stronger
+    const withTrend = raw.map((x, i) => x + (i / (N - 1)) * trend);
+    const lo = Math.min(...withTrend), hi = Math.max(...withTrend);
+    const range = Math.max(1e-6, hi - lo);
+    return withTrend.map((x, i) => ({
+      value: 0.1 + ((x - lo) / range) * 0.8,            // fill [0.1, 0.9]
+      timestamp: i,
+    }));
   }
 
-  // MARKETING: derive the displayed lifetime-change % from the same synthetic
-  // sparkline so the chart slope and the percentage agree. Spread × 200 keeps
-  // it in a believable 10–180% range — no more random 9900% spikes.
+  // Displayed change % for the CTA widget — a stable, ticker-seeded value in the
+  // 5–15% range (always rendered green/up per the marketing treatment).
   function syntheticPctForTicker(ticker: string): number {
-    const vals = generateFallbackSparkline(ticker).map(p => p.value);
-    return (Math.max(...vals) - Math.min(...vals)) * 200;
+    let seed = ticker.split('').reduce((a, c) => (a * 31 + c.charCodeAt(0)) | 0, 0x5eed) >>> 0;
+    seed = (seed * 1664525 + 1013904223) >>> 0;
+    return 5 + (seed / 0xffffffff) * 10; // 5..15
   }
 
   const fetchSparkline = useCallback(async (entryId: string, ticker: string) => {
@@ -636,10 +649,12 @@ export function CanvasGrid({
     // signal we want the post to send.
     const spark = generateFallbackSparkline(sel.ticker);
     const syntheticPct = syntheticPctForTicker(sel.ticker);
+    const size = marketSizeMap[entryId] ?? 'large';
     if (!ov) {
       return {
         ...(sel as unknown as MarketData),
         sparkline: spark,
+        size,
         price: { ...sel.price, lifetimeChangePct: syntheticPct },
       };
     }
@@ -652,21 +667,14 @@ export function CanvasGrid({
       industry:    ov.industry || null,
       subcategory: sel.subcategory,
       sparkline: spark,
+      size,
       price: {
         usd:              !isNaN(priceNum ?? NaN) ? priceNum : sel.price.usd,
         lifetimeChangePct: !isNaN(pctNum ?? NaN) ? pctNum  : syntheticPct,
       },
     };
-  }, [marketMap, marketOverrideMap, sparklineMap]);
+  }, [marketMap, marketOverrideMap, sparklineMap, marketSizeMap]);
 
-  useEffect(() => {
-    if (talentsForMarketFetchedRef.current) return;
-    talentsForMarketFetchedRef.current = true;
-    fetch('/api/ai/talents')
-      .then(r => r.json())
-      .then((d: unknown) => { if (Array.isArray(d)) setTalentsForMarket(d as Talent[]); setTalentsLoadingForMarket(false); })
-      .catch(() => setTalentsLoadingForMarket(false));
-  }, []);
 
   const generateSocialCaption = useCallback(async (entry: VideoEntry) => {
     setSocialCaptionMap(prev => ({
@@ -688,9 +696,61 @@ export function CanvasGrid({
       if (!r.ok) throw new Error(await r.text());
       const data = await r.json() as { caption?: string; error?: string };
       if (data.error || !data.caption) throw new Error(data.error ?? 'no caption returned');
+      const generated = data.caption;
+
+      // Show the caption right away, but keep the spinner up while DeepSeek
+      // auto-picks the CTA talent (it reads this caption) and we sync the
+      // Market widget + closing paragraph to whoever it chooses.
       setSocialCaptionMap(prev => ({
         ...prev,
-        [entry.id]: { text: data.caption!, loading: false, error: null, copied: false },
+        [entry.id]: { text: generated, loading: true, error: null, copied: false },
+      }));
+
+      let finalText = generated;
+      try {
+        const cr = await fetch('/api/ai/pick-cta', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            caption:          entry.caption || undefined,
+            generatedCaption: generated,
+            videoTitle:       entry.data?.title || undefined,
+            author:           entry.data?.author?.nickname || undefined,
+            context:          entry.context || undefined,
+          }),
+        });
+        if (cr.ok) {
+          const cta = await cr.json() as { talent?: Talent; ctaParagraph?: string; matchType?: string; error?: string };
+          if (cta.talent && !cta.error) {
+            const t = cta.talent;
+            // Fill the Market widget exactly as a manual pick would.
+            setMarketMap(prev => ({ ...prev, [entry.id]: t }));
+            setSparklineMap(prev => ({ ...prev, [entry.id]: prev[entry.id] ?? generateFallbackSparkline(t.ticker) }));
+            fetchSparkline(entry.id, t.ticker);
+            setMarketOverrideMap(prev => ({
+              ...prev,
+              [entry.id]: {
+                name: t.name, industry: t.industry ?? '',
+                photo_url: t.photo_url,
+                priceUsd: t.price.usd?.toFixed(2) ?? '',
+                lifetimeChangePct: syntheticPctForTicker(t.ticker).toFixed(1),
+              },
+            }));
+            // Swap the caption's closing paragraph for the CTA naming this talent.
+            if (cta.ctaParagraph) {
+              const paras = generated.split(/\n\s*\n/);
+              if (paras.length > 0) {
+                paras[paras.length - 1] = cta.ctaParagraph;
+                finalText = paras.join('\n\n');
+              }
+            }
+          }
+        }
+      } catch { /* CTA pick is best-effort — keep the caption as written */ }
+
+      setSocialCaptionMap(prev => ({
+        ...prev,
+        [entry.id]: { text: finalText, loading: false, error: null, copied: false },
       }));
     } catch (e) {
       setSocialCaptionMap(prev => ({
@@ -698,7 +758,17 @@ export function CanvasGrid({
         [entry.id]: { text: prev[entry.id]?.text ?? '', loading: false, error: String(e), copied: false },
       }));
     }
-  }, []);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [fetchSparkline]);
+
+  // "Next" in the media tab: fetch the video, then — for video posts — auto-run
+  // the caption generator (which itself chains the CTA pick). One action instead
+  // of three. If the fetch fails, the error is already surfaced on the entry.
+  const handleFetchThenGenerate = useCallback(async (entry: VideoEntry) => {
+    const data = await onFetchVideo(entry.id);
+    if (!data) return;
+    await generateSocialCaption({ ...entry, data });
+  }, [onFetchVideo, generateSocialCaption]);
 
   const copySocialCaption = useCallback(async (entryId: string) => {
     const text = socialCaptionMap[entryId]?.text;
@@ -838,6 +908,14 @@ export function CanvasGrid({
     canvasRefsMap.current.get(id)?.setZoom(clamped);
   }, [canvasRefsMap]);
 
+  const getTopPct = useCallback((id: string) => blockTopPctMap[id] ?? 15, [blockTopPctMap]);
+
+  const applyTopPct = useCallback((id: string, pct: number) => {
+    const clamped = Math.max(0, Math.min(100, pct));
+    setBlockTopPctMap(prev => ({ ...prev, [id]: clamped }));
+    canvasRefsMap.current.get(id)?.setBlockTopPct(clamped / 100);
+  }, [canvasRefsMap]);
+
   const selectedEntry      = entries.find(e => e.id === selectedId) ?? entries[0];
   const isSelectedCarousel = selectedEntry?.mode === 'carousel';
 
@@ -912,12 +990,7 @@ export function CanvasGrid({
               {selectedEntry.carouselSubMode === 'video' ? 'Export' : 'PNG'}
             </button>
           )}
-          {videoRenderEntries.length > 0 && (
-            <button onClick={onDownloadAll} className="flex items-center gap-1.5 rounded-full bg-white px-2 py-1.5 text-xs font-medium text-black hover:bg-zinc-100 transition-colors">
-              <DownloadIcon size={11} stroke="currentColor" />
-              Download All
-            </button>
-          )}
+          {/* Download All moved into the export bar (bottom-right) — appears after Export is pressed. */}
         </div>
       </div>
 
@@ -968,7 +1041,7 @@ export function CanvasGrid({
                     entry={entry}
                     onUpdateField={(field, value) => onUpdateEntry(entry.id, field, value)}
                     onUpdateLocalVideo={(src, name) => onUpdateLocalVideo(entry.id, src, name)}
-                    onFetch={() => onFetchVideo(entry.id)}
+                    onFetch={() => handleFetchThenGenerate(entry)}
                   />
                 )}
 
@@ -1036,11 +1109,19 @@ export function CanvasGrid({
                             className="flex items-center h-9 px-2.5 rounded-md bg-zinc-950 border border-zinc-800 text-zinc-400 hover:text-zinc-200 hover:border-zinc-600 transition-colors text-[10px] font-medium shrink-0"
                             title="Reset box"
                           >Reset box</button>
-                          <button
-                            onClick={() => canvasRefsMap.current.get(entry.id)?.centerBox()}
-                            className="flex items-center h-9 px-2.5 rounded-md bg-zinc-950 border border-zinc-800 text-zinc-400 hover:text-zinc-200 hover:border-zinc-600 transition-colors text-[10px] font-medium shrink-0"
-                            title="Center"
-                          >Center</button>
+                          <label
+                            className="flex items-center gap-1 h-9 px-2.5 rounded-md bg-zinc-950 border border-zinc-800 text-zinc-400 text-[10px] font-medium shrink-0"
+                            title="Distance of the block's top edge from the top of the frame"
+                          >
+                            <span>Top</span>
+                            <input
+                              type="number" min={0} max={100} step={1}
+                              value={getTopPct(entry.id)}
+                              onChange={e => applyTopPct(entry.id, parseInt(e.target.value || '0', 10) || 0)}
+                              className="w-9 bg-transparent text-zinc-200 text-right tabular-nums outline-none"
+                            />
+                            <span>%</span>
+                          </label>
                           <button onClick={() => onRemoveRow(entry.id)} className={BTN_ICON} title="Delete row">
                             <TrashIcon size={15} />
                           </button>
@@ -1127,30 +1208,45 @@ export function CanvasGrid({
                         design from pauv-the-app/MobileTradeList.tsx. */}
                     {entry.mode === 'twitter' && (() => {
                       const selected = marketMap[entry.id] ?? null;
-                      const search = marketSearchMap[entry.id] ?? '';
-                      const q = search.trim().toLowerCase();
-                      const filtered = q
-                        ? talentsForMarket.filter(t =>
-                            t.name.toLowerCase().includes(q) || t.ticker.toLowerCase().includes(q)
-                          )
-                        : talentsForMarket.slice(0, 8);
+                      // The CTA UI only appears AFTER the caption + CTA have been
+                      // generated (auto-pick sets the market). No pre-generation
+                      // search/picker — the generated CTA is the first thing shown.
+                      if (!selected) return null;
                       return (
                         <div className="rounded-lg bg-zinc-950 border border-zinc-800 overflow-hidden">
                           <div className="flex items-center justify-between gap-3 px-3 py-2 border-b border-zinc-800">
                             <span className="text-[11px] font-semibold text-zinc-300 uppercase tracking-wider">Market</span>
-                            {selected && (
-                              <button
-                                onClick={() => {
-                                  setMarketMap(prev => ({ ...prev, [entry.id]: null }));
-                                  setMarketOverrideMap(prev => { const n = { ...prev }; delete n[entry.id]; return n; });
-                                }}
-                                className="text-[10px] text-zinc-600 hover:text-zinc-400 transition-colors"
-                              >
-                                Clear
-                              </button>
-                            )}
+                            <div className="flex items-center gap-2">
+                              {/* CTA size toggle — Large (full row) vs Small (one line). */}
+                              <div className="flex items-center rounded-md border border-zinc-800 overflow-hidden">
+                                {(['large', 'small'] as const).map(sz => {
+                                  const active = (marketSizeMap[entry.id] ?? 'large') === sz;
+                                  return (
+                                    <button
+                                      key={sz}
+                                      onClick={() => setMarketSizeMap(prev => ({ ...prev, [entry.id]: sz }))}
+                                      title={sz === 'large' ? 'Full row: photo, name, industry, sparkline, price, change' : 'One line: photo, name, price, change'}
+                                      className={`px-2 py-0.5 text-[10px] font-medium capitalize transition-colors ${active ? 'bg-zinc-700 text-zinc-100' : 'bg-transparent text-zinc-500 hover:text-zinc-300'}`}
+                                    >
+                                      {sz}
+                                    </button>
+                                  );
+                                })}
+                              </div>
+                              {selected && (
+                                <button
+                                  onClick={() => {
+                                    setMarketMap(prev => ({ ...prev, [entry.id]: null }));
+                                    setMarketOverrideMap(prev => { const n = { ...prev }; delete n[entry.id]; return n; });
+                                  }}
+                                  className="text-[10px] text-zinc-600 hover:text-zinc-400 transition-colors"
+                                >
+                                  Clear
+                                </button>
+                              )}
+                            </div>
                           </div>
-                          {selected ? (() => {
+                          {(() => {
                             const ov = marketOverrideMap[entry.id] ?? {
                               name: selected.name, industry: selected.industry ?? '',
                               photo_url: selected.photo_url,
@@ -1173,7 +1269,7 @@ export function CanvasGrid({
                                   <button
                                     onClick={() => openPhotoPicker(entry.id, ov.name || selected.name)}
                                     title="Change photo"
-                                    className="relative shrink-0 flex items-center justify-center rounded-full overflow-hidden group"
+                                    className="relative shrink-0 flex items-center justify-center rounded-lg overflow-hidden group"
                                     style={{ width: 42, height: 42, background: '#1e1e1e', border: '1px solid #2a2a2a' }}
                                   >
                                     <span style={{ fontSize: 10, color: '#52525b', fontWeight: 600 }}>
@@ -1187,10 +1283,10 @@ export function CanvasGrid({
                                       <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="2" strokeLinecap="round"><path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z"/><circle cx="12" cy="13" r="4"/></svg>
                                     </div>
                                   </button>
-                                  {/* Name + Industry */}
-                                  <div className="flex-1 min-w-0 flex flex-col" style={{ gap: 3 }}>
-                                    <span style={{ fontSize: 15, fontWeight: 600, color: '#fff', letterSpacing: '-0.015em' }}>{ov.name || '—'}</span>
-                                    <span style={{ fontSize: 12, color: '#71717a' }}>{ov.industry || '—'}</span>
+                                  {/* Name + Industry — left-aligned, stacked tight on top of each other */}
+                                  <div className="flex-1 min-w-0 flex flex-col" style={{ gap: 4 }}>
+                                    <span style={{ fontSize: 19, fontWeight: 600, color: '#fff', letterSpacing: '-0.015em', lineHeight: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{ov.name || '—'}</span>
+                                    <span style={{ fontSize: 12, color: '#71717a', lineHeight: 1 }}>{ov.industry || '—'}</span>
                                   </div>
                                   {/* Sparkline — 80×30, between name/industry and price/change (SXSparkline) */}
                                   {(() => {
@@ -1201,8 +1297,7 @@ export function CanvasGrid({
                                     const spark = generateFallbackSparkline(selected.ticker);
                                     const sparkColor = '#04df9d';
                                     const W = 96, H = 32, pad = 2;
-                                    const sortedSpark = [...spark].sort((a, b) => a.value - b.value);
-                                    const paddedSpark = sortedSpark.length === 1 ? [sortedSpark[0]!, sortedSpark[0]!] : sortedSpark;
+                                    const paddedSpark = spark.length === 1 ? [spark[0]!, spark[0]!] : spark;
                                     const vals = paddedSpark.map(p => p.value);
                                     const vMin = Math.min(...vals), vMax = Math.max(...vals);
                                     const vRange = vMax - vMin;
@@ -1215,7 +1310,7 @@ export function CanvasGrid({
                                       d += ` H${pts[i+1]!.x.toFixed(1)} V${pts[i+1]!.y.toFixed(1)}`;
                                     }
                                     return (
-                                      <div style={{ width: 80, height: 30, flexShrink: 0, marginRight: 8 }}>
+                                      <div style={{ width: 80, height: 30, flexShrink: 0, marginRight: 16 }}>
                                         <svg viewBox={`0 0 ${W} ${H}`} preserveAspectRatio="none" width="100%" height="100%" style={{ display: 'block', overflow: 'visible' }}>
                                           <path d={d} fill="none" stroke={sparkColor} strokeWidth="1.5" strokeLinecap="square" strokeLinejoin="miter" vectorEffect="non-scaling-stroke" />
                                         </svg>
@@ -1223,19 +1318,19 @@ export function CanvasGrid({
                                     );
                                   })()}
                                   {/* Price + Change */}
-                                  <div className="flex flex-col items-end shrink-0" style={{ gap: 4 }}>
-                                    <span style={{ fontFamily: 'var(--font-geist-mono)', fontSize: 15, fontWeight: 600, color: '#fff' }}>
+                                  <div className="flex flex-col items-end shrink-0" style={{ gap: 3 }}>
+                                    <span style={{ fontFamily: 'var(--font-geist-mono)', fontSize: 19, fontWeight: 600, color: '#fff', lineHeight: 1 }}>
                                       {ov.priceUsd !== '' && !isNaN(parseFloat(ov.priceUsd))
                                         ? parseFloat(ov.priceUsd).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
                                         : '—'}
                                     </span>
-                                    <div className="flex items-center" style={{ gap: 3 }}>
+                                    <div className="flex items-center" style={{ gap: 3, lineHeight: 1 }}>
                                       {ov.lifetimeChangePct !== '' && !isNaN(pctVal) && (
                                         <>
                                           <svg viewBox="0 0 24 18" width="13" height="13" style={{ color: changeColor, flexShrink: 0, transform: `rotate(${isPos ? '0' : '180'}deg)` }}>
                                             <path fill="currentColor" d="m12 0 10.392 14.25H1.608z" />
                                           </svg>
-                                          <span style={{ fontFamily: 'var(--font-geist-mono)', fontSize: 12, fontWeight: 500, color: changeColor }}>
+                                          <span style={{ fontFamily: 'var(--font-geist-mono)', fontSize: 12, fontWeight: 500, color: changeColor, lineHeight: 1 }}>
                                             {Math.abs(pctVal).toFixed(1)}%
                                           </span>
                                         </>
@@ -1262,98 +1357,7 @@ export function CanvasGrid({
                                 </div>
                               </div>
                             );
-                          })() : (
-                            /* Search + list — each result is an ArtistRow */
-                            <div>
-                              <div className="px-3 pt-2.5 pb-1.5">
-                                <input
-                                  value={search}
-                                  onChange={e => setMarketSearchMap(prev => ({ ...prev, [entry.id]: e.target.value }))}
-                                  placeholder="Search market…"
-                                  className="w-full bg-zinc-900 border border-zinc-800 rounded-md px-2.5 py-1.5 text-xs text-zinc-200 placeholder-zinc-600 outline-none focus:border-zinc-600 transition-colors"
-                                />
-                              </div>
-                              <div className="max-h-52 overflow-y-auto px-3">
-                                {talentsLoadingForMarket ? (
-                                  <div className="text-[11px] text-zinc-600 py-3">Loading markets…</div>
-                                ) : filtered.length === 0 ? (
-                                  <div className="text-[11px] text-zinc-600 py-3">No results for &ldquo;{search}&rdquo;</div>
-                                ) : (
-                                  filtered.map(t => {
-                                    // MARKETING: always green + up in the picker list too, so
-                                    // every option looks like an upward bet.
-                                    const isPos = true;
-                                    const changeColor = '#04df9d';
-                                    return (
-                                      <button
-                                        key={t.id}
-                                        onClick={() => {
-                                          setMarketMap(prev => ({ ...prev, [entry.id]: t }));
-                                          setMarketSearchMap(prev => ({ ...prev, [entry.id]: '' }));
-                                          setSparklineMap(prev => ({ ...prev, [entry.id]: prev[entry.id] ?? generateFallbackSparkline(t.ticker) }));
-                                          fetchSparkline(entry.id, t.ticker);
-                                          setMarketOverrideMap(prev => ({
-                                            ...prev,
-                                            [entry.id]: {
-                                              name: t.name, industry: t.industry ?? '',
-                                              photo_url: t.photo_url,
-                                              priceUsd: t.price.usd?.toFixed(2) ?? '',
-                                              // MARKETING: pre-fill with synthetic % derived from
-                                              // the ticker's synthetic sparkline so the picker's
-                                              // edit field defaults to a believable number.
-                                              lifetimeChangePct: syntheticPctForTicker(t.ticker).toFixed(1),
-                                            },
-                                          }));
-                                        }}
-                                        className="flex items-center w-full text-left transition-colors hover:bg-[#18181b]"
-                                        style={{ gap: 12, padding: '14px 0', borderBottom: '1px solid #1a1a1a' }}
-                                      >
-                                        {/* Avatar */}
-                                        <div className="relative shrink-0 flex items-center justify-center rounded-full overflow-hidden"
-                                          style={{ width: 42, height: 42, background: '#1e1e1e', border: '1px solid #2a2a2a' }}>
-                                          <span style={{ fontSize: 10, color: '#52525b', fontWeight: 600 }}>
-                                            {t.name.split(' ').map((w: string) => w[0]).filter(Boolean).slice(0, 2).join('').toUpperCase()}
-                                          </span>
-                                          {t.photo_url && (
-                                            // eslint-disable-next-line @next/next/no-img-element
-                                            <img src={t.photo_url} alt={t.name}
-                                              className="absolute inset-0 w-full h-full object-cover"
-                                              onError={(e) => { e.currentTarget.style.display = 'none'; }} />
-                                          )}
-                                        </div>
-                                        {/* Name + Industry */}
-                                        <div className="flex-1 min-w-0 flex flex-col" style={{ gap: 3 }}>
-                                          <span style={{ fontSize: 15, fontWeight: 600, color: '#fff', letterSpacing: '-0.015em', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                                            {t.name}
-                                          </span>
-                                          <span style={{ fontSize: 12, color: '#71717a' }}>
-                                            {t.industry ?? '—'}
-                                          </span>
-                                        </div>
-                                        {/* Price + Change */}
-                                        <div className="flex flex-col items-end shrink-0" style={{ gap: 4 }}>
-                                          <span style={{ fontFamily: 'var(--font-geist-mono)', fontSize: 15, fontWeight: 600, color: '#fff' }}>
-                                            {t.price.usd != null
-                                              ? t.price.usd.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
-                                              : '—'}
-                                          </span>
-                                          <div className="flex items-center" style={{ gap: 3 }}>
-                                            <svg viewBox="0 0 24 18" width="13" height="13"
-                                              style={{ color: changeColor, flexShrink: 0, transform: `rotate(${isPos ? '0' : '180'}deg)` }}>
-                                              <path fill="currentColor" d="m12 0 10.392 14.25H1.608z" />
-                                            </svg>
-                                            <span style={{ fontFamily: 'var(--font-geist-mono)', fontSize: 12, fontWeight: 500, color: changeColor }}>
-                                              {t.price.lifetimeChangePct != null ? `${Math.abs(t.price.lifetimeChangePct).toFixed(1)}%` : '—'}
-                                            </span>
-                                          </div>
-                                        </div>
-                                      </button>
-                                    );
-                                  })
-                                )}
-                              </div>
-                            </div>
-                          )}
+                          })()}
                         </div>
                       );
                     })()}
@@ -1452,6 +1456,7 @@ export function CanvasGrid({
           activeRef={activeVideoRef}
           recordingState={activeRecordingState}
           videoSrc={activeVideoSrc}
+          onDownloadAll={onDownloadAll}
         />
       </div>
 

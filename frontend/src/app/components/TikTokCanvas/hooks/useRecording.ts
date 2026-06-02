@@ -529,15 +529,18 @@ export function useRecording(config: UseRecordingConfig) {
 
             const vw = video?.videoWidth || 1080;
             const vh = video?.videoHeight || 1920;
-            const scale = (CANVAS_W / vw) * videoScaleRef.current;
-            const dx = (CANVAS_W - vw * scale) / 2 + ox;
-            const dy = (CANVAS_H - vh * scale) / 2 + oy;
+            // Cover-fill the crop box (matches the on-screen draw loop).
+            const cover = Math.max(cropBox.w / vw, cropBox.h / vh) * videoScaleRef.current;
+            const drawW = vw * cover;
+            const drawH = vh * cover;
+            const dx = cropBox.x + (cropBox.w - drawW) / 2 + ox;
+            const dy = cropBox.y + (cropBox.h - drawH) / 2 + oy;
 
             offCtx.save();
             offCtx.beginPath();
             offCtx.rect(cropBox.x, cropBox.y, cropBox.w, cropBox.h);
             offCtx.clip();
-            offCtx.drawImage(currentFrame.frame, dx, dy, vw * scale, vh * scale);
+            offCtx.drawImage(currentFrame.frame, dx, dy, drawW, drawH);
             offCtx.restore();
 
           } else {
@@ -549,15 +552,18 @@ export function useRecording(config: UseRecordingConfig) {
             const { x: ox, y: oy } = videoOffsetRef.current;
             const vw = video?.videoWidth || 1080;
             const vh = video?.videoHeight || 1920;
-            const scale = Math.min(1000 / vw, CANVAS_H / vh) * videoScaleRef.current;
-            const dx = (CANVAS_W - vw * scale) / 2 + ox;
-            const dy = (CANVAS_H - vh * scale) / 2 + oy;
+            // Cover-fill the crop box (matches the on-screen draw loop).
+            const cover = Math.max(cropBox.w / vw, cropBox.h / vh) * videoScaleRef.current;
+            const drawW = vw * cover;
+            const drawH = vh * cover;
+            const dx = cropBox.x + (cropBox.w - drawW) / 2 + ox;
+            const dy = cropBox.y + (cropBox.h - drawH) / 2 + oy;
 
             offCtx.save();
             offCtx.beginPath();
             offCtx.rect(cropBox.x, cropBox.y, cropBox.w, cropBox.h);
             offCtx.clip();
-            offCtx.drawImage(currentFrame.frame, dx, dy, vw * scale, vh * scale);
+            offCtx.drawImage(currentFrame.frame, dx, dy, drawW, drawH);
             offCtx.restore();
 
             const captionLines = overlayCaption ? countSonotradeCaptionLines(offCtx as any, overlayCaption) : 0;
@@ -581,6 +587,7 @@ export function useRecording(config: UseRecordingConfig) {
                 priceUsd: marketData.price.usd,
                 lifetimeChangePct: marketData.price.lifetimeChangePct,
                 sparkline: marketData.sparkline,
+                size: marketData.size ?? 'large',
                 avatarImgRef: marketAvatarImgRef,
                 lastPhotoUrlRef: marketAvatarUrlRef,
               });

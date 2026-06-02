@@ -3,7 +3,7 @@
 import { useState, useRef } from 'react';
 import type { TikTokCanvasRef } from '../components/TikTokCanvas';
 import type { CarouselCanvasRef } from '../components/carouselTypes';
-import type { VideoEntry, VideoMode, SlideType } from '../types';
+import type { VideoEntry, VideoMode, SlideType, VideoData } from '../types';
 import { makeEmptyEntry } from '@/lib/entry';
 
 export function useVideoEntries() {
@@ -61,15 +61,18 @@ export function useVideoEntries() {
     ));
   }
 
-  async function fetchVideo(id: string) {
+  // Returns the fetched VideoData on success (or null on any failure) so callers
+  // can chain follow-up work off a successful fetch — e.g. the media tab's
+  // "Next" arrow auto-generating the caption + CTA once the video is in.
+  async function fetchVideo(id: string): Promise<VideoData | null> {
     const currentEntry = entriesRef.current.find(e => e.id === id);
     if (!currentEntry || !currentEntry.url.trim()) {
       setEntries(prev => prev.map(e => e.id === id ? { ...e, error: 'URL is required' } : e));
-      return;
+      return null;
     }
     if (currentEntry.mode !== 'carousel' && !currentEntry.caption.trim()) {
       setEntries(prev => prev.map(e => e.id === id ? { ...e, error: 'Caption is required' } : e));
-      return;
+      return null;
     }
 
     setEntries(prev => prev.map(e =>
@@ -84,17 +87,20 @@ export function useVideoEntries() {
       });
       const json = await res.json() as { error?: string };
       const errorMsg = typeof json.error === 'string' ? json.error : 'Something went wrong';
+      const data = res.ok ? (json as VideoData) : null;
       setEntries(prev => prev.map(e =>
         e.id === id ? {
           ...e, loading: false,
           error: res.ok ? '' : errorMsg,
-          data: res.ok ? json as VideoEntry['data'] : null, videoFailed: false,
+          data, videoFailed: false,
         } : e
       ));
+      return data;
     } catch {
       setEntries(prev => prev.map(e =>
         e.id === id ? { ...e, loading: false, error: 'Network error — please try again' } : e
       ));
+      return null;
     }
   }
 
