@@ -54,6 +54,13 @@ const SPARK_LINE_W     = Math.round(1.5 * S);// stroke width ≈ 4px
 // ── Small variant — a single compact line: photo, name, price, change ──────────
 // No industry subtitle, no sparkline. ~48px row at UI scale vs ~70px for large.
 export const MARKET_ROW_H_SMALL = Math.round(48 * S); // ≈ 126px
+// Breathing room between the bottom of the video and the top of the CTA box.
+export const CTA_TOP_GAP = Math.round(7 * S);
+// "Link in bio" line centered under the CTA box.
+const LINK_SIZE = Math.round(13 * S);
+const LINK_GAP  = Math.round(5 * S);
+const COLOR_LINK = 'rgba(255,255,255,0.5)'; // light grey
+export const CTA_LINK_AREA_H = LINK_GAP + LINK_SIZE + Math.round(8 * S);
 const SM_AVATAR_D    = Math.round(30 * S); // ≈ 79px
 const SM_NAME_SIZE   = Math.round(18 * S); // bumped from 14 → 16 → 18
 const SM_PRICE_SIZE  = Math.round(16 * S); // bumped from 14 for prominence
@@ -122,13 +129,40 @@ export function drawMarketRow({
   const rowH      = isSmall ? MARKET_ROW_H_SMALL : MARKET_ROW_H;
   const avatarD   = isSmall ? SM_AVATAR_D : AVATAR_D;
   const avatarR   = avatarD / 2;
-  const cy        = videoBottomY;
+  const cy        = videoBottomY + CTA_TOP_GAP; // gap between video and CTA
   const midY      = cy + rowH / 2;
   const rightEdge = cx + cw - PADDING_X;
 
-  // ── Separator — borderBottom: '1px solid #1a1a1a' from ArtistRow ─────────────
-  ctx.fillStyle = COLOR_SEPARATOR;
-  ctx.fillRect(cx + PADDING_X, cy, cw - PADDING_X * 2, Math.max(1, Math.round(1 * S)));
+  // "Link in bio" — light grey, centered under the CTA box. Drawn for both sizes.
+  const drawLinkInBio = () => {
+    ctx.font = `500 ${LINK_SIZE}px ${SANS}`;
+    ctx.fillStyle = COLOR_LINK;
+    const txt = 'Link in bio';
+    const w = ctx.measureText(txt).width;
+    ctx.fillText(txt, cx + cw / 2 - w / 2, cy + rowH + LINK_GAP + LINK_SIZE);
+  };
+
+  if (!isSmall) {
+    // Large: a white rounded-rectangle outline hugging the CTA content (small
+    // gets no box and no divider).
+    const boxMargin = 52;                       // canvas px in from the side edges
+    const bx = cx + boxMargin;
+    const bw = cw - boxMargin * 2;
+    const byInset = Math.round(9 * S);
+    const by = cy + byInset;
+    const bh = rowH - byInset * 2;
+    const br = Math.round(14 * S);
+    ctx.beginPath();
+    ctx.moveTo(bx + br, by);
+    ctx.arcTo(bx + bw, by,      bx + bw, by + bh, br);
+    ctx.arcTo(bx + bw, by + bh, bx,      by + bh, br);
+    ctx.arcTo(bx,      by + bh, bx,      by,      br);
+    ctx.arcTo(bx,      by,      bx + bw, by,      br);
+    ctx.closePath();
+    ctx.strokeStyle = 'rgba(255,255,255,0.28)'; // light, soft white
+    ctx.lineWidth = Math.max(1, Math.round(0.8 * S));
+    ctx.stroke();
+  }
 
   // ── Avatar ────────────────────────────────────────────────────────────────────
   const avatarCX = cx + PADDING_X + avatarR;
@@ -229,6 +263,7 @@ export function drawMarketRow({
       ctx.fillStyle = COLOR_POSITIVE;
       ctx.fillText(changeText, changeTextX, changeBaseline);
     }
+    drawLinkInBio();
     return;
   }
 
@@ -256,6 +291,11 @@ export function drawMarketRow({
 
   const priceColW   = Math.max(priceTextW, changeRowW);
 
+  // Layout (left→right): avatar · name/industry · price+change · sparkline.
+  // The sparkline now sits at the far right; price/change sits just left of it.
+  const hasSpark       = sparkline != null && sparkline.length >= 1;
+  const priceRightEdge = hasSpark ? rightEdge - SPARK_W - SPARK_MARGIN_R : rightEdge;
+
   // Name + Industry: left-aligned, stacked, group centered on the photo's
   // middle. If the name is too long to fit before the sparkline/price column,
   // SHRINK it to fit rather than wrap or ellipsize. Industry keeps its size.
@@ -278,8 +318,7 @@ export function drawMarketRow({
   if (sparkline && sparkline.length >= 1) {
     const sparkColor = COLOR_POSITIVE;
 
-    const sparkRight = rightEdge - priceColW - SPARK_MARGIN_R;
-    const sparkLeft  = sparkRight - SPARK_W;
+    const sparkLeft  = rightEdge - SPARK_W;
     const sparkTop   = midY - SPARK_H / 2;
     const pad        = (2 / 32) * SPARK_H;
 
@@ -325,7 +364,7 @@ export function drawMarketRow({
   if (priceText) {
     ctx.font = `600 ${PRICE_SIZE}px ${MONO}`;
     ctx.fillStyle = COLOR_WHITE;
-    ctx.fillText(priceText, rightEdge - priceTextW, priceBaseline);
+    ctx.fillText(priceText, priceRightEdge - priceTextW, priceBaseline);
   }
 
   if (lifetimeChangePct != null) {
@@ -336,7 +375,7 @@ export function drawMarketRow({
 
     ctx.font = `500 ${CHANGE_SIZE}px ${MONO}`;
     ctx.fillStyle = color;
-    const aX     = rightEdge - ARROW_W - ARROW_GAP - changeTxtW;
+    const aX     = priceRightEdge - ARROW_W - ARROW_GAP - changeTxtW;
 
     // Arrow center aligned on text cap-height (ListTrendArrow: 13×13, SVG viewBox 0 0 24 18)
     const arrowCY  = changeBaseline - CHANGE_SIZE * 0.35;
@@ -352,4 +391,6 @@ export function drawMarketRow({
 
     ctx.fillText(changeText, aX + ARROW_W + ARROW_GAP, changeBaseline);
   }
+
+  drawLinkInBio();
 }

@@ -1267,7 +1267,9 @@ export function CanvasGrid({
                             return (
                               <div>
                                 {/* Preview row (ArtistRow style, read from overrides) */}
-                                <div className="flex items-center" style={{ gap: 12, padding: '10px 12px', borderBottom: '1px solid #1a1a1a' }}>
+                                <div className="flex items-center" style={(marketSizeMap[entry.id] ?? 'large') === 'large'
+                                  ? { gap: 12, padding: '10px 12px', border: '1px solid rgba(255,255,255,0.28)', borderRadius: 14, margin: '8px 12px' }
+                                  : { gap: 12, padding: '10px 12px', borderBottom: '1px solid #1a1a1a' }}>
                                   {/* Avatar — click to open photo picker */}
                                   <button
                                     onClick={() => openPhotoPicker(entry.id, ov.name || selected.name)}
@@ -1291,7 +1293,27 @@ export function CanvasGrid({
                                     <span style={{ fontSize: 19, fontWeight: 600, color: '#fff', letterSpacing: '-0.015em', lineHeight: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{ov.name || '—'}</span>
                                     <span style={{ fontSize: 12, color: '#71717a', lineHeight: 1 }}>{ov.industry || '—'}</span>
                                   </div>
-                                  {/* Sparkline — 80×30, between name/industry and price/change (SXSparkline) */}
+                                  {/* Price + Change — now sits left of the chart */}
+                                  <div className="flex flex-col items-end shrink-0" style={{ gap: 3 }}>
+                                    <span style={{ fontFamily: 'var(--font-geist-mono)', fontSize: 19, fontWeight: 600, color: '#fff', lineHeight: 1 }}>
+                                      {ov.priceUsd !== '' && !isNaN(parseFloat(ov.priceUsd))
+                                        ? parseFloat(ov.priceUsd).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
+                                        : '—'}
+                                    </span>
+                                    <div className="flex items-center" style={{ gap: 3, lineHeight: 1 }}>
+                                      {ov.lifetimeChangePct !== '' && !isNaN(pctVal) && (
+                                        <>
+                                          <svg viewBox="0 0 24 18" width="13" height="13" style={{ color: changeColor, flexShrink: 0, transform: `rotate(${isPos ? '0' : '180'}deg)` }}>
+                                            <path fill="currentColor" d="m12 0 10.392 14.25H1.608z" />
+                                          </svg>
+                                          <span style={{ fontFamily: 'var(--font-geist-mono)', fontSize: 12, fontWeight: 500, color: changeColor, lineHeight: 1 }}>
+                                            {Math.abs(pctVal).toFixed(1)}%
+                                          </span>
+                                        </>
+                                      )}
+                                    </div>
+                                  </div>
+                                  {/* Sparkline — 80×30, now at the far right (chart + price swapped) */}
                                   {(() => {
                                     // MARKETING: always synthetic, ticker-seeded so the picker
                                     // shows the exact same green upward curve that will appear
@@ -1313,34 +1335,16 @@ export function CanvasGrid({
                                       d += ` H${pts[i+1]!.x.toFixed(1)} V${pts[i+1]!.y.toFixed(1)}`;
                                     }
                                     return (
-                                      <div style={{ width: 80, height: 30, flexShrink: 0, marginRight: 16 }}>
+                                      <div style={{ width: 80, height: 30, flexShrink: 0, marginLeft: 4 }}>
                                         <svg viewBox={`0 0 ${W} ${H}`} preserveAspectRatio="none" width="100%" height="100%" style={{ display: 'block', overflow: 'visible' }}>
                                           <path d={d} fill="none" stroke={sparkColor} strokeWidth="1.5" strokeLinecap="square" strokeLinejoin="miter" vectorEffect="non-scaling-stroke" />
                                         </svg>
                                       </div>
                                     );
                                   })()}
-                                  {/* Price + Change */}
-                                  <div className="flex flex-col items-end shrink-0" style={{ gap: 3 }}>
-                                    <span style={{ fontFamily: 'var(--font-geist-mono)', fontSize: 19, fontWeight: 600, color: '#fff', lineHeight: 1 }}>
-                                      {ov.priceUsd !== '' && !isNaN(parseFloat(ov.priceUsd))
-                                        ? parseFloat(ov.priceUsd).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
-                                        : '—'}
-                                    </span>
-                                    <div className="flex items-center" style={{ gap: 3, lineHeight: 1 }}>
-                                      {ov.lifetimeChangePct !== '' && !isNaN(pctVal) && (
-                                        <>
-                                          <svg viewBox="0 0 24 18" width="13" height="13" style={{ color: changeColor, flexShrink: 0, transform: `rotate(${isPos ? '0' : '180'}deg)` }}>
-                                            <path fill="currentColor" d="m12 0 10.392 14.25H1.608z" />
-                                          </svg>
-                                          <span style={{ fontFamily: 'var(--font-geist-mono)', fontSize: 12, fontWeight: 500, color: changeColor, lineHeight: 1 }}>
-                                            {Math.abs(pctVal).toFixed(1)}%
-                                          </span>
-                                        </>
-                                      )}
-                                    </div>
-                                  </div>
                                 </div>
+                                {/* "Link in bio" — light grey, centered under the CTA */}
+                                <div style={{ textAlign: 'center', color: 'rgba(255,255,255,0.5)', fontSize: 12, paddingBottom: 8 }}>Link in bio</div>
                                 {/* Edit fields */}
                                 <div className="px-3 py-2.5 flex flex-col gap-2">
                                   <div className="flex gap-2">

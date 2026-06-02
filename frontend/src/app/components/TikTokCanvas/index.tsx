@@ -9,7 +9,7 @@ import {
 } from './constants';
 import type { Box, TikTokCanvasProps, TikTokCanvasRef } from './types';
 import { drawHeaderOnContext } from './drawing/drawHeader';
-import { drawMarketRow, MARKET_ROW_H, MARKET_ROW_H_SMALL } from './drawing/drawMarketRow';
+import { drawMarketRow, MARKET_ROW_H, MARKET_ROW_H_SMALL, CTA_TOP_GAP, CTA_LINK_AREA_H } from './drawing/drawMarketRow';
 import { countCaptionLines, countSonotradeCaptionLines } from './drawing/countCaptionLines';
 import { VideoOverlays } from './ui/VideoOverlays';
 import { CanvasHandles } from './ui/CanvasHandles';
@@ -328,14 +328,15 @@ export const TikTokCanvas = forwardRef<TikTokCanvasRef, TikTokCanvasProps>(funct
     }
     if (!overlayCaption || !ctx) return BASE_HEADER_HEIGHT;
     const captionLines = countSonotradeCaptionLines(ctx, overlayCaption);
-    const CAPTION_BOTTOM_OFFSET = 18;
+    const CAPTION_BOTTOM_OFFSET = 35; // keep in sync with drawHeader.ts
     return BASE_HEADER_HEIGHT + CAPTION_TOP_PADDING + (captionLines * CAPTION_LINE_HEIGHT) - CAPTION_BOTTOM_OFFSET;
   }
 
   // Height the CTA (market row) reserves below the video, 0 when there's none.
   function ctaHeight(): number {
     if (!marketData) return 0;
-    return (marketData.size ?? 'large') === 'small' ? MARKET_ROW_H_SMALL : MARKET_ROW_H;
+    const row = (marketData.size ?? 'large') === 'small' ? MARKET_ROW_H_SMALL : MARKET_ROW_H;
+    return row + CTA_TOP_GAP + CTA_LINK_AREA_H; // gap + row + "Link in bio" line
   }
 
   // Auto-size + position the crop box so the whole block (header → video → CTA)

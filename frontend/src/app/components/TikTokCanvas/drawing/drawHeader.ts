@@ -44,7 +44,9 @@ export function drawHeaderOnContext({
   verifiedImgRef,
 }: DrawHeaderOptions): number {
   const captionLines = countSonotradeCaptionLines(ctx, overlayCaption);
-  const CAPTION_BOTTOM_OFFSET = 18;
+  // Trims dead space below the caption so the video sits as close under it as the
+  // caption sits under the logo row (~16px). Must match index.tsx computeHeaderHeight.
+  const CAPTION_BOTTOM_OFFSET = 35;
   const headerHeight = overlayCaption
     ? BASE_HEADER_HEIGHT + CAPTION_TOP_PADDING + (captionLines * CAPTION_LINE_HEIGHT) - CAPTION_BOTTOM_OFFSET
     : BASE_HEADER_HEIGHT;
