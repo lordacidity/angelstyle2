@@ -5,7 +5,7 @@ import { useRef, useEffect, useState, forwardRef, useImperativeHandle } from 're
 import {
   CANVAS_W, CANVAS_H, VIDEO_TARGET_W, DISPLAY_SCALE, MIN_DIM,
   BASE_HEADER_HEIGHT, CAPTION_LINE_HEIGHT, CAPTION_TOP_PADDING, HEADER_PADDING_X,
-  BLOCK_TOP_PCT, BLOCK_BOTTOM_MARGIN,
+  BLOCK_TOP_PCT,
 } from './constants';
 import type { Box, TikTokCanvasProps, TikTokCanvasRef } from './types';
 import { drawHeaderOnContext } from './drawing/drawHeader';
@@ -75,7 +75,10 @@ export const TikTokCanvas = forwardRef<TikTokCanvasRef, TikTokCanvasProps>(funct
 
   usePanZoom({ canvasRef, videoScaleRef, setVideoScale });
 
-  const { startDrag, isDraggingRef } = useDrag({ boxRef, setBox, videoOffsetRef });
+  const { startDrag, isDraggingRef } = useDrag({
+    boxRef, setBox, videoOffsetRef,
+    onResizeEnd: () => repositionBlock(),
+  });
 
   const { isRecording, recProgress, recStatus, startRecording, cancelRecording } = useRecording({
     canvasRef, videoRef, brand, rowNumber, videoId,
@@ -121,15 +124,25 @@ export const TikTokCanvas = forwardRef<TikTokCanvasRef, TikTokCanvasProps>(funct
     onRecordingStateChangeRef.current?.({ isRecording, recProgress, recStatus });
   }, [isRecording, recProgress, recStatus]);
 
-  // Keep the top of the block anchored at BLOCK_TOP_PCT as the header height
-  // changes (caption generated/edited, brand switched). The header grows above
-  // the video, so without this the logo would drift up off the 10% mark.
+  // Brand switch changes the video's target width (clean = full-bleed), so re-fit
+  // the photo to its natural height at the new width and re-position.
   useEffect(() => {
     const v = videoRef.current;
     if (!v || !v.videoWidth || !v.videoHeight) return;
     anchorBlockTop();
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [overlayCaption, brand, marketData]);
+  }, [brand]);
+
+  // Caption edits (header grows/shrinks) and CTA size changes (small vs large,
+  // marketData) change the chrome height. Re-apply the 1:2 top:bottom split using
+  // the current photo size so the block stays balanced without resetting a manual
+  // resize. repositionBlock only touches y, so it's safe to run on every change.
+  useEffect(() => {
+    const v = videoRef.current;
+    if (!v || !v.videoWidth || !v.videoHeight) return;
+    repositionBlock();
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [overlayCaption, marketData]);
 
   // ── Main draw loop ────────────────────────────────────────────────────────────
 
@@ -326,21 +339,23 @@ export const TikTokCanvas = forwardRef<TikTokCanvasRef, TikTokCanvasProps>(funct
   }
 
   // Auto-size + position the crop box so the whole block (header → video → CTA)
-  // is anchored BLOCK_TOP_PCT down from the top and fits the frame. The video is
-  // shown at the template's full width; its height is the natural height at that
-  // width, capped to the space left after the header + CTA so nothing is cut off
-  // by the canvas. The draw loop cover-fills this box, so the frame is always
-  // tight around the video — no black bars, no distortion — and manual
-  // drag/resize is rarely needed. The header draws at `y - headerHeight + 4`, so
+  // sits with the black space ABOVE it always half the black space below it
+  // (top : bottom = 1 : 2). The fixed chrome (header + CTA) is constant, so the
+  // leftover black space is CANVAS_H - chrome - videoHeight; split 1/3 above and
+  // 2/3 below it gives blockTop = leftover / 3. The video is shown at the
+  // template's full width; its height is the natural height at that width, capped
+  // to the frame so nothing is cut off and blockTop never goes negative. The draw
+  // loop cover-fills this box, so the frame is always tight around the video — no
+  // black bars, no distortion. The header draws at `y - headerHeight + 4`, so
   // y = blockTop + headerHeight - 4 puts the header's top edge exactly at blockTop.
   function anchorBlockTop() {
     const video = videoRef.current;
     const headerHeight = computeHeaderHeight();
-    const blockTop = blockTopPctRef.current * CANVAS_H;
-    const y = blockTop + headerHeight - 4;
+    const chrome = headerHeight + ctaHeight();
 
     if (!video || !video.videoWidth || !video.videoHeight) {
-      const b = { ...boxRef.current, y };
+      const blockTop = Math.max(0, (CANVAS_H - chrome) / 3);
+      const b = { ...boxRef.current, y: blockTop + headerHeight - 4 };
       boxRef.current = b;
       setBox({ ...b });
       return;
@@ -348,10 +363,26 @@ export const TikTokCanvas = forwardRef<TikTokCanvasRef, TikTokCanvasProps>(funct
 
     const boxW = brand === 'clean' ? CANVAS_W : VIDEO_TARGET_W;
     const naturalH = video.videoHeight * (boxW / video.videoWidth);
-    const availableH = CANVAS_H - y - ctaHeight() - BLOCK_BOTTOM_MARGIN;
-    const boxH = Math.max(MIN_DIM, Math.min(naturalH, availableH));
+    const boxH = Math.max(MIN_DIM, Math.min(naturalH, CANVAS_H - chrome));
+    const blockTop = Math.max(0, (CANVAS_H - chrome - boxH) / 3);
+    const y = blockTop + headerHeight - 4;
 
     const b = { x: (CANVAS_W - boxW) / 2, y, w: boxW, h: boxH };
+    boxRef.current = b;
+    setBox({ ...b });
+  }
+
+  // Re-apply the 1:2 top:bottom split using the CURRENT photo size (unlike
+  // anchorBlockTop, which re-fits the photo to its natural height). Used when the
+  // chrome changes height — CTA toggled small/large, caption edited — or after a
+  // manual resize, so the block re-centers vertically without resetting the size
+  // the user just set.
+  function repositionBlock() {
+    const headerHeight = computeHeaderHeight();
+    const chrome = headerHeight + ctaHeight();
+    const boxH = boxRef.current.h;
+    const blockTop = Math.max(0, (CANVAS_H - chrome - boxH) / 3);
+    const b = { ...boxRef.current, y: blockTop + headerHeight - 4 };
     boxRef.current = b;
     setBox({ ...b });
   }

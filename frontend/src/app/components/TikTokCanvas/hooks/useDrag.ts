@@ -17,11 +17,16 @@ interface UseDragParams {
   boxRef: MutableRefObject<Box>;
   setBox: (b: Box) => void;
   videoOffsetRef: MutableRefObject<{ x: number; y: number }>;
+  // Called once a resize-handle drag ends (not a 'move'/pan), so the caller can
+  // re-balance the block's vertical position around the new photo size.
+  onResizeEnd?: () => void;
 }
 
-export function useDrag({ boxRef, setBox, videoOffsetRef }: UseDragParams) {
+export function useDrag({ boxRef, setBox, videoOffsetRef, onResizeEnd }: UseDragParams) {
   const drag = useRef<DragState | null>(null);
   const isDraggingRef = useRef(false);
+  const onResizeEndRef = useRef(onResizeEnd);
+  onResizeEndRef.current = onResizeEnd;
 
   useEffect(() => {
     function applyDrag(dx: number, dy: number, shiftKey: boolean) {
@@ -63,7 +68,12 @@ export function useDrag({ boxRef, setBox, videoOffsetRef }: UseDragParams) {
         e.shiftKey,
       );
     }
-    function onUp() { drag.current = null; isDraggingRef.current = false; }
+    function onUp() {
+      const resized = !!drag.current && drag.current.handle !== 'move' && isDraggingRef.current;
+      drag.current = null;
+      isDraggingRef.current = false;
+      if (resized) onResizeEndRef.current?.();
+    }
 
     window.addEventListener('mousemove', onMove);
     window.addEventListener('mouseup', onUp);

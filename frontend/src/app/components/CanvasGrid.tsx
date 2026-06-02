@@ -551,25 +551,28 @@ export function CanvasGrid({
   function generateFallbackSparkline(ticker: string): SparkPoint[] {
     let seed = ticker.split('').reduce((a, c) => (a * 31 + c.charCodeAt(0)) | 0, 0x1234) >>> 0;
     const rand = () => { seed = (seed * 1664525 + 1013904223) >>> 0; return seed / 0xffffffff; };
-    const N = 16;
-    // Kalshi-style step chart: a MOMENTUM walk (autocorrelated shocks → sustained
-    // runs / legs, real pullbacks — not white noise, not a straight ramp) plus an
-    // upward trend so it clearly closes higher, normalized to fill the box. Fewer
-    // points → chunkier steps. Seeded → unique per ticker.
-    const raw: number[] = [];
-    let v = 0, m = 0;
+    // "Volatile climb": a rising backbone (0→1 across the series) with mean-zero
+    // jitter laid ON TOP — big enough to make real up/down pullbacks, plus the
+    // occasional fat-tail swing. The jitter is TAPERED to ~0 at both ends (sin
+    // window), so every chart opens near its low and closes at its high → always
+    // reads clearly bullish, never wanders off. Crucially the backbone is the
+    // climb and the jitter is absolute (not scaled by the noise span), so the
+    // swing depth is a real, tunable fraction of the full height instead of
+    // cancelling out under normalization. Seeded → unique per ticker.
+    const N = 13 + Math.floor(rand() * 9);            // 13..21 points → varying step width
+    const wiggle = 0.34 + rand() * 0.18;              // swing depth, fraction of full height
+    const vals: number[] = [];
     for (let i = 0; i < N; i++) {
-      m = m * 0.68 + (rand() - 0.5) * 0.6;   // momentum: shocks persist into legs
-      v += m;
-      raw.push(v);
+      const t = N === 1 ? 0 : i / (N - 1);            // 0..1 rising backbone
+      const taper = Math.sin(Math.PI * t);            // 0 at both ends, 1 mid → pins endpoints
+      let j = (rand() - 0.5) * wiggle;                // mean-zero pullback noise
+      if (rand() < 0.22) j += (rand() - 0.5) * wiggle * 1.8;  // occasional bigger swing
+      vals.push(t + j * taper);
     }
-    const span = Math.max(1e-6, Math.max(...raw) - Math.min(...raw));
-    const trend = (1.05 + rand() * 0.6) * span;         // upward pull — a touch stronger
-    const withTrend = raw.map((x, i) => x + (i / (N - 1)) * trend);
-    const lo = Math.min(...withTrend), hi = Math.max(...withTrend);
+    const lo = Math.min(...vals), hi = Math.max(...vals);
     const range = Math.max(1e-6, hi - lo);
-    return withTrend.map((x, i) => ({
-      value: 0.1 + ((x - lo) / range) * 0.8,            // fill [0.1, 0.9]
+    return vals.map((x, i) => ({
+      value: 0.1 + ((x - lo) / range) * 0.8,          // fill [0.1, 0.9]
       timestamp: i,
     }));
   }
