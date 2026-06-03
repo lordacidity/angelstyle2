@@ -17,12 +17,12 @@ import * as filesStore from "./filesStore.js";
 import * as templates from "./templates.js";
 import { chat as deepseekChat, parseJson as deepseekParseJson } from "./deepseek.js";
 
-// Resolve the single root .env at phonedeck/.env — shared with the Studio
-// frontend (which loads the same file via @next/env in next.config.ts). HERE
-// resolves relative to this file, not cwd, so launching from any directory
-// (npm --prefix, start-dev.bat, etc.) still hits the right file.
+// Single source of truth lives at phonedeck/frontend/.env — Next.js auto-loads
+// it as its project root, and we read the same file here so both runtimes share
+// one set of values. HERE resolves relative to this file, not cwd, so launching
+// from any directory (npm --prefix, start-dev.bat, etc.) still hits it.
 const HERE = path.dirname(fileURLToPath(import.meta.url));
-dotenv.config({ path: path.resolve(HERE, "..", "..", ".env") });
+dotenv.config({ path: path.resolve(HERE, "..", "..", "frontend", ".env") });
 
 // Dynamic import AFTER dotenv runs, so pauvData sees the env vars when it
 // constructs its module-level Supabase client.
