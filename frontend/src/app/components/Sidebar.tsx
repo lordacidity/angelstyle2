@@ -14,6 +14,17 @@ interface SidebarProps {
 
 const NAV: { id: AppSection; label: string; icon: React.ReactNode }[] = [
   {
+    id: 'deck',
+    label: 'Deck',
+    // Downward (apex-at-bottom) triangle — matches the icon Phonedeck's own
+    // sidebar uses for its home tab.
+    icon: (
+      <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+        <polygon points="4 6 20 6 12 20"/>
+      </svg>
+    ),
+  },
+  {
     id: 'template',
     label: 'Template',
     icon: (
@@ -44,6 +55,30 @@ const NAV: { id: AppSection; label: string; icon: React.ReactNode }[] = [
         <rect x="3" y="3" width="18" height="18" rx="2"/>
         <path d="M3 9h18"/>
         <path d="M9 21V9"/>
+      </svg>
+    ),
+  },
+  {
+    id: 'trending',
+    label: 'Trending',
+    // Six-spoke asterisk / spark — matches the icon Phonedeck's sidebar uses.
+    icon: (
+      <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+        <line x1="12" y1="3" x2="12" y2="21"/>
+        <line x1="4.5" y1="7.5" x2="19.5" y2="16.5"/>
+        <line x1="4.5" y1="16.5" x2="19.5" y2="7.5"/>
+      </svg>
+    ),
+  },
+  {
+    id: 'images',
+    label: 'Images',
+    // Camera body + lens — matches Phonedeck's sidebar icon.
+    icon: (
+      <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+        <rect x="2" y="7" width="20" height="14" rx="2"/>
+        <path d="M8 7l1.5-3h5L16 7"/>
+        <circle cx="12" cy="14" r="3.5"/>
       </svg>
     ),
   },

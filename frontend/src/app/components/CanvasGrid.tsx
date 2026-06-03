@@ -710,6 +710,43 @@ export function CanvasGrid({
   // CTA widget size per entry: 'large' (full row w/ industry + sparkline) or
   // 'small' (one-line: photo, name, price, change). Defaults to 'large'.
   const [marketSizeMap,           setMarketSizeMap]           = useState<Record<string, 'large' | 'small'>>({});
+  // Global toggle controlling whether the market widget is drawn on the
+  // canvas (and exported). Persisted in localStorage so flipping it off
+  // applies to every video — current, future, after Clear, after refresh —
+  // until the user flips it back on.
+  const [marketWidgetVisible, setMarketWidgetVisible] = useState(true);
+  // Per-entry collapsed state for the Market + Post Caption cards. False/
+  // undefined = expanded (showing full body). True = collapsed (header only).
+  // Independent from marketWidgetVisible: the card's open/closed state and
+  // whether the widget actually renders on the canvas are separate concerns.
+  // Persisted in localStorage so refresh + Clear leave the user's fold
+  // preference alone.
+  const [marketCardCollapsedMap,  setMarketCardCollapsedMap]  = useState<Record<string, boolean>>({});
+  const [postCaptionCollapsedMap, setPostCaptionCollapsedMap] = useState<Record<string, boolean>>({});
+  const persistedHydratedRef = useRef(false);
+  useEffect(() => {
+    try {
+      const m = window.localStorage.getItem('studio.marketCardCollapsed');
+      if (m) setMarketCardCollapsedMap(JSON.parse(m) as Record<string, boolean>);
+      const p = window.localStorage.getItem('studio.postCaptionCollapsed');
+      if (p) setPostCaptionCollapsedMap(JSON.parse(p) as Record<string, boolean>);
+      const v = window.localStorage.getItem('studio.marketWidgetVisible');
+      if (v === 'false') setMarketWidgetVisible(false);
+    } catch { /* malformed JSON or storage disabled — silent reset to default */ }
+    persistedHydratedRef.current = true;
+  }, []);
+  useEffect(() => {
+    if (!persistedHydratedRef.current) return;
+    try { window.localStorage.setItem('studio.marketCardCollapsed', JSON.stringify(marketCardCollapsedMap)); } catch { /* ignore */ }
+  }, [marketCardCollapsedMap]);
+  useEffect(() => {
+    if (!persistedHydratedRef.current) return;
+    try { window.localStorage.setItem('studio.postCaptionCollapsed', JSON.stringify(postCaptionCollapsedMap)); } catch { /* ignore */ }
+  }, [postCaptionCollapsedMap]);
+  useEffect(() => {
+    if (!persistedHydratedRef.current) return;
+    try { window.localStorage.setItem('studio.marketWidgetVisible', String(marketWidgetVisible)); } catch { /* ignore */ }
+  }, [marketWidgetVisible]);
 
   // Per-entry user overrides for the selected market's display fields
   interface MarketOverride {
@@ -875,6 +912,10 @@ export function CanvasGrid({
     setMarketSizeMap({});
     setMarketOverrideMap({});
     setSparklineMap({});
+    // NOTE: marketCardCollapsedMap, postCaptionCollapsedMap, AND
+    // marketWidgetVisible intentionally NOT reset — those are UI / global
+    // preferences, not per-content state. Clear shouldn't override the
+    // user's fold or widget-visibility choices.
     setSelectedId('1');
     onClearAll();
   }, [onClearAll]);
@@ -883,6 +924,9 @@ export function CanvasGrid({
   const getMarketData = useCallback((entryId: string): MarketData | null => {
     const sel = marketMap[entryId];
     if (!sel) return null;
+    // Respect the global visibility toggle — hiding the widget keeps the
+    // selected talent + overrides intact for an easy re-enable.
+    if (!marketWidgetVisible) return null;
     const ov = marketOverrideMap[entryId];
     // MARKETING: always use the synthetic ticker-seeded fallback so every
     // market gets a healthy-looking upward green curve. Real API data is
@@ -915,7 +959,7 @@ export function CanvasGrid({
         lifetimeChangePct: !isNaN(pctNum ?? NaN) ? pctNum  : syntheticPct,
       },
     };
-  }, [marketMap, marketOverrideMap, sparklineMap, marketSizeMap]);
+  }, [marketMap, marketOverrideMap, sparklineMap, marketSizeMap, marketWidgetVisible]);
 
 
   const generateSocialCaption = useCallback(async (entry: VideoEntry) => {
@@ -969,19 +1013,31 @@ export function CanvasGrid({
           const cta = await cr.json() as { talent?: Talent; ctaParagraph?: string; matchType?: string; error?: string };
           if (cta.talent && !cta.error) {
             const t = cta.talent;
-            // Fill the Market widget exactly as a manual pick would.
-            setMarketMap(prev => ({ ...prev, [entry.id]: t }));
-            setSparklineMap(prev => ({ ...prev, [entry.id]: prev[entry.id] ?? generateFallbackSparkline(t.ticker) }));
-            fetchSparkline(entry.id, t.ticker);
-            setMarketOverrideMap(prev => ({
-              ...prev,
-              [entry.id]: {
-                name: t.name, industry: t.industry ?? '',
-                photo_url: t.photo_url,
-                priceUsd: t.price.usd?.toFixed(2) ?? '',
-                lifetimeChangePct: syntheticPctForTicker(t.ticker).toFixed(1),
-              },
-            }));
+            // If the user hit Clear on this entry's market while we were
+            // awaiting the AI's pick, respect that — don't silently re-apply.
+            // `null` is the explicit "cleared" marker; `undefined` (never had a
+            // market) is still fair game for auto-fill.
+            let userCleared = false;
+            setMarketMap(prev => {
+              if (prev[entry.id] === null) { userCleared = true; return prev; }
+              return { ...prev, [entry.id]: t };
+            });
+            if (userCleared) {
+              // Skip sparkline + override writes too — pointless without a market.
+              // CTA paragraph swap below still runs since that's purely the caption.
+            } else {
+              setSparklineMap(prev => ({ ...prev, [entry.id]: prev[entry.id] ?? generateFallbackSparkline(t.ticker) }));
+              fetchSparkline(entry.id, t.ticker);
+              setMarketOverrideMap(prev => ({
+                ...prev,
+                [entry.id]: {
+                  name: t.name, industry: t.industry ?? '',
+                  photo_url: t.photo_url,
+                  priceUsd: t.price.usd?.toFixed(2) ?? '',
+                  lifetimeChangePct: syntheticPctForTicker(t.ticker).toFixed(1),
+                },
+              }));
+            }
             // Swap the caption's closing paragraph for the CTA naming this talent.
             if (cta.ctaParagraph) {
               const paras = generated.split(/\n\s*\n/);
@@ -1241,9 +1297,9 @@ export function CanvasGrid({
           <button
             onClick={handleClearAll}
             title="Clear everything and start over"
-            className="flex items-center gap-1.5 rounded-md border border-zinc-800 px-2.5 py-1.5 text-xs font-medium text-zinc-400 hover:text-zinc-100 hover:border-zinc-600 transition-colors"
+            className="flex items-center gap-1.5 rounded-full bg-white px-4 py-1.5 text-xs font-semibold text-black hover:bg-zinc-100 transition-colors shrink-0"
           >
-            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M3 6h18"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg>
+            <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M3 6h18"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg>
             Clear
           </button>
         </div>
@@ -1355,11 +1411,6 @@ export function CanvasGrid({
                         />
                         <div className="flex items-center gap-1.5 ml-auto">
                           <button
-                            onClick={() => canvasRefsMap.current.get(entry.id)?.resetTrim()}
-                            className="flex items-center h-9 px-2.5 rounded-md bg-zinc-950 border border-zinc-800 text-zinc-400 hover:text-zinc-200 hover:border-zinc-600 transition-colors text-[10px] font-medium shrink-0"
-                            title="Reset trim"
-                          >Reset trim</button>
-                          <button
                             onClick={() => canvasRefsMap.current.get(entry.id)?.resetBox()}
                             className="flex items-center h-9 px-2.5 rounded-md bg-zinc-950 border border-zinc-800 text-zinc-400 hover:text-zinc-200 hover:border-zinc-600 transition-colors text-[10px] font-medium shrink-0"
                             title="Reset box"
@@ -1463,14 +1514,29 @@ export function CanvasGrid({
                         design from pauv-the-app/MobileTradeList.tsx. */}
                     {entry.mode === 'twitter' && (() => {
                       const selected = marketMap[entry.id] ?? null;
-                      // The CTA UI only appears AFTER the caption + CTA have been
-                      // generated (auto-pick sets the market). No pre-generation
-                      // search/picker — the generated CTA is the first thing shown.
-                      if (!selected) return null;
+                      // Market card is always shown for Twitter posts so the
+                      // user can collapse / change / toggle it before a market
+                      // is picked. The body shows a placeholder until a talent
+                      // is auto-picked by the CTA generator or manually chosen
+                      // via Change.
+                      const collapsed = marketCardCollapsedMap[entry.id] ?? false;
                       return (
                         <div className="rounded-lg bg-zinc-950 border border-zinc-800 overflow-hidden">
-                          <div className="flex items-center justify-between gap-3 px-3 py-2 border-b border-zinc-800">
-                            <span className="text-[11px] font-semibold text-zinc-300 uppercase tracking-wider">Market</span>
+                          <div className={`flex items-center justify-between gap-3 px-3 py-2 ${collapsed ? '' : 'border-b border-zinc-800'}`}>
+                            <div className="flex items-center gap-2 min-w-0">
+                              <button
+                                onClick={() => setMarketCardCollapsedMap(prev => ({ ...prev, [entry.id]: !(prev[entry.id] ?? false) }))}
+                                title={collapsed ? 'Expand market' : 'Collapse market'}
+                                className="flex items-center justify-center w-4 h-4 text-zinc-500 hover:text-zinc-200 transition-colors shrink-0"
+                              >
+                                <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                                  {collapsed
+                                    ? <polyline points="6 9 12 15 18 9"/>
+                                    : <polyline points="18 15 12 9 6 15"/>}
+                                </svg>
+                              </button>
+                              <span className="text-[11px] font-semibold text-zinc-300 uppercase tracking-wider">Market</span>
+                            </div>
                             <div className="flex items-center gap-2">
                               {/* CTA size toggle — Large (full row) vs Small (one line). */}
                               <div className="flex items-center rounded-md border border-zinc-800 overflow-hidden">
@@ -1497,20 +1563,20 @@ export function CanvasGrid({
                                 <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="m22 8-3 3-1.5-1.5"/></svg>
                                 Change
                               </button>
-                              {selected && (
-                                <button
-                                  onClick={() => {
-                                    setMarketMap(prev => ({ ...prev, [entry.id]: null }));
-                                    setMarketOverrideMap(prev => { const n = { ...prev }; delete n[entry.id]; return n; });
-                                  }}
-                                  className="text-[10px] text-zinc-600 hover:text-zinc-400 transition-colors"
-                                >
-                                  Clear
-                                </button>
-                              )}
+                              {/* Visibility toggle — global preference. Hides the market widget
+                                  from the canvas/export across ALL videos, persists through
+                                  Clear + refresh. Picked talent + overrides stay intact for
+                                  instant re-enable. */}
+                              <button
+                                onClick={() => setMarketWidgetVisible(v => !v)}
+                                title={marketWidgetVisible ? 'Hide market widget (applies to all videos)' : 'Show market widget'}
+                                className={`inline-flex items-center shrink-0 w-9 h-5 rounded-full px-0.5 transition-colors ${marketWidgetVisible ? 'bg-[#04df9d]' : 'bg-zinc-700'}`}
+                              >
+                                <span className={`block w-4 h-4 rounded-full bg-white shadow-sm transition-transform ${marketWidgetVisible ? 'translate-x-4' : 'translate-x-0'}`} />
+                              </button>
                             </div>
                           </div>
-                          {(() => {
+                          {!collapsed && (selected ? (() => {
                             const ov = marketOverrideMap[entry.id] ?? {
                               name: selected.name, industry: selected.industry ?? '',
                               photo_url: selected.photo_url,
@@ -1625,7 +1691,11 @@ export function CanvasGrid({
                                 </div>
                               </div>
                             );
-                          })()}
+                          })() : (
+                            <div className="px-3 py-6 text-center">
+                              <p className="text-[11px] text-zinc-600">No market picked yet — use <span className="text-zinc-400 font-medium">Change</span> to choose one.</p>
+                            </div>
+                          ))}
                         </div>
                       );
                     })()}
@@ -1636,10 +1706,22 @@ export function CanvasGrid({
                         without leaving the row. */}
                     {!isEntryCarousel && (() => {
                       const sc = socialCaptionMap[entry.id];
+                      const collapsed = postCaptionCollapsedMap[entry.id] ?? false;
                       return (
                         <div className="rounded-lg bg-zinc-950 border border-zinc-800 overflow-hidden">
-                          <div className="flex items-center justify-between gap-3 px-3 py-2 border-b border-zinc-800">
+                          <div className={`flex items-center justify-between gap-3 px-3 py-2 ${collapsed ? '' : 'border-b border-zinc-800'}`}>
                             <div className="flex items-center gap-2 min-w-0">
+                              <button
+                                onClick={() => setPostCaptionCollapsedMap(prev => ({ ...prev, [entry.id]: !(prev[entry.id] ?? false) }))}
+                                title={collapsed ? 'Expand caption' : 'Collapse caption'}
+                                className="flex items-center justify-center w-4 h-4 text-zinc-500 hover:text-zinc-200 transition-colors shrink-0"
+                              >
+                                <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                                  {collapsed
+                                    ? <polyline points="6 9 12 15 18 9"/>
+                                    : <polyline points="18 15 12 9 6 15"/>}
+                                </svg>
+                              </button>
                               <span className="text-[11px] font-semibold text-zinc-300 uppercase tracking-wider">Post caption</span>
                             </div>
                             <div className="flex items-center gap-1.5 shrink-0">
@@ -1681,25 +1763,27 @@ export function CanvasGrid({
                               </button>
                             </div>
                           </div>
-                          <div className="px-3 py-2.5">
-                            {sc?.error ? (
-                              <span className="text-xs text-red-400">{sc.error}</span>
-                            ) : sc?.text ? (
-                              <textarea
-                                value={sc.text}
-                                onChange={e => setSocialCaptionMap(prev => ({
-                                  ...prev,
-                                  [entry.id]: { ...prev[entry.id]!, text: e.target.value, copied: false },
-                                }))}
-                                rows={Math.min(14, Math.max(6, sc.text.split('\n').length + Math.ceil(sc.text.length / 70)))}
-                                className="w-full bg-transparent text-[12px] text-zinc-200 placeholder-zinc-700 outline-none resize-y leading-relaxed"
-                              />
-                            ) : (
-                              <span className="text-[11px] text-zinc-600">
-                                Click Generate to draft a long-form caption. Edit the Context field above to steer it.
-                              </span>
-                            )}
-                          </div>
+                          {!collapsed && (
+                            <div className="px-3 py-2.5">
+                              {sc?.error ? (
+                                <span className="text-xs text-red-400">{sc.error}</span>
+                              ) : sc?.text ? (
+                                <textarea
+                                  value={sc.text}
+                                  onChange={e => setSocialCaptionMap(prev => ({
+                                    ...prev,
+                                    [entry.id]: { ...prev[entry.id]!, text: e.target.value, copied: false },
+                                  }))}
+                                  rows={Math.min(8, Math.max(4, sc.text.split('\n').length + Math.ceil(sc.text.length / 90)))}
+                                  className="w-full bg-transparent text-[12px] text-zinc-200 placeholder-zinc-700 outline-none resize-y leading-relaxed"
+                                />
+                              ) : (
+                                <span className="text-[11px] text-zinc-600">
+                                  Click Generate to draft a long-form caption. Edit the Context field above to steer it.
+                                </span>
+                              )}
+                            </div>
+                          )}
                         </div>
                       );
                     })()}

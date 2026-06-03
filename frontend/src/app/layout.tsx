@@ -1,6 +1,9 @@
 import type { Metadata } from "next";
 import { Geist, Geist_Mono, Anton } from "next/font/google";
 import "./globals.css";
+// Phonedeck UI styles, scoped to the .phonedeck-root wrapper so they don't
+// leak into Studio's Tailwind-styled chrome.
+import "./phonedeck/phonedeck-scoped.css";
 import { RangeSliderSync } from "./components/RangeSliderSync";
 
 const geistSans = Geist({

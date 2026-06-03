@@ -11,6 +11,10 @@ import { TemplateSelector } from './components/TemplateSelector';
 import { CanvasGrid } from './components/CanvasGrid';
 import { ErrorBoundary } from './components/ErrorBoundary';
 import { GoogleSheetsModal } from './components/GoogleSheetsModal';
+import { PhonedeckMiniPanel } from './components/PhonedeckMiniPanel';
+import { PhonedeckApp } from './phonedeck/PhonedeckApp';
+import { PhonedeckTrending } from './phonedeck/PhonedeckTrending';
+import { PhonedeckImages } from './phonedeck/PhonedeckImages';
 import { GRID_BG_STYLE } from '@/lib/ui-constants';
 import { makeEmptyEntry } from '@/lib/entry';
 import type { AppSection, VideoMode } from './types';
@@ -35,6 +39,18 @@ function GridSection({ children }: { children: React.ReactNode }) {
   return (
     <div className="flex flex-col h-screen" style={GRID_BG_STYLE}>
       <div className="flex-1 min-h-0">{children}</div>
+    </div>
+  );
+}
+
+// Wraps a Phonedeck-side view (PhonedeckApp/Trending/Images) in the
+// .phonedeck-root scope so the bundled CSS only applies inside. Stays mounted
+// across tab changes (display toggled) so SSE / scroll / selection state
+// survive nav between Studio sections.
+function PhonedeckPane({ visible, children }: { visible: boolean; children: React.ReactNode }) {
+  return (
+    <div className="phonedeck-root" style={{ display: visible ? 'block' : 'none', minHeight: '100vh' }}>
+      {children}
     </div>
   );
 }
@@ -103,6 +119,16 @@ export default function Home() {
 
   return (
     <div className="flex min-h-screen bg-black text-white">
+      {/* Floating Phonedeck panel — bottom-right, mirrors Phonedeck's Incoming
+          list over HTTP/SSE so a fresh export can be pushed to phones without
+          switching tabs. Works locally; can point at a peer machine on the LAN
+          via NEXT_PUBLIC_PHONEDECK_URL. Hidden on the Brand Kit / template
+          selector landing page since no content is being created or exported
+          there — kept mounted (display:none) so the SSE connection persists
+          across navigation. */}
+      <div style={{ display: activeSection === 'media' ? undefined : 'none' }}>
+        <PhonedeckMiniPanel />
+      </div>
       <Sidebar
         active={activeSection}
         onSelect={setActiveSection}
@@ -205,6 +231,16 @@ export default function Home() {
             <p className="text-xs text-zinc-600">Coming soon</p>
           </div>
         )}
+
+        {/* Phonedeck-side sections — iframe-mount the existing Phonedeck web
+            app routes so we get the live UI without duplicating any code.
+            Each iframe stays mounted (display toggled) so SSE connections +
+            scroll/selection state survive nav between tabs. The shared
+            mini-panel widget is hidden on the Deck tab below since the full
+            Phonedeck UI is already on-screen there. */}
+        <PhonedeckPane visible={activeSection === 'deck'}>     <PhonedeckApp /></PhonedeckPane>
+        <PhonedeckPane visible={activeSection === 'trending'}> <PhonedeckTrending /></PhonedeckPane>
+        <PhonedeckPane visible={activeSection === 'images'}>   <PhonedeckImages /></PhonedeckPane>
       </main>
 
       {googleSheets.showSheetsModal && (

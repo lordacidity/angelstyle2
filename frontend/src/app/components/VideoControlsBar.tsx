@@ -139,12 +139,10 @@ interface VideoControlsBarProps {
   onDownloadAll:  () => void;
 }
 
-export function VideoControlsBar({ entryId, activeRef, recordingState, videoSrc, onDownloadAll }: VideoControlsBarProps) {
+export function VideoControlsBar({ entryId, activeRef, recordingState, videoSrc }: VideoControlsBarProps) {
   // Once Export is pressed for this entry, the full timeline collapses to a slim
   // status bar (export progress + Download All). Reset whenever the selected
   // entry changes so each video starts in the full editor again.
-  const [hasExported, setHasExported] = useState(false);
-  useEffect(() => { setHasExported(false); }, [entryId]);
   const [isPlaying,    setIsPlaying]    = useState(false);
   const [currentTime,  setCurrentTime]  = useState(0);
   const [duration,     setDuration]     = useState(0);
@@ -431,39 +429,6 @@ export function VideoControlsBar({ entryId, activeRef, recordingState, videoSrc,
   const recProgress = recordingState?.recProgress ?? 0;
   const recStatus   = recordingState?.recStatus   ?? '';
 
-  // ── Collapsed export bar — shown once Export is pressed: a single line with
-  // export status on the left and Download All on the right (no timeline).
-  if (hasExported) {
-    return (
-      <div className="shrink-0 mx-3 mb-3 rounded-lg border border-zinc-800 bg-zinc-950 px-5 py-3 flex items-center gap-3">
-        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="text-zinc-500 shrink-0">
-          <circle cx="12" cy="12" r="9" /><circle cx="12" cy="12" r="3" />
-        </svg>
-        {isRecording ? (
-          <>
-            <div className="w-32 h-1 rounded-full bg-zinc-800 overflow-hidden">
-              <div className="h-full bg-[#fe2c55] transition-all duration-100" style={{ width: `${Math.round(recProgress * 100)}%` }} />
-            </div>
-            <span className="text-[11px] text-zinc-400 tabular-nums">{recStatus || `Exporting… ${Math.round(recProgress * 100)}%`}</span>
-            <button onClick={() => activeRef.cancelExport()} className="text-[11px] text-red-400 hover:text-red-300 transition-colors">Cancel</button>
-          </>
-        ) : (
-          <span className="text-[11px] text-zinc-400">Export complete — saved to your downloads.</span>
-        )}
-        <div className="flex-1" />
-        <button onClick={() => setHasExported(false)} className="text-[11px] text-zinc-600 hover:text-zinc-300 transition-colors">Edit</button>
-        <button
-          onClick={onDownloadAll}
-          className="flex items-center gap-1.5 rounded-full bg-white px-4 py-1.5 text-xs font-semibold text-black hover:bg-zinc-100 transition-colors shrink-0">
-          <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-            <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" /><polyline points="7 10 12 15 17 10" /><line x1="12" y1="15" x2="12" y2="3" />
-          </svg>
-          Download All
-        </button>
-      </div>
-    );
-  }
-
   const sortedSegs = [...segments].sort((a, b) => a.start - b.start);
   const trimStart  = sortedSegs[0]?.start ?? 0;
   const trimEnd    = sortedSegs[sortedSegs.length - 1]?.end ?? duration;
@@ -696,7 +661,7 @@ export function VideoControlsBar({ entryId, activeRef, recordingState, videoSrc,
             <button onClick={() => activeRef.cancelExport()} className="text-[10px] text-red-400 hover:text-red-300 transition-colors">Cancel</button>
           </div>
         ) : (
-          <button onClick={() => { setHasExported(true); activeRef.startDownload(); }}
+          <button onClick={() => activeRef.startDownload()}
             className="flex items-center gap-1.5 rounded-full bg-white px-4 py-1.5 text-xs font-semibold text-black hover:bg-zinc-100 transition-colors shrink-0">
             <svg width="11" height="11" viewBox="0 0 24 24" fill="currentColor">
               <circle cx="12" cy="12" r="9" fill="none" stroke="currentColor" strokeWidth="2"/><circle cx="12" cy="12" r="4"/>
