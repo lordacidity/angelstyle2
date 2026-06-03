@@ -239,13 +239,14 @@ export function PhonedeckMiniPanel() {
       >
         <div className="flex items-center gap-2 min-w-0">
           <span className={`w-1.5 h-1.5 rounded-full ${connected ? 'bg-[#04df9d]' : 'bg-zinc-600'}`} />
-          <span className="text-[11px] font-semibold text-zinc-300 uppercase tracking-wider">Phonedeck</span>
+          <span className="text-[11px] font-semibold text-zinc-300 uppercase tracking-wider">
+            Phonedeck <span className="text-zinc-500 tabular-nums">({ready.length})</span>
+          </span>
           {connected && incoming.length > 0 && (
             <span className="text-[10px] text-zinc-500 shrink-0">{incoming.length} new</span>
           )}
         </div>
-        <div className="flex items-center gap-2 shrink-0">
-          <span className="text-[10px] text-zinc-600">{ready.length} 📱</span>
+        <div className="flex items-center shrink-0">
           <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" className="text-zinc-500">
             {collapsed
               ? <polyline points="18 15 12 9 6 15"/>
