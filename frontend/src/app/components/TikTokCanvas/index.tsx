@@ -144,12 +144,18 @@ export const TikTokCanvas = forwardRef<TikTokCanvasRef, TikTokCanvasProps>(funct
   // marketData) change the chrome height. Re-apply the 1:2 top:bottom split using
   // the current photo size so the block stays balanced without resetting a manual
   // resize. repositionBlock only touches y, so it's safe to run on every change.
+  //
+  // Depend on a primitive signal derived from marketData (presence + size), not
+  // the marketData object itself — the parent rebuilds that object on every
+  // render (spread + fresh sparkline array), which would otherwise re-fire this
+  // effect every render → setBox → re-render → "Maximum update depth exceeded".
+  const marketSignal = marketData ? `m:${marketData.size}` : 'none';
   useEffect(() => {
     const v = videoRef.current;
     if (!v || !v.videoWidth || !v.videoHeight) return;
     repositionBlock();
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [overlayCaption, marketData]);
+  }, [overlayCaption, marketSignal]);
 
   // ── Main draw loop ────────────────────────────────────────────────────────────
 
