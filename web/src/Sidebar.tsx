@@ -1,15 +1,10 @@
-// Left-rail navigation shared by Phonedeck / News / Templates pages.
-// Visual language mirrors Distribution Studio: narrow icon-only column,
-// inline SVG line-art icons, tiny label below each, color-only active state.
+// Left-rail navigation. Visual language mirrors Distribution Studio:
+// narrow icon-only column, inline SVG line-art icons, tiny label below
+// each, color-only active state.
 
 import type { ReactNode } from "react";
 
-// "news-industry" stays in the Tab union because NewsCardsView still lives at
-// /news/industry — it's just hidden from the sidebar now that the card-build
-// flow is reached via the Trending tab's "Build card" handoff. Pass
-// `current="news-trending"` from there so the Trending tab stays highlighted
-// during the build flow.
-type Tab = "phonedeck" | "news-industry" | "news-person" | "news-trending" | "templates" | "images" | "studio";
+type Tab = "phonedeck" | "news-trending" | "images";
 
 interface Item {
   key: Tab;
@@ -35,15 +30,12 @@ const ITEMS: Item[] = [
     key: "phonedeck",
     label: "Phonedeck",
     href: "/",
-    // Downward (apex-at-bottom) triangle — clean geometric mark for the
-    // home/control surface.
     icon: <svg {...ICON_PROPS}><polygon points="4 6 20 6 12 20"/></svg>,
   },
   {
     key: "news-trending",
     label: "Trending",
     href: "/news/trending",
-    // Six-spoke asterisk / spark — three lines crossing the center.
     icon: (
       <svg {...ICON_PROPS}>
         <line x1="12" y1="3"   x2="12"   y2="21"/>
@@ -53,53 +45,14 @@ const ITEMS: Item[] = [
     ),
   },
   {
-    key: "news-person",
-    label: "Person",
-    href: "/news/person",
-    // Classic user silhouette — head circle + shoulders arc.
-    icon: (
-      <svg {...ICON_PROPS}>
-        <circle cx="12" cy="8" r="4"/>
-        <path d="M4 21v-1a8 8 0 0 1 16 0v1"/>
-      </svg>
-    ),
-  },
-  {
-    key: "templates",
-    label: "Templates",
-    href: "/templates",
-    // 4-up grid of rounded squares — same as Studio's Template icon.
-    icon: (
-      <svg {...ICON_PROPS}>
-        <rect x="3"  y="3"  width="7" height="7" rx="1"/>
-        <rect x="14" y="3"  width="7" height="7" rx="1"/>
-        <rect x="3"  y="14" width="7" height="7" rx="1"/>
-        <rect x="14" y="14" width="7" height="7" rx="1"/>
-      </svg>
-    ),
-  },
-  {
     key: "images",
     label: "Images",
     href: "/images",
-    // Camera body + lens circle + shutter bump on top.
     icon: (
       <svg {...ICON_PROPS}>
         <rect x="2" y="7" width="20" height="14" rx="2"/>
         <path d="M8 7l1.5-3h5L16 7"/>
         <circle cx="12" cy="14" r="3.5"/>
-      </svg>
-    ),
-  },
-  {
-    key: "studio",
-    label: "Studio",
-    href: "/studio",
-    // Halo + curved wings — minimal angel mark for the creative app.
-    icon: (
-      <svg {...ICON_PROPS}>
-        <circle cx="12" cy="5" r="1.8"/>
-        <path d="M3 15 Q 7 8, 12 13 Q 17 8, 21 15"/>
       </svg>
     ),
   },

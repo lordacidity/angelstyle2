@@ -1,7 +1,6 @@
 // Trending: today's most-mentioned music & film Pauv talents, sourced from
 // Google News across major entertainment outlets. Each talent's row expands
-// to show their recent headlines, with a "Build card →" button that drops
-// into the existing News Cards flow via the sessionStorage seed handoff.
+// to show their recent headlines.
 
 import { useEffect, useState } from "react";
 import { Sidebar } from "./Sidebar";
@@ -60,7 +59,6 @@ export function TrendingView() {
   const [items, setItems] = useState<TrendingTalent[] | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
-  const [buildingFor, setBuildingFor] = useState<string | null>(null);
   const [category, setCategory] = useState<Category>("music");
 
   const load = async () => {
@@ -90,58 +88,6 @@ export function TrendingView() {
     });
   };
 
-  // Same seed-handoff as PersonNewsView: prepare DeepSeek extract + article
-  // image scrape, store seed, redirect to /news/industry which jumps straight
-  // to the photo step.
-  const buildCard = async (talent: Talent, h: TrendingHeadline) => {
-    setBuildingFor(h.link);
-    setError(null);
-    try {
-      const extractPayload = { title: h.title, description: h.description };
-      const [extract, scrape] = await Promise.all([
-        fetch("/api/news/extract-person", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify(extractPayload),
-        }).then(async (r) => {
-          if (!r.ok) throw new Error(await r.text());
-          return r.json();
-        }),
-        fetch("/api/article/scrape-images", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ url: h.link }),
-        })
-          .then((r) => (r.ok ? r.json() : null))
-          .catch(() => null),
-      ]);
-
-      const articleImages: string[] = scrape?.images ?? [];
-      const seed = {
-        selectedItem: {
-          caption: cleanHeadline(h.title),
-          source: "article" as const,
-          url: h.link,
-          mainPerson: talent.name,
-          matchedTicker: talent.ticker,
-          publishedAt: h.pubDate,
-          imageUrl: null,
-          rawText: h.description ?? "",
-          sourceName: h.source ?? "Google News",
-          extractPayload,
-        },
-        extract,
-        articleImages,
-        articleSourceName: scrape?.siteName ?? h.source ?? null,
-      };
-      sessionStorage.setItem("person-news-seed", JSON.stringify(seed));
-      window.location.href = "/news/industry";
-    } catch (e) {
-      setError(`Couldn't prepare card: ${String(e)}`);
-      setBuildingFor(null);
-    }
-  };
-
   return (
     <div className="layout">
       <Sidebar current="news-trending" />
@@ -151,7 +97,7 @@ export function TrendingView() {
             <h1>Trending Now</h1>
             <div className="subtitle">
               Today's most-mentioned talents across entertainment outlets.
-              Click a name to see their recent headlines, then build a card from any story.
+              Click a name to see their recent headlines.
             </div>
           </div>
           <div className="row">
@@ -241,7 +187,6 @@ export function TrendingView() {
               {isOpen && (
                 <div style={{ marginTop: 12, paddingTop: 12, borderTop: "1px solid #27272a" }}>
                   {it.headlines.map((h, idx) => {
-                    const isBuilding = buildingFor === h.link;
                     return (
                       <div
                         key={`${h.link}-${idx}`}
@@ -285,13 +230,6 @@ export function TrendingView() {
                             {h.pubDate ? ` · ${new Date(h.pubDate).toLocaleString()}` : ""}
                           </div>
                         </a>
-                        <button
-                          onClick={() => buildCard(it.talent, h)}
-                          disabled={isBuilding || buildingFor !== null}
-                          style={{ flexShrink: 0 }}
-                        >
-                          {isBuilding ? "Preparing…" : "Build card →"}
-                        </button>
                       </div>
                     );
                   })}

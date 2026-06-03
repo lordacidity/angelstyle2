@@ -107,27 +107,26 @@ h2 {
 .phone-pill {
   display: inline-flex;
   align-items: center;
-  gap: 6px;
   padding: 5px 10px;
   border-radius: 6px;
   border: 1px solid #27272a;
   background: #09090b;
   cursor: pointer;
   user-select: none;
+  font-family: inherit;
   font-size: 12px;
+  font-weight: 500;
   color: #a1a1aa;
   transition: background 120ms, border-color 120ms, color 120ms;
 }
-.phone-pill:hover { border-color: #52525b; color: #fafafa; }
-
-.phone-pill input { margin: 0; accent-color: #fff; }
+.phone-pill:hover { border-color: #52525b; color: #fafafa; background: #09090b; }
 
 .phone-pill.checked {
-  background: #fafafa;
-  border-color: #fafafa;
+  background: #04df9d;
+  border-color: #04df9d;
   color: #000;
 }
-.phone-pill.checked:hover { background: #f4f4f5; }
+.phone-pill.checked:hover { background: #03c98e; border-color: #03c98e; }
 
 .row {
   display: flex;

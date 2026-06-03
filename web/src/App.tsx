@@ -320,16 +320,21 @@ export function App() {
                         {ready.map((d) => {
                           const checked = sel.has(d.serial);
                           return (
-                            <label key={d.serial} className={`phone-pill${checked ? " checked" : ""}`}>
-                              <input type="checkbox" checked={checked} onChange={() => toggle(f.name, d.serial)} />
+                            <button
+                              key={d.serial}
+                              type="button"
+                              onClick={() => toggle(f.name, d.serial)}
+                              className={`phone-pill${checked ? " checked" : ""}`}
+                              title={d.serial}
+                            >
                               {d.name ?? d.model ?? shortSerial(d.serial)}
-                            </label>
+                            </button>
                           );
                         })}
                       </div>
                       <div className="row">
                         <button onClick={() => push(f.name)} disabled={sel.size === 0 || busy[f.name]}>
-                          {busy[f.name] ? "Pushing..." : `Push to ${sel.size} phone(s)`}
+                          {busy[f.name] ? "…" : `Push → ${sel.size}`}
                         </button>
                         <button className="secondary" onClick={() => selectAll(f.name)} disabled={ready.length === 0}>Select all</button>
                         <button className="secondary" onClick={() => clearSel(f.name)} disabled={sel.size === 0}>Clear</button>
