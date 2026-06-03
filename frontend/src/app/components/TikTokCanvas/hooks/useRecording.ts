@@ -451,6 +451,64 @@ export function useRecording(config: UseRecordingConfig) {
       const offCtx = offscreen.getContext('2d')!;
       let currentFrame: { frame: VideoFrame; ts: number } | null = null;
 
+      // ── Pre-bake static overlays into a sprite ──────────────────────────────
+      // Caption (clean) and header + market row (sonotrade) don't change frame
+      // to frame — they depend on the cropBox, brand, and inputs that are all
+      // frozen for the duration of the recording. Painting them once into a
+      // transparent overlay canvas and drawImage()-ing that single sprite per
+      // frame skips all the per-frame text shaping, emoji loads, avatar draws,
+      // and sparkline geometry that used to run on every iteration.
+      const overlaySprite = new OffscreenCanvas(CANVAS_W, CANVAS_H);
+      const spriteCtx = overlaySprite.getContext('2d')!;
+      const cropBoxFrozen = boxRef.current;
+      if (isClean) {
+        if (overlayCaption) {
+          const CLEAN_EXPORT_FONT = `400 44px Chirp, "Twitter Chirp", -apple-system, BlinkMacSystemFont, sans-serif`;
+          const CLEAN_EXPORT_EMOJI = 44;
+          const padX = HEADER_PADDING_X + 43;
+          const maxWidth = CANVAS_W - padX * 2;
+          const captionLines = countCaptionLines(spriteCtx as any, overlayCaption, CLEAN_EXPORT_FONT, maxWidth, CLEAN_EXPORT_EMOJI);
+          const CAPTION_BOTTOM_OFFSET = 18;
+          const CLEAN_PAD_TOP = 44;
+          const CLEAN_PAD_BOT = 40;
+          const captionAreaH = CLEAN_PAD_TOP + (captionLines * CAPTION_LINE_HEIGHT) + CLEAN_PAD_BOT - CAPTION_BOTTOM_OFFSET;
+          const captionAreaY = Math.max(0, cropBoxFrozen.y - captionAreaH + 4);
+
+          spriteCtx.font = CLEAN_EXPORT_FONT;
+          spriteCtx.fillStyle = '#000';
+          let cy = captionAreaY + CLEAN_PAD_TOP + CAPTION_LINE_HEIGHT - 10;
+          for (const line of wrapRichText(spriteCtx as any, overlayCaption, maxWidth, CLEAN_EXPORT_EMOJI)) {
+            drawRichLine(spriteCtx as any, line, padX, cy, CLEAN_EXPORT_EMOJI);
+            cy += CAPTION_LINE_HEIGHT;
+          }
+        }
+      } else {
+        const captionLines = overlayCaption ? countSonotradeCaptionLines(spriteCtx as any, overlayCaption) : 0;
+        const headerHeight = overlayCaption
+          ? BASE_HEADER_HEIGHT + CAPTION_TOP_PADDING + (captionLines * CAPTION_LINE_HEIGHT) - 18
+          : BASE_HEADER_HEIGHT;
+        const headerY = Math.max(0, cropBoxFrozen.y - headerHeight + 4);
+        // @ts-ignore
+        drawHeaderOnContext({ ctx: spriteCtx as any, cx: 0, cy: headerY, cw: CANVAS_W, ...headerDrawOpts });
+        if (marketData && marketAvatarImgRef && marketAvatarUrlRef) {
+          drawMarketRow({
+            ctx: spriteCtx as any,
+            cx: 0,
+            videoBottomY: cropBoxFrozen.y + cropBoxFrozen.h,
+            cw: CANVAS_W,
+            name: marketData.name,
+            subtitle: marketData.industry ?? marketData.subcategory ?? '—',
+            photo_url: marketData.photo_url,
+            priceUsd: marketData.price.usd,
+            lifetimeChangePct: marketData.price.lifetimeChangePct,
+            sparkline: marketData.sparkline,
+            size: marketData.size ?? 'large',
+            avatarImgRef: marketAvatarImgRef,
+            lastPhotoUrlRef: marketAvatarUrlRef,
+          });
+        }
+      }
+
       // Advance `currentFrame` to the latest decoded frame with ts <= targetTs,
       // closing earlier frames as we step past them. Waits for the producer if
       // nothing's available yet.
@@ -495,104 +553,36 @@ export function useRecording(config: UseRecordingConfig) {
             break;
           }
 
-          if (isClean) {
-            // ── Caption template: white bg, caption above, video in crop box ──
-            offCtx.fillStyle = '#fff';
-            offCtx.fillRect(0, 0, CANVAS_W, CANVAS_H);
+          // Per-frame work is now just: bg fill + video drawImage + sprite
+          // drawImage. All text shaping, emoji loads, avatar draws, sparkline
+          // geometry, etc. were pre-baked into overlaySprite once above.
+          offCtx.fillStyle = isClean ? '#fff' : '#000';
+          offCtx.fillRect(0, 0, CANVAS_W, CANVAS_H);
 
-            const cropBox = boxRef.current;
-            const { x: ox, y: oy } = videoOffsetRef.current;
+          const cropBox = boxRef.current;
+          const { x: ox, y: oy } = videoOffsetRef.current;
+          const vw = video?.videoWidth || 1080;
+          const vh = video?.videoHeight || 1920;
+          // Cover-fill the crop box (matches the on-screen draw loop).
+          const cover = Math.max(cropBox.w / vw, cropBox.h / vh) * videoScaleRef.current;
+          const drawW = vw * cover;
+          const drawH = vh * cover;
+          const dx = cropBox.x + (cropBox.w - drawW) / 2 + ox;
+          const dy = cropBox.y + (cropBox.h - drawH) / 2 + oy;
 
-            if (overlayCaption) {
-              const CLEAN_EXPORT_FONT = `400 44px Chirp, "Twitter Chirp", -apple-system, BlinkMacSystemFont, sans-serif`;
-              const CLEAN_EXPORT_EMOJI = 44;
-              const padX = HEADER_PADDING_X + 43;
-              const maxWidth = CANVAS_W - padX * 2;
-              // Count + draw with identical font/width/emoji size so the reserved
-              // caption area matches what's actually painted (incl. emoji).
-              const captionLines = countCaptionLines(offCtx as any, overlayCaption, CLEAN_EXPORT_FONT, maxWidth, CLEAN_EXPORT_EMOJI);
-              const CAPTION_BOTTOM_OFFSET = 18;
-              const CLEAN_PAD_TOP = 44;
-              const CLEAN_PAD_BOT = 40;
-              const captionAreaH = CLEAN_PAD_TOP + (captionLines * CAPTION_LINE_HEIGHT) + CLEAN_PAD_BOT - CAPTION_BOTTOM_OFFSET;
-              const captionAreaY = Math.max(0, cropBox.y - captionAreaH + 4);
+          offCtx.save();
+          offCtx.beginPath();
+          offCtx.rect(cropBox.x, cropBox.y, cropBox.w, cropBox.h);
+          offCtx.clip();
+          offCtx.drawImage(currentFrame.frame, dx, dy, drawW, drawH);
+          offCtx.restore();
 
-              offCtx.font = CLEAN_EXPORT_FONT;
-              offCtx.fillStyle = '#000';
-              let cy = captionAreaY + CLEAN_PAD_TOP + CAPTION_LINE_HEIGHT - 10;
-
-              for (const line of wrapRichText(offCtx as any, overlayCaption, maxWidth, CLEAN_EXPORT_EMOJI)) {
-                drawRichLine(offCtx as any, line, padX, cy, CLEAN_EXPORT_EMOJI);
-                cy += CAPTION_LINE_HEIGHT;
-              }
-            }
-
-            const vw = video?.videoWidth || 1080;
-            const vh = video?.videoHeight || 1920;
-            // Cover-fill the crop box (matches the on-screen draw loop).
-            const cover = Math.max(cropBox.w / vw, cropBox.h / vh) * videoScaleRef.current;
-            const drawW = vw * cover;
-            const drawH = vh * cover;
-            const dx = cropBox.x + (cropBox.w - drawW) / 2 + ox;
-            const dy = cropBox.y + (cropBox.h - drawH) / 2 + oy;
-
-            offCtx.save();
-            offCtx.beginPath();
-            offCtx.rect(cropBox.x, cropBox.y, cropBox.w, cropBox.h);
-            offCtx.clip();
-            offCtx.drawImage(currentFrame.frame, dx, dy, drawW, drawH);
-            offCtx.restore();
-
-          } else {
-            // ── Twitter template: black bg, X header, video below ──
-            offCtx.fillStyle = '#000';
-            offCtx.fillRect(0, 0, CANVAS_W, CANVAS_H);
-
-            const cropBox = boxRef.current;
-            const { x: ox, y: oy } = videoOffsetRef.current;
-            const vw = video?.videoWidth || 1080;
-            const vh = video?.videoHeight || 1920;
-            // Cover-fill the crop box (matches the on-screen draw loop).
-            const cover = Math.max(cropBox.w / vw, cropBox.h / vh) * videoScaleRef.current;
-            const drawW = vw * cover;
-            const drawH = vh * cover;
-            const dx = cropBox.x + (cropBox.w - drawW) / 2 + ox;
-            const dy = cropBox.y + (cropBox.h - drawH) / 2 + oy;
-
-            offCtx.save();
-            offCtx.beginPath();
-            offCtx.rect(cropBox.x, cropBox.y, cropBox.w, cropBox.h);
-            offCtx.clip();
-            offCtx.drawImage(currentFrame.frame, dx, dy, drawW, drawH);
-            offCtx.restore();
-
-            const captionLines = overlayCaption ? countSonotradeCaptionLines(offCtx as any, overlayCaption) : 0;
-            const headerHeight = overlayCaption
-              ? BASE_HEADER_HEIGHT + CAPTION_TOP_PADDING + (captionLines * CAPTION_LINE_HEIGHT) - 18
-              : BASE_HEADER_HEIGHT;
-            const headerY = Math.max(0, cropBox.y - headerHeight + 4);
-
-            // @ts-ignore
-            drawHeaderOnContext({ ctx: offCtx as any, cx: 0, cy: headerY, cw: CANVAS_W, ...headerDrawOpts });
-
-            if (marketData && marketAvatarImgRef && marketAvatarUrlRef) {
-              drawMarketRow({
-                ctx: offCtx as any,
-                cx: 0,
-                videoBottomY: cropBox.y + cropBox.h,
-                cw: CANVAS_W,
-                name: marketData.name,
-                subtitle: marketData.industry ?? marketData.subcategory ?? '—',
-                photo_url: marketData.photo_url,
-                priceUsd: marketData.price.usd,
-                lifetimeChangePct: marketData.price.lifetimeChangePct,
-                sparkline: marketData.sparkline,
-                size: marketData.size ?? 'large',
-                avatarImgRef: marketAvatarImgRef,
-                lastPhotoUrlRef: marketAvatarUrlRef,
-              });
-            }
-          }
+          // Composite the pre-baked overlay (caption for clean, header + market
+          // row for sonotrade) on top of the video. Drawing this AFTER the video
+          // preserves the original z-order — e.g. the header's 4 px overlap onto
+          // the cropBox stays painted over the video, matching the old per-frame
+          // ordering bit-for-bit.
+          offCtx.drawImage(overlaySprite, 0, 0);
 
           const sample = new VideoSample(offscreen, { timestamp: targetTs, duration: EXPORT_FRAME_DURATION });
           await videoSource.add(sample);
