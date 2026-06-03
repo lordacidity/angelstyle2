@@ -1,0 +1,1963 @@
+'use client';
+
+import type { MutableRefObject, Dispatch, SetStateAction, RefObject } from 'react';
+import { useState, useRef, useEffect, useMemo, useCallback, memo } from 'react';
+import { createPortal } from 'react-dom';
+import { TikTokCanvas } from './TikTokCanvas';
+import type { TikTokCanvasRef, MarketData, SparkPoint } from './TikTokCanvas';
+import CarouselCanvas, { CAROUSEL_PREVIEW_W } from './CarouselCanvas';
+import { CarouselSettingsPanel } from './CarouselSettingsPanel';
+import { defaultCarouselSettings } from './carouselTypes';
+import type { CarouselCanvasRef, CarouselSettings, CarouselBgLayerState } from './carouselTypes';
+import { useCarouselTemplates } from '../hooks/useCarouselTemplates';
+import type { VideoEntry, BrandProps, SlideType, VideoData } from '../types';
+import type { RecordingState } from './TikTokCanvas/types';
+import { VideoControlsBar } from './VideoControlsBar';
+import { EditablePct } from './EditablePct';
+import { bestVideoUrl } from '@/lib/utils';
+import { EMOJIS, emojiSrc, emojiSrcForChar, splitEmojiTokens, preloadEmojiImages } from '@/lib/emoji';
+import { BTN_ICON, BTN_TEXT } from '@/lib/ui-constants';
+import {
+  UploadIcon, ArrowRightIcon, SpinnerIcon,
+  TrashIcon, CloseIcon, DownloadIcon, VideoIcon, LinkIcon, CropIcon,
+} from '@/lib/icons';
+
+const CARD_W = CAROUSEL_PREVIEW_W; // 410 — same width as canvas preview
+
+interface Talent {
+  id: string;
+  ticker: string;
+  name: string;
+  bio: string | null;
+  photo_url: string | null;
+  industry: string | null;
+  subcategory: string | null;
+  location: string | null;
+  price: {
+    usd: number | null;
+    lifetimeChangePct: number | null;
+    holders: number | null;
+    volumeLifetimeUsd: number | null;
+    latestTickAt: string | null;
+    frozen: boolean;
+  };
+}
+
+interface CanvasGridProps {
+  entries: VideoEntry[];
+  canvasRefsMap: MutableRefObject<Map<string, TikTokCanvasRef>>;
+  carouselRefsMap: MutableRefObject<Map<string, CarouselCanvasRef>>;
+  brand: BrandProps;
+  onAddRow: (carouselSlideType?: SlideType) => void;
+  onRemoveRow: (id: string) => void;
+  onClearAll: () => void;
+  onDownloadAll: () => void;
+  onHandleVideoError: (id: string) => void;
+  onUpdateEntry: (id: string, field: 'url' | 'caption' | 'context', value: string) => void;
+  onUpdateCarouselEntry: (id: string, field: 'imageSrc' | 'headline' | 'subheadline' | 'articleUrl', value: string) => void;
+  onUpdateLocalVideo: (id: string, src: string, name: string) => void;
+  onFetchVideo: (id: string) => Promise<VideoData | null>;
+  onSetCarouselSubMode: (id: string, mode: 'image' | 'video') => void;
+  userId: string | null;
+  settingsMap: Record<string, CarouselSettings>;
+  setSettingsMap: Dispatch<SetStateAction<Record<string, CarouselSettings>>>;
+  pendingAiSeed?: { imageSrc: string; headline: string; subheadline: string; subheadline2?: string; articleUrl?: string } | null;
+  onAiSeedConsumed?: () => void;
+  // Optional — when provided, renders a back arrow in the toolbar that
+  // returns the user to the AI Cards flow (headline + photo picker) for the
+  // same person. Placeholder behaviour for now: re-enters the AI section.
+  onBackToAi?: () => void;
+}
+
+// ── Carousel input card ───────────────────────────────────────────────────────
+
+function CarouselInputCard({
+  entry,
+  onUpdateCarousel,
+  onUpdateUrl,
+  onUpdateLocalVideo,
+  onFetch,
+  onSetSubMode,
+  onRemove,
+}: {
+  entry: VideoEntry;
+  onUpdateCarousel: (field: 'imageSrc' | 'headline' | 'subheadline' | 'articleUrl', value: string) => void;
+  onUpdateUrl: (url: string) => void;
+  onUpdateLocalVideo: (src: string, name: string) => void;
+  onFetch: () => void;
+  onSetSubMode: (mode: 'image' | 'video') => void;
+  onRemove: () => void;
+}) {
+  const fileRef = useRef<HTMLInputElement>(null);
+  const videoFileRef = useRef<HTMLInputElement>(null);
+  const subMode = entry.carouselSubMode ?? 'image';
+  const hasLocalVideo = !!entry.localVideoSrc;
+
+  function handleVideoFile(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    onUpdateLocalVideo(URL.createObjectURL(file), file.name);
+    onUpdateUrl('');
+    if (videoFileRef.current) videoFileRef.current.value = '';
+  }
+
+  function clearLocalVideo() {
+    if (entry.localVideoSrc) URL.revokeObjectURL(entry.localVideoSrc);
+    onUpdateLocalVideo('', '');
+  }
+
+  return (
+    <div className="rounded-lg bg-zinc-950 border border-zinc-800 overflow-hidden" style={{ width: CARD_W }}>
+
+      {/* Tab toggle row */}
+      <div className="flex items-center gap-2 px-3 py-2 border-b border-zinc-800">
+        {(['image', 'video'] as const).map(m => (
+          <button key={m} onClick={() => onSetSubMode(m)}
+            className={`px-3 py-1 rounded text-xs font-medium capitalize transition-colors ${
+              subMode === m ? 'bg-zinc-700 text-white' : 'text-zinc-500 hover:text-zinc-300'
+            }`}
+          >{m}</button>
+        ))}
+        <button onClick={onRemove} className="ml-auto flex items-center justify-center w-7 h-7 rounded text-zinc-600 hover:text-red-400 hover:bg-zinc-800 transition-colors" title="Delete row">
+          <TrashIcon size={13} />
+        </button>
+      </div>
+
+      {/* Image / Video input row */}
+      <div className="flex items-center gap-2 px-3 py-3 border-b border-zinc-800">
+        {subMode === 'image' ? (
+          <>
+            {entry.imageSrc ? (
+              // eslint-disable-next-line @next/next/no-img-element
+              <img src={entry.imageSrc} alt="" className="w-9 h-9 rounded object-cover shrink-0" />
+            ) : (
+              <div className="flex items-center gap-2 flex-1 min-w-0 border border-zinc-700 rounded-md px-2.5 h-9 text-zinc-500">
+                <ImagePlaceholderIcon />
+                <span className="text-sm text-zinc-600">Upload image…</span>
+              </div>
+            )}
+            <button onClick={() => fileRef.current?.click()} title="Upload image"
+              className="flex items-center justify-center w-9 h-9 rounded-md bg-white hover:bg-zinc-100 transition-colors shrink-0">
+              <UploadIcon stroke="black" />
+            </button>
+            <input ref={fileRef} type="file" accept="image/*" className="hidden"
+              onChange={e => {
+                const f = e.target.files?.[0];
+                if (!f) return;
+                if (entry.imageSrc?.startsWith('blob:')) URL.revokeObjectURL(entry.imageSrc);
+                onUpdateCarousel('imageSrc', URL.createObjectURL(f));
+              }}
+            />
+          </>
+        ) : hasLocalVideo ? (
+          <>
+            <VideoIcon className="text-zinc-400 shrink-0" size={13} />
+            <span className="text-sm text-zinc-300 truncate flex-1 min-w-0">{entry.localVideoName || 'Uploaded video'}</span>
+            <button onClick={() => videoFileRef.current?.click()} title="Change video"
+              className="flex items-center justify-center w-9 h-9 rounded-md bg-white hover:bg-zinc-100 transition-colors shrink-0">
+              <UploadIcon stroke="black" />
+            </button>
+            <button onClick={clearLocalVideo} title="Remove video"
+              className="flex items-center justify-center w-9 h-9 rounded-md bg-white hover:bg-zinc-100 transition-colors shrink-0">
+              <CloseIcon size={13} stroke="black" />
+            </button>
+            <input ref={videoFileRef} type="file" accept="video/*" className="hidden" onChange={handleVideoFile} />
+          </>
+        ) : (
+          <>
+            <div className="flex items-center gap-2 flex-1 min-w-0 border border-zinc-700 rounded-md px-2.5 h-9">
+              <LinkIcon size={13} className="text-zinc-500 shrink-0" />
+              <input
+                value={entry.url}
+                onChange={e => onUpdateUrl(e.target.value)}
+                onKeyDown={e => { if (e.key === 'Enter') onFetch(); }}
+                placeholder="Paste TikTok, Instagram or X URL…"
+                className="flex-1 bg-transparent text-sm text-white placeholder-zinc-600 outline-none min-w-0"
+              />
+            </div>
+            <button onClick={() => videoFileRef.current?.click()} title="Upload video file"
+              className="flex items-center justify-center w-9 h-9 rounded-md bg-white hover:bg-zinc-100 transition-colors shrink-0">
+              <UploadIcon stroke="black" />
+            </button>
+            <button
+              onClick={onFetch}
+              disabled={entry.loading || !entry.url.trim()}
+              title="Fetch video"
+              className="flex items-center justify-center w-9 h-9 rounded-md bg-white hover:bg-zinc-100 transition-colors shrink-0 disabled:opacity-30 disabled:cursor-not-allowed"
+            >
+              {entry.loading
+                ? <SpinnerIcon stroke="black" style={{ animation: 'spin 1s linear infinite' }} />
+                : <ArrowRightIcon stroke="black" />}
+            </button>
+            <input ref={videoFileRef} type="file" accept="video/*" className="hidden" onChange={handleVideoFile} />
+            {entry.error && <span className="text-[11px] text-red-400 ml-1">{entry.error}</span>}
+          </>
+        )}
+      </div>
+
+      {/* Source article — small + muted, sits above the headline so the user
+          keeps track of the story this card was built from. Main slide only —
+          supporting slides inherit the same article and don't need the field
+          repeated. Always editable; clickable ↗ icon appears once a URL is in. */}
+      {(entry.carouselSlideType ?? 'main') === 'main' && (
+        <div className="px-3 py-1.5 border-b border-zinc-800 flex items-center gap-2">
+          <LinkIcon size={11} className="text-zinc-600 shrink-0" />
+          <input
+            type="text"
+            value={entry.articleUrl ?? ''}
+            onChange={e => onUpdateCarousel('articleUrl', e.target.value)}
+            placeholder="Source article link (optional)…"
+            className="flex-1 bg-transparent text-[11px] text-zinc-500 placeholder-zinc-700 outline-none min-w-0"
+          />
+          {entry.articleUrl && (
+            <a
+              href={entry.articleUrl}
+              target="_blank"
+              rel="noreferrer"
+              className="shrink-0 text-zinc-600 hover:text-zinc-300 transition-colors"
+              title="Open article in new tab"
+              onClick={e => e.stopPropagation()}
+            >
+              <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/>
+                <polyline points="15 3 21 3 21 9"/>
+                <line x1="10" y1="14" x2="21" y2="3"/>
+              </svg>
+            </a>
+          )}
+        </div>
+      )}
+
+      {/* Headline */}
+      <div className="px-3 py-2 border-b border-zinc-800">
+        <textarea value={entry.headline ?? ''} onChange={e => onUpdateCarousel('headline', e.target.value)}
+          placeholder="Headline…" rows={2}
+          className="w-full bg-transparent text-sm text-white placeholder-zinc-600 outline-none resize-none leading-relaxed"
+        />
+      </div>
+
+      {/* Sub-headline */}
+      <div className="px-3 py-2">
+        <textarea value={entry.subheadline ?? ''} onChange={e => onUpdateCarousel('subheadline', e.target.value)}
+          placeholder="Sub-headline (optional)…" rows={1}
+          className="w-full bg-transparent text-sm text-zinc-400 placeholder-zinc-700 outline-none resize-none leading-relaxed"
+        />
+      </div>
+
+    </div>
+  );
+}
+
+// Small inline SVG used only inside this file — not exported
+function ImagePlaceholderIcon() {
+  return (
+    <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" className="shrink-0">
+      <rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="8.5" cy="8.5" r="1.5"/><polyline points="21 15 16 10 5 21"/>
+    </svg>
+  );
+}
+
+// ── Emoji picker (Apple glyphs) ────────────────────────────────────────────────
+// Opens under the caption box when the user types "@". Pinned emoji (😂 🔥) sort
+// to the front; a search box at the top filters by name/keyword. Picking inserts
+// the unicode char back into the caption (replacing the "@query").
+
+function EmojiPicker({
+  anchorRef,
+  query,
+  onQueryChange,
+  onPick,
+  onClose,
+}: {
+  anchorRef: RefObject<HTMLTextAreaElement | null>;
+  query: string;
+  onQueryChange: (q: string) => void;
+  onPick: (char: string) => void;
+  onClose: () => void;
+}) {
+  const ref = useRef<HTMLDivElement>(null);
+  // Track the caption box position so the portal can sit just under it. Recompute
+  // on scroll/resize so it stays anchored.
+  const [rect, setRect] = useState<DOMRect | null>(null);
+  useEffect(() => {
+    const el = anchorRef.current;
+    if (!el) return;
+    const update = () => setRect(el.getBoundingClientRect());
+    update();
+    window.addEventListener('scroll', update, true);
+    window.addEventListener('resize', update);
+    return () => {
+      window.removeEventListener('scroll', update, true);
+      window.removeEventListener('resize', update);
+    };
+  }, [anchorRef]);
+
+  useEffect(() => {
+    function onDocMouseDown(e: MouseEvent) {
+      const t = e.target as Node;
+      if (ref.current && !ref.current.contains(t) && anchorRef.current && !anchorRef.current.contains(t)) onClose();
+    }
+    document.addEventListener('mousedown', onDocMouseDown);
+    return () => document.removeEventListener('mousedown', onDocMouseDown);
+  }, [onClose, anchorRef]);
+
+  if (!rect || typeof document === 'undefined') return null;
+
+  const q = query.trim().toLowerCase();
+  const results = EMOJIS
+    .filter(e => !q || e.name.toLowerCase().includes(q) || e.keywords.some(k => k.includes(q)))
+    .sort((a, b) => (b.pinned ? 1 : 0) - (a.pinned ? 1 : 0));
+
+  // Rendered in a portal on document.body so no ancestor's `overflow-hidden`
+  // clips it — it floats on top of everything.
+  return createPortal(
+    <div
+      ref={ref}
+      className="fixed z-[1000] rounded-lg bg-zinc-900 border border-zinc-700 shadow-2xl overflow-hidden"
+      style={{ left: rect.left, top: rect.bottom + 4, width: Math.max(rect.width, 300) }}
+    >
+      <div className="p-2 border-b border-zinc-800">
+        <input
+          value={query}
+          onChange={e => onQueryChange(e.target.value)}
+          placeholder="Search emoji…"
+          className="w-full bg-zinc-800 border border-zinc-700 rounded-md px-2.5 py-1.5 text-xs text-zinc-200 placeholder-zinc-500 outline-none focus:border-zinc-500"
+        />
+      </div>
+      <div className="p-2 max-h-[220px] overflow-y-auto">
+        {results.length === 0 ? (
+          <p className="text-xs text-zinc-600 text-center py-4">No emoji found.</p>
+        ) : (
+          <div className="grid grid-cols-8 gap-1">
+            {results.map(e => (
+              <button
+                key={e.unified}
+                type="button"
+                title={e.name}
+                onMouseDown={ev => ev.preventDefault()}
+                onClick={() => onPick(e.char)}
+                className="relative flex items-center justify-center rounded-md hover:bg-zinc-800 transition-colors"
+                style={{ width: 34, height: 34 }}
+              >
+                {e.pinned && <span className="absolute top-0.5 right-0.5 w-1 h-1 rounded-full bg-amber-400" />}
+                {/* eslint-disable-next-line @next/next/no-img-element */}
+                <img src={emojiSrc(e.unified)} alt={e.name} width={24} height={24} draggable={false} />
+              </button>
+            ))}
+          </div>
+        )}
+      </div>
+    </div>,
+    document.body,
+  );
+}
+
+// ── Video input card ──────────────────────────────────────────────────────────
+
+function VideoInputCard({
+  entry,
+  onUpdateField,
+  onUpdateLocalVideo,
+  onFetch,
+}: {
+  entry: VideoEntry;
+  onUpdateField: (field: 'url' | 'caption' | 'context', value: string) => void;
+  onUpdateLocalVideo: (src: string, name: string) => void;
+  onFetch: () => void;
+}) {
+  const fileRef = useRef<HTMLInputElement>(null);
+  const hasLocal = !!entry.localVideoSrc;
+
+  // ── Emoji picker (type "@" in the caption) ──────────────────────────────────
+  const captionRef = useRef<HTMLTextAreaElement>(null);
+  const captionOverlayRef = useRef<HTMLDivElement>(null);
+  // When set, the picker is open: `start` is the index of the triggering "@",
+  // `query` is the text typed after it (used as the search term).
+  const [emojiTrigger, setEmojiTrigger] = useState<{ start: number; query: string } | null>(null);
+
+  useEffect(() => { preloadEmojiImages(); }, []);
+
+  // Detect an active "@word" being typed right before the caret. The "@" must be
+  // at the start of the caption or follow whitespace, so emails/handles inside a
+  // word don't trigger it.
+  function detectEmojiTrigger() {
+    const ta = captionRef.current;
+    if (!ta) return;
+    const caret = ta.selectionStart ?? 0;
+    const value = ta.value;
+    let i = caret - 1;
+    while (i >= 0 && value[i] !== '@' && !/\s/.test(value[i])) i--;
+    if (i < 0 || value[i] !== '@' || (i > 0 && !/\s/.test(value[i - 1]))) {
+      setEmojiTrigger(null);
+      return;
+    }
+    setEmojiTrigger({ start: i, query: value.slice(i + 1, caret) });
+  }
+
+  function insertEmoji(char: string) {
+    const ta = captionRef.current;
+    if (!ta || !emojiTrigger) return;
+    const caret = ta.selectionStart ?? ta.value.length;
+    const before = ta.value.slice(0, emojiTrigger.start);
+    const after = ta.value.slice(caret);
+    onUpdateField('caption', before + char + after);
+    setEmojiTrigger(null);
+    const pos = before.length + char.length;
+    requestAnimationFrame(() => { ta.focus(); ta.setSelectionRange(pos, pos); });
+  }
+
+  function handleFile(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    onUpdateLocalVideo(URL.createObjectURL(file), file.name);
+    onUpdateField('url', '');
+    if (fileRef.current) fileRef.current.value = '';
+  }
+
+  function clearLocalVideo() {
+    if (entry.localVideoSrc) URL.revokeObjectURL(entry.localVideoSrc);
+    onUpdateLocalVideo('', '');
+  }
+
+  return (
+    <div className="flex flex-col gap-2" style={{ width: CARD_W }}>
+
+      {/* Conjoined URL + caption card */}
+      <div className="rounded-lg bg-zinc-950 border border-zinc-800 overflow-hidden">
+
+        {/* URL / file row */}
+        <div className="flex items-center gap-2 px-3 py-3 border-b border-zinc-800">
+          {hasLocal ? (
+            <>
+              <VideoIcon size={13} className="text-zinc-400 shrink-0" />
+              <span className="text-sm text-zinc-300 truncate flex-1 min-w-0">{entry.localVideoName || 'Uploaded video'}</span>
+              <button onClick={() => fileRef.current?.click()} title="Change video"
+                className="flex items-center justify-center w-9 h-9 rounded-md bg-white hover:bg-zinc-100 transition-colors shrink-0">
+                <UploadIcon stroke="black" />
+              </button>
+              <button onClick={clearLocalVideo} title="Remove video"
+                className="flex items-center justify-center w-9 h-9 rounded-md bg-white hover:bg-zinc-100 transition-colors shrink-0">
+                <CloseIcon size={13} stroke="black" />
+              </button>
+            </>
+          ) : (
+            <>
+              <div className="flex items-center gap-2 flex-1 min-w-0 border border-zinc-700 rounded-md px-2.5 h-9">
+                <LinkIcon size={13} className="text-zinc-500 shrink-0" />
+                <input
+                  type="url"
+                  value={entry.url}
+                  onChange={e => onUpdateField('url', e.target.value)}
+                  onKeyDown={e => {
+                    if ((e.metaKey || e.ctrlKey) && e.key === 'z') e.preventDefault();
+                    if (e.key === 'Enter') onFetch();
+                  }}
+                  placeholder="Paste TikTok, Instagram or X URL…"
+                  className="flex-1 min-w-0 bg-transparent text-sm text-white placeholder-zinc-600 outline-none"
+                />
+              </div>
+              <button onClick={() => fileRef.current?.click()} title="Upload video file"
+                className="flex items-center justify-center w-9 h-9 rounded-md bg-white hover:bg-zinc-100 transition-colors shrink-0">
+                <UploadIcon stroke="black" />
+              </button>
+              <button
+                onClick={onFetch}
+                disabled={entry.loading || !entry.url.trim() || (!!entry.data && !entry.videoFailed)}
+                title="Fetch video"
+                className="flex items-center justify-center w-9 h-9 rounded-md bg-white hover:bg-zinc-100 transition-colors shrink-0 disabled:opacity-30 disabled:cursor-not-allowed"
+              >
+                {entry.loading
+                  ? <SpinnerIcon stroke="black" style={{ animation: 'spin 1s linear infinite' }} />
+                  : <ArrowRightIcon stroke="black" />}
+              </button>
+            </>
+          )}
+        </div>
+
+        <div className="px-3 py-2 border-b border-zinc-800 relative">
+          {/* The textarea handles editing/caret/selection but renders OS (blob)
+              emoji, so its text is made transparent and an aligned overlay behind
+              it paints the same text with Apple emoji PNGs. */}
+          <div className="relative">
+            <div
+              ref={captionOverlayRef}
+              aria-hidden
+              className="absolute inset-0 z-0 pointer-events-none overflow-hidden text-sm text-white leading-relaxed"
+              style={{ whiteSpace: 'pre-wrap', overflowWrap: 'break-word', wordBreak: 'break-word' }}
+            >
+              {entry.caption
+                ? splitEmojiTokens(entry.caption).map((tok, i) => {
+                    if (tok.type === 'text') return <span key={i}>{tok.value}</span>;
+                    const src = emojiSrcForChar(tok.value);
+                    return src
+                      ? (
+                        // eslint-disable-next-line @next/next/no-img-element
+                        <img key={i} src={src} alt={tok.value} draggable={false}
+                          style={{ display: 'inline-block', width: '1.25em', height: '1.25em', verticalAlign: '-0.3em' }} />
+                      )
+                      : <span key={i}>{tok.value}</span>;
+                  })
+                : null}
+            </div>
+            <textarea
+              ref={captionRef}
+              value={entry.caption}
+              onChange={e => { onUpdateField('caption', e.target.value); detectEmojiTrigger(); }}
+              onKeyUp={detectEmojiTrigger}
+              onClick={detectEmojiTrigger}
+              onScroll={() => { if (captionOverlayRef.current && captionRef.current) captionOverlayRef.current.scrollTop = captionRef.current.scrollTop; }}
+              onKeyDown={e => {
+                if ((e.metaKey || e.ctrlKey) && e.key === 'z') e.preventDefault();
+                if (e.key === 'Escape' && emojiTrigger) { e.preventDefault(); setEmojiTrigger(null); }
+              }}
+              placeholder="Caption…  (type @ for emoji)"
+              rows={2}
+              className="relative z-10 w-full p-0 border-0 bg-transparent text-sm text-transparent caret-white placeholder-zinc-600 outline-none resize-none leading-relaxed"
+            />
+          </div>
+          {emojiTrigger && (
+            <EmojiPicker
+              anchorRef={captionRef}
+              query={emojiTrigger.query}
+              onQueryChange={q => setEmojiTrigger(t => (t ? { ...t, query: q } : t))}
+              onPick={insertEmoji}
+              onClose={() => setEmojiTrigger(null)}
+            />
+          )}
+        </div>
+
+        {/* Optional context fed to the social-caption generator — background,
+            vibe, the angle to take. Smaller + muted so it reads as a hint, not
+            a primary input. Empty string is fine; the generator just uses URL
+            title/caption when this is blank. */}
+        <div className="px-3 py-2">
+          <textarea
+            value={entry.context ?? ''}
+            onChange={e => onUpdateField('context', e.target.value)}
+            onKeyDown={e => { if ((e.metaKey || e.ctrlKey) && e.key === 'z') e.preventDefault(); }}
+            placeholder="Context…"
+            rows={2}
+            className="w-full bg-transparent text-[11px] text-zinc-400 placeholder-zinc-700 outline-none resize-none leading-relaxed"
+          />
+        </div>
+      </div>
+
+      <input ref={fileRef} type="file" accept="video/*" className="hidden" onChange={handleFile} />
+
+      {(entry.error && !hasLocal) && <span className="text-xs text-red-400 px-1">{entry.error}</span>}
+    </div>
+  );
+}
+
+// ── Carousel BG controls ──────────────────────────────────────────────────────
+
+function CarouselBgControls({
+  entry,
+  bgState,
+  settings,
+  carouselRef,
+  onRemoveRow,
+  isCarouselVideo,
+}: {
+  entry: VideoEntry;
+  bgState: CarouselBgLayerState;
+  settings: CarouselSettings;
+  carouselRef: CarouselCanvasRef | undefined;
+  onRemoveRow: (id: string) => void;
+  isCarouselVideo: boolean;
+}) {
+  const splitActive = settings.bgBlurEnabled && settings.bgBlurAmount === 0 && bgState.fgMaskReady;
+  const blurActive  = settings.bgBlurEnabled && settings.bgBlurAmount > 0 && bgState.fgMaskReady;
+  return (
+    <div className="flex items-center gap-1.5 ml-8">
+      <button onClick={() => carouselRef?.enterCropMode()} className={BTN_ICON} title="Crop">
+        <CropIcon size={12} />
+      </button>
+
+      {!isCarouselVideo && (
+        <>
+          <button
+            onClick={() => carouselRef?.toggleSplit()}
+            disabled={bgState.isBgProcessing}
+            title="Split layers"
+            className={`${BTN_TEXT} ${
+              splitActive  ? 'bg-white text-black border-white' :
+              bgState.bgProcessError ? 'bg-red-900/50 text-red-400 border-red-800 hover:bg-red-900' :
+              'bg-zinc-950 border-zinc-800 text-zinc-400 hover:text-zinc-200 hover:border-zinc-600'
+            }`}
+          >
+            {bgState.isBgProcessing ? (
+              <><SpinnerIcon size={9} style={{ animation: 'spin 1s linear infinite' }} />Processing…</>
+            ) : bgState.bgProcessError ? 'Retry' : splitActive ? 'Split: On' : 'Split'}
+          </button>
+
+          {bgState.fgMaskReady && (
+            <button
+              onClick={() => carouselRef?.toggleBlur()}
+              title="Blur background"
+              className={`${BTN_TEXT} ${
+                blurActive
+                  ? 'bg-white text-black border-white'
+                  : 'bg-zinc-950 border-zinc-800 text-zinc-400 hover:text-zinc-200 hover:border-zinc-600'
+              }`}
+            >
+              {blurActive ? 'Blur: On' : 'BG Blur'}
+            </button>
+          )}
+        </>
+      )}
+
+      <button onClick={() => onRemoveRow(entry.id)} className={BTN_ICON} title="Delete row">
+        <TrashIcon size={15} />
+      </button>
+    </div>
+  );
+}
+
+// ── Ghost "add" card — memoized (static content, stable prop) ─────────────────
+
+function PlusIcon() {
+  return (
+    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round">
+      <line x1="12" y1="5" x2="12" y2="19"/>
+      <line x1="5" y1="12" x2="19" y2="12"/>
+    </svg>
+  );
+}
+
+const GhostAddCard = memo(function GhostAddCard({ onAdd }: { onAdd: () => void }) {
+  return (
+    <button
+      onClick={onAdd}
+      className="relative flex flex-col items-center justify-center gap-3 rounded-lg bg-zinc-950 text-zinc-600 hover:text-zinc-400 transition-colors"
+      style={{ width: CARD_W, minHeight: 140 }}
+    >
+      <svg className="absolute inset-0 pointer-events-none" width="100%" height="100%">
+        <rect x="1" y="1" width="calc(100% - 2px)" height="calc(100% - 2px)"
+          rx="7" fill="none" stroke="currentColor" strokeWidth="2" strokeDasharray="5 4" />
+      </svg>
+      <div className="flex items-center justify-center w-9 h-9 rounded-full border border-dashed border-current">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round">
+          <line x1="12" y1="5" x2="12" y2="19"/>
+          <line x1="5" y1="12" x2="19" y2="12"/>
+        </svg>
+      </div>
+      <span className="text-sm font-medium">Add row</span>
+    </button>
+  );
+});
+
+const SLIDE_TYPE_LABELS: [SlideType, string][] = [
+  ['main',        'Main'],
+  ['supporting_1','Supporting 1'],
+  ['supporting_2','Supporting 2'],
+];
+
+const CarouselAddRow = memo(function CarouselAddRow({ onAdd }: { onAdd: (type: SlideType) => void }) {
+  return (
+    <div className="flex gap-2" style={{ width: CARD_W }}>
+      {SLIDE_TYPE_LABELS.map(([type, label]) => (
+        <button
+          key={type}
+          onClick={() => onAdd(type)}
+          className="relative flex flex-1 flex-col items-center justify-center gap-2 rounded-lg bg-zinc-950 text-zinc-600 hover:text-zinc-400 transition-colors py-5"
+        >
+          <svg className="absolute inset-0 pointer-events-none" width="100%" height="100%">
+            <rect x="1" y="1" width="calc(100% - 2px)" height="calc(100% - 2px)"
+              rx="7" fill="none" stroke="currentColor" strokeWidth="2" strokeDasharray="5 4" />
+          </svg>
+          <div className="flex items-center justify-center w-7 h-7 rounded-full border border-dashed border-current">
+            <PlusIcon />
+          </div>
+          <span className="text-[11px] font-medium text-center leading-tight">{label}</span>
+        </button>
+      ))}
+    </div>
+  );
+});
+
+// ── CanvasGrid ────────────────────────────────────────────────────────────────
+
+const CAROUSEL_SLIDE_TYPES: SlideType[] = ['main', 'supporting_1', 'supporting_2'];
+
+export function CanvasGrid({
+  entries, canvasRefsMap, carouselRefsMap, brand,
+  onAddRow, onRemoveRow, onClearAll, onDownloadAll, onHandleVideoError,
+  onUpdateEntry, onUpdateCarouselEntry, onUpdateLocalVideo,
+  onFetchVideo, onSetCarouselSubMode, userId,
+  settingsMap, setSettingsMap,
+  pendingAiSeed, onAiSeedConsumed, onBackToAi,
+}: CanvasGridProps) {
+  const isCarousel = entries.length > 0 && entries[0].mode === 'carousel';
+
+  const [selectedId,                setSelectedId]                = useState<string>(entries[0]?.id ?? '');
+  const [scaleMap,                  setScaleMap]                  = useState<Record<string, number>>({});
+  const [bgStateMap,                setBgStateMap]                = useState<Record<string, CarouselBgLayerState>>({});
+  const [viewScale,                 setViewScale]                 = useState(0.9);
+  const [recordingStateMap,         setRecordingStateMap]         = useState<Record<string, RecordingState>>({});
+  const [carouselRecordingStateMap, setCarouselRecordingStateMap] = useState<Record<string, RecordingState>>({});
+  const [canvasRefVersion,          setCanvasRefVersion]          = useState(0);
+  const [carouselRefVersion,        setCarouselRefVersion]        = useState(0);
+  const [videoZoomMap,              setVideoZoomMap]              = useState<Record<string, number>>({});
+  // Per-entry vertical anchor of the block top, as a whole-number percent (default 15).
+  const [blockTopPctMap,            setBlockTopPctMap]            = useState<Record<string, number>>({});
+  // Per-entry social-caption state. Keyed by entry.id. Lives in CanvasGrid
+  // (not VideoEntry) because it's purely UI/transient — no need to persist or
+  // round-trip through hooks.
+  const [socialCaptionMap, setSocialCaptionMap] = useState<Record<string, { text: string; loading: boolean; error: string | null; copied: boolean }>>({});
+
+  const [marketMap,               setMarketMap]               = useState<Record<string, Talent | null>>({});
+  // CTA widget size per entry: 'large' (full row w/ industry + sparkline) or
+  // 'small' (one-line: photo, name, price, change). Defaults to 'large'.
+  const [marketSizeMap,           setMarketSizeMap]           = useState<Record<string, 'large' | 'small'>>({});
+  // Global toggle controlling whether the market widget is drawn on the
+  // canvas (and exported). Persisted in localStorage so flipping it off
+  // applies to every video — current, future, after Clear, after refresh —
+  // until the user flips it back on.
+  const [marketWidgetVisible, setMarketWidgetVisible] = useState(true);
+  // Per-entry collapsed state for the Market + Post Caption cards. False/
+  // undefined = expanded (showing full body). True = collapsed (header only).
+  // Independent from marketWidgetVisible: the card's open/closed state and
+  // whether the widget actually renders on the canvas are separate concerns.
+  // Persisted in localStorage so refresh + Clear leave the user's fold
+  // preference alone.
+  const [marketCardCollapsedMap,  setMarketCardCollapsedMap]  = useState<Record<string, boolean>>({});
+  const [postCaptionCollapsedMap, setPostCaptionCollapsedMap] = useState<Record<string, boolean>>({});
+  const persistedHydratedRef = useRef(false);
+  useEffect(() => {
+    try {
+      const m = window.localStorage.getItem('studio.marketCardCollapsed');
+      if (m) setMarketCardCollapsedMap(JSON.parse(m) as Record<string, boolean>);
+      const p = window.localStorage.getItem('studio.postCaptionCollapsed');
+      if (p) setPostCaptionCollapsedMap(JSON.parse(p) as Record<string, boolean>);
+      const v = window.localStorage.getItem('studio.marketWidgetVisible');
+      if (v === 'false') setMarketWidgetVisible(false);
+    } catch { /* malformed JSON or storage disabled — silent reset to default */ }
+    persistedHydratedRef.current = true;
+  }, []);
+  useEffect(() => {
+    if (!persistedHydratedRef.current) return;
+    try { window.localStorage.setItem('studio.marketCardCollapsed', JSON.stringify(marketCardCollapsedMap)); } catch { /* ignore */ }
+  }, [marketCardCollapsedMap]);
+  useEffect(() => {
+    if (!persistedHydratedRef.current) return;
+    try { window.localStorage.setItem('studio.postCaptionCollapsed', JSON.stringify(postCaptionCollapsedMap)); } catch { /* ignore */ }
+  }, [postCaptionCollapsedMap]);
+  useEffect(() => {
+    if (!persistedHydratedRef.current) return;
+    try { window.localStorage.setItem('studio.marketWidgetVisible', String(marketWidgetVisible)); } catch { /* ignore */ }
+  }, [marketWidgetVisible]);
+
+  // Per-entry user overrides for the selected market's display fields
+  interface MarketOverride {
+    name: string; industry: string; photo_url: string | null;
+    priceUsd: string; lifetimeChangePct: string;
+  }
+  const [marketOverrideMap, setMarketOverrideMap] = useState<Record<string, MarketOverride>>({});
+
+  // Per-entry sparkline data (fetched when a market is selected)
+  const [sparklineMap, setSparklineMap] = useState<Record<string, SparkPoint[]>>({});
+
+  // Deterministic pseudo-random sparkline (LCG seeded on ticker). MARKETING:
+  // a wandering line that has genuine ups AND downs but trends upward and ends
+  // higher than it started — a believable rising chart, not an extreme straight
+  // climb. Drawn in natural order (the canvas no longer sorts it ascending).
+  function generateFallbackSparkline(ticker: string): SparkPoint[] {
+    let seed = ticker.split('').reduce((a, c) => (a * 31 + c.charCodeAt(0)) | 0, 0x1234) >>> 0;
+    const rand = () => { seed = (seed * 1664525 + 1013904223) >>> 0; return seed / 0xffffffff; };
+    // "Volatile climb": a rising backbone (0→1 across the series) with mean-zero
+    // jitter laid ON TOP — big enough to make real up/down pullbacks, plus the
+    // occasional fat-tail swing. The jitter is TAPERED to ~0 at both ends (sin
+    // window), so every chart opens near its low and closes at its high → always
+    // reads clearly bullish, never wanders off. Crucially the backbone is the
+    // climb and the jitter is absolute (not scaled by the noise span), so the
+    // swing depth is a real, tunable fraction of the full height instead of
+    // cancelling out under normalization. Seeded → unique per ticker.
+    const N = 13 + Math.floor(rand() * 9);            // 13..21 points → varying step width
+    const wiggle = 0.34 + rand() * 0.18;              // swing depth, fraction of full height
+    const vals: number[] = [];
+    for (let i = 0; i < N; i++) {
+      const t = N === 1 ? 0 : i / (N - 1);            // 0..1 rising backbone
+      const taper = Math.sin(Math.PI * t);            // 0 at both ends, 1 mid → pins endpoints
+      let j = (rand() - 0.5) * wiggle;                // mean-zero pullback noise
+      if (rand() < 0.22) j += (rand() - 0.5) * wiggle * 1.8;  // occasional bigger swing
+      vals.push(t + j * taper);
+    }
+    const lo = Math.min(...vals), hi = Math.max(...vals);
+    const range = Math.max(1e-6, hi - lo);
+    return vals.map((x, i) => ({
+      value: 0.1 + ((x - lo) / range) * 0.8,          // fill [0.1, 0.9]
+      timestamp: i,
+    }));
+  }
+
+  // Displayed change % for the CTA widget — a stable, ticker-seeded value in the
+  // 5–15% range (always rendered green/up per the marketing treatment).
+  function syntheticPctForTicker(ticker: string): number {
+    let seed = ticker.split('').reduce((a, c) => (a * 31 + c.charCodeAt(0)) | 0, 0x5eed) >>> 0;
+    seed = (seed * 1664525 + 1013904223) >>> 0;
+    return 5 + (seed / 0xffffffff) * 10; // 5..15
+  }
+
+  const fetchSparkline = useCallback(async (entryId: string, ticker: string) => {
+    try {
+      const r = await fetch(`/api/markets/batch-history?slugs=${encodeURIComponent(ticker)}&window=all`);
+      const data = await r.json() as Record<string, Array<{ price: number; timestamp: string }>>;
+      const pts = data[ticker];
+      if (Array.isArray(pts) && pts.length > 0) {
+        setSparklineMap(prev => ({
+          ...prev,
+          [entryId]: pts.map(p => ({ value: p.price, timestamp: new Date(p.timestamp).getTime() })),
+        }));
+      }
+    } catch { /* non-fatal */ }
+  }, []);
+
+  // Photo picker popup state
+  interface PickerPhoto { url: string; thumbnail: string; title?: string }
+  const [photoPickerEntryId,  setPhotoPickerEntryId]  = useState<string | null>(null);
+  const [photoPickerPhotos,   setPhotoPickerPhotos]   = useState<PickerPhoto[]>([]);
+  const [photoPickerLoading,  setPhotoPickerLoading]  = useState(false);
+  const [photoPickerQuery,    setPhotoPickerQuery]    = useState('');
+  const [photoPickerOffset,   setPhotoPickerOffset]   = useState(0);
+  const [photoPickerMore,     setPhotoPickerMore]     = useState(false);
+
+  const searchPickerPhotos = useCallback(async (query: string, offset: number, append: boolean) => {
+    if (!query.trim()) return;
+    setPhotoPickerLoading(true);
+    setPhotoPickerQuery(query);
+    try {
+      const r = await fetch('/api/ai/photos/search', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ query, count: 9, offset }),
+      });
+      const fresh = await r.json() as PickerPhoto[];
+      setPhotoPickerPhotos(prev => append ? [...prev, ...fresh] : fresh);
+      setPhotoPickerOffset(offset + fresh.length);
+    } finally { setPhotoPickerLoading(false); }
+  }, []);
+
+  const openPhotoPicker = useCallback((entryId: string, initialQuery: string) => {
+    setPhotoPickerEntryId(entryId);
+    setPhotoPickerPhotos([]);
+    setPhotoPickerOffset(0);
+    setPhotoPickerQuery(initialQuery);
+    if (initialQuery.trim()) {
+      setPhotoPickerLoading(true);
+      fetch('/api/ai/photos/search', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ query: initialQuery, count: 9, offset: 0 }),
+      }).then(r => r.json()).then((photos: PickerPhoto[]) => {
+        setPhotoPickerPhotos(photos);
+        setPhotoPickerOffset(photos.length);
+      }).finally(() => setPhotoPickerLoading(false));
+    }
+  }, []);
+
+  // Person picker popup state — lets the user manually override whoever the CTA
+  // auto-pick chose. The full Pauv roster is fetched once and cached, then
+  // filtered client-side by name / ticker / industry.
+  const [personPickerEntryId, setPersonPickerEntryId] = useState<string | null>(null);
+  const [personPickerQuery,   setPersonPickerQuery]   = useState('');
+  const [allTalents,          setAllTalents]          = useState<Talent[] | null>(null);
+  const [talentsLoading,      setTalentsLoading]      = useState(false);
+
+  const openPersonPicker = useCallback((entryId: string) => {
+    setPersonPickerEntryId(entryId);
+    setPersonPickerQuery('');
+    setAllTalents(prev => {
+      if (prev) return prev;            // already cached — don't refetch
+      setTalentsLoading(true);
+      fetch('/api/ai/talents')
+        .then(r => r.json())
+        .then((data: Talent[] | { error?: string }) => { if (Array.isArray(data)) setAllTalents(data); })
+        .catch(() => {})
+        .finally(() => setTalentsLoading(false));
+      return prev;
+    });
+  }, []);
+
+  // Drop a chosen talent into the Market widget for an entry — mirrors exactly
+  // what the auto-pick does so a manual override behaves identically.
+  const applyTalent = useCallback((entryId: string, t: Talent) => {
+    setMarketMap(prev => ({ ...prev, [entryId]: t }));
+    setSparklineMap(prev => ({ ...prev, [entryId]: prev[entryId] ?? generateFallbackSparkline(t.ticker) }));
+    fetchSparkline(entryId, t.ticker);
+    setMarketOverrideMap(prev => ({
+      ...prev,
+      [entryId]: {
+        name: t.name, industry: t.industry ?? '',
+        photo_url: t.photo_url,
+        priceUsd: t.price.usd?.toFixed(2) ?? '',
+        lifetimeChangePct: syntheticPctForTicker(t.ticker).toFixed(1),
+      },
+    }));
+    setPersonPickerEntryId(null);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [fetchSparkline]);
+
+  // "Clear" (top-right) — wipe every per-entry working state and reset the rows
+  // to a single fresh entry, dropping the user back to the empty insert form
+  // (link + caption + context). The parent resets `entries`; we clear the
+  // transient maps CanvasGrid owns so nothing from the old run lingers.
+  const handleClearAll = useCallback(() => {
+    setScaleMap({});
+    setBgStateMap({});
+    setRecordingStateMap({});
+    setCarouselRecordingStateMap({});
+    setVideoZoomMap({});
+    setBlockTopPctMap({});
+    setSocialCaptionMap({});
+    setMarketMap({});
+    setMarketSizeMap({});
+    setMarketOverrideMap({});
+    setSparklineMap({});
+    // NOTE: marketCardCollapsedMap, postCaptionCollapsedMap, AND
+    // marketWidgetVisible intentionally NOT reset — those are UI / global
+    // preferences, not per-content state. Clear shouldn't override the
+    // user's fold or widget-visibility choices.
+    setSelectedId('1');
+    onClearAll();
+  }, [onClearAll]);
+
+  // Build a MarketData object merging the selected talent with any user overrides
+  const getMarketData = useCallback((entryId: string): MarketData | null => {
+    const sel = marketMap[entryId];
+    if (!sel) return null;
+    // Respect the global visibility toggle — hiding the widget keeps the
+    // selected talent + overrides intact for an easy re-enable.
+    if (!marketWidgetVisible) return null;
+    const ov = marketOverrideMap[entryId];
+    // MARKETING: always use the synthetic ticker-seeded fallback so every
+    // market gets a healthy-looking upward green curve. Real API data is
+    // unreliable for our purpose — some markets return a single point or all
+    // identical values, which renders as a flat line and undercuts the buy
+    // signal we want the post to send.
+    const spark = generateFallbackSparkline(sel.ticker);
+    const syntheticPct = syntheticPctForTicker(sel.ticker);
+    const size = marketSizeMap[entryId] ?? 'large';
+    if (!ov) {
+      return {
+        ...(sel as unknown as MarketData),
+        sparkline: spark,
+        size,
+        price: { ...sel.price, lifetimeChangePct: syntheticPct },
+      };
+    }
+    const priceNum = ov.priceUsd !== '' ? parseFloat(ov.priceUsd) : null;
+    const pctNum   = ov.lifetimeChangePct !== '' ? parseFloat(ov.lifetimeChangePct) : null;
+    return {
+      name:        ov.name  || sel.name,
+      ticker:      sel.ticker,
+      photo_url:   ov.photo_url,
+      industry:    ov.industry || null,
+      subcategory: sel.subcategory,
+      sparkline: spark,
+      size,
+      price: {
+        usd:              !isNaN(priceNum ?? NaN) ? priceNum : sel.price.usd,
+        lifetimeChangePct: !isNaN(pctNum ?? NaN) ? pctNum  : syntheticPct,
+      },
+    };
+  }, [marketMap, marketOverrideMap, sparklineMap, marketSizeMap, marketWidgetVisible]);
+
+
+  const generateSocialCaption = useCallback(async (entry: VideoEntry) => {
+    setSocialCaptionMap(prev => ({
+      ...prev,
+      [entry.id]: { text: prev[entry.id]?.text ?? '', loading: true, error: null, copied: false },
+    }));
+    try {
+      const r = await fetch('/api/ai/social-caption', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          url:        entry.url || undefined,
+          caption:    entry.caption || undefined,
+          context:    entry.context || undefined,
+          videoTitle: entry.data?.title || undefined,
+          author:     entry.data?.author?.nickname || undefined,
+        }),
+      });
+      if (!r.ok) throw new Error(await r.text());
+      const data = await r.json() as { caption?: string; error?: string };
+      if (data.error || !data.caption) throw new Error(data.error ?? 'no caption returned');
+      const generated = data.caption;
+
+      // Show the caption right away, but keep the spinner up while DeepSeek
+      // auto-picks the CTA talent (it reads this caption) and we sync the
+      // Market widget + closing paragraph to whoever it chooses.
+      setSocialCaptionMap(prev => ({
+        ...prev,
+        [entry.id]: { text: generated, loading: true, error: null, copied: false },
+      }));
+
+      let finalText = generated;
+      try {
+        const cr = await fetch('/api/ai/pick-cta', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            caption:          entry.caption || undefined,
+            generatedCaption: generated,
+            videoTitle:       entry.data?.title || undefined,
+            author:           entry.data?.author?.nickname || undefined,
+            context:          entry.context || undefined,
+            brand: {
+              displayName: brand.displayName || 'Pauv',
+              handle:      brand.handle || '@Pauv',
+            },
+          }),
+        });
+        if (cr.ok) {
+          const cta = await cr.json() as { talent?: Talent; ctaParagraph?: string; matchType?: string; error?: string };
+          if (cta.talent && !cta.error) {
+            const t = cta.talent;
+            // If the user hit Clear on this entry's market while we were
+            // awaiting the AI's pick, respect that — don't silently re-apply.
+            // `null` is the explicit "cleared" marker; `undefined` (never had a
+            // market) is still fair game for auto-fill.
+            let userCleared = false;
+            setMarketMap(prev => {
+              if (prev[entry.id] === null) { userCleared = true; return prev; }
+              return { ...prev, [entry.id]: t };
+            });
+            if (userCleared) {
+              // Skip sparkline + override writes too — pointless without a market.
+              // CTA paragraph swap below still runs since that's purely the caption.
+            } else {
+              setSparklineMap(prev => ({ ...prev, [entry.id]: prev[entry.id] ?? generateFallbackSparkline(t.ticker) }));
+              fetchSparkline(entry.id, t.ticker);
+              setMarketOverrideMap(prev => ({
+                ...prev,
+                [entry.id]: {
+                  name: t.name, industry: t.industry ?? '',
+                  photo_url: t.photo_url,
+                  priceUsd: t.price.usd?.toFixed(2) ?? '',
+                  lifetimeChangePct: syntheticPctForTicker(t.ticker).toFixed(1),
+                },
+              }));
+            }
+            // Swap the caption's closing paragraph for the CTA naming this talent.
+            if (cta.ctaParagraph) {
+              const paras = generated.split(/\n\s*\n/);
+              if (paras.length > 0) {
+                paras[paras.length - 1] = cta.ctaParagraph;
+                finalText = paras.join('\n\n');
+              }
+            }
+          }
+        }
+      } catch { /* CTA pick is best-effort — keep the caption as written */ }
+
+      setSocialCaptionMap(prev => ({
+        ...prev,
+        [entry.id]: { text: finalText, loading: false, error: null, copied: false },
+      }));
+    } catch (e) {
+      setSocialCaptionMap(prev => ({
+        ...prev,
+        [entry.id]: { text: prev[entry.id]?.text ?? '', loading: false, error: String(e), copied: false },
+      }));
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [fetchSparkline, brand.displayName, brand.handle]);
+
+  // "Next" in the media tab: fetch the video, then — for video posts — auto-run
+  // the caption generator (which itself chains the CTA pick). One action instead
+  // of three. If the fetch fails, the error is already surfaced on the entry.
+  const handleFetchThenGenerate = useCallback(async (entry: VideoEntry) => {
+    const data = await onFetchVideo(entry.id);
+    if (!data) return;
+    await generateSocialCaption({ ...entry, data });
+  }, [onFetchVideo, generateSocialCaption]);
+
+  const copySocialCaption = useCallback(async (entryId: string) => {
+    const text = socialCaptionMap[entryId]?.text;
+    if (!text) return;
+    try {
+      await navigator.clipboard.writeText(text);
+      setSocialCaptionMap(prev => ({ ...prev, [entryId]: { ...prev[entryId]!, copied: true } }));
+      setTimeout(() => {
+        setSocialCaptionMap(prev => {
+          const cur = prev[entryId];
+          if (!cur) return prev;
+          return { ...prev, [entryId]: { ...cur, copied: false } };
+        });
+      }, 1800);
+    } catch {
+      // ignore — user can select+copy manually as a fallback
+    }
+  }, [socialCaptionMap]);
+
+  const { savedSlides } = useCarouselTemplates(isCarousel ? userId : null);
+  const savedSlidesRef  = useRef(savedSlides);
+  savedSlidesRef.current = savedSlides;
+
+  const entrySlideTypeMap = useMemo(() => {
+    const m = new Map<string, SlideType>();
+    entries.forEach((e, i) => {
+      m.set(e.id, e.carouselSlideType ?? CAROUSEL_SLIDE_TYPES[i % 3]);
+    });
+    return m;
+  }, [entries]);
+
+  // Holds subheadline2 that needs to be applied to a supporting_1 entry once it exists.
+  const pendingSupporting1Ref = useRef<string | null>(null);
+
+  // When savedSlides is ready AND there is a pending AI seed, apply the template settings
+  // first, then set imageSrc/headline/subheadline on the entry.  This mirrors exactly what
+  // happens in the manual flow: template loads → user uploads image.  The image-load effect
+  // inside CarouselCanvas calls onSettingsChange({bgBlurEnabled:false}); by the time that
+  // fires here, settingsMap[id] is already stamped with the saved template so updateSettings
+  // uses it as the base instead of defaultCarouselSettings().
+  useEffect(() => {
+    if (!savedSlides || !pendingAiSeed) return;
+    const entry = entries.find(e => e.mode === 'carousel');
+    if (!entry) return;
+
+    const slideType = entry.carouselSlideType ?? 'main';
+    const saved = savedSlides[slideType];
+
+    // Stamp the template settings into settingsMap first (same render batch)
+    if (saved?.settings) {
+      setSettingsMap(prev => ({ ...prev, [entry.id]: saved.settings }));
+    }
+
+    // Apply the AI content — CarouselCanvas will receive both in the same render
+    onUpdateCarouselEntry(entry.id, 'imageSrc',    pendingAiSeed.imageSrc);
+    onUpdateCarouselEntry(entry.id, 'headline',    pendingAiSeed.headline);
+    onUpdateCarouselEntry(entry.id, 'subheadline', pendingAiSeed.subheadline);
+    if (pendingAiSeed.articleUrl) {
+      onUpdateCarouselEntry(entry.id, 'articleUrl', pendingAiSeed.articleUrl);
+    }
+
+    // For subheadline2 → supporting_1 slide: if the entry already exists update it,
+    // otherwise store in ref and add the row; the effect below will apply it.
+    if (pendingAiSeed.subheadline2) {
+      const s1 = entries.find(e => e.mode === 'carousel' && (e.carouselSlideType ?? 'main') === 'supporting_1');
+      if (s1) {
+        onUpdateCarouselEntry(s1.id, 'subheadline', pendingAiSeed.subheadline2);
+      } else {
+        pendingSupporting1Ref.current = pendingAiSeed.subheadline2;
+        onAddRow('supporting_1');
+      }
+    }
+
+    onAiSeedConsumed?.();
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [savedSlides, pendingAiSeed]);
+
+  // Second pass: once the supporting_1 entry is added, apply the stored subheadline2.
+  useEffect(() => {
+    if (!pendingSupporting1Ref.current) return;
+    const s1 = entries.find(e => e.mode === 'carousel' && (e.carouselSlideType ?? 'main') === 'supporting_1');
+    if (!s1) return;
+    onUpdateCarouselEntry(s1.id, 'subheadline', pendingSupporting1Ref.current);
+    pendingSupporting1Ref.current = null;
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [entries]);
+
+  const scrollRef             = useRef<HTMLDivElement>(null);
+  const cardRefs              = useRef<Record<string, HTMLDivElement | null>>({});
+  const prevLengthRef         = useRef(entries.length);
+  const canvasRefRegistered   = useRef(new Set<string>());
+  const carouselRefRegistered = useRef(new Set<string>());
+
+  // Scroll selected card into view (vertical)
+  useEffect(() => {
+    const scrollEl = scrollRef.current;
+    const cardEl   = cardRefs.current[selectedId];
+    if (!scrollEl || !cardEl) return;
+    const containerRect = scrollEl.getBoundingClientRect();
+    const cardRect      = cardEl.getBoundingClientRect();
+    const scrollTop     = scrollEl.scrollTop
+      + (cardRect.top - containerRect.top)
+      - (containerRect.height - cardRect.height) / 2;
+    scrollEl.scrollTo({ top: scrollTop, behavior: 'smooth' });
+  }, [selectedId]);
+
+  // When a new entry is added, select and scroll to it
+  useEffect(() => {
+    if (entries.length > prevLengthRef.current) {
+      const newest = entries[entries.length - 1];
+      if (newest) setTimeout(() => setSelectedId(newest.id), 30);
+    }
+    prevLengthRef.current = entries.length;
+  }, [entries.length]);
+
+  const getSettings = useCallback((id: string): CarouselSettings => {
+    if (settingsMap[id]) return settingsMap[id];
+    const slideType = entrySlideTypeMap.get(id) ?? 'main';
+    const saved = savedSlides?.[slideType];
+    return saved?.settings ?? defaultCarouselSettings();
+  }, [settingsMap, entrySlideTypeMap, savedSlides]);
+
+  const updateSettings = useCallback((id: string, partial: Partial<CarouselSettings>) => {
+    setSettingsMap(prev => {
+      const slideType = entrySlideTypeMap.get(id) ?? 'main';
+      const saved = savedSlidesRef.current?.[slideType];
+      const base  = prev[id] ?? saved?.settings ?? defaultCarouselSettings();
+      return { ...prev, [id]: { ...base, ...partial } };
+    });
+  }, [entrySlideTypeMap, setSettingsMap]);
+
+  const getVideoZoom = useCallback((id: string) => videoZoomMap[id] ?? 1, [videoZoomMap]);
+
+  const applyVideoZoom = useCallback((id: string, s: number) => {
+    const clamped = Math.max(0.5, Math.min(3, s));
+    setVideoZoomMap(prev => ({ ...prev, [id]: clamped }));
+    canvasRefsMap.current.get(id)?.setZoom(clamped);
+  }, [canvasRefsMap]);
+
+  const getTopPct = useCallback((id: string) => blockTopPctMap[id] ?? 15, [blockTopPctMap]);
+
+  const applyTopPct = useCallback((id: string, pct: number) => {
+    const clamped = Math.max(0, Math.min(100, pct));
+    setBlockTopPctMap(prev => ({ ...prev, [id]: clamped }));
+    canvasRefsMap.current.get(id)?.setBlockTopPct(clamped / 100);
+  }, [canvasRefsMap]);
+
+  const selectedEntry      = entries.find(e => e.id === selectedId) ?? entries[0];
+  const isSelectedCarousel = selectedEntry?.mode === 'carousel';
+
+  const isSelectedVideo = !isSelectedCarousel && selectedEntry && (
+    !!selectedEntry.localVideoSrc || (!!selectedEntry.data && !selectedEntry.loading)
+  );
+  const isCarouselVideoSelected = isSelectedCarousel && selectedEntry?.carouselSubMode === 'video' && (
+    !!selectedEntry.localVideoSrc || (!!selectedEntry.data && !selectedEntry.loading)
+  );
+  const showVideoControls = isSelectedVideo || isCarouselVideoSelected;
+
+  // canvasRefVersion / carouselRefVersion force re-derivation when refs populate
+  const activeVideoRef = showVideoControls && canvasRefVersion >= 0 && carouselRefVersion >= 0
+    ? (isSelectedVideo
+        ? (canvasRefsMap.current.get(selectedEntry!.id) ?? null)
+        : (carouselRefsMap.current.get(selectedEntry!.id) ?? null))
+    : null;
+
+  const activeRecordingState = showVideoControls
+    ? (isSelectedVideo
+        ? (recordingStateMap[selectedEntry!.id] ?? null)
+        : (carouselRecordingStateMap[selectedEntry!.id] ?? null))
+    : null;
+
+  const activeVideoSrc = useMemo(() => {
+    if (!showVideoControls) return null;
+    return selectedEntry!.localVideoSrc
+      ?? (selectedEntry!.data ? bestVideoUrl(selectedEntry!.data) : null);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [
+    showVideoControls,
+    selectedEntry?.localVideoSrc,
+    selectedEntry?.data?.play,
+    selectedEntry?.data?.hdplay,
+    selectedEntry?.data?.wmplay,
+  ]);
+
+  return (
+    <div className="w-full flex flex-col h-full overflow-hidden">
+
+      {/* ── Toolbar ── */}
+      <div className="flex items-center justify-between gap-4 px-4 py-3 border-b border-zinc-800 shrink-0 bg-zinc-950">
+        {/* Back to AI Cards + view zoom */}
+        <div className="flex items-center gap-2">
+          {onBackToAi && (
+            <button
+              onClick={onBackToAi}
+              title="Back to headline + photo"
+              className="flex items-center justify-center w-7 h-7 rounded-md text-zinc-500 hover:text-zinc-200 hover:bg-zinc-800 transition-colors"
+            >
+              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
+                <path d="M19 12H5"/>
+                <polyline points="12 19 5 12 12 5"/>
+              </svg>
+            </button>
+          )}
+          <span className="text-[10px] text-zinc-600 select-none tabular-nums w-8 text-right">{Math.round(viewScale * 100)}%</span>
+          <input
+            type="range" min={40} max={150} step={10}
+            value={Math.round(viewScale * 100)}
+            onChange={e => setViewScale(parseInt(e.target.value) / 100)}
+            className="w-20 h-1 accent-white cursor-pointer"
+          />
+        </div>
+
+        {/* Right actions */}
+        <div className="flex items-center gap-4">
+          {isSelectedCarousel && selectedEntry && (
+            <button onClick={() => carouselRefsMap.current.get(selectedEntry.id)?.startDownload()}
+              className="flex items-center gap-1.5 rounded-full bg-white px-2 py-1.5 text-xs font-medium text-black hover:bg-zinc-100 transition-colors">
+              <DownloadIcon size={11} stroke="currentColor" />
+              {selectedEntry.carouselSubMode === 'video' ? 'Export' : 'PNG'}
+            </button>
+          )}
+          {/* Download All moved into the export bar (bottom-right) — appears after Export is pressed. */}
+          {/* Clear — reset everything back to the empty insert form. */}
+          <button
+            onClick={handleClearAll}
+            title="Clear everything and start over"
+            className="flex items-center gap-1.5 rounded-full bg-white px-4 py-1.5 text-xs font-semibold text-black hover:bg-zinc-100 transition-colors shrink-0"
+          >
+            <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M3 6h18"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg>
+            Clear
+          </button>
+        </div>
+      </div>
+
+      {/* ── Vertical scroll column ── */}
+      <div
+        ref={scrollRef}
+        className="flex-1 overflow-y-auto scroll-smooth"
+        style={{ paddingRight: isSelectedCarousel && selectedEntry ? 360 : 0 }}
+      >
+        <div className="flex flex-col items-center gap-8 py-6 px-4" style={{ zoom: viewScale }}>
+
+          {entries.map((entry, index) => {
+            const isSelected      = entry.id === (selectedEntry?.id ?? '');
+            const isEntryCarousel = entry.mode === 'carousel';
+
+            const isCarouselVideo   = isEntryCarousel && entry.carouselSubMode === 'video';
+            const hasCarouselRender = isEntryCarousel && (
+              (!isCarouselVideo && (!!entry.imageSrc || !!entry.headline || !!entry.subheadline)) ||
+              (isCarouselVideo && (!!entry.localVideoSrc || (!!entry.data && !entry.loading)))
+            );
+            const hasVideoRender = !isEntryCarousel && !entry.loading && (
+              !!entry.localVideoSrc
+              || (!!entry.data && !(entry.data.images && entry.data.images.length > 0))
+            );
+            const hasRender = hasCarouselRender || hasVideoRender;
+            const scale     = scaleMap[entry.id] ?? 1;
+
+            return (
+              <div
+                key={entry.id}
+                ref={el => { cardRefs.current[entry.id] = el; }}
+                className="flex flex-col gap-3"
+                style={{ width: CARD_W }}
+              >
+                {/* Input card */}
+                {isEntryCarousel ? (
+                  <CarouselInputCard
+                    entry={entry}
+                    onUpdateCarousel={(field, value) => onUpdateCarouselEntry(entry.id, field, value)}
+                    onUpdateUrl={url => onUpdateEntry(entry.id, 'url', url)}
+                    onUpdateLocalVideo={(src, name) => onUpdateLocalVideo(entry.id, src, name)}
+                    onFetch={() => onFetchVideo(entry.id)}
+                    onSetSubMode={mode => onSetCarouselSubMode(entry.id, mode)}
+                    onRemove={() => onRemoveRow(entry.id)}
+                  />
+                ) : (
+                  <VideoInputCard
+                    entry={entry}
+                    onUpdateField={(field, value) => onUpdateEntry(entry.id, field, value)}
+                    onUpdateLocalVideo={(src, name) => onUpdateLocalVideo(entry.id, src, name)}
+                    onFetch={() => handleFetchThenGenerate(entry)}
+                  />
+                )}
+
+                {/* Canvas render + controls (only when ready) */}
+                {hasRender && (
+                  <div className="flex flex-col gap-4 mt-2">
+
+                    {/* Carousel-specific controls row */}
+                    {isEntryCarousel && (
+                      <div className="flex items-center justify-between gap-4">
+                        {/* Zoom */}
+                        <div className="flex items-center gap-2 shrink-0">
+                          <span className="text-[10px] text-zinc-600 select-none shrink-0">Zoom</span>
+                          <input
+                            type="range" min={20} max={800} step={5}
+                            value={Math.round(scale * 100)}
+                            onChange={e => {
+                              const n = parseInt(e.target.value) / 100;
+                              carouselRefsMap.current.get(entry.id)?.setZoom(n);
+                            }}
+                            className="w-20 h-1 accent-white cursor-pointer"
+                          />
+                          <EditablePct
+                            value={Math.round(scale * 100)}
+                            min={20} max={800} step={5}
+                            onCommit={pct => carouselRefsMap.current.get(entry.id)?.setZoom(pct / 100)}
+                          />
+                        </div>
+
+                        {/* Crop / Split / BG Blur */}
+                        <CarouselBgControls
+                          entry={entry}
+                          bgState={bgStateMap[entry.id] ?? { fgMaskReady: false, isBgProcessing: false, bgProcessError: false }}
+                          settings={getSettings(entry.id)}
+                          carouselRef={carouselRefsMap.current.get(entry.id)}
+                          onRemoveRow={onRemoveRow}
+                          isCarouselVideo={isCarouselVideo}
+                        />
+                      </div>
+                    )}
+
+                    {/* Video canvas zoom + delete (non-carousel only) */}
+                    {!isEntryCarousel && (
+                      <div className="flex items-center gap-2 px-0.5">
+                        <span className="text-[10px] text-zinc-600 select-none shrink-0">Zoom</span>
+                        <input
+                          type="range" min={50} max={300} step={5}
+                          value={Math.round(getVideoZoom(entry.id) * 100)}
+                          onChange={e => applyVideoZoom(entry.id, parseInt(e.target.value) / 100)}
+                          className="w-20 h-1 accent-white cursor-pointer"
+                        />
+                        <EditablePct
+                          value={Math.round(getVideoZoom(entry.id) * 100)}
+                          min={50} max={300} step={5}
+                          onCommit={pct => applyVideoZoom(entry.id, pct / 100)}
+                        />
+                        <div className="flex items-center gap-1.5 ml-auto">
+                          <button
+                            onClick={() => canvasRefsMap.current.get(entry.id)?.resetBox()}
+                            className="flex items-center h-9 px-2.5 rounded-md bg-zinc-950 border border-zinc-800 text-zinc-400 hover:text-zinc-200 hover:border-zinc-600 transition-colors text-[10px] font-medium shrink-0"
+                            title="Reset box"
+                          >Reset box</button>
+                          <label
+                            className="flex items-center gap-1 h-9 px-2.5 rounded-md bg-zinc-950 border border-zinc-800 text-zinc-400 text-[10px] font-medium shrink-0"
+                            title="Distance of the block's top edge from the top of the frame"
+                          >
+                            <span>Top</span>
+                            <input
+                              type="number" min={0} max={100} step={1}
+                              value={getTopPct(entry.id)}
+                              onChange={e => applyTopPct(entry.id, parseInt(e.target.value || '0', 10) || 0)}
+                              className="w-9 bg-transparent text-zinc-200 text-right tabular-nums outline-none"
+                            />
+                            <span>%</span>
+                          </label>
+                          <button onClick={() => onRemoveRow(entry.id)} className={BTN_ICON} title="Delete row">
+                            <TrashIcon size={15} />
+                          </button>
+                        </div>
+                      </div>
+                    )}
+
+                    {/* Selection ring + canvas */}
+                    <div
+                      onClick={e => {
+                        if ((e.target as Element).closest('[data-carousel-slot]')) return;
+                        setSelectedId(entry.id);
+                      }}
+                      className={`relative cursor-pointer transition-all duration-150 mt-1 ${
+                        isSelected
+                          ? 'ring-2 ring-white ring-offset-2 ring-offset-black'
+                          : 'ring-1 ring-zinc-800 hover:ring-zinc-600'
+                      }`}
+                    >
+                      {isEntryCarousel ? (
+                        <CarouselCanvas
+                          ref={r => {
+                            if (r) {
+                              carouselRefsMap.current.set(entry.id, r);
+                              if (!carouselRefRegistered.current.has(entry.id)) {
+                                carouselRefRegistered.current.add(entry.id);
+                                setCarouselRefVersion(v => v + 1);
+                              }
+                            } else {
+                              carouselRefsMap.current.delete(entry.id);
+                            }
+                          }}
+                          imageSrc={!isCarouselVideo ? (entry.imageSrc ?? '') : ''}
+                          videoSrc={isCarouselVideo
+                            ? (entry.localVideoSrc ?? (entry.data ? bestVideoUrl(entry.data) : undefined))
+                            : undefined}
+                          headline={entry.headline ?? ''}
+                          subheadline={entry.subheadline ?? ''}
+                          settings={getSettings(entry.id)}
+                          invertedSlots={entrySlideTypeMap.get(entry.id) === 'supporting_2'}
+                          onScaleChange={s => setScaleMap(prev => ({ ...prev, [entry.id]: s }))}
+                          onSettingsChange={partial => updateSettings(entry.id, partial)}
+                          onBgLayerStateChange={s => setBgStateMap(prev => ({ ...prev, [entry.id]: s }))}
+                          brandLogoSrc={brand.logoSrc || undefined}
+                          onRecordingStateChange={state => setCarouselRecordingStateMap(prev => ({ ...prev, [entry.id]: state }))}
+                          onHeadlineChange={text => onUpdateCarouselEntry(entry.id, 'headline', text)}
+                          onSubheadlineChange={text => onUpdateCarouselEntry(entry.id, 'subheadline', text)}
+                        />
+                      ) : (
+                        <TikTokCanvas
+                          ref={r => {
+                            if (r) {
+                              canvasRefsMap.current.set(entry.id, r);
+                              if (!canvasRefRegistered.current.has(entry.id)) {
+                                canvasRefRegistered.current.add(entry.id);
+                                setCanvasRefVersion(v => v + 1);
+                              }
+                            } else {
+                              canvasRefsMap.current.delete(entry.id);
+                            }
+                          }}
+                          videoSrc={entry.localVideoSrc ?? (entry.data ? bestVideoUrl(entry.data) : '')}
+                          videoId={entry.data?.id}
+                          rowNumber={index}
+                          onVideoError={() => onHandleVideoError(entry.id)}
+                          brand={entry.mode === 'caption' ? 'clean' : 'sonotrade'}
+                          overlayLogoSrc={brand.logoSrc || '/templatelogo.png'}
+                          overlayDisplayName={brand.displayName || 'Pauv'}
+                          overlayHandle={brand.handle || '@Pauv'}
+                          overlayVerified={true}
+                          overlayCaption={entry.caption}
+                          marketData={entry.mode === 'twitter' ? getMarketData(entry.id) : null}
+                          onRecordingStateChange={state =>
+                            setRecordingStateMap(prev => ({ ...prev, [entry.id]: state }))
+                          }
+                        />
+                      )}
+                    </div>
+
+                    {/* Market selector — Twitter template only.
+                        Lets the user pick a Pauv market and renders its
+                        details row on the canvas below the video box.
+                        Selected state and list rows match the ArtistRow
+                        design from pauv-the-app/MobileTradeList.tsx. */}
+                    {entry.mode === 'twitter' && (() => {
+                      const selected = marketMap[entry.id] ?? null;
+                      // Market card is always shown for Twitter posts so the
+                      // user can collapse / change / toggle it before a market
+                      // is picked. The body shows a placeholder until a talent
+                      // is auto-picked by the CTA generator or manually chosen
+                      // via Change.
+                      const collapsed = marketCardCollapsedMap[entry.id] ?? false;
+                      return (
+                        <div className="rounded-lg bg-zinc-950 border border-zinc-800 overflow-hidden">
+                          <div className={`flex items-center justify-between gap-3 px-3 py-2 ${collapsed ? '' : 'border-b border-zinc-800'}`}>
+                            <div className="flex items-center gap-2 min-w-0">
+                              <button
+                                onClick={() => setMarketCardCollapsedMap(prev => ({ ...prev, [entry.id]: !(prev[entry.id] ?? false) }))}
+                                title={collapsed ? 'Expand market' : 'Collapse market'}
+                                className="flex items-center justify-center w-4 h-4 text-zinc-500 hover:text-zinc-200 transition-colors shrink-0"
+                              >
+                                <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                                  {collapsed
+                                    ? <polyline points="6 9 12 15 18 9"/>
+                                    : <polyline points="18 15 12 9 6 15"/>}
+                                </svg>
+                              </button>
+                              <span className="text-[11px] font-semibold text-zinc-300 uppercase tracking-wider">Market</span>
+                            </div>
+                            <div className="flex items-center gap-2">
+                              {/* CTA size toggle — Large (full row) vs Small (one line). */}
+                              <div className="flex items-center rounded-md border border-zinc-800 overflow-hidden">
+                                {(['large', 'small'] as const).map(sz => {
+                                  const active = (marketSizeMap[entry.id] ?? 'large') === sz;
+                                  return (
+                                    <button
+                                      key={sz}
+                                      onClick={() => setMarketSizeMap(prev => ({ ...prev, [entry.id]: sz }))}
+                                      title={sz === 'large' ? 'Full row: photo, name, industry, sparkline, price, change' : 'One line: photo, name, price, change'}
+                                      className={`px-2 py-0.5 text-[10px] font-medium capitalize transition-colors ${active ? 'bg-zinc-700 text-zinc-100' : 'bg-transparent text-zinc-500 hover:text-zinc-300'}`}
+                                    >
+                                      {sz}
+                                    </button>
+                                  );
+                                })}
+                              </div>
+                              {/* Change person — manually override the auto-picked talent. */}
+                              <button
+                                onClick={() => openPersonPicker(entry.id)}
+                                title="Pick a different person from the Pauv roster"
+                                className="flex items-center gap-1 px-2 py-0.5 rounded-md border border-zinc-800 text-[10px] font-medium text-zinc-400 hover:text-zinc-100 hover:border-zinc-600 transition-colors"
+                              >
+                                <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="m22 8-3 3-1.5-1.5"/></svg>
+                                Change
+                              </button>
+                              {/* Visibility toggle — global preference. Hides the market widget
+                                  from the canvas/export across ALL videos, persists through
+                                  Clear + refresh. Picked talent + overrides stay intact for
+                                  instant re-enable. */}
+                              <button
+                                onClick={() => setMarketWidgetVisible(v => !v)}
+                                title={marketWidgetVisible ? 'Hide market widget (applies to all videos)' : 'Show market widget'}
+                                className={`inline-flex items-center shrink-0 w-9 h-5 rounded-full px-0.5 transition-colors ${marketWidgetVisible ? 'bg-[#04df9d]' : 'bg-zinc-700'}`}
+                              >
+                                <span className={`block w-4 h-4 rounded-full bg-white shadow-sm transition-transform ${marketWidgetVisible ? 'translate-x-4' : 'translate-x-0'}`} />
+                              </button>
+                            </div>
+                          </div>
+                          {!collapsed && (selected ? (() => {
+                            const ov = marketOverrideMap[entry.id] ?? {
+                              name: selected.name, industry: selected.industry ?? '',
+                              photo_url: selected.photo_url,
+                              priceUsd: selected.price.usd?.toFixed(2) ?? '',
+                              lifetimeChangePct: selected.price.lifetimeChangePct?.toFixed(2) ?? '',
+                            };
+                            const setOv = (patch: Partial<typeof ov>) =>
+                              setMarketOverrideMap(prev => ({ ...prev, [entry.id]: { ...ov, ...patch } }));
+                            const displayPhoto = ov.photo_url;
+                            const pctVal = parseFloat(ov.lifetimeChangePct);
+                            // MARKETING: always render as positive (green + up arrow) so the
+                            // preview always encourages buying, regardless of real direction.
+                            const isPos = true;
+                            const changeColor = '#04df9d';
+                            return (
+                              <div>
+                                {/* Preview row (ArtistRow style, read from overrides) */}
+                                <div className="flex items-center" style={(marketSizeMap[entry.id] ?? 'large') === 'large'
+                                  ? { gap: 12, padding: '10px 12px', border: '1px solid rgba(255,255,255,0.28)', borderRadius: 14, margin: '8px 12px' }
+                                  : { gap: 12, padding: '10px 12px', borderBottom: '1px solid #1a1a1a' }}>
+                                  {/* Avatar — click to open photo picker */}
+                                  <button
+                                    onClick={() => openPhotoPicker(entry.id, ov.name || selected.name)}
+                                    title="Change photo"
+                                    className="relative shrink-0 flex items-center justify-center rounded-lg overflow-hidden group"
+                                    style={{ width: 42, height: 42, background: '#1e1e1e', border: '1px solid #2a2a2a' }}
+                                  >
+                                    <span style={{ fontSize: 10, color: '#52525b', fontWeight: 600 }}>
+                                      {(ov.name || selected.name).split(' ').map((w: string) => w[0]).filter(Boolean).slice(0, 2).join('').toUpperCase()}
+                                    </span>
+                                    {displayPhoto && (
+                                      // eslint-disable-next-line @next/next/no-img-element
+                                      <img src={displayPhoto} alt="" className="absolute inset-0 w-full h-full object-cover" />
+                                    )}
+                                    <div className="absolute inset-0 bg-black/50 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center">
+                                      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="2" strokeLinecap="round"><path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z"/><circle cx="12" cy="13" r="4"/></svg>
+                                    </div>
+                                  </button>
+                                  {/* Name + Industry — left-aligned, stacked tight on top of each other */}
+                                  <div className="flex-1 min-w-0 flex flex-col" style={{ gap: 4 }}>
+                                    <span style={{ fontSize: 19, fontWeight: 600, color: '#fff', letterSpacing: '-0.015em', lineHeight: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{ov.name || '—'}</span>
+                                    <span style={{ fontSize: 12, color: '#71717a', lineHeight: 1 }}>{ov.industry || '—'}</span>
+                                  </div>
+                                  {/* Price + Change — now sits left of the chart */}
+                                  <div className="flex flex-col items-end shrink-0" style={{ gap: 3 }}>
+                                    <span style={{ fontFamily: 'var(--font-geist-mono)', fontSize: 19, fontWeight: 600, color: '#fff', lineHeight: 1 }}>
+                                      {ov.priceUsd !== '' && !isNaN(parseFloat(ov.priceUsd))
+                                        ? parseFloat(ov.priceUsd).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
+                                        : '—'}
+                                    </span>
+                                    <div className="flex items-center" style={{ gap: 3, lineHeight: 1 }}>
+                                      {ov.lifetimeChangePct !== '' && !isNaN(pctVal) && (
+                                        <>
+                                          <svg viewBox="0 0 24 18" width="13" height="13" style={{ color: changeColor, flexShrink: 0, transform: `rotate(${isPos ? '0' : '180'}deg)` }}>
+                                            <path fill="currentColor" d="m12 0 10.392 14.25H1.608z" />
+                                          </svg>
+                                          <span style={{ fontFamily: 'var(--font-geist-mono)', fontSize: 12, fontWeight: 500, color: changeColor, lineHeight: 1 }}>
+                                            {Math.abs(pctVal).toFixed(1)}%
+                                          </span>
+                                        </>
+                                      )}
+                                    </div>
+                                  </div>
+                                  {/* Sparkline — 80×30, now at the far right (chart + price swapped) */}
+                                  {(() => {
+                                    // MARKETING: always synthetic, ticker-seeded so the picker
+                                    // shows the exact same green upward curve that will appear
+                                    // in the exported video. Never trust the real API data here
+                                    // — it would diverge between picker and export.
+                                    const spark = generateFallbackSparkline(selected.ticker);
+                                    const sparkColor = '#04df9d';
+                                    const W = 96, H = 32, pad = 2;
+                                    const paddedSpark = spark.length === 1 ? [spark[0]!, spark[0]!] : spark;
+                                    const vals = paddedSpark.map(p => p.value);
+                                    const vMin = Math.min(...vals), vMax = Math.max(...vals);
+                                    const vRange = vMax - vMin;
+                                    const pts = paddedSpark.map((p, i) => ({
+                                      x: (i / (paddedSpark.length - 1)) * W,
+                                      y: vRange === 0 ? H / 2 : pad + (1 - (p.value - vMin) / vRange) * (H - pad * 2),
+                                    }));
+                                    let d = `M${pts[0]!.x.toFixed(1)},${pts[0]!.y.toFixed(1)}`;
+                                    for (let i = 0; i < pts.length - 1; i++) {
+                                      d += ` H${pts[i+1]!.x.toFixed(1)} V${pts[i+1]!.y.toFixed(1)}`;
+                                    }
+                                    return (
+                                      <div style={{ width: 80, height: 30, flexShrink: 0, marginLeft: 4 }}>
+                                        <svg viewBox={`0 0 ${W} ${H}`} preserveAspectRatio="none" width="100%" height="100%" style={{ display: 'block', overflow: 'visible' }}>
+                                          <path d={d} fill="none" stroke={sparkColor} strokeWidth="1.5" strokeLinecap="square" strokeLinejoin="miter" vectorEffect="non-scaling-stroke" />
+                                        </svg>
+                                      </div>
+                                    );
+                                  })()}
+                                </div>
+                                {/* "link in bio to trade" — light grey, centered under the CTA */}
+                                <div style={{ textAlign: 'center', color: 'rgba(255,255,255,0.5)', fontSize: 12, paddingBottom: 8 }}>link in bio to trade</div>
+                                {/* Edit fields */}
+                                <div className="px-3 py-2.5 flex flex-col gap-2">
+                                  <div className="flex gap-2">
+                                    <input value={ov.name} onChange={e => setOv({ name: e.target.value })}
+                                      placeholder="Name" className="flex-1 min-w-0 bg-zinc-900 border border-zinc-800 rounded px-2 py-1 text-xs text-zinc-200 placeholder-zinc-600 outline-none focus:border-zinc-600" />
+                                    <input value={ov.industry} onChange={e => setOv({ industry: e.target.value })}
+                                      placeholder="Industry" className="flex-1 min-w-0 bg-zinc-900 border border-zinc-800 rounded px-2 py-1 text-xs text-zinc-200 placeholder-zinc-600 outline-none focus:border-zinc-600" />
+                                  </div>
+                                  <div className="flex gap-2">
+                                    <input value={ov.priceUsd} onChange={e => setOv({ priceUsd: e.target.value })}
+                                      placeholder="Price (USD)" type="number" step="0.01"
+                                      className="flex-1 min-w-0 bg-zinc-900 border border-zinc-800 rounded px-2 py-1 text-xs text-zinc-200 placeholder-zinc-600 outline-none focus:border-zinc-600 font-mono" />
+                                    <input value={ov.lifetimeChangePct} onChange={e => setOv({ lifetimeChangePct: e.target.value })}
+                                      placeholder="Change %" type="number" step="0.01"
+                                      className="flex-1 min-w-0 bg-zinc-900 border border-zinc-800 rounded px-2 py-1 text-xs text-zinc-200 placeholder-zinc-600 outline-none focus:border-zinc-600 font-mono" />
+                                  </div>
+                                </div>
+                              </div>
+                            );
+                          })() : (
+                            <div className="px-3 py-6 text-center">
+                              <p className="text-[11px] text-zinc-600">No market picked yet — use <span className="text-zinc-400 font-medium">Change</span> to choose one.</p>
+                            </div>
+                          ))}
+                        </div>
+                      );
+                    })()}
+
+                    {/* Social caption generator — only for video-mode posts.
+                        Lives directly below the rendered preview so the user
+                        can generate, edit, and copy a long-form post caption
+                        without leaving the row. */}
+                    {!isEntryCarousel && (() => {
+                      const sc = socialCaptionMap[entry.id];
+                      const collapsed = postCaptionCollapsedMap[entry.id] ?? false;
+                      return (
+                        <div className="rounded-lg bg-zinc-950 border border-zinc-800 overflow-hidden">
+                          <div className={`flex items-center justify-between gap-3 px-3 py-2 ${collapsed ? '' : 'border-b border-zinc-800'}`}>
+                            <div className="flex items-center gap-2 min-w-0">
+                              <button
+                                onClick={() => setPostCaptionCollapsedMap(prev => ({ ...prev, [entry.id]: !(prev[entry.id] ?? false) }))}
+                                title={collapsed ? 'Expand caption' : 'Collapse caption'}
+                                className="flex items-center justify-center w-4 h-4 text-zinc-500 hover:text-zinc-200 transition-colors shrink-0"
+                              >
+                                <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                                  {collapsed
+                                    ? <polyline points="6 9 12 15 18 9"/>
+                                    : <polyline points="18 15 12 9 6 15"/>}
+                                </svg>
+                              </button>
+                              <span className="text-[11px] font-semibold text-zinc-300 uppercase tracking-wider">Post caption</span>
+                            </div>
+                            <div className="flex items-center gap-1.5 shrink-0">
+                              {sc?.text && (
+                                <button
+                                  onClick={() => copySocialCaption(entry.id)}
+                                  className="flex items-center gap-1.5 h-7 px-2.5 rounded-md bg-zinc-950 border border-zinc-800 text-zinc-400 hover:text-zinc-200 hover:border-zinc-600 transition-colors text-[10px] font-medium"
+                                  title="Copy to clipboard"
+                                >
+                                  {sc.copied ? (
+                                    <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                                      <polyline points="20 6 9 17 4 12"/>
+                                    </svg>
+                                  ) : (
+                                    <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                                      <rect x="9" y="9" width="13" height="13" rx="2" ry="2"/>
+                                      <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/>
+                                    </svg>
+                                  )}
+                                  {sc.copied ? 'Copied' : 'Copy'}
+                                </button>
+                              )}
+                              <button
+                                onClick={() => generateSocialCaption(entry)}
+                                disabled={sc?.loading}
+                                className="flex items-center gap-1.5 h-7 px-2.5 rounded-md bg-white text-black hover:bg-zinc-100 disabled:opacity-40 disabled:cursor-not-allowed transition-colors text-[10px] font-semibold"
+                                title="Generate caption with AI"
+                              >
+                                {sc?.loading ? (
+                                  <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" style={{ animation: 'spin 1s linear infinite' }}>
+                                    <path d="M21 12a9 9 0 1 1-6.219-8.56"/>
+                                  </svg>
+                                ) : (
+                                  <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                                    <polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/>
+                                  </svg>
+                                )}
+                                {sc?.loading ? 'Generating…' : sc?.text ? 'Regenerate' : 'Generate'}
+                              </button>
+                            </div>
+                          </div>
+                          {!collapsed && (
+                            <div className="px-3 py-2.5">
+                              {sc?.error ? (
+                                <span className="text-xs text-red-400">{sc.error}</span>
+                              ) : sc?.text ? (
+                                <textarea
+                                  value={sc.text}
+                                  onChange={e => setSocialCaptionMap(prev => ({
+                                    ...prev,
+                                    [entry.id]: { ...prev[entry.id]!, text: e.target.value, copied: false },
+                                  }))}
+                                  rows={Math.min(8, Math.max(4, sc.text.split('\n').length + Math.ceil(sc.text.length / 90)))}
+                                  className="w-full bg-transparent text-[12px] text-zinc-200 placeholder-zinc-700 outline-none resize-y leading-relaxed"
+                                />
+                              ) : (
+                                <span className="text-[11px] text-zinc-600">
+                                  Click Generate to draft a long-form caption. Edit the Context field above to steer it.
+                                </span>
+                              )}
+                            </div>
+                          )}
+                        </div>
+                      );
+                    })()}
+                  </div>
+                )}
+              </div>
+            );
+          })}
+
+          {isCarousel
+            ? <CarouselAddRow onAdd={type => onAddRow(type)} />
+            : <GhostAddCard onAdd={() => onAddRow()} />
+          }
+
+        </div>
+      </div>
+
+      {/* ── Video controls bar — shared bottom panel for video templates ── */}
+      <div className="bg-zinc-950" style={{ paddingRight: isCarouselVideoSelected ? 360 : 0 }}>
+        <VideoControlsBar
+          entryId={showVideoControls ? selectedEntry!.id : null}
+          activeRef={activeVideoRef}
+          recordingState={activeRecordingState}
+          videoSrc={activeVideoSrc}
+          onDownloadAll={onDownloadAll}
+        />
+      </div>
+
+      {/* ── Photo picker modal — opens when user clicks an avatar in the market selector ── */}
+      {photoPickerEntryId && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70" onClick={() => setPhotoPickerEntryId(null)}>
+          <div className="bg-zinc-900 border border-zinc-700 rounded-xl w-[520px] max-h-[80vh] flex flex-col shadow-2xl" onClick={e => e.stopPropagation()}>
+            {/* Header */}
+            <div className="flex items-center justify-between px-4 py-3 border-b border-zinc-800 shrink-0">
+              <span className="text-sm font-semibold text-zinc-100">Pick a photo</span>
+              <button onClick={() => setPhotoPickerEntryId(null)} className="text-zinc-500 hover:text-zinc-200 transition-colors">
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+              </button>
+            </div>
+            {/* Search */}
+            <div className="flex gap-2 px-4 py-3 border-b border-zinc-800 shrink-0">
+              <input
+                value={photoPickerQuery}
+                onChange={e => setPhotoPickerQuery(e.target.value)}
+                onKeyDown={e => { if (e.key === 'Enter') searchPickerPhotos(photoPickerQuery, 0, false); }}
+                placeholder="Search photos…"
+                className="flex-1 bg-zinc-800 border border-zinc-700 rounded-md px-3 py-1.5 text-sm text-zinc-200 placeholder-zinc-500 outline-none focus:border-zinc-500"
+              />
+              <button
+                onClick={() => searchPickerPhotos(photoPickerQuery, 0, false)}
+                disabled={!photoPickerQuery.trim() || photoPickerLoading}
+                className="px-3 py-1.5 rounded-md bg-zinc-800 border border-zinc-700 text-zinc-300 hover:text-white hover:border-zinc-500 disabled:opacity-40 text-sm transition-colors"
+              >Search</button>
+            </div>
+            {/* Grid */}
+            <div className="overflow-y-auto flex-1 p-4">
+              {photoPickerLoading && (
+                <div className="flex flex-wrap gap-3">
+                  {[1,2,3,4,5,6].map(i => <div key={i} className="rounded-lg bg-zinc-800 animate-pulse" style={{ width: 140, height: 140 }} />)}
+                </div>
+              )}
+              {!photoPickerLoading && photoPickerPhotos.length === 0 && (
+                <p className="text-sm text-zinc-600 text-center py-8">Search for a photo above.</p>
+              )}
+              {!photoPickerLoading && photoPickerPhotos.length > 0 && (
+                <div className="flex flex-wrap gap-3">
+                  {photoPickerPhotos.map(p => (
+                    <button
+                      key={p.url}
+                      onClick={() => {
+                        setMarketOverrideMap(prev => ({
+                          ...prev,
+                          [photoPickerEntryId!]: { ...(prev[photoPickerEntryId!] ?? { name: '', industry: '', photo_url: null, priceUsd: '', lifetimeChangePct: '' }), photo_url: p.url },
+                        }));
+                        setPhotoPickerEntryId(null);
+                      }}
+                      className="rounded-lg overflow-hidden border-2 border-transparent hover:border-white transition-colors"
+                      style={{ width: 140, height: 140 }}
+                    >
+                      {/* eslint-disable-next-line @next/next/no-img-element */}
+                      <img src={p.thumbnail} alt={p.title ?? ''} className="w-full h-full object-cover" onError={e => { (e.currentTarget as HTMLImageElement).style.display = 'none'; }} />
+                    </button>
+                  ))}
+                  <button
+                    onClick={() => { setPhotoPickerMore(true); searchPickerPhotos(photoPickerQuery, photoPickerOffset, true).finally(() => setPhotoPickerMore(false)); }}
+                    disabled={photoPickerMore}
+                    className="flex flex-col items-center justify-center gap-1 rounded-lg border-2 border-dashed border-zinc-700 hover:border-zinc-500 hover:bg-zinc-800 disabled:opacity-40 transition-colors text-zinc-600 hover:text-zinc-300"
+                    style={{ width: 140, height: 140 }}
+                  >
+                    <span className="text-2xl leading-none">+</span>
+                    <span className="text-xs">More</span>
+                  </button>
+                </div>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Person picker — manually choose which Pauv talent the CTA features. */}
+      {personPickerEntryId && (() => {
+        const q = personPickerQuery.trim().toLowerCase();
+        const results = (allTalents ?? [])
+          .filter(t => !q
+            || t.name.toLowerCase().includes(q)
+            || t.ticker.toLowerCase().includes(q)
+            || (t.industry ?? '').toLowerCase().includes(q))
+          .slice(0, 60);
+        return (
+          <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70" onClick={() => setPersonPickerEntryId(null)}>
+            <div className="bg-zinc-900 border border-zinc-700 rounded-xl w-[520px] max-h-[80vh] flex flex-col shadow-2xl" onClick={e => e.stopPropagation()}>
+              {/* Header */}
+              <div className="flex items-center justify-between px-4 py-3 border-b border-zinc-800 shrink-0">
+                <span className="text-sm font-semibold text-zinc-100">Change person</span>
+                <button onClick={() => setPersonPickerEntryId(null)} className="text-zinc-500 hover:text-zinc-200 transition-colors">
+                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+                </button>
+              </div>
+              {/* Search */}
+              <div className="px-4 py-3 border-b border-zinc-800 shrink-0">
+                <input
+                  autoFocus
+                  value={personPickerQuery}
+                  onChange={e => setPersonPickerQuery(e.target.value)}
+                  placeholder="Search by name, ticker, or industry…"
+                  className="w-full bg-zinc-800 border border-zinc-700 rounded-md px-3 py-1.5 text-sm text-zinc-200 placeholder-zinc-500 outline-none focus:border-zinc-500"
+                />
+              </div>
+              {/* List */}
+              <div className="overflow-y-auto flex-1 p-2">
+                {talentsLoading && (
+                  <p className="text-sm text-zinc-600 text-center py-8">Loading roster…</p>
+                )}
+                {!talentsLoading && results.length === 0 && (
+                  <p className="text-sm text-zinc-600 text-center py-8">No matches.</p>
+                )}
+                {!talentsLoading && results.map(t => (
+                  <button
+                    key={t.id}
+                    onClick={() => applyTalent(personPickerEntryId, t)}
+                    className="w-full flex items-center gap-3 px-2 py-2 rounded-lg hover:bg-zinc-800 transition-colors text-left"
+                  >
+                    <span className="relative shrink-0 flex items-center justify-center rounded-lg overflow-hidden" style={{ width: 36, height: 36, background: '#1e1e1e', border: '1px solid #2a2a2a' }}>
+                      <span style={{ fontSize: 9, color: '#52525b', fontWeight: 600 }}>
+                        {t.name.split(' ').map(w => w[0]).filter(Boolean).slice(0, 2).join('').toUpperCase()}
+                      </span>
+                      {t.photo_url && (
+                        // eslint-disable-next-line @next/next/no-img-element
+                        <img src={t.photo_url} alt="" className="absolute inset-0 w-full h-full object-cover" onError={e => { (e.currentTarget as HTMLImageElement).style.display = 'none'; }} />
+                      )}
+                    </span>
+                    <span className="flex-1 min-w-0 flex flex-col">
+                      <span className="text-sm text-zinc-100 truncate">{t.name}</span>
+                      <span className="text-[11px] text-zinc-500 truncate">{t.industry || 'Unknown'}</span>
+                    </span>
+                    <span className="shrink-0 text-[11px] font-mono text-zinc-500">{t.ticker}</span>
+                  </button>
+                ))}
+              </div>
+            </div>
+          </div>
+        );
+      })()}
+
+      {/* ── Settings panel — fixed right column ── */}
+      {isSelectedCarousel && selectedEntry && (
+        <div className="fixed top-[52px] right-0 z-20 bg-transparent w-[360px] h-[calc(100vh-52px)] flex flex-col">
+          <CarouselSettingsPanel
+            settings={getSettings(selectedEntry.id)}
+            onChange={partial => updateSettings(selectedEntry.id, partial)}
+            videoMode={selectedEntry.carouselSubMode === 'video'}
+          />
+        </div>
+      )}
+    </div>
+  );
+}

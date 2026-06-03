@@ -4,6 +4,7 @@ node_modules/
 # Build outputs
 dist/
 build/
+.next/
 
 # Runtime data — phone names, account usernames, themes, file history, settings.
 # These are personal/instance-specific and should never be in source control.

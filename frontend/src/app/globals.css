@@ -1,0 +1,106 @@
+@import "tailwindcss";
+
+@font-face {
+  font-family: 'Chirp';
+  src: url('/chirp-regular.otf') format('opentype');
+  font-weight: 400;
+  font-style: normal;
+  font-display: swap;
+}
+
+:root {
+  --background: #ffffff;
+  --foreground: #171717;
+}
+
+@theme inline {
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --font-sans: var(--font-geist-sans);
+  --font-mono: var(--font-geist-mono);
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --background: #0a0a0a;
+    --foreground: #ededed;
+  }
+}
+
+body {
+  background: var(--background);
+  color: var(--foreground);
+  font-family: Arial, Helvetica, sans-serif;
+}
+
+button {
+  cursor: pointer;
+  transition: transform 80ms ease, opacity 80ms ease;
+}
+
+button:active {
+  transform: scale(0.93);
+}
+
+input[type='range'] {
+  -webkit-appearance: none;
+  appearance: none;
+  background: linear-gradient(to right, #fff var(--fill, 50%), #3f3f46 var(--fill, 50%));
+  border-radius: 9999px;
+  border: none;
+  outline: none;
+}
+
+input[type='color']::-webkit-color-swatch-wrapper {
+  padding: 0;
+}
+
+input[type='color']::-webkit-color-swatch {
+  border: none;
+  border-radius: 4px;
+}
+
+input[type='color']::-moz-color-swatch {
+  border: none;
+  border-radius: 4px;
+}
+
+input[type='range']::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: white;
+  cursor: pointer;
+  border: none;
+  box-shadow: none;
+}
+
+input[type='range']::-webkit-slider-runnable-track {
+  background: transparent;
+  border: none;
+}
+
+input[type='range']::-moz-range-thumb {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: white;
+  border: none;
+  cursor: pointer;
+}
+
+input[type='range']::-moz-range-track {
+  background: transparent;
+  border: none;
+}
+
+input[type='range']::-moz-range-progress {
+  background: transparent;
+}
+
+/* Spin keyframe — used by inline style={{ animation:'spin 1s linear infinite' }} */
+@keyframes spin {
+  to { transform: rotate(360deg); }
+}
+
