@@ -16,6 +16,27 @@ import { countCaptionLines, countPauvCaptionLines, CAPTION_EMOJI_SIZE } from '..
 import { wrapRichText, drawRichLine, preloadEmojiImages } from '@/lib/emoji';
 import type { Box, MarketData } from '../types';
 
+// Phonedeck server runs on the user's OWN machine (default localhost:8080).
+// The export upload must therefore go DIRECTLY from the browser — the same
+// browser-direct pattern every other Phonedeck call uses (see PhonedeckApp).
+// Routing it through a same-origin Next.js route breaks on Vercel, where
+// "localhost" is Vercel's server, not the user's PC. Override the host with
+// NEXT_PUBLIC_PHONEDECK_URL if Phonedeck runs on a peer machine.
+const PHONEDECK_URL = process.env.NEXT_PUBLIC_PHONEDECK_URL ?? 'http://localhost:8080';
+
+// Strip characters multer/Windows can't put in a filename. Mirrors the old
+// /api/export/save route's safeName so exported names stay identical.
+function safeExportName(raw: string): string {
+  const cleaned = raw
+    .replace(/[<>:"/\\|?*]/g, '')
+    .replace(/\s+/g, ' ')
+    .trim()
+    .slice(0, 70)
+    .replace(/[. ]+$/g, '')
+    .trim();
+  return cleaned || 'export';
+}
+
 export interface UseRecordingConfig {
   canvasRef: RefObject<HTMLCanvasElement | null>;
   videoRef: RefObject<HTMLVideoElement | null>;
@@ -705,24 +726,26 @@ export function useRecording(config: UseRecordingConfig) {
       }
       if (!nameBase) nameBase = `row-${String(rowNumber + 1).padStart(2, '0')}-${videoId ?? 'export'}`;
 
-      // Save straight to ~/Downloads/copyright free images/MM-DD-YYYY/ via the
-      // local Studio server. Fall back to a normal browser download if that
-      // fails, so an export is never lost.
+      // Send straight to the local Phonedeck server's Incoming folder. This
+      // POSTs from the BROWSER directly to localhost:8080 (multer field name
+      // "files", same as PhonedeckApp.uploadOne) — NOT through a Next.js route,
+      // which would run on Vercel and never reach the user's PC. Fall back to a
+      // normal browser download if Phonedeck isn't running, so a render is
+      // never lost.
+      const filename = `${safeExportName(nameBase)}.mp4`;
       try {
-        const resp = await fetch(`/api/export/save?name=${encodeURIComponent(nameBase)}`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'video/mp4' },
-          body: blob,
-        });
+        const form = new FormData();
+        form.append('files', blob, filename);
+        const resp = await fetch(`${PHONEDECK_URL}/api/upload`, { method: 'POST', body: form });
         if (!resp.ok) throw new Error(await resp.text());
-        const data = await resp.json() as { filename?: string };
-        const fname = data.filename ?? nameBase + '.mp4';
-        setRecStatus(`In Phonedeck Incoming: ${fname}`);
+        setRecStatus(`In Phonedeck Incoming: ${filename}`);
         setTimeout(() => setRecStatus(''), 5000);
       } catch (saveErr) {
-        console.warn('[EXPORT] save-to-folder failed, falling back to browser download:', saveErr);
+        console.warn('[EXPORT] phonedeck upload failed, falling back to browser download:', saveErr);
+        setRecStatus('Phonedeck not reachable — saved to Downloads instead');
+        setTimeout(() => setRecStatus(''), 6000);
         const url = URL.createObjectURL(blob);
-        Object.assign(document.createElement('a'), { href: url, download: `${nameBase}.mp4` }).click();
+        Object.assign(document.createElement('a'), { href: url, download: filename }).click();
         URL.revokeObjectURL(url);
       }
       setRecProgress(1);

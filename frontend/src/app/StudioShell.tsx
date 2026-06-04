@@ -67,6 +67,105 @@ function PhonedeckPane({ visible, children }: { visible: boolean; children: Reac
   );
 }
 
+// The one-paste bootstrap a teammate runs once on a fresh PC. Installs Git/Node/
+// scrcpy+adb, clones the repo, registers the phonedeck:// protocol, and starts
+// the server. Kept in sync with /setup.ps1 at the repo root.
+const SETUP_COMMAND =
+  'irm https://raw.githubusercontent.com/lordacidity/angelstyle/main/setup.ps1 | iex';
+
+// Launch-server control. The Vercel-hosted page can't spawn a process, so the
+// main button is a deep-link into the phonedeck:// protocol (registered once by
+// setup.ps1) that runs launch-server.bat → the local Express backend. The
+// attached "First time?" dropdown shows the one-paste setup command; it
+// auto-opens once per browser so a new teammate sees how to get started.
+function LaunchServerButton() {
+  const [open, setOpen] = useState(false);
+  const [copied, setCopied] = useState(false);
+
+  useEffect(() => {
+    try {
+      if (!localStorage.getItem('phonedeck.setupSeen')) setOpen(true);
+    } catch { /* localStorage blocked — just don't auto-open */ }
+  }, []);
+
+  function markSeen() {
+    try { localStorage.setItem('phonedeck.setupSeen', '1'); } catch { /* ignore */ }
+  }
+
+  async function copy() {
+    try {
+      await navigator.clipboard.writeText(SETUP_COMMAND);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2000);
+    } catch { /* clipboard blocked — the code is select-all, copy manually */ }
+    markSeen();
+  }
+
+  return (
+    <div className="fixed bottom-3 left-[84px] z-[25]">
+      {open && (
+        <div className="absolute bottom-full left-0 mb-2 w-[370px] rounded-lg border border-zinc-800 bg-zinc-950/95 p-3 shadow-xl backdrop-blur">
+          <div className="mb-2 flex items-start justify-between gap-2">
+            <p className="text-[11px] font-semibold text-white">First time on this PC?</p>
+            <button
+              onClick={() => { setOpen(false); markSeen(); }}
+              className="shrink-0 text-xs text-zinc-500 hover:text-white"
+            >
+              ✕
+            </button>
+          </div>
+          <p className="mb-2 text-[11px] leading-relaxed text-zinc-400">
+            Open <span className="text-zinc-200">Windows PowerShell</span> and paste this once —
+            it installs everything and starts the server:
+          </p>
+          <div className="flex items-stretch gap-1.5">
+            <code className="flex-1 select-all break-all rounded border border-zinc-800 bg-black/60 px-2 py-1.5 font-mono text-[10.5px] text-emerald-300">
+              {SETUP_COMMAND}
+            </code>
+            <button
+              onClick={copy}
+              className="shrink-0 rounded border border-zinc-700 px-2 text-[11px] font-medium text-zinc-200 transition-colors hover:bg-zinc-800"
+            >
+              {copied ? 'Copied' : 'Copy'}
+            </button>
+          </div>
+          <p className="mt-2 text-[10px] leading-relaxed text-zinc-500">
+            Done once. After that just press <span className="text-zinc-300">Launch server</span> each
+            time — it restarts in one click, no setup again.
+          </p>
+        </div>
+      )}
+
+      <div className="flex items-stretch overflow-hidden rounded-md border border-zinc-800 bg-zinc-900/90 backdrop-blur">
+        <a
+          href="phonedeck://launch"
+          title="Start the local Phonedeck server on this PC"
+          className="flex items-center gap-1.5 px-2.5 py-1.5 text-[11px] font-medium text-zinc-300 transition-colors hover:bg-zinc-800/60 hover:text-white"
+        >
+          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+            <polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2" />
+          </svg>
+          Launch server
+        </a>
+        <button
+          onClick={() => setOpen(o => !o)}
+          title="First-time setup instructions"
+          className="flex items-center gap-1 border-l border-zinc-800 px-1.5 text-[10px] text-zinc-400 transition-colors hover:bg-zinc-800/60 hover:text-white"
+        >
+          First time?
+          <svg
+            width="9" height="9" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+            strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"
+            className={`transition-transform ${open ? 'rotate-180' : ''}`}
+          >
+            <polyline points="6 9 12 15 18 9" />
+          </svg>
+        </button>
+      </div>
+    </div>
+  );
+}
+
 export function StudioShell() {
   const pathname = usePathname();
   const router = useRouter();
@@ -330,22 +429,8 @@ export function StudioShell() {
         zIndex={20}
       />
 
-      {/* Launch-server button — the Vercel-hosted page can't spawn a process, so
-          this is a deep-link into the phonedeck:// URL protocol registered on each
-          team PC (run register-phonedeck-protocol.ps1 once). Clicking it runs
-          launch-server.bat, opening a terminal and starting the local Express
-          backend that drives the phones. No-op on PCs without the protocol
-          registered, so it's safe to ship to everyone. Internal/team use. */}
-      <a
-        href="phonedeck://launch"
-        title="Start the local Phonedeck server on this PC (one-time setup: register-phonedeck-protocol.ps1)"
-        className="fixed bottom-3 left-[84px] z-[25] flex items-center gap-1.5 px-2.5 py-1.5 rounded-md border border-zinc-800 bg-zinc-900/90 text-[11px] font-medium text-zinc-300 hover:text-white hover:border-zinc-600 transition-colors backdrop-blur"
-      >
-        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-          <polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2" />
-        </svg>
-        Launch server
-      </a>
+      {/* Launch-server split button + first-time setup dropdown (see component). */}
+      <LaunchServerButton />
     </div>
   );
 }

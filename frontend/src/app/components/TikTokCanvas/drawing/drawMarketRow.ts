@@ -166,24 +166,45 @@ export function drawMarketRow({
   // triangleOnly: skip all drawing except the animated triangle (used in recording per-frame pass).
   if (triangleOnly && lifetimeChangePct == null) return; // bio / no-change CTA: nothing to animate
   if (triangleOnly && lifetimeChangePct != null) {
+    if (isBio) return; // bio CTA has no market row / arrow to animate
     const changeText = `${Math.abs(lifetimeChangePct).toFixed(1)}%`;
-    ctx.font = `500 ${CHANGE_SIZE}px ${MONO}`;
-    const changeTxtW = ctx.measureText(changeText).width;
-    const PRICE_CAP   = PRICE_SIZE * 0.72;
-    const CHANGE_CAP  = CHANGE_SIZE * 0.72;
-    const priceBlockH = PRICE_CAP + PRICE_GAP + CHANGE_CAP;
-    const changeBaseline = Math.round((midY - priceBlockH / 2) + PRICE_CAP + PRICE_GAP + CHANGE_CAP);
-    const aX      = rightEdge - ARROW_W - ARROW_GAP - changeTxtW;
-    const arrowCY  = changeBaseline - CHANGE_SIZE * 0.35 + Math.round(1 * S);
-    const arrowTop = arrowCY - ARROW_H / 2;
     ctx.fillStyle = COLOR_POSITIVE;
     ctx.globalAlpha = arrowOpacity;
-    ctx.beginPath();
-    ctx.moveTo(aX + ARROW_W * 0.5,   arrowTop);
-    ctx.lineTo(aX + ARROW_W * 0.933, arrowTop + ARROW_H * 0.792);
-    ctx.lineTo(aX + ARROW_W * 0.067, arrowTop + ARROW_H * 0.792);
-    ctx.closePath();
-    ctx.fill();
+    if (isSmall) {
+      // Mirror the small-variant arrow geometry exactly (see the small block below)
+      // so the per-frame animated triangle lands on top of the baked one — not at
+      // the large layout's position, which would draw a phantom arrow below.
+      ctx.font = `500 ${SM_CHANGE_SIZE}px ${MONO}`;
+      const changeTxtW = ctx.measureText(changeText).width;
+      const smRightEdge = rightEdge - SM_RIGHT_PAD;
+      const changeTextX = smRightEdge - changeTxtW;
+      const arrowX      = changeTextX - SM_ARROW_GAP - SM_ARROW_W;
+      const changeBaseline = Math.round(midY + SM_CHANGE_SIZE * 0.35);
+      const arrowCY  = changeBaseline - SM_CHANGE_SIZE * 0.35;
+      const arrowTop = arrowCY - SM_ARROW_H / 2;
+      ctx.beginPath();
+      ctx.moveTo(arrowX + SM_ARROW_W * 0.5,   arrowTop);
+      ctx.lineTo(arrowX + SM_ARROW_W * 0.933, arrowTop + SM_ARROW_H * 0.792);
+      ctx.lineTo(arrowX + SM_ARROW_W * 0.067, arrowTop + SM_ARROW_H * 0.792);
+      ctx.closePath();
+      ctx.fill();
+    } else {
+      ctx.font = `500 ${CHANGE_SIZE}px ${MONO}`;
+      const changeTxtW = ctx.measureText(changeText).width;
+      const PRICE_CAP   = PRICE_SIZE * 0.72;
+      const CHANGE_CAP  = CHANGE_SIZE * 0.72;
+      const priceBlockH = PRICE_CAP + PRICE_GAP + CHANGE_CAP;
+      const changeBaseline = Math.round((midY - priceBlockH / 2) + PRICE_CAP + PRICE_GAP + CHANGE_CAP);
+      const aX      = rightEdge - ARROW_W - ARROW_GAP - changeTxtW;
+      const arrowCY  = changeBaseline - CHANGE_SIZE * 0.35 + Math.round(1 * S);
+      const arrowTop = arrowCY - ARROW_H / 2;
+      ctx.beginPath();
+      ctx.moveTo(aX + ARROW_W * 0.5,   arrowTop);
+      ctx.lineTo(aX + ARROW_W * 0.933, arrowTop + ARROW_H * 0.792);
+      ctx.lineTo(aX + ARROW_W * 0.067, arrowTop + ARROW_H * 0.792);
+      ctx.closePath();
+      ctx.fill();
+    }
     ctx.globalAlpha = 1;
     return;
   }
@@ -357,12 +378,18 @@ export function drawMarketRow({
       ctx.fillStyle = COLOR_POSITIVE;
       const arrowCY  = changeBaseline - SM_CHANGE_SIZE * 0.35;
       const arrowTop = arrowCY - SM_ARROW_H / 2;
+      // Respect arrowOpacity so the export's static sprite (baked at opacity 0)
+      // omits this arrow and the per-frame triangleOnly pass animates it instead —
+      // matching the large variant. Without this the small arrow bakes in solid
+      // (never blinks) and the animated one lands elsewhere.
+      ctx.globalAlpha = arrowOpacity;
       ctx.beginPath();
       ctx.moveTo(arrowX + SM_ARROW_W * 0.5,   arrowTop);
       ctx.lineTo(arrowX + SM_ARROW_W * 0.933, arrowTop + SM_ARROW_H * 0.792);
       ctx.lineTo(arrowX + SM_ARROW_W * 0.067, arrowTop + SM_ARROW_H * 0.792);
       ctx.closePath();
       ctx.fill();
+      ctx.globalAlpha = 1;
       ctx.font = `500 ${SM_CHANGE_SIZE}px ${MONO}`;
       ctx.fillStyle = COLOR_POSITIVE;
       ctx.fillText(changeText, changeTextX, changeBaseline);

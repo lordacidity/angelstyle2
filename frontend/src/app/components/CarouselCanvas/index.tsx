@@ -39,6 +39,31 @@ const RICH_COLORS: readonly string[] = [
   '#ec4899', '#f43f5e',
 ];
 
+// Phonedeck server runs on the user's OWN machine (default localhost:8080).
+// Exports must upload DIRECTLY from the browser (multer field "files"), the same
+// way every other Phonedeck call works — never via a Next.js route, which on
+// Vercel runs on Vercel's server and can't reach the user's PC.
+const PHONEDECK_URL = process.env.NEXT_PUBLIC_PHONEDECK_URL ?? 'http://localhost:8080';
+
+// Send an exported blob to Phonedeck's Incoming folder. Falls back to a normal
+// browser download if Phonedeck isn't running, so an export is never lost.
+// Returns a status string for the UI.
+async function sendToPhonedeck(blob: Blob, filename: string): Promise<string> {
+  try {
+    const form = new FormData();
+    form.append('files', blob, filename);
+    const r = await fetch(`${PHONEDECK_URL}/api/upload`, { method: 'POST', body: form });
+    if (!r.ok) throw new Error(await r.text());
+    return `In Phonedeck Incoming: ${filename}`;
+  } catch (err) {
+    console.warn('[carousel export] phonedeck upload failed, falling back to download:', err);
+    const url = URL.createObjectURL(blob);
+    Object.assign(document.createElement('a'), { href: url, download: filename }).click();
+    URL.revokeObjectURL(url);
+    return 'Phonedeck not reachable — saved to Downloads instead';
+  }
+}
+
 interface CarouselCanvasProps {
   imageSrc: string;
   videoSrc?: string;
@@ -1856,9 +1881,9 @@ const CarouselCanvas = forwardRef<CarouselCanvasRef, CarouselCanvasProps>(
         if (!buffer) throw new Error('No buffer received from output');
 
         const blob = new Blob([buffer], { type: 'video/mp4' });
-        const url = URL.createObjectURL(blob);
-        Object.assign(document.createElement('a'), { href: url, download: `carousel-${Date.now()}.mp4` }).click();
-        URL.revokeObjectURL(url);
+        const status = await sendToPhonedeck(blob, `carousel-${Date.now()}.mp4`);
+        setVideoExportStatus(status);
+        setTimeout(() => setVideoExportStatus(''), 5000);
 
         emit(1, 'Done!');
 
@@ -1898,11 +1923,11 @@ const CarouselCanvas = forwardRef<CarouselCanvasRef, CarouselCanvasProps>(
           hiCanvas,
         );
         await new Promise(r => setTimeout(r, 30));
-        hiCanvas.toBlob(blob => {
+        hiCanvas.toBlob(async blob => {
           if (!blob) return;
-          const url = URL.createObjectURL(blob);
-          const a = document.createElement('a'); a.href = url; a.download = `carousel-${Date.now()}.png`; a.click();
-          URL.revokeObjectURL(url);
+          const status = await sendToPhonedeck(blob, `carousel-${Date.now()}.png`);
+          setVideoExportStatus(status);
+          setTimeout(() => setVideoExportStatus(''), 5000);
         }, 'image/png');
       },
       zoomIn() {
