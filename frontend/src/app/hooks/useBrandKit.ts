@@ -14,10 +14,33 @@ const EMPTY_BRAND: BrandProps = {
 function toDbHandle(h: string) { return h.replace(/^@+/, ''); }
 function toDisplayHandle(h: string) { return h.startsWith('@') ? h : `@${h}`; }
 
-// There's a single shared "Pauv" identity (no login), so the display name +
-// handle live in Supabase on the brand_kit row alongside the logos — set once,
-// shared across every machine. (Previously these were per-computer localStorage
-// so multiple logins could brand differently; that's no longer needed.)
+// Logos are shared (Supabase, under the one Pauv account) so everyone pulls from
+// the same logo library. Display name + handle are PER-PERSON: each machine
+// keeps its own in localStorage, so one person can brand as "Pauv Artists" and
+// another as "Pauv Athletes" off the same shared account. The Supabase
+// brand_kit name/handle columns are only a fallback seed for a machine that has
+// never set them locally.
+const LS_DISPLAY_NAME = 'brandkit.displayName';
+const LS_HANDLE       = 'brandkit.handle';
+
+function readLocalIdentity(): { displayName: string | null; handle: string | null } {
+  if (typeof window === 'undefined') return { displayName: null, handle: null };
+  try {
+    return {
+      displayName: window.localStorage.getItem(LS_DISPLAY_NAME),
+      handle:      window.localStorage.getItem(LS_HANDLE),
+    };
+  } catch { return { displayName: null, handle: null }; }
+}
+
+function writeLocalIdentity(displayName: string, dbHandle: string): void {
+  if (typeof window === 'undefined') return;
+  try {
+    window.localStorage.setItem(LS_DISPLAY_NAME, displayName);
+    window.localStorage.setItem(LS_HANDLE,       dbHandle);
+  } catch { /* localStorage disabled — silent no-op, UI state still updates */ }
+}
+
 export function useBrandKit(userId: string | null) {
   const [brand, setBrandState] = useState<BrandProps>(EMPTY_BRAND);
   const setBrand = useCallback((updater: BrandProps | ((prev: BrandProps) => BrandProps)) => {
@@ -44,13 +67,13 @@ export function useBrandKit(userId: string | null) {
 
     async function load() {
       setLoading(true);
+      const local = readLocalIdentity();
 
       const { data: kit, error: fetchErr } = await supabase
         .from('brand_kit')
         .select('*')
         .eq('user_id', userId)
         .maybeSingle();
-
 
       if (fetchErr) {
         setError(`DB error: ${fetchErr.message}`);
@@ -59,6 +82,14 @@ export function useBrandKit(userId: string | null) {
       }
 
       if (!kit) {
+        // No shared row yet (no logos uploaded). Still surface this machine's
+        // local identity so the fields aren't blank.
+        setBrand({
+          displayName: local.displayName ?? '',
+          handle: local.handle ? toDisplayHandle(local.handle) : '',
+          logos: [],
+          logoSrc: '',
+        });
         setLoading(false);
         return;
       }
@@ -78,9 +109,10 @@ export function useBrandKit(userId: string | null) {
         position: l.position,
       }));
 
-      // Identity (display name + handle) comes straight from the shared row.
-      const displayName = kit.display_name ?? '';
-      const handleRaw   = kit.handle ?? '';
+      // Identity (display name + handle): localStorage wins so each machine
+      // keeps its own brand; the Supabase columns are only a fallback seed.
+      const displayName = local.displayName ?? (kit.display_name ?? '');
+      const handleRaw   = local.handle      ?? (kit.handle      ?? '');
 
       setBrand({
         displayName,
@@ -96,36 +128,17 @@ export function useBrandKit(userId: string | null) {
   }, [userId]);
 
   const save = useCallback(async (displayName: string, handle: string): Promise<boolean> => {
+    // Per-machine identity: write localStorage only. Supabase is intentionally
+    // NOT updated so each machine keeps its own name/handle off the shared
+    // account. uploadLogo() creates the brand_kit row when it's needed for the
+    // (shared) logo library.
     if (!userId) return false;
     setSaving(true);
     const dbHandle = toDbHandle(handle);
-    try {
-      let id = brandKitIdRef.current;
-      if (!id) {
-        // First save with no logos uploaded yet — create the shared row.
-        const { data, error: insertErr } = await supabase
-          .from('brand_kit')
-          .insert({ display_name: displayName, handle: dbHandle, user_id: userId })
-          .select('id')
-          .single();
-        if (insertErr || !data) throw new Error(insertErr?.message ?? 'Failed to create brand');
-        id = data.id;
-        brandKitIdRef.current = id;
-      } else {
-        const { error: updateErr } = await supabase
-          .from('brand_kit')
-          .update({ display_name: displayName, handle: dbHandle })
-          .eq('id', id);
-        if (updateErr) throw new Error(updateErr.message);
-      }
-      setBrand(prev => ({ ...prev, displayName, handle: toDisplayHandle(dbHandle) }));
-      return true;
-    } catch (e) {
-      setError(e instanceof Error ? e.message : 'Failed to save brand');
-      return false;
-    } finally {
-      setSaving(false);
-    }
+    writeLocalIdentity(displayName, dbHandle);
+    setBrand(prev => ({ ...prev, displayName, handle: toDisplayHandle(dbHandle) }));
+    setSaving(false);
+    return true;
   }, [userId]);
 
   const uploadLogo = useCallback(async (file: File) => {
