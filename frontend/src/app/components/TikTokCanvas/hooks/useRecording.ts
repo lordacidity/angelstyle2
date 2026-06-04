@@ -47,6 +47,12 @@ export function useRecording(config: UseRecordingConfig) {
   const [recStatus, setRecStatus] = useState('');
   const abortControllerRef = useRef<AbortController | null>(null);
 
+  // Always-current snapshot of config. startRecording reads from this ref so
+  // that a stale imperative handle (one render behind due to useImperativeHandle
+  // commit timing) still captures the latest marketData/caption/etc.
+  const configRef = useRef(config);
+  configRef.current = config;
+
   async function startRecording(): Promise<void> {
     const {
       canvasRef, videoRef, brand, rowNumber, videoId,
@@ -55,7 +61,7 @@ export function useRecording(config: UseRecordingConfig) {
       logoImgRef, verifiedImgRef,
       overlayCaption, overlayLogoSrc, overlayDisplayName, overlayHandle, overlayVerified,
       marketData, marketAvatarImgRef, marketAvatarUrlRef, pauvLogoImgRef,
-    } = config;
+    } = configRef.current;
 
     const canvas = canvasRef.current;
     const video = videoRef.current;
@@ -621,7 +627,7 @@ export function useRecording(config: UseRecordingConfig) {
           // ordering bit-for-bit.
           offCtx.drawImage(overlaySprite, 0, 0);
 
-          // Animate the CTA triangle (pulsate opacity) per-frame so it's baked into the export.
+          // Per-frame CTA animation: numbers flip every few seconds + triangle pulses.
           if (!isClean && marketData && marketAvatarImgRef && marketAvatarUrlRef) {
             const pulse = 0.2 + 0.8 * (0.5 + 0.5 * Math.sin(2 * Math.PI * targetTs * 0.75));
             drawMarketRow({
