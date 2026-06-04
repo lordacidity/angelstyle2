@@ -133,7 +133,24 @@ function tileGrid(n: number) {
 const sleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
 
 const app = express();
-app.use(cors());
+
+// Private Network Access (Chrome's "Local Network Access"). The Studio is served
+// from a public HTTPS origin (e.g. angelstyle.vercel.app) but calls this server
+// on http://localhost:8080 — a loopback address. Chrome treats public-site →
+// loopback as a private-network request and BLOCKS it ("Permission was denied
+// for this request to access the loopback address space") unless the preflight
+// response echoes `Access-Control-Allow-Private-Network: true`. The cors()
+// middleware doesn't set this header, so add it first, on every request that
+// carries the matching preflight request header.
+app.use((req, res, next) => {
+  if (req.headers["access-control-request-private-network"]) {
+    res.setHeader("Access-Control-Allow-Private-Network", "true");
+  }
+  next();
+});
+// Reflect the requesting origin and allow the PNA header on preflights so the
+// browser is satisfied for both http and https Studio origins.
+app.use(cors({ origin: true }));
 app.use(express.json());
 
 fs.mkdirSync(config.watchDir, { recursive: true });
