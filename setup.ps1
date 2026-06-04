@@ -3,7 +3,7 @@
 #
 # The friend just opens Windows PowerShell and pastes ONE line:
 #
-#   irm https://raw.githubusercontent.com/lordacidity/angelstyle/main/setup.ps1 | iex
+#   irm https://raw.githubusercontent.com/lordacidity/angelstyle2/main/setup.ps1 | iex
 #
 # This script then, with no further input:
 #   1. Installs Git + Node.js (via winget) if they're missing.
@@ -23,7 +23,7 @@ $ErrorActionPreference = 'Stop'
 Write-Host ''
 Write-Host '=== Phonedeck setup ===' -ForegroundColor Cyan
 
-$repoUrl = 'https://github.com/lordacidity/angelstyle.git'
+$repoUrl = 'https://github.com/lordacidity/angelstyle2.git'
 $dest    = Join-Path ([Environment]::GetFolderPath('Desktop')) 'angelstyle'
 
 function Have($name) { [bool](Get-Command $name -ErrorAction SilentlyContinue) }

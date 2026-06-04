@@ -71,7 +71,7 @@ function PhonedeckPane({ visible, children }: { visible: boolean; children: Reac
 // scrcpy+adb, clones the repo, registers the phonedeck:// protocol, and starts
 // the server. Kept in sync with /setup.ps1 at the repo root.
 const SETUP_COMMAND =
-  'irm https://raw.githubusercontent.com/lordacidity/angelstyle/main/setup.ps1 | iex';
+  'irm https://raw.githubusercontent.com/lordacidity/angelstyle2/main/setup.ps1 | iex';
 
 // Launch-server control. The Vercel-hosted page can't spawn a process, so the
 // main button is a deep-link into the phonedeck:// protocol (registered once by
