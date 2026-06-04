@@ -65,7 +65,30 @@ foreach ($c in 'git','node','npm') {
   }
 }
 
-# ── 2. scrcpy + adb (Android device tools) ────────────────────────────────────
+# ── 2. Clone or update the repo ───────────────────────────────────────────────
+# This MUST run before the scrcpy download below: `git clone` refuses a target
+# that already exists and is non-empty, and the scrcpy step writes into
+# $dest\tools. So clone first (turning $dest into the repo), then drop tools\
+# inside it.
+if (Test-Path (Join-Path $dest '.git')) {
+  Write-Host "Updating existing copy at $dest ..." -ForegroundColor Cyan
+  git -C $dest pull --ff-only
+} elseif (Test-Path $dest) {
+  # The folder exists but isn't a clone yet — e.g. an earlier half-run already
+  # created $dest\tools, which makes `git clone` refuse it. Initialise the repo
+  # in place instead. A forced checkout only rewrites tracked files, so untracked
+  # extras already there (like tools\) are left untouched.
+  Write-Host "Folder exists but isn't a clone yet — initialising repo in $dest ..." -ForegroundColor Cyan
+  git -C $dest init -q
+  if (-not (git -C $dest remote)) { git -C $dest remote add origin $repoUrl }
+  git -C $dest fetch origin main
+  git -C $dest checkout -B main -f origin/main
+} else {
+  Write-Host "Cloning to $dest ..." -ForegroundColor Cyan
+  git clone $repoUrl $dest
+}
+
+# ── 3. scrcpy + adb (Android device tools) ────────────────────────────────────
 # The server calls `adb` and `scrcpy` off the PATH. winget's scrcpy doesn't put
 # the bundled adb.exe on PATH, so if either is missing we download the official
 # scrcpy-win64 release (which contains BOTH exes) to a known folder and point the
@@ -101,15 +124,6 @@ if (-not (Have adb) -or -not (Have scrcpy)) {
   } else {
     Write-Host '  Skipping — phone mirroring/pushing may not work until adb + scrcpy are installed.' -ForegroundColor Yellow
   }
-}
-
-# ── 3. Clone or update the repo ───────────────────────────────────────────────
-if (Test-Path (Join-Path $dest '.git')) {
-  Write-Host "Updating existing copy at $dest ..." -ForegroundColor Cyan
-  git -C $dest pull --ff-only
-} else {
-  Write-Host "Cloning to $dest ..." -ForegroundColor Cyan
-  git clone $repoUrl $dest
 }
 
 # ── 4. Install server dependencies ────────────────────────────────────────────
