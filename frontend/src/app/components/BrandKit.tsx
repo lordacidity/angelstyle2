@@ -116,7 +116,7 @@ export function BrandKit({
                     </div>
                   )}
 
-                  {hoveredLogo === logo.id && (
+                  {hoveredLogo === logo.id && !logo.id.startsWith('static:') && (
                     <button
                       onClick={() => onDeleteLogo(logo.id)}
                       className="absolute -top-1.5 -left-1.5 w-4 h-4 rounded-full bg-red-500 flex items-center justify-center shadow hover:bg-red-400 transition-colors"

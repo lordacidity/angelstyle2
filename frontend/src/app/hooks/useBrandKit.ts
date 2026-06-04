@@ -4,9 +4,17 @@ import { useState, useEffect, useCallback, useRef } from 'react';
 import { supabase } from '@/lib/supabase';
 import type { BrandProps, BrandLogo } from '../types';
 
+// The Pauv logo ships as a static asset in frontend/public, so the brand kit
+// always has a working logo with zero Supabase/auth dependency. Any logos that
+// DO load from the shared account are appended after this one. The `static:`
+// id prefix marks it as non-deletable — it isn't a Supabase row.
+const STATIC_LOGOS: BrandLogo[] = [
+  { id: 'static:pauv', url: '/pauv-favicon.png', label: 'Pauv', position: -1 },
+];
+
 const EMPTY_BRAND: BrandProps = {
-  logoSrc: '',
-  logos: [],
+  logoSrc: STATIC_LOGOS[0].url,
+  logos: STATIC_LOGOS,
   displayName: '',
   handle: '',
 };
@@ -83,12 +91,12 @@ export function useBrandKit(userId: string | null) {
 
       if (!kit) {
         // No shared row yet (no logos uploaded). Still surface this machine's
-        // local identity so the fields aren't blank.
+        // local identity plus the static Pauv logo so the kit is usable offline.
         setBrand({
           displayName: local.displayName ?? '',
           handle: local.handle ? toDisplayHandle(local.handle) : '',
-          logos: [],
-          logoSrc: '',
+          logos: STATIC_LOGOS,
+          logoSrc: STATIC_LOGOS[0].url,
         });
         setLoading(false);
         return;
@@ -102,12 +110,16 @@ export function useBrandKit(userId: string | null) {
         .eq('brand_kit_id', kit.id)
         .order('position');
 
-      const logos: BrandLogo[] = (logoRows ?? []).map(l => ({
-        id: l.id,
-        url: l.url,
-        label: l.label ?? undefined,
-        position: l.position,
-      }));
+      // Static Pauv logo first, then any logos uploaded to the shared account.
+      const logos: BrandLogo[] = [
+        ...STATIC_LOGOS,
+        ...(logoRows ?? []).map(l => ({
+          id: l.id,
+          url: l.url,
+          label: l.label ?? undefined,
+          position: l.position,
+        })),
+      ];
 
       // Identity (display name + handle): localStorage wins so each machine
       // keeps its own brand; the Supabase columns are only a fallback seed.
@@ -205,6 +217,8 @@ export function useBrandKit(userId: string | null) {
   }, [userId]);
 
   const deleteLogo = useCallback(async (logoId: string) => {
+    // The bundled Pauv logo isn't a Supabase row — never delete it.
+    if (logoId.startsWith('static:')) return;
     const logo = brandRef.current.logos.find(l => l.id === logoId);
     if (!logo) return;
 
