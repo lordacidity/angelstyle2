@@ -1,13 +1,19 @@
 import { NextResponse } from 'next/server';
 import { createClient } from '@supabase/supabase-js';
 
-const sb = createClient(
-  process.env.PAUV_SUPABASE_URL!,
-  process.env.PAUV_SUPABASE_ANON_KEY!,
-);
+// Built lazily inside the handler — constructing it at module scope makes
+// Next's build-time page-data collection evaluate it without the PAUV_SUPABASE_*
+// env vars present, which throws "supabaseUrl is required" and fails the build.
+function getClient() {
+  return createClient(
+    process.env.PAUV_SUPABASE_URL!,
+    process.env.PAUV_SUPABASE_ANON_KEY!,
+  );
+}
 
 export async function GET() {
   try {
+    const sb = getClient();
     const [{ data: profiles, error: pErr }, { data: markets, error: mErr }] = await Promise.all([
       sb.from('profiles')
         .select('id,ticker,name,bio,photo_url,industry,info_subcategory,info_location,claim_status')
