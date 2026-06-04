@@ -11,11 +11,11 @@ import { usePathname, useRouter } from 'next/navigation';
 import { useVideoEntries } from './hooks/useVideoEntries';
 import { useGoogleSheets } from './hooks/useGoogleSheets';
 import { useBrandKit } from './hooks/useBrandKit';
-import { useAuth } from './hooks/useAuth';
+import { usePauvSession } from './hooks/usePauvSession';
 import type { CarouselSettings } from './components/carouselTypes';
 import { Sidebar } from './components/Sidebar';
 import { BoardSection } from './components/BoardSection';
-import { TemplateSelector } from './components/TemplateSelector';
+import { BrandKit } from './components/BrandKit';
 import { CanvasGrid } from './components/CanvasGrid';
 import { ErrorBoundary } from './components/ErrorBoundary';
 import { GoogleSheetsModal } from './components/GoogleSheetsModal';
@@ -27,7 +27,7 @@ import { PhonedeckTrending } from './phonedeck/PhonedeckTrending';
 import { PhonedeckImages } from './phonedeck/PhonedeckImages';
 import { GRID_BG_STYLE } from '@/lib/ui-constants';
 import { makeEmptyEntry } from '@/lib/entry';
-import { sectionFromPath, pathForSection, parseStyle } from '@/lib/sections';
+import { sectionFromPath, pathForSection } from '@/lib/sections';
 import type { VideoMode } from './types';
 
 const AiCardsSection = lazy(() =>
@@ -70,12 +70,12 @@ export function StudioShell() {
   const pathname = usePathname();
   const router = useRouter();
   const activeSection = sectionFromPath(pathname);
-  const routeStyle = parseStyle(pathname); // /template/<style> → 'twitter'|'caption'|'carousel'|null
 
-  const [selectedTemplate, setSelectedTemplate] = useState<VideoMode | null>(null);
   const [carouselSettingsMap, setCarouselSettingsMap] = useState<Record<string, CarouselSettings>>({});
-  const { user, loading: authLoading, signIn, signUp, signOut, resetPassword, changePassword } = useAuth();
-  const { brand, setBrand, saving, uploading, loading, error, setError, save, uploadLogo, deleteLogo, selectLogo } = useBrandKit(user?.id ?? null);
+  // No login UI — silently signed in as the shared Pauv account so the brand
+  // kit / templates persist against a real Supabase user.
+  const { userId } = usePauvSession();
+  const { brand, saving, uploading, loading, error, setError, save, uploadLogo, deleteLogo, selectLogo } = useBrandKit(userId);
 
   const {
     entries, setEntries, canvasRefsMap, carouselRefsMap,
@@ -105,21 +105,6 @@ export function StudioShell() {
   const [aiEverVisited, setAiEverVisited] = useState(false);
   useEffect(() => { if (activeSection === 'ai') setAiEverVisited(true); }, [activeSection]);
 
-  // Template-style sub-routes drive selection: /template/twitter|caption set the
-  // mode and advance to the editor; /template/carousel just marks carousel
-  // selected (TemplateSelector then shows its setup popup).
-  useEffect(() => {
-    if (routeStyle === 'twitter' || routeStyle === 'caption') {
-      setSelectedTemplate(routeStyle);
-      setEntries(prev => prev.map(e => ({ ...e, mode: routeStyle })));
-      const t = setTimeout(() => router.push(pathForSection('media')), 400);
-      return () => clearTimeout(t);
-    }
-    if (routeStyle === 'carousel') {
-      setSelectedTemplate('carousel');
-    }
-  }, [routeStyle]); // eslint-disable-line react-hooks/exhaustive-deps
-
   useEffect(() => {
     const raw = sessionStorage.getItem('ai-card-seed');
     if (!raw) return;
@@ -127,22 +112,16 @@ export function StudioShell() {
     try {
       const seed = JSON.parse(raw) as { imageSrc: string; headline: string; subheadline: string; subheadline2?: string; articleUrl?: string };
       setPendingAiSeed(seed);
-      // Go through the normal carousel template flow so savedSlides loads before we apply content
-      setSelectedTemplate('carousel');
+      // Drop into carousel mode so savedSlides loads before we apply content.
       setEntries(prev => prev.map(e => ({ ...e, mode: 'carousel' as const })));
       setTimeout(() => router.push(pathForSection('media')), 400);
     } catch { /* malformed seed — ignore */ }
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
-  function handleTemplateSelect(mode: VideoMode) {
-    setSelectedTemplate(mode);
-    setEntries(prev => prev.map(e => ({ ...e, mode })));
-    setTimeout(() => router.push(pathForSection('media')), 400);
-  }
-
   function handleBuildCard(seed: { imageSrc: string; headline: string; subheadline: string; subheadline2?: string; articleUrl?: string }) {
     setPendingAiSeed(seed);
-    handleTemplateSelect('carousel');
+    setEntries(prev => prev.map(e => ({ ...e, mode: 'carousel' as const })));
+    setTimeout(() => router.push(pathForSection('media')), 400);
   }
 
   // Board widget → generator. Replace the current rows with a single fresh entry
@@ -168,15 +147,22 @@ export function StudioShell() {
 
   function handleResetAll() {
     resetEverything();
-    setSelectedTemplate(null);
-    router.push(pathForSection('template'));
+    router.push(pathForSection('brandkit'));
   }
 
   // "Clear" in the media toolbar: wipe all rows back to one empty entry (keeping
-  // the current template mode) and stay on the media insert screen, so the user
-  // lands right back at the empty link / caption / context form.
+  // the current format) and stay on the media insert screen, so the user lands
+  // right back at the empty link / caption / context form.
   function handleClearAll() {
     setEntries(prev => [makeEmptyEntry('1', prev[0]?.mode ?? 'twitter')]);
+  }
+
+  // Media format toggle (Twitter / Caption / Carousel) — replaces the old
+  // template picker. Applies the chosen mode to every row; new rows inherit
+  // row 0's mode, so future rows follow too.
+  const currentFormat: VideoMode = entries[0]?.mode ?? 'twitter';
+  function handleSetFormat(mode: VideoMode) {
+    setEntries(prev => prev.map(e => ({ ...e, mode })));
   }
 
   return (
@@ -214,33 +200,19 @@ export function StudioShell() {
             <Suspense fallback={<SectionLoader />}>
               <AiCardsSection
                 onBuildCard={handleBuildCard}
-                onCancel={() => router.push(pathForSection('template'))}
+                onCancel={() => router.push(pathForSection('brandkit'))}
               />
             </Suspense>
           </div>
         )}
 
-        {activeSection === 'template' && (
-          <TemplateSelector
-            selected={selectedTemplate}
-            routeStyle={routeStyle}
-            onPickStyle={(m) => router.push(`/template/${m}`)}
-            onStandard={() => handleTemplateSelect('carousel')}
-            onCloseStyle={() => router.push(pathForSection('template'))}
-            onSelectWithAi={() => router.push(pathForSection('ai'))}
-            onGoToBuilder={() => router.push(pathForSection('builder'))}
+        {activeSection === 'brandkit' && (
+          <BrandKit
             brand={brand}
             loading={loading}
             saving={saving}
             uploading={uploading}
             error={error}
-            user={user}
-            authLoading={authLoading}
-            onSignIn={signIn}
-            onSignUp={signUp}
-            onResetPassword={resetPassword}
-            onChangePassword={changePassword}
-            onSignOut={signOut}
             onSave={save}
             onUploadLogo={uploadLogo}
             onDeleteLogo={deleteLogo}
@@ -267,7 +239,9 @@ export function StudioShell() {
                 onUpdateLocalVideo={updateLocalVideo}
                 onFetchVideo={fetchVideo}
                 onSetCarouselSubMode={setCarouselSubMode}
-                userId={user?.id ?? null}
+                userId={userId}
+                format={currentFormat}
+                onSetFormat={handleSetFormat}
                 settingsMap={carouselSettingsMap}
                 setSettingsMap={setCarouselSettingsMap}
                 pendingAiSeed={pendingAiSeed}
@@ -286,7 +260,7 @@ export function StudioShell() {
           <ErrorBoundary>
             <GridSection>
               <Suspense fallback={<SectionLoader />}>
-                <BuilderGrid brand={brand} onSelectLogo={selectLogo} userId={user?.id ?? null} />
+                <BuilderGrid brand={brand} onSelectLogo={selectLogo} userId={userId} />
               </Suspense>
             </GridSection>
           </ErrorBoundary>

@@ -10,7 +10,7 @@ import {
 import type { Box, TikTokCanvasProps, TikTokCanvasRef } from './types';
 import { drawHeaderOnContext } from './drawing/drawHeader';
 import { drawMarketRow, MARKET_ROW_H, MARKET_ROW_H_SMALL, CTA_TOP_GAP, CTA_LINK_AREA_H } from './drawing/drawMarketRow';
-import { countCaptionLines, countSonotradeCaptionLines, CAPTION_EMOJI_SIZE } from './drawing/countCaptionLines';
+import { countCaptionLines, countPauvCaptionLines, CAPTION_EMOJI_SIZE } from './drawing/countCaptionLines';
 import { wrapRichText, drawRichLine } from '@/lib/emoji';
 import { VideoOverlays } from './ui/VideoOverlays';
 import { CanvasHandles } from './ui/CanvasHandles';
@@ -32,7 +32,7 @@ export const TikTokCanvas = forwardRef<TikTokCanvasRef, TikTokCanvasProps>(funct
   videoId,
   rowNumber = 0,
   onVideoError,
-  brand = 'sonotrade',
+  brand = 'pauv',
   overlayLogoSrc = '/templatelogo.png',
   overlayDisplayName = 'Pauv',
   overlayHandle = '@Pauv',
@@ -193,10 +193,10 @@ export const TikTokCanvas = forwardRef<TikTokCanvasRef, TikTokCanvasProps>(funct
       ? CLEAN_PAD_TOP + (captionLineCount * CAPTION_LINE_HEIGHT) + CLEAN_PAD_BOT - CAPTION_BOT_OFF
       : 0;
 
-    // Pre-compute sonotrade header height (depends only on caption, not on box position)
-    const sonotradeHeaderHeight = overlayCaption && brand !== 'clean'
+    // Pre-compute pauv header height (depends only on caption, not on box position)
+    const pauvHeaderHeight = overlayCaption && brand !== 'clean'
       ? (() => {
-          const lines = countSonotradeCaptionLines(ctx, overlayCaption);
+          const lines = countPauvCaptionLines(ctx, overlayCaption);
           return BASE_HEADER_HEIGHT + CAPTION_TOP_PADDING + (lines * CAPTION_LINE_HEIGHT) - CAPTION_BOT_OFF;
         })()
       : BASE_HEADER_HEIGHT;
@@ -258,7 +258,7 @@ export const TikTokCanvas = forwardRef<TikTokCanvasRef, TikTokCanvasProps>(funct
         return;
       }
 
-      // sonotrade (Twitter/X header template)
+      // pauv (Twitter/X header template)
       ctx.fillStyle = '#000';
       ctx.fillRect(0, 0, CANVAS_W, CANVAS_H);
 
@@ -266,7 +266,7 @@ export const TikTokCanvas = forwardRef<TikTokCanvasRef, TikTokCanvasProps>(funct
         const { x, y, w, h } = boxRef.current;
         const { x: ox, y: oy } = videoOffsetRef.current;
 
-        const headerY = Math.max(0, y - sonotradeHeaderHeight + 4);
+        const headerY = Math.max(0, y - pauvHeaderHeight + 4);
         drawHeaderOnContext({ ctx, cx: 0, cy: headerY, cw: CANVAS_W, ...drawOpts });
 
         // Cover-fill the box: the box already carries the intended size +
@@ -330,7 +330,7 @@ export const TikTokCanvas = forwardRef<TikTokCanvasRef, TikTokCanvasProps>(funct
       return CLEAN_PAD_TOP + (captionLines * CAPTION_LINE_HEIGHT) + CLEAN_PAD_BOT - CAPTION_BOT_OFF;
     }
     if (!overlayCaption || !ctx) return BASE_HEADER_HEIGHT;
-    const captionLines = countSonotradeCaptionLines(ctx, overlayCaption);
+    const captionLines = countPauvCaptionLines(ctx, overlayCaption);
     const CAPTION_BOTTOM_OFFSET = 35; // keep in sync with drawHeader.ts
     return BASE_HEADER_HEIGHT + CAPTION_TOP_PADDING + (captionLines * CAPTION_LINE_HEIGHT) - CAPTION_BOTTOM_OFFSET;
   }

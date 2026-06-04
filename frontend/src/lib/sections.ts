@@ -2,11 +2,11 @@
 // (links) and StudioShell (derives the active section from the pathname) import
 // from here so the two can never drift.
 
-import type { AppSection, VideoMode } from '@/app/types';
+import type { AppSection } from '@/app/types';
 
-// Each left-nav section's canonical path. 'template' doubles as the app root.
+// Each left-nav section's canonical path. 'brandkit' doubles as the app root.
 export const SECTION_PATHS: Record<AppSection, string> = {
-  template: '/template',
+  brandkit: '/brand-kit',
   deck: '/deck',
   media: '/media',
   builder: '/builder',
@@ -18,24 +18,15 @@ export const SECTION_PATHS: Record<AppSection, string> = {
 };
 
 export function pathForSection(s: AppSection): string {
-  return SECTION_PATHS[s] ?? '/template';
+  return SECTION_PATHS[s] ?? '/brand-kit';
 }
 
-// Reverse lookup. '/', '/template' and '/template/<style>' all map to template.
+// Reverse lookup. '/' and '/brand-kit' both map to the Brand Kit landing.
 export function sectionFromPath(pathname: string): AppSection {
   const p = pathname.replace(/\/+$/, '') || '/';
-  if (p === '/' || p === '/template' || p.startsWith('/template/')) return 'template';
+  if (p === '/' || p === '/brand-kit') return 'brandkit';
   for (const [section, path] of Object.entries(SECTION_PATHS) as [AppSection, string][]) {
     if (p === path) return section;
   }
-  return 'template';
-}
-
-// Template-style sub-routes: /template/twitter | caption | carousel.
-export const TEMPLATE_STYLES = ['twitter', 'caption', 'carousel'] as const;
-
-export function parseStyle(pathname: string): VideoMode | null {
-  const m = pathname.replace(/\/+$/, '').match(/^\/template\/([^/]+)$/);
-  if (!m) return null;
-  return (TEMPLATE_STYLES as readonly string[]).includes(m[1]) ? (m[1] as VideoMode) : null;
+  return 'brandkit';
 }

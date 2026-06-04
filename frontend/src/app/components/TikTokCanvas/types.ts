@@ -24,8 +24,8 @@ export interface TikTokCanvasProps {
   videoId?: string;
   rowNumber?: number;
   onVideoError?: () => void;
-  /** 'sonotrade' = Twitter/X header template, 'clean' = caption-only template */
-  brand?: 'sonotrade' | 'clean';
+  /** 'pauv' = Twitter/X header template, 'clean' = caption-only template */
+  brand?: 'pauv' | 'clean';
   overlayLogoSrc?: string;
   overlayDisplayName?: string;
   overlayHandle?: string;

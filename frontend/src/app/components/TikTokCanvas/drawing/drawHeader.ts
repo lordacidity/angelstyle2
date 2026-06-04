@@ -2,23 +2,23 @@ import {
   BASE_HEADER_HEIGHT,
   CAPTION_LINE_HEIGHT,
   CAPTION_TOP_PADDING,
-  SONOTRADE_PADDING_X,
+  PAUV_PADDING_X,
   HEADER_PADDING_TOP,
-  SONOTRADE_AVATAR_SIZE,
-  SONOTRADE_TEXT_X,
-  SONOTRADE_CAPTION_MAX_W,
+  PAUV_AVATAR_SIZE,
+  PAUV_TEXT_X,
+  PAUV_CAPTION_MAX_W,
   VERIFIED_TICK_SVG,
 } from '../constants';
 import type { DrawHeaderOptions } from '../types';
-import { countSonotradeCaptionLines, SONOTRADE_CAP_FONT, CAPTION_EMOJI_SIZE } from './countCaptionLines';
+import { countPauvCaptionLines, PAUV_CAP_FONT, CAPTION_EMOJI_SIZE } from './countCaptionLines';
 import { wrapRichText, drawRichLine } from '@/lib/emoji';
 
 const CHIRP = 'Chirp, "Twitter Chirp", -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif';
 
 // Proportionally matches X's shape-square-rx-16 (16px on 40px = 40% corner radius)
-const AVATAR_SIZE = SONOTRADE_AVATAR_SIZE;           // 108
+const AVATAR_SIZE = PAUV_AVATAR_SIZE;           // 108
 const AVATAR_RADIUS = 16;
-const TEXT_X_OFFSET = SONOTRADE_TEXT_X;              // 201 from canvas left
+const TEXT_X_OFFSET = PAUV_TEXT_X;              // 201 from canvas left
 
 // Scaled from Twitter's 15px @ ~390px content width → 1080px canvas
 const NAME_SIZE = 42;
@@ -44,7 +44,7 @@ export function drawHeaderOnContext({
   logoImgRef,
   verifiedImgRef,
 }: DrawHeaderOptions): number {
-  const captionLines = countSonotradeCaptionLines(ctx, overlayCaption);
+  const captionLines = countPauvCaptionLines(ctx, overlayCaption);
   // Trims dead space below the caption so the video sits as close under it as the
   // caption sits under the logo row (~16px). Must match index.tsx computeHeaderHeight.
   const CAPTION_BOTTOM_OFFSET = 35;
@@ -57,7 +57,7 @@ export function drawHeaderOnContext({
   ctx.fillRect(cx, cy, cw, headerHeight);
 
   // ── Avatar ──────────────────────────────────────────────────────────────────
-  const avatarX = cx + SONOTRADE_PADDING_X;
+  const avatarX = cx + PAUV_PADDING_X;
   const avatarY = cy + HEADER_PADDING_TOP;
 
   let logo = logoImgRef.current;
@@ -124,14 +124,14 @@ export function drawHeaderOnContext({
 
   // ── Tweet body (caption) — full width, starts at avatar left edge ──────────
   if (overlayCaption) {
-    const captionX = cx + SONOTRADE_PADDING_X;
+    const captionX = cx + PAUV_PADDING_X;
     const captionBaseline = handleBaseline + CAP_GAP + CAP_SIZE;
 
-    ctx.font = SONOTRADE_CAP_FONT;
+    ctx.font = PAUV_CAP_FONT;
     ctx.fillStyle = 'rgb(231, 233, 234)';
 
     let y = captionBaseline;
-    for (const line of wrapRichText(ctx, overlayCaption, SONOTRADE_CAPTION_MAX_W, CAPTION_EMOJI_SIZE)) {
+    for (const line of wrapRichText(ctx, overlayCaption, PAUV_CAPTION_MAX_W, CAPTION_EMOJI_SIZE)) {
       drawRichLine(ctx, line, captionX, y, CAPTION_EMOJI_SIZE);
       y += CAPTION_LINE_HEIGHT;
     }

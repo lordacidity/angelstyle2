@@ -25,12 +25,12 @@ export const CAPTION_TOP_PADDING = 38;   // derived: handles formula BASE+38+N*5
 export const HEADER_PADDING_X = 32;
 export const HEADER_PADDING_TOP = 18;
 
-// Sonotrade (Twitter) template — caption lives in the right column (same X as name)
-export const SONOTRADE_AVATAR_SIZE = 108;
-export const SONOTRADE_PADDING_X = HEADER_PADDING_X + 33; // 65 — 3px tighter each side than reference
-export const SONOTRADE_TEXT_X = SONOTRADE_PADDING_X + SONOTRADE_AVATAR_SIZE + 28; // 65+108+28 = 201
-export const SONOTRADE_CAPTION_MAX_W = CANVAS_W - SONOTRADE_PADDING_X * 2; // 1080-130 = 950
-export const SONOTRADE_CAPTION_FONT = 'Chirp, "Twitter Chirp", -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif';
+// Pauv (Twitter) template — caption lives in the right column (same X as name)
+export const PAUV_AVATAR_SIZE = 108;
+export const PAUV_PADDING_X = HEADER_PADDING_X + 33; // 65 — 3px tighter each side than reference
+export const PAUV_TEXT_X = PAUV_PADDING_X + PAUV_AVATAR_SIZE + 28; // 65+108+28 = 201
+export const PAUV_CAPTION_MAX_W = CANVAS_W - PAUV_PADDING_X * 2; // 1080-130 = 950
+export const PAUV_CAPTION_FONT = 'Chirp, "Twitter Chirp", -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif';
 
 export const CURSORS: Record<string, string> = {
   tl: 'n-resize', tc: 'n-resize', tr: 'n-resize',

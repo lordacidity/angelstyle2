@@ -12,7 +12,7 @@ import {
 } from '../constants';
 import { drawHeaderOnContext } from '../drawing/drawHeader';
 import { drawMarketRow } from '../drawing/drawMarketRow';
-import { countCaptionLines, countSonotradeCaptionLines, CAPTION_EMOJI_SIZE } from '../drawing/countCaptionLines';
+import { countCaptionLines, countPauvCaptionLines, CAPTION_EMOJI_SIZE } from '../drawing/countCaptionLines';
 import { wrapRichText, drawRichLine, preloadEmojiImages } from '@/lib/emoji';
 import type { Box, MarketData } from '../types';
 
@@ -476,7 +476,7 @@ export function useRecording(config: UseRecordingConfig) {
       let currentFrame: { frame: VideoFrame; ts: number } | null = null;
 
       // ── Pre-bake static overlays into a sprite ──────────────────────────────
-      // Caption (clean) and header + market row (sonotrade) don't change frame
+      // Caption (clean) and header + market row (pauv) don't change frame
       // to frame — they depend on the cropBox, brand, and inputs that are all
       // frozen for the duration of the recording. Painting them once into a
       // transparent overlay canvas and drawImage()-ing that single sprite per
@@ -507,7 +507,7 @@ export function useRecording(config: UseRecordingConfig) {
           }
         }
       } else {
-        const captionLines = overlayCaption ? countSonotradeCaptionLines(spriteCtx as any, overlayCaption) : 0;
+        const captionLines = overlayCaption ? countPauvCaptionLines(spriteCtx as any, overlayCaption) : 0;
         const headerHeight = overlayCaption
           ? BASE_HEADER_HEIGHT + CAPTION_TOP_PADDING + (captionLines * CAPTION_LINE_HEIGHT) - 18
           : BASE_HEADER_HEIGHT;
@@ -602,7 +602,7 @@ export function useRecording(config: UseRecordingConfig) {
           offCtx.restore();
 
           // Composite the pre-baked overlay (caption for clean, header + market
-          // row for sonotrade) on top of the video. Drawing this AFTER the video
+          // row for pauv) on top of the video. Drawing this AFTER the video
           // preserves the original z-order — e.g. the header's 4 px overlap onto
           // the cropBox stays painted over the video, matching the old per-frame
           // ordering bit-for-bit.

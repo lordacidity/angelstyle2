@@ -10,7 +10,7 @@ import { CarouselSettingsPanel } from './CarouselSettingsPanel';
 import { defaultCarouselSettings } from './carouselTypes';
 import type { CarouselCanvasRef, CarouselSettings, CarouselBgLayerState } from './carouselTypes';
 import { useCarouselTemplates } from '../hooks/useCarouselTemplates';
-import type { VideoEntry, BrandProps, SlideType, VideoData } from '../types';
+import type { VideoEntry, BrandProps, SlideType, VideoData, VideoMode } from '../types';
 import type { RecordingState } from './TikTokCanvas/types';
 import { VideoControlsBar } from './VideoControlsBar';
 import { EditablePct } from './EditablePct';
@@ -59,6 +59,10 @@ interface CanvasGridProps {
   onFetchVideo: (id: string) => Promise<VideoData | null>;
   onSetCarouselSubMode: (id: string, mode: 'image' | 'video') => void;
   userId: string | null;
+  // Current post format + setter for the Media toolbar's format toggle
+  // (Twitter / Caption / Carousel) — replaces the old template picker.
+  format?: VideoMode;
+  onSetFormat?: (mode: VideoMode) => void;
   settingsMap: Record<string, CarouselSettings>;
   setSettingsMap: Dispatch<SetStateAction<Record<string, CarouselSettings>>>;
   pendingAiSeed?: { imageSrc: string; headline: string; subheadline: string; subheadline2?: string; articleUrl?: string } | null;
@@ -693,6 +697,7 @@ export function CanvasGrid({
   onAddRow, onRemoveRow, onClearAll, onDownloadAll, onHandleVideoError,
   onUpdateEntry, onUpdateCarouselEntry, onUpdateLocalVideo,
   onFetchVideo, onSetCarouselSubMode, userId,
+  format, onSetFormat,
   settingsMap, setSettingsMap,
   pendingAiSeed, onAiSeedConsumed, onBackToAi,
   pendingBoardSend, onBoardSendConsumed,
@@ -1348,6 +1353,24 @@ export function CanvasGrid({
             onChange={e => setViewScale(parseInt(e.target.value) / 100)}
             className="w-20 h-1 accent-white cursor-pointer"
           />
+
+          {/* Format toggle — replaces the old template picker. Applies to every
+              row (and future rows inherit it). */}
+          {onSetFormat && (
+            <div className="flex items-center gap-0.5 ml-2 rounded-lg bg-zinc-900 border border-zinc-800 p-0.5">
+              {([['twitter', 'Twitter'], ['caption', 'Caption'], ['carousel', 'Carousel']] as const).map(([m, label]) => (
+                <button
+                  key={m}
+                  onClick={() => onSetFormat(m)}
+                  className={`px-2.5 py-1 rounded-md text-[11px] font-medium transition-colors ${
+                    format === m ? 'bg-white text-black' : 'text-zinc-400 hover:text-zinc-200'
+                  }`}
+                >
+                  {label}
+                </button>
+              ))}
+            </div>
+          )}
         </div>
 
         {/* Right actions */}
@@ -1576,7 +1599,7 @@ export function CanvasGrid({
                           videoId={entry.data?.id}
                           rowNumber={index}
                           onVideoError={() => onHandleVideoError(entry.id)}
-                          brand={entry.mode === 'caption' ? 'clean' : 'sonotrade'}
+                          brand={entry.mode === 'caption' ? 'clean' : 'pauv'}
                           overlayLogoSrc={brand.logoSrc || '/templatelogo.png'}
                           overlayDisplayName={brand.displayName || 'Pauv'}
                           overlayHandle={brand.handle || '@Pauv'}

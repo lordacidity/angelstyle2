@@ -1,6 +1,6 @@
 import {
   CANVAS_W, HEADER_PADDING_X, CAPTION_LINE_HEIGHT,
-  SONOTRADE_CAPTION_MAX_W, SONOTRADE_CAPTION_FONT,
+  PAUV_CAPTION_MAX_W, PAUV_CAPTION_FONT,
 } from '../constants';
 import { wrapRichText } from '@/lib/emoji';
 
@@ -10,7 +10,7 @@ const CLEAN_MAX_W = CANVAS_W - (HEADER_PADDING_X + 43) * 2;
 // Caption glyphs are 42px; emoji are rendered as ~1em square images, so the
 // line counter must measure them at the same size the renderers draw them.
 export const CAPTION_EMOJI_SIZE = 42;
-export const SONOTRADE_CAP_FONT = `400 42px ${SONOTRADE_CAPTION_FONT}`;
+export const PAUV_CAP_FONT = `400 42px ${PAUV_CAPTION_FONT}`;
 
 export function countCaptionLines(
   ctx: CanvasRenderingContext2D,
@@ -24,9 +24,9 @@ export function countCaptionLines(
   return wrapRichText(ctx, overlayCaption, maxWidth, emojiSize).length;
 }
 
-export function countSonotradeCaptionLines(
+export function countPauvCaptionLines(
   ctx: CanvasRenderingContext2D,
   overlayCaption: string,
 ): number {
-  return countCaptionLines(ctx, overlayCaption, SONOTRADE_CAP_FONT, SONOTRADE_CAPTION_MAX_W);
+  return countCaptionLines(ctx, overlayCaption, PAUV_CAP_FONT, PAUV_CAPTION_MAX_W);
 }

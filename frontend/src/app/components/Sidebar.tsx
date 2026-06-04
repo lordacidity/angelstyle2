@@ -26,14 +26,15 @@ const NAV: { id: AppSection; label: string; icon: React.ReactNode }[] = [
     ),
   },
   {
-    id: 'template',
-    label: 'Template',
+    id: 'brandkit',
+    label: 'Brand Kit',
+    // Color swatches — the brand identity (logo / name / handle).
     icon: (
       <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
-        <rect x="3" y="3" width="7" height="7" rx="1"/>
-        <rect x="14" y="3" width="7" height="7" rx="1"/>
-        <rect x="3" y="14" width="7" height="7" rx="1"/>
-        <rect x="14" y="14" width="7" height="7" rx="1"/>
+        <circle cx="13.5" cy="6.5" r="2.5"/>
+        <circle cx="17.5" cy="10.5" r="2.5"/>
+        <circle cx="8.5" cy="7.5" r="2.5"/>
+        <path d="M12 2a10 10 0 1 0 0 20 2.5 2.5 0 0 0 2-4 2.5 2.5 0 0 1 2-4h2a4 4 0 0 0 4-4 10 10 0 0 0-10-8z"/>
       </svg>
     ),
   },

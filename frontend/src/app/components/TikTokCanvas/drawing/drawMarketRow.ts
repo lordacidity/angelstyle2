@@ -19,7 +19,7 @@ const MONO = '"Geist Mono", monospace';
 // DISPLAY_SCALE = 0.38 → multiply any UI px by (1/0.38) to get canvas px
 const S = 1 / 0.38;
 
-const PADDING_X = 65; // left/right margin — matches SONOTRADE_PADDING_X
+const PADDING_X = 65; // left/right margin — matches PAUV_PADDING_X
 
 // ArtistRow: padding '14px 0', avatar 42×42, total row height ~70px at UI scale
 export const MARKET_ROW_H = Math.round(70 * S); // ≈ 184px
