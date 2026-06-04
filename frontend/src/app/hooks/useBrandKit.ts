@@ -72,6 +72,7 @@ export function useBrandKit(userId: string | null) {
         .eq('user_id', userId)
         .maybeSingle();
 
+
       if (fetchErr) {
         setError(`DB error: ${fetchErr.message}`);
         setLoading(false);

@@ -103,8 +103,7 @@ interface TemplateSelectorProps {
   error?: string | null;
   user: { id: string; email?: string } | null;
   authLoading?: boolean;
-  onSignIn: (email: string, password: string) => Promise<string | null>;
-  onSignUp: (email: string, password: string) => Promise<string | null>;
+  onSignIn: (email: string) => Promise<string | null>;
   onResetPassword: (email: string) => Promise<string | null>;
   onChangePassword: (current: string, next: string) => Promise<string | null>;
   onSignOut: () => void;
@@ -118,7 +117,7 @@ interface TemplateSelectorProps {
 export function TemplateSelector({
   selected, routeStyle, onPickStyle, onStandard, onCloseStyle, onSelectWithAi, onGoToBuilder,
   brand, loading, saving, uploading, error,
-  user, authLoading, onSignIn, onSignUp, onResetPassword, onChangePassword, onSignOut,
+  user, authLoading, onSignIn, onResetPassword, onChangePassword, onSignOut,
   onSave, onUploadLogo, onDeleteLogo, onSelectLogo, onClearError,
 }: TemplateSelectorProps) {
   const fileRef = useRef<HTMLInputElement>(null);
@@ -133,29 +132,6 @@ export function TemplateSelector({
   const [hoveredLogo, setHoveredLogo] = useState<string | null>(null);
   const [saved, setSaved] = useState(false);
   const savedTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const [showChangePw, setShowChangePw] = useState(false);
-  const [pwCurrent, setPwCurrent] = useState('');
-  const [pwNew, setPwNew] = useState('');
-  const [pwConfirm, setPwConfirm] = useState('');
-  const [pwError, setPwError] = useState<string | null>(null);
-  const [pwLoading, setPwLoading] = useState(false);
-  const [pwDone, setPwDone] = useState(false);
-
-  async function handleChangePw(e: React.FormEvent) {
-    e.preventDefault();
-    if (pwNew !== pwConfirm) { setPwError('New passwords do not match'); return; }
-    setPwError(null);
-    setPwLoading(true);
-    const err = await onChangePassword(pwCurrent, pwNew);
-    if (err) { setPwError(err); } else { setPwDone(true); setPwCurrent(''); setPwNew(''); setPwConfirm(''); }
-    setPwLoading(false);
-  }
-
-  function closePwForm() {
-    setShowChangePw(false);
-    setPwCurrent(''); setPwNew(''); setPwConfirm('');
-    setPwError(null); setPwDone(false);
-  }
   const { savedSlides, loading: slidesLoading } = useCarouselTemplates(user?.id ?? null);
 
   // Sync local fields when brand loads from Supabase
@@ -200,7 +176,7 @@ export function TemplateSelector({
   if (!user) {
     return (
       <div className="flex flex-col items-center pt-16 gap-10">
-        <AuthForm onSignIn={onSignIn} onSignUp={onSignUp} onResetPassword={onResetPassword} />
+        <AuthForm onSignIn={onSignIn} />
       </div>
     );
   }
@@ -229,12 +205,6 @@ export function TemplateSelector({
           </div>
           <div className="flex items-center gap-3 pt-1">
             <button
-              onClick={() => { setShowChangePw(v => !v); setPwError(null); setPwDone(false); }}
-              className="text-xs text-zinc-600 hover:text-zinc-400 transition-colors"
-            >
-              Change password
-            </button>
-            <button
               onClick={onSignOut}
               className="text-xs text-zinc-600 hover:text-zinc-400 transition-colors"
             >
@@ -242,60 +212,6 @@ export function TemplateSelector({
             </button>
           </div>
         </div>
-
-        {showChangePw && (
-          <div className="rounded-lg bg-zinc-950 border border-zinc-800 p-4">
-            {pwDone ? (
-              <div className="flex items-center justify-between">
-                <p className="text-sm text-zinc-300">Password updated successfully.</p>
-                <button onClick={closePwForm} className="text-xs text-zinc-500 hover:text-white transition-colors">Close</button>
-              </div>
-            ) : (
-              <form onSubmit={handleChangePw} className="flex flex-col gap-3">
-                <div className="flex items-center justify-between mb-1">
-                  <span className="text-xs font-medium text-zinc-400 uppercase tracking-wider">Change password</span>
-                  <button type="button" onClick={closePwForm} className="text-zinc-600 hover:text-zinc-400 text-xs transition-colors">✕</button>
-                </div>
-                <input
-                  type="password"
-                  value={pwCurrent}
-                  onChange={e => setPwCurrent(e.target.value)}
-                  placeholder="Current password"
-                  required
-                  className="w-full bg-zinc-900 border border-zinc-800 focus:border-zinc-600 rounded-lg px-3 py-2 text-sm text-white placeholder-zinc-600 outline-none transition-colors"
-                />
-                <input
-                  type="password"
-                  value={pwNew}
-                  onChange={e => setPwNew(e.target.value)}
-                  placeholder="New password"
-                  required
-                  minLength={6}
-                  className="w-full bg-zinc-900 border border-zinc-800 focus:border-zinc-600 rounded-lg px-3 py-2 text-sm text-white placeholder-zinc-600 outline-none transition-colors"
-                />
-                <input
-                  type="password"
-                  value={pwConfirm}
-                  onChange={e => setPwConfirm(e.target.value)}
-                  placeholder="Confirm new password"
-                  required
-                  minLength={6}
-                  className="w-full bg-zinc-900 border border-zinc-800 focus:border-zinc-600 rounded-lg px-3 py-2 text-sm text-white placeholder-zinc-600 outline-none transition-colors"
-                />
-                {pwError && (
-                  <p className="text-xs text-red-400 bg-red-950/40 border border-red-800/50 rounded-lg px-3 py-2">{pwError}</p>
-                )}
-                <button
-                  type="submit"
-                  disabled={pwLoading}
-                  className="w-full py-2 rounded-lg bg-white text-black text-sm font-semibold hover:bg-zinc-100 transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
-                >
-                  {pwLoading ? 'Updating…' : 'Update password'}
-                </button>
-              </form>
-            )}
-          </div>
-        )}
 
         {/* Logos grid */}
         <div className="flex flex-col gap-2">

@@ -64,7 +64,10 @@ export function AiCardsSection({ onBuildCard, onCancel }: AiCardsSectionProps) {
 
   useEffect(() => {
     fetch('/api/ai/talents')
-      .then(r => r.json()).then((d: Talent[]) => setTalents(d))
+      .then(r => r.json()).then((d) => {
+        if (Array.isArray(d)) setTalents(d);
+        else setError(d?.error ?? 'Failed to load talents');
+      })
       .catch(e => setError(String(e))).finally(() => setTalentsLoading(false));
   }, []);
 

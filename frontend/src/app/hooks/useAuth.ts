@@ -21,18 +21,34 @@ export function useAuth() {
     return () => subscription.unsubscribe();
   }, []);
 
-  async function signIn(email: string, password: string): Promise<string | null> {
-    const { error } = await supabase.auth.signInWithPassword({ email, password });
-    return error?.message ?? null;
-  }
+  async function signIn(email: string): Promise<string | null> {
+    const res = await fetch('/api/auth/email-signin', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ email }),
+    });
+    const json = await res.json();
+    if (json.error) return json.error;
 
-  async function signUp(email: string, password: string): Promise<string | null> {
-    const { error } = await supabase.auth.signUp({ email, password });
-    return error?.message ?? null;
+    const { data, error: verifyErr } = await supabase.auth.verifyOtp({
+      token_hash: json.token_hash,
+      type: 'magiclink',
+    });
+    if (verifyErr) return verifyErr.message;
+
+    if (data.session) {
+      await supabase.auth.setSession({
+        access_token: data.session.access_token,
+        refresh_token: data.session.refresh_token,
+      });
+    }
+    if (data.user) setUser(data.user);
+    return null;
   }
 
   async function signOut() {
     await supabase.auth.signOut();
+    setUser(null);
   }
 
   async function resetPassword(email: string): Promise<string | null> {
@@ -55,5 +71,5 @@ export function useAuth() {
     return error?.message ?? null;
   }
 
-  return { user, loading, signIn, signUp, signOut, resetPassword, updatePassword, changePassword };
+  return { user, loading, signIn, signOut, resetPassword, updatePassword, changePassword };
 }

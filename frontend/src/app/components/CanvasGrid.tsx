@@ -1678,14 +1678,14 @@ export function CanvasGrid({
                               <div>
                                 {/* Preview row (ArtistRow style, read from overrides) */}
                                 <div className="flex items-center" style={(marketSizeMap[entry.id] ?? 'large') === 'large'
-                                  ? { gap: 12, padding: '10px 12px', border: '1px solid rgba(255,255,255,0.28)', borderRadius: 14, margin: '8px 12px' }
+                                  ? { gap: 7, padding: '9px 12px', border: '1px solid rgba(255,255,255,0.28)', borderRadius: 10, margin: '8px 12px' }
                                   : { gap: 12, padding: '10px 12px', borderBottom: '1px solid #1a1a1a' }}>
                                   {/* Avatar — click to open photo picker */}
                                   <button
                                     onClick={() => openPhotoPicker(entry.id, ov.name || selected.name)}
                                     title="Change photo"
-                                    className="relative shrink-0 flex items-center justify-center rounded-lg overflow-hidden group"
-                                    style={{ width: 42, height: 42, background: '#1e1e1e', border: '1px solid #2a2a2a' }}
+                                    className="relative shrink-0 flex items-center justify-center rounded-full overflow-hidden group"
+                                    style={{ width: 28, height: 28, background: '#1e1e1e', border: '1px solid #2a2a2a' }}
                                   >
                                     <span style={{ fontSize: 10, color: '#52525b', fontWeight: 600 }}>
                                       {(ov.name || selected.name).split(' ').map((w: string) => w[0]).filter(Boolean).slice(0, 2).join('').toUpperCase()}
@@ -1699,36 +1699,12 @@ export function CanvasGrid({
                                     </div>
                                   </button>
                                   {/* Name + Industry — left-aligned, stacked tight on top of each other */}
-                                  <div className="flex-1 min-w-0 flex flex-col" style={{ gap: 4 }}>
-                                    <span style={{ fontSize: 19, fontWeight: 600, color: '#fff', letterSpacing: '-0.015em', lineHeight: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{ov.name || '—'}</span>
-                                    <span style={{ fontSize: 12, color: '#71717a', lineHeight: 1 }}>{ov.industry || '—'}</span>
+                                  <div className="flex-1 min-w-0 flex flex-col" style={{ gap: 7 }}>
+                                    <span style={{ fontSize: 10, fontWeight: 600, color: '#fff', letterSpacing: '-0.015em', lineHeight: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{ov.name || '—'}</span>
+                                    <span style={{ fontSize: 8, color: '#71717a', lineHeight: 1 }}>{ov.industry || '—'}</span>
                                   </div>
-                                  {/* Price + Change — now sits left of the chart */}
-                                  <div className="flex flex-col items-end shrink-0" style={{ gap: 3 }}>
-                                    <span style={{ fontFamily: 'var(--font-geist-mono)', fontSize: 19, fontWeight: 600, color: '#fff', lineHeight: 1 }}>
-                                      {ov.priceUsd !== '' && !isNaN(parseFloat(ov.priceUsd))
-                                        ? parseFloat(ov.priceUsd).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
-                                        : '—'}
-                                    </span>
-                                    <div className="flex items-center" style={{ gap: 3, lineHeight: 1 }}>
-                                      {ov.lifetimeChangePct !== '' && !isNaN(pctVal) && (
-                                        <>
-                                          <svg viewBox="0 0 24 18" width="13" height="13" style={{ color: changeColor, flexShrink: 0, transform: `rotate(${isPos ? '0' : '180'}deg)` }}>
-                                            <path fill="currentColor" d="m12 0 10.392 14.25H1.608z" />
-                                          </svg>
-                                          <span style={{ fontFamily: 'var(--font-geist-mono)', fontSize: 12, fontWeight: 500, color: changeColor, lineHeight: 1 }}>
-                                            {Math.abs(pctVal).toFixed(1)}%
-                                          </span>
-                                        </>
-                                      )}
-                                    </div>
-                                  </div>
-                                  {/* Sparkline — 80×30, now at the far right (chart + price swapped) */}
+                                  {/* Sparkline — left of price+change */}
                                   {(() => {
-                                    // MARKETING: always synthetic, ticker-seeded so the picker
-                                    // shows the exact same green upward curve that will appear
-                                    // in the exported video. Never trust the real API data here
-                                    // — it would diverge between picker and export.
                                     const spark = generateFallbackSparkline(selected.ticker);
                                     const sparkColor = '#04df9d';
                                     const W = 96, H = 32, pad = 2;
@@ -1741,20 +1717,48 @@ export function CanvasGrid({
                                       y: vRange === 0 ? H / 2 : pad + (1 - (p.value - vMin) / vRange) * (H - pad * 2),
                                     }));
                                     let d = `M${pts[0]!.x.toFixed(1)},${pts[0]!.y.toFixed(1)}`;
-                                    for (let i = 0; i < pts.length - 1; i++) {
-                                      d += ` H${pts[i+1]!.x.toFixed(1)} V${pts[i+1]!.y.toFixed(1)}`;
+                                    for (let i = 1; i < pts.length - 1; i++) {
+                                      const mx = ((pts[i]!.x + pts[i+1]!.x) / 2).toFixed(1);
+                                      const my = ((pts[i]!.y + pts[i+1]!.y) / 2).toFixed(1);
+                                      d += ` Q${pts[i]!.x.toFixed(1)},${pts[i]!.y.toFixed(1)} ${mx},${my}`;
                                     }
+                                    d += ` L${pts[pts.length-1]!.x.toFixed(1)},${pts[pts.length-1]!.y.toFixed(1)}`;
                                     return (
-                                      <div style={{ width: 80, height: 30, flexShrink: 0, marginLeft: 4 }}>
+                                      <div style={{ width: 80, height: 30, flexShrink: 0, marginRight: 9 }}>
                                         <svg viewBox={`0 0 ${W} ${H}`} preserveAspectRatio="none" width="100%" height="100%" style={{ display: 'block', overflow: 'visible' }}>
                                           <path d={d} fill="none" stroke={sparkColor} strokeWidth="1.5" strokeLinecap="square" strokeLinejoin="miter" vectorEffect="non-scaling-stroke" />
                                         </svg>
                                       </div>
                                     );
                                   })()}
+                                  {/* Price + Change — far right */}
+                                  <div className="flex flex-col items-end shrink-0" style={{ gap: 8 }}>
+                                    <span style={{ fontFamily: 'var(--font-geist-mono)', fontSize: 11, fontWeight: 600, color: '#fff', lineHeight: 1 }}>
+                                      {ov.priceUsd !== '' && !isNaN(parseFloat(ov.priceUsd))
+                                        ? parseFloat(ov.priceUsd).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
+                                        : '—'}
+                                    </span>
+                                    <div className="flex items-center" style={{ gap: 3, lineHeight: 1 }}>
+                                      {ov.lifetimeChangePct !== '' && !isNaN(pctVal) && (
+                                        <>
+                                          <svg viewBox="0 0 24 18" width="8" height="8" style={{ color: changeColor, flexShrink: 0, transform: `rotate(${isPos ? '0' : '180'}deg)`, marginTop: 1 }}>
+                                            <path fill="currentColor" d="m12 0 10.392 14.25H1.608z" />
+                                          </svg>
+                                          <span style={{ fontFamily: 'var(--font-geist-mono)', fontSize: 8, fontWeight: 500, color: changeColor, lineHeight: 1 }}>
+                                            {Math.abs(pctVal).toFixed(1)}%
+                                          </span>
+                                        </>
+                                      )}
+                                    </div>
+                                  </div>
                                 </div>
                                 {/* "link in bio to trade" — light grey, centered under the CTA */}
-                                <div style={{ textAlign: 'center', color: 'rgba(255,255,255,0.5)', fontSize: 12, paddingBottom: 8 }}>link in bio to trade</div>
+                                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 4, color: 'rgba(255,255,255,0.5)', fontSize: 10, paddingBottom: 8, marginTop: -4 }}>
+                                  {/* eslint-disable-next-line @next/next/no-img-element */}
+                                  <img src="/pauvlogo.png" alt="" style={{ height: 10, width: 'auto', marginTop: 2.5, marginRight: -4 }} />
+                                  <span style={{ fontFamily: 'Inter, sans-serif', fontWeight: 600, color: '#fff', fontSize: 10 }}>.com</span>
+                                  <span style={{ fontFamily: 'Inter, sans-serif', fontWeight: 400, color: 'rgba(255,255,255,0.5)', fontSize: 10 }}>to trade</span>
+                                </div>
                                 {/* Edit fields */}
                                 <div className="px-3 py-2.5 flex flex-col gap-2">
                                   <div className="flex gap-2">

@@ -74,7 +74,7 @@ export function StudioShell() {
 
   const [selectedTemplate, setSelectedTemplate] = useState<VideoMode | null>(null);
   const [carouselSettingsMap, setCarouselSettingsMap] = useState<Record<string, CarouselSettings>>({});
-  const { user, loading: authLoading, signIn, signUp, signOut, resetPassword, changePassword } = useAuth();
+  const { user, loading: authLoading, signIn, signOut, resetPassword, changePassword } = useAuth();
   const { brand, setBrand, saving, uploading, loading, error, setError, save, uploadLogo, deleteLogo, selectLogo } = useBrandKit(user?.id ?? null);
 
   const {
@@ -237,7 +237,6 @@ export function StudioShell() {
             user={user}
             authLoading={authLoading}
             onSignIn={signIn}
-            onSignUp={signUp}
             onResetPassword={resetPassword}
             onChangePassword={changePassword}
             onSignOut={signOut}

@@ -49,6 +49,7 @@ export const TikTokCanvas = forwardRef<TikTokCanvasRef, TikTokCanvasProps>(funct
   const logoImgRef = useRef<HTMLImageElement | null>(null);
   const marketAvatarImgRef = useRef<HTMLImageElement | null>(null);
   const marketAvatarUrlRef = useRef<string | null>(null);
+  const pauvLogoImgRef = useRef<HTMLImageElement | null>(null);
 
   const videoOffsetRef = useRef<{ x: number; y: number }>({ x: 0, y: 0 });
   const videoScaleRef = useRef<number>(1);
@@ -93,7 +94,7 @@ export const TikTokCanvas = forwardRef<TikTokCanvasRef, TikTokCanvasProps>(funct
     trimStartRef, trimEndRef, includeEditRef,
     logoImgRef, verifiedImgRef,
     overlayCaption, overlayLogoSrc, overlayDisplayName, overlayHandle, overlayVerified,
-    marketData, marketAvatarImgRef, marketAvatarUrlRef,
+    marketData, marketAvatarImgRef, marketAvatarUrlRef, pauvLogoImgRef,
   });
 
   useImperativeHandle(ref, () => ({
@@ -285,6 +286,7 @@ export const TikTokCanvas = forwardRef<TikTokCanvasRef, TikTokCanvasProps>(funct
         ctx.restore();
 
         if (marketData) {
+          const arrowPulse = 0.2 + 0.8 * (0.5 + 0.5 * Math.sin(2 * Math.PI * performance.now() / 1000 * 0.75));
           drawMarketRow({
             ctx, cx: 0, videoBottomY: y + h, cw: CANVAS_W,
             name: marketData.name,
@@ -296,6 +298,8 @@ export const TikTokCanvas = forwardRef<TikTokCanvasRef, TikTokCanvasProps>(funct
             size: marketData.size ?? 'large',
             avatarImgRef: marketAvatarImgRef,
             lastPhotoUrlRef: marketAvatarUrlRef,
+            pauvLogoImgRef,
+            arrowOpacity: arrowPulse,
           });
         }
       }
