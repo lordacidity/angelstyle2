@@ -329,6 +329,23 @@ export function StudioShell() {
         floorSelector="[data-troll-floor]"
         zIndex={20}
       />
+
+      {/* Launch-server button — the Vercel-hosted page can't spawn a process, so
+          this is a deep-link into the phonedeck:// URL protocol registered on each
+          team PC (run register-phonedeck-protocol.ps1 once). Clicking it runs
+          launch-server.bat, opening a terminal and starting the local Express
+          backend that drives the phones. No-op on PCs without the protocol
+          registered, so it's safe to ship to everyone. Internal/team use. */}
+      <a
+        href="phonedeck://launch"
+        title="Start the local Phonedeck server on this PC (one-time setup: register-phonedeck-protocol.ps1)"
+        className="fixed bottom-3 left-[84px] z-[25] flex items-center gap-1.5 px-2.5 py-1.5 rounded-md border border-zinc-800 bg-zinc-900/90 text-[11px] font-medium text-zinc-300 hover:text-white hover:border-zinc-600 transition-colors backdrop-blur"
+      >
+        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+          <polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2" />
+        </svg>
+        Launch server
+      </a>
     </div>
   );
 }
