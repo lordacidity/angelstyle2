@@ -3,8 +3,9 @@
 // BrandKit — the app's landing section. There's no login (the app is a single
 // shared "Pauv" identity, auto-signed-in via usePauvSession), so this is just
 // the brand setup: a logo library plus display name + handle. Whatever's chosen
-// here feeds straight into the Media generator (passed down as `brand`). Set it
-// once; it persists in Supabase and is shared across machines.
+// here feeds straight into the Media generator (passed down as `brand`). Logos
+// are shared via Supabase; the display name + handle are saved locally per
+// machine (localStorage), so each person keeps their own and no login is needed.
 
 import { useRef, useState, useCallback } from 'react';
 import type { BrandProps, BrandLogo } from '../types';

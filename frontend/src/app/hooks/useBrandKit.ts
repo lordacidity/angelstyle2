@@ -68,7 +68,16 @@ export function useBrandKit(userId: string | null) {
 
   useEffect(() => {
     if (!userId) {
-      setBrand(EMPTY_BRAND);
+      // No shared Supabase session (e.g. creds not configured). Name/@ live in
+      // localStorage per-machine, so still surface them — along with the bundled
+      // static Pauv logo — so the kit is fully usable with no auth at all.
+      const local = readLocalIdentity();
+      setBrand({
+        displayName: local.displayName ?? '',
+        handle: local.handle ? toDisplayHandle(local.handle) : '',
+        logos: STATIC_LOGOS,
+        logoSrc: STATIC_LOGOS[0].url,
+      });
       brandKitIdRef.current = null;
       return;
     }
@@ -140,18 +149,20 @@ export function useBrandKit(userId: string | null) {
   }, [userId]);
 
   const save = useCallback(async (displayName: string, handle: string): Promise<boolean> => {
-    // Per-machine identity: write localStorage only. Supabase is intentionally
-    // NOT updated so each machine keeps its own name/handle off the shared
-    // account. uploadLogo() creates the brand_kit row when it's needed for the
+    // Per-machine identity: write localStorage only, with NO auth dependency.
+    // Supabase is intentionally NOT updated (each machine keeps its own name/
+    // handle off the shared account), and we deliberately do NOT require a
+    // signed-in userId — the name/@ are purely local, so they save even when the
+    // shared Supabase account is unavailable (e.g. creds not configured).
+    // uploadLogo() still creates the brand_kit row when it's needed for the
     // (shared) logo library.
-    if (!userId) return false;
     setSaving(true);
     const dbHandle = toDbHandle(handle);
     writeLocalIdentity(displayName, dbHandle);
     setBrand(prev => ({ ...prev, displayName, handle: toDisplayHandle(dbHandle) }));
     setSaving(false);
     return true;
-  }, [userId]);
+  }, [setBrand]);
 
   const uploadLogo = useCallback(async (file: File) => {
     if (!userId) return;
