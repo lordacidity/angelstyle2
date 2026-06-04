@@ -1,4 +1,4 @@
-// One-off migration runner. Reads .env, connects to Railway via DATABASE_PUBLIC_URL,
+// One-off migration runner. Reads the repo-root .env, connects to Railway via DATABASE_PUBLIC_URL,
 // and runs the SQL file passed as arg 1 (or 001_news_sources.sql by default).
 //
 // Run with: npx tsx scripts/runMigration.ts [path/to/file.sql]
@@ -10,7 +10,8 @@ import dotenv from "dotenv";
 import pg from "pg";
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
-const ENV_PATH = path.resolve(HERE, "..", "..", "..", ".env");
+// server/scripts -> server -> repo root (.env). Run via `tsx scripts/runMigration.ts`.
+const ENV_PATH = path.resolve(HERE, "..", "..", ".env");
 dotenv.config({ path: ENV_PATH });
 
 const sqlArg = process.argv[2] ?? path.resolve(HERE, "..", "migrations", "001_news_sources.sql");

@@ -9,7 +9,7 @@ import {
 } from './constants';
 import type { Box, TikTokCanvasProps, TikTokCanvasRef } from './types';
 import { drawHeaderOnContext } from './drawing/drawHeader';
-import { drawMarketRow, MARKET_ROW_H, MARKET_ROW_H_SMALL, CTA_TOP_GAP, CTA_LINK_AREA_H } from './drawing/drawMarketRow';
+import { drawMarketRow, MARKET_ROW_H, MARKET_ROW_H_SMALL, CTA_TOP_GAP, CTA_TOP_GAP_SMALL, CTA_TOP_GAP_BIO, CTA_LINK_AREA_H, CTA_LINK_AREA_H_BIO } from './drawing/drawMarketRow';
 import { countCaptionLines, countPauvCaptionLines, CAPTION_EMOJI_SIZE } from './drawing/countCaptionLines';
 import { wrapRichText, drawRichLine } from '@/lib/emoji';
 import { VideoOverlays } from './ui/VideoOverlays';
@@ -342,8 +342,13 @@ export const TikTokCanvas = forwardRef<TikTokCanvasRef, TikTokCanvasProps>(funct
   // Height the CTA (market row) reserves below the video, 0 when there's none.
   function ctaHeight(): number {
     if (!marketData) return 0;
-    const row = (marketData.size ?? 'large') === 'small' ? MARKET_ROW_H_SMALL : MARKET_ROW_H;
-    return row + CTA_TOP_GAP + CTA_LINK_AREA_H; // gap + row + "Link in bio" line
+    const size = marketData.size ?? 'large';
+    // Bio: no market row, just the (bigger) link tucked under the video.
+    if (size === 'bio') return CTA_TOP_GAP_BIO + CTA_LINK_AREA_H_BIO;
+    const small = size === 'small';
+    const row = small ? MARKET_ROW_H_SMALL : MARKET_ROW_H;
+    const topGap = small ? CTA_TOP_GAP_SMALL : CTA_TOP_GAP;
+    return row + topGap + CTA_LINK_AREA_H; // gap + row + "Link in bio" line
   }
 
   // Auto-size + position the crop box so the whole block (header → video → CTA)
@@ -363,7 +368,7 @@ export const TikTokCanvas = forwardRef<TikTokCanvasRef, TikTokCanvasProps>(funct
     const headerHeight = computeHeaderHeight();
     const chrome = headerHeight + ctaHeight();
     // Chrome for the top:bottom split excludes the "link in bio" line.
-    const splitChrome = chrome - (marketData ? CTA_LINK_AREA_H : 0);
+    const splitChrome = chrome - (marketData ? ((marketData.size ?? 'large') === 'bio' ? CTA_LINK_AREA_H_BIO : CTA_LINK_AREA_H) : 0);
 
     if (!video || !video.videoWidth || !video.videoHeight) {
       const blockTop = Math.max(0, (CANVAS_H - splitChrome) * TOP_FRAC);
@@ -393,7 +398,7 @@ export const TikTokCanvas = forwardRef<TikTokCanvasRef, TikTokCanvasProps>(funct
     const headerHeight = computeHeaderHeight();
     const chrome = headerHeight + ctaHeight();
     // Chrome for the top:bottom split excludes the "link in bio" line.
-    const splitChrome = chrome - (marketData ? CTA_LINK_AREA_H : 0);
+    const splitChrome = chrome - (marketData ? ((marketData.size ?? 'large') === 'bio' ? CTA_LINK_AREA_H_BIO : CTA_LINK_AREA_H) : 0);
     const boxH = boxRef.current.h;
     const blockTop = Math.max(0, (CANVAS_H - splitChrome - boxH) * TOP_FRAC);
     const b = { ...boxRef.current, y: blockTop + headerHeight - 4 };

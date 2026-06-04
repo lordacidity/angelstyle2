@@ -64,8 +64,9 @@ export interface MarketData {
   industry: string | null;
   subcategory: string | null;
   sparkline?: SparkPoint[] | null;
-  /** CTA widget size: 'large' = full row, 'small' = one-line. Defaults to 'large'. */
-  size?: 'large' | 'small';
+  /** CTA size: 'large' = full row, 'small' = one-line, 'bio' = just the "pauv.com
+   *  to trade" link (no market row). Defaults to 'large'. */
+  size?: 'large' | 'small' | 'bio';
   price: {
     usd: number | null;
     lifetimeChangePct: number | null;

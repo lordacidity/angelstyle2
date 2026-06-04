@@ -1,8 +1,9 @@
 // Internal canvas resolution (1080p portrait for highest export quality)
 export const CANVAS_W = 1080;
 export const CANVAS_H = 1920;
-// Target width for video fitting (1000px leaves 40px padding on each side)
-export const VIDEO_TARGET_W = 1000;
+// Target width for video fitting (960px leaves a 60px black gap each side —
+// the original 40px gap widened by 50%)
+export const VIDEO_TARGET_W = 960;
 // Display scale so the on-screen canvas isn't huge
 export const DISPLAY_SCALE = 0.38; // 1080×1920 → ~410×730 on screen
 export const MIN_DIM = 40;
@@ -27,7 +28,7 @@ export const HEADER_PADDING_TOP = 18;
 
 // Pauv (Twitter) template — caption lives in the right column (same X as name)
 export const PAUV_AVATAR_SIZE = 108;
-export const PAUV_PADDING_X = HEADER_PADDING_X + 33; // 65 — 3px tighter each side than reference
+export const PAUV_PADDING_X = 78; // post L/R black gap — was 65, widened by 20%
 export const PAUV_TEXT_X = PAUV_PADDING_X + PAUV_AVATAR_SIZE + 28; // 65+108+28 = 201
 export const PAUV_CAPTION_MAX_W = CANVAS_W - PAUV_PADDING_X * 2; // 1080-130 = 950
 export const PAUV_CAPTION_FONT = 'Chirp, "Twitter Chirp", -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif';

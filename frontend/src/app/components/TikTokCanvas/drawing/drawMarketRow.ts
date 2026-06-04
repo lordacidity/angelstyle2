@@ -55,19 +55,31 @@ const SPARK_LINE_W     = Math.round(1.5 * S);// stroke width ≈ 4px
 export const MARKET_ROW_H_SMALL = Math.round(48 * S); // ≈ 126px
 // Breathing room between the bottom of the video and the top of the CTA box.
 export const CTA_TOP_GAP = Math.round(7 * S);
+// The small CTA tucks even closer to the video than the large one.
+export const CTA_TOP_GAP_SMALL = Math.round(1 * S);
+// The bio CTA sits well below the video — a roomy gap above the "pauv.com" line.
+export const CTA_TOP_GAP_BIO = Math.round(14 * S);
 // "Link in bio" line centered under the CTA box.
 const LINK_SIZE = Math.round(10 * S);
 const LINK_GAP  = Math.round(2 * S);
 const COLOR_LINK = 'rgba(255,255,255,0.5)'; // light grey
 export const CTA_LINK_AREA_H = LINK_GAP + LINK_SIZE + Math.round(8 * S);
-const SM_AVATAR_D    = Math.round(24 * S);
+// Bio CTA: no market row at all — just the link, a little bigger, right under the video.
+const BIO_LINK_SIZE = Math.round(13 * S);
+export const CTA_LINK_AREA_H_BIO = LINK_GAP + BIO_LINK_SIZE + Math.round(8 * S);
+const SM_AVATAR_D      = Math.round(24 * S);
+// Small CTA photo is a rounded square, not a circle — slight corner rounding.
+const SM_AVATAR_RADIUS = Math.round(5 * S);
+// Extra room to the right of the small CTA so the % change isn't flush to the edge.
+const SM_RIGHT_PAD     = Math.round(10 * S);
 const SM_NAME_SIZE   = Math.round(18 * S); // bumped from 14 → 16 → 18
-const SM_PRICE_SIZE  = Math.round(16 * S); // bumped from 14 for prominence
-const SM_CHANGE_SIZE = Math.round(12 * S);
-const SM_ARROW_W     = Math.round(12 * S);
-const SM_ARROW_H     = Math.round(12 * S * 18 / 24);
-const SM_ARROW_GAP   = Math.round(3 * S);
-const SM_PC_GAP      = Math.round(10 * S); // gap between price and change groups
+// Right side (the price + change cluster) shrunk 15% — the 0.85 factor below.
+const SM_PRICE_SIZE  = Math.round(16 * 0.85 * S); // was 16 (bumped for prominence), -15%
+const SM_CHANGE_SIZE = Math.round(12 * 0.85 * S); // was 12, -15%
+const SM_ARROW_W     = Math.round(12 * 0.85 * S);
+const SM_ARROW_H     = Math.round(12 * 0.85 * S * 18 / 24);
+const SM_ARROW_GAP   = Math.round(3 * 0.85 * S);
+const SM_PC_GAP      = Math.round(10 * 0.85 * S); // gap between price and change groups
 const SM_NAME_PAD    = Math.round(12 * S); // min gap between name and price group
 
 export interface DrawMarketRowOptions {
@@ -86,17 +98,31 @@ export interface DrawMarketRowOptions {
   pauvLogoImgRef?: MutableRefObject<HTMLImageElement | null>;
   arrowOpacity?: number;
   triangleOnly?: boolean;
-  size?: 'large' | 'small';
+  size?: 'large' | 'small' | 'bio';
 }
 
-// Avatar outline: a circle.
+// Avatar outline: a circle by default, or a rounded square when `cornerRadius`
+// is given (the small variant uses a slightly-rounded square instead).
 function avatarPath(
   ctx: CanvasRenderingContext2D,
-  cx: number, cy: number, r: number, _d: number,
+  cx: number, cy: number, r: number, d: number,
+  cornerRadius?: number,
 ): void {
   ctx.beginPath();
-  ctx.arc(cx, cy, r, 0, Math.PI * 2);
-  ctx.closePath();
+  if (cornerRadius && cornerRadius > 0) {
+    const x = cx - d / 2;
+    const y = cy - d / 2;
+    const br = cornerRadius;
+    ctx.moveTo(x + br, y);
+    ctx.arcTo(x + d, y,     x + d, y + d, br);
+    ctx.arcTo(x + d, y + d, x,     y + d, br);
+    ctx.arcTo(x,     y + d, x,     y,     br);
+    ctx.arcTo(x,     y,     x + d, y,     br);
+    ctx.closePath();
+  } else {
+    ctx.arc(cx, cy, r, 0, Math.PI * 2);
+    ctx.closePath();
+  }
 }
 
 // Largest font size (stepping down from baseSize, floored at minSize) at which
@@ -122,14 +148,23 @@ export function drawMarketRow({
   avatarImgRef, lastPhotoUrlRef, pauvLogoImgRef, arrowOpacity = 1, triangleOnly = false, size = 'large',
 }: DrawMarketRowOptions): void {
   const isSmall   = size === 'small';
-  const rowH      = isSmall ? MARKET_ROW_H_SMALL : MARKET_ROW_H;
+  const isBio     = size === 'bio';
+  const rowH      = isBio ? 0 : (isSmall ? MARKET_ROW_H_SMALL : MARKET_ROW_H);
   const avatarD   = isSmall ? SM_AVATAR_D : AVATAR_D;
   const avatarR   = avatarD / 2;
-  const cy        = videoBottomY + CTA_TOP_GAP; // gap between video and CTA
+  const cy        = videoBottomY + (isBio ? CTA_TOP_GAP_BIO : isSmall ? CTA_TOP_GAP_SMALL : CTA_TOP_GAP); // gap between video and CTA
   const midY      = cy + rowH / 2;
-  const rightEdge = cx + cw - PADDING_X;
+  // Large CTA only: pull both sides in so the row is ~20% narrower and stays
+  // centered. The slack is taken from the empty space to the LEFT of the chart —
+  // avatar/name shift right, chart/price shift left — while the chart, text, and
+  // price+change cluster keep their sizes.
+  const LG_NARROW = 0.20;
+  const lgInset   = (isSmall || isBio) ? 0 : Math.round((cw - PADDING_X * 2) * LG_NARROW / 2);
+  const padX      = PADDING_X + lgInset;
+  const rightEdge = cx + cw - padX;
 
   // triangleOnly: skip all drawing except the animated triangle (used in recording per-frame pass).
+  if (triangleOnly && lifetimeChangePct == null) return; // bio / no-change CTA: nothing to animate
   if (triangleOnly && lifetimeChangePct != null) {
     const changeText = `${Math.abs(lifetimeChangePct).toFixed(1)}%`;
     ctx.font = `500 ${CHANGE_SIZE}px ${MONO}`;
@@ -153,18 +188,19 @@ export function drawMarketRow({
     return;
   }
 
-  // "Link in bio" — light grey, centered under the CTA box. Drawn for both sizes.
-  const drawLinkInBio = () => {
-    ctx.font = `500 ${LINK_SIZE}px ${SANS}`;
+  // "Link in bio" — light grey, centered under the CTA box. Drawn for every size;
+  // `linkSize` lets the bio variant render it a little bigger.
+  const drawLinkInBio = (linkSize: number = LINK_SIZE) => {
+    ctx.font = `500 ${linkSize}px ${SANS}`;
     ctx.fillStyle = COLOR_LINK;
     const txt = 'to trade';
     const txtW = ctx.measureText(txt).width;
-    const logoH = LINK_SIZE;
+    const logoH = linkSize;
     const logoW = logoH; // square-ish, will render at natural aspect via drawImage
     const gap       = Math.round(4 * S);
     const logoGap   = 0;
     const totalW = logoW + gap + txtW;
-    const baseY  = cy + rowH + LINK_GAP + LINK_SIZE;
+    const baseY  = cy + rowH + LINK_GAP + linkSize;
     const startX = cx + cw / 2 - totalW / 2;
 
     // Draw Pauv logo if loaded
@@ -176,7 +212,7 @@ export function drawMarketRow({
       logo.onload = () => { if (pauvLogoImgRef) pauvLogoImgRef.current = logo; };
     }
     const dotCom = '.com';
-    ctx.font = `600 ${LINK_SIZE}px Inter, ${SANS}`;
+    ctx.font = `600 ${linkSize}px Inter, ${SANS}`;
     const dotComW = ctx.measureText(dotCom).width;
 
     if (logo?.complete && logo.naturalWidth > 0) {
@@ -187,19 +223,27 @@ export function drawMarketRow({
       ctx.drawImage(logo, x, baseY - logoH + Math.round(2.5 * S), dw, logoH);
       ctx.fillStyle = COLOR_WHITE;
       ctx.fillText(dotCom, x + dw + logoGap, baseY);
-      ctx.font = `400 ${LINK_SIZE}px Inter, ${SANS}`;
+      ctx.font = `400 ${linkSize}px Inter, ${SANS}`;
       ctx.fillStyle = COLOR_LINK;
       ctx.fillText(txt, x + dw + logoGap + dotComW + gap, baseY);
     } else {
-      ctx.font = `500 ${LINK_SIZE}px ${SANS}`;
+      ctx.font = `500 ${linkSize}px ${SANS}`;
       ctx.fillText(txt, cx + cw / 2 - txtW / 2, baseY);
     }
   };
 
+  // Bio CTA: only the "pauv.com to trade" line — a little bigger, sitting right
+  // under the video. No avatar, no market row.
+  if (isBio) {
+    drawLinkInBio(BIO_LINK_SIZE);
+    return;
+  }
+
   if (!isSmall) {
     // Large: a white rounded-rectangle outline hugging the CTA content (small
-    // gets no box and no divider).
-    const boxMargin = 80;                       // canvas px in from the side edges
+    // gets no box and no divider). Narrows with the content via lgInset so the
+    // box keeps its constant gap to the avatar/price and stays centered.
+    const boxMargin = 80 + lgInset;             // canvas px in from the side edges
     const bx = cx + boxMargin;
     const bw = cw - boxMargin * 2;
     const byInset = Math.round(9 * S);
@@ -219,8 +263,10 @@ export function drawMarketRow({
   }
 
   // ── Avatar ────────────────────────────────────────────────────────────────────
-  const avatarCX = cx + PADDING_X + avatarR;
+  const avatarCX = cx + padX + avatarR;
   const avatarCY = midY;
+  // Small variant draws the photo as a slightly-rounded square; others stay circular.
+  const avatarCorner = isSmall ? SM_AVATAR_RADIUS : undefined;
 
   if (photo_url !== lastPhotoUrlRef.current) {
     avatarImgRef.current = null;
@@ -236,13 +282,13 @@ export function drawMarketRow({
 
   // Background fill
   ctx.fillStyle = COLOR_AVATAR_BG;
-  avatarPath(ctx, avatarCX, avatarCY, avatarR, avatarD);
+  avatarPath(ctx, avatarCX, avatarCY, avatarR, avatarD, avatarCorner);
   ctx.fill();
 
   if (img && img.complete && img.naturalWidth > 0) {
     // Photo — object-fit: cover
     ctx.save();
-    avatarPath(ctx, avatarCX, avatarCY, avatarR, avatarD);
+    avatarPath(ctx, avatarCX, avatarCY, avatarR, avatarD, avatarCorner);
     ctx.clip();
     const iw = img.naturalWidth, ih = img.naturalHeight;
     const scale = Math.max(avatarD / iw, avatarD / ih);
@@ -263,7 +309,7 @@ export function drawMarketRow({
   // Border: '1px solid #2a2a2a'
   ctx.strokeStyle = COLOR_AVATAR_BORDER;
   ctx.lineWidth = Math.max(1, Math.round(1 * S));
-  avatarPath(ctx, avatarCX, avatarCY, avatarR, avatarD);
+  avatarPath(ctx, avatarCX, avatarCY, avatarR, avatarD, avatarCorner);
   ctx.stroke();
 
   // ── Small variant — one line: name (left) · price + change (right) ───────────
@@ -277,10 +323,14 @@ export function drawMarketRow({
     const changeTxtW = changeText ? ctx.measureText(changeText).width : 0;
     const changeRowW = changeTxtW ? SM_ARROW_W + SM_ARROW_GAP + changeTxtW : 0;
 
-    // Right group laid out right-to-left ending at rightEdge: [price] [gap] [↑ change]
-    const changeTextX = rightEdge - changeTxtW;
+    // Pull the right cluster in from the row's right edge so the % change has
+    // breathing room before the side, instead of sitting flush against it.
+    const smRightEdge = rightEdge - SM_RIGHT_PAD;
+
+    // Right group laid out right-to-left ending at smRightEdge: [price] [gap] [↑ change]
+    const changeTextX = smRightEdge - changeTxtW;
     const arrowX      = changeTextX - SM_ARROW_GAP - SM_ARROW_W;
-    const priceRight  = changeRowW ? arrowX - SM_PC_GAP : rightEdge;
+    const priceRight  = changeRowW ? arrowX - SM_PC_GAP : smRightEdge;
     const priceX      = priceRight - priceW;
     const groupLeft   = changeRowW ? arrowX : priceX;
 
@@ -354,15 +404,16 @@ export function drawMarketRow({
   // middle. If the name is too long to fit before the sparkline/price column,
   // SHRINK it to fit rather than wrap or ellipsize. Industry keeps its size.
   const sparkSpace = (sparkline && sparkline.length >= 1) ? (SPARK_W + SPARK_MARGIN_R) : SPARK_MARGIN_R;
-  const nameMaxW   = Math.max(Math.round(20 * S), (rightEdge - priceColW - sparkSpace) - TEXT_X - Math.round(8 * S));
+  const textX      = TEXT_X + lgInset; // name/industry shift right with the avatar
+  const nameMaxW   = Math.max(Math.round(20 * S), (rightEdge - priceColW - sparkSpace) - textX - Math.round(8 * S));
   const nameSize   = fitFontSize(ctx, name, '600', SANS, NAME_SIZE, nameMaxW, Math.round(11 * S));
   ctx.font = `600 ${nameSize}px ${SANS}`;
   ctx.fillStyle = COLOR_WHITE;
-  ctx.fillText(name, TEXT_X, nameBaseline);
+  ctx.fillText(name, textX, nameBaseline);
 
   ctx.font = `400 ${SUB_SIZE}px ${SANS}`;
   ctx.fillStyle = COLOR_SECONDARY;
-  ctx.fillText(subtitle || '—', TEXT_X, subBaseline);
+  ctx.fillText(subtitle || '—', textX, subBaseline);
 
   // ── Sparkline — sits immediately left of the price column with SPARK_MARGIN_R gap ──
   // This matches the CSS: [sparkline div marginRight:8][price+change shrink:0]

@@ -765,8 +765,8 @@ export function CanvasGrid({
 
   const [marketMap,               setMarketMap]               = useState<Record<string, Talent | null>>({});
   // CTA widget size per entry: 'large' (full row w/ industry + sparkline) or
-  // 'small' (one-line: photo, name, price, change). Defaults to 'large'.
-  const [marketSizeMap,           setMarketSizeMap]           = useState<Record<string, 'large' | 'small'>>({});
+  // 'small' (one-line: photo, name, price, change). Defaults to 'small'.
+  const [marketSizeMap,           setMarketSizeMap]           = useState<Record<string, 'large' | 'small' | 'bio'>>({});
   // Global toggle controlling whether the market widget is drawn on the
   // canvas (and exported). Persisted in localStorage so flipping it off
   // applies to every video — current, future, after Clear, after refresh —
@@ -780,6 +780,9 @@ export function CanvasGrid({
   // preference alone.
   const [marketCardCollapsedMap,  setMarketCardCollapsedMap]  = useState<Record<string, boolean>>({});
   const [postCaptionCollapsedMap, setPostCaptionCollapsedMap] = useState<Record<string, boolean>>({});
+  // Safe-zone guide (the red TikTok safe/unsafe-zone overlay) shown over a video
+  // canvas, toggled per entry by the control beneath the canvas. Off by default.
+  const [safeZoneMap, setSafeZoneMap] = useState<Record<string, boolean>>({});
   const persistedHydratedRef = useRef(false);
   useEffect(() => {
     try {
@@ -979,11 +982,17 @@ export function CanvasGrid({
 
   // Build a MarketData object merging the selected talent with any user overrides
   const getMarketData = useCallback((entryId: string): MarketData | null => {
-    const sel = marketMap[entryId];
-    if (!sel) return null;
     // Respect the global visibility toggle — hiding the widget keeps the
     // selected talent + overrides intact for an easy re-enable.
     if (!marketWidgetVisible) return null;
+    const sizePref = marketSizeMap[entryId] ?? 'small';
+    // Bio CTA needs no talent — it's just the "pauv.com to trade" line under the
+    // video — so return a minimal record (no name / price / sparkline).
+    if (sizePref === 'bio') {
+      return { name: '', ticker: '', photo_url: null, industry: null, subcategory: null, sparkline: null, size: 'bio', price: { usd: null, lifetimeChangePct: null } };
+    }
+    const sel = marketMap[entryId];
+    if (!sel) return null;
     const ov = marketOverrideMap[entryId];
     // MARKETING: always use the synthetic ticker-seeded fallback so every
     // market gets a healthy-looking upward green curve. Real API data is
@@ -992,7 +1001,7 @@ export function CanvasGrid({
     // signal we want the post to send.
     const spark = generateFallbackSparkline(sel.ticker);
     const syntheticPct = syntheticPctForTicker(sel.ticker);
-    const size = marketSizeMap[entryId] ?? 'large';
+    const size = marketSizeMap[entryId] ?? 'small';
     if (!ov) {
       return {
         ...(sel as unknown as MarketData),
@@ -1611,7 +1620,41 @@ export function CanvasGrid({
                           }
                         />
                       )}
+
+                      {/* Safe-zone guide — the red TikTok safe / unsafe-zone
+                          overlay, laid on top of the video canvas (contained,
+                          never stretched) when toggled on below. Carousel has no
+                          equivalent so it's video-only. pointer-events-none so it
+                          never blocks dragging / resizing the video box. */}
+                      {!isEntryCarousel && (safeZoneMap[entry.id] ?? true) && (
+                        <img
+                          src="/safe-zones.png"
+                          alt=""
+                          aria-hidden
+                          draggable={false}
+                          className="absolute inset-0 w-full h-full pointer-events-none select-none opacity-50"
+                          style={{ objectFit: 'contain' }}
+                        />
+                      )}
                     </div>
+
+                    {/* Safe-zone toggle — slim row under the canvas, styled like the
+                        market section's controls. On by default. */}
+                    {!isEntryCarousel && (() => {
+                      const on = safeZoneMap[entry.id] ?? true;
+                      return (
+                        <div className="mt-2 flex items-center justify-between gap-3 px-3 py-1.5 rounded-md bg-zinc-950 border border-zinc-800">
+                          <span className="text-[11px] font-semibold text-zinc-300 uppercase tracking-wider">Safe zones</span>
+                          <button
+                            onClick={() => setSafeZoneMap(prev => ({ ...prev, [entry.id]: !(prev[entry.id] ?? true) }))}
+                            title={on ? 'Hide TikTok safe zones' : 'Show TikTok safe zones'}
+                            className={`inline-flex items-center shrink-0 w-9 h-5 rounded-full px-0.5 transition-colors ${on ? 'bg-[#fe2c55]' : 'bg-zinc-700'}`}
+                          >
+                            <span className={`block w-4 h-4 rounded-full bg-white shadow-sm transition-transform ${on ? 'translate-x-4' : 'translate-x-0'}`} />
+                          </button>
+                        </div>
+                      );
+                    })()}
 
                     {/* Market selector — Twitter template only.
                         Lets the user pick a Pauv market and renders its
@@ -1646,13 +1689,13 @@ export function CanvasGrid({
                             <div className="flex items-center gap-2">
                               {/* CTA size toggle — Large (full row) vs Small (one line). */}
                               <div className="flex items-center rounded-md border border-zinc-800 overflow-hidden">
-                                {(['large', 'small'] as const).map(sz => {
-                                  const active = (marketSizeMap[entry.id] ?? 'large') === sz;
+                                {(['large', 'small', 'bio'] as const).map(sz => {
+                                  const active = (marketSizeMap[entry.id] ?? 'small') === sz;
                                   return (
                                     <button
                                       key={sz}
                                       onClick={() => setMarketSizeMap(prev => ({ ...prev, [entry.id]: sz }))}
-                                      title={sz === 'large' ? 'Full row: photo, name, industry, sparkline, price, change' : 'One line: photo, name, price, change'}
+                                      title={sz === 'large' ? 'Full row: photo, name, industry, sparkline, price, change' : sz === 'small' ? 'One line: photo, name, price, change' : 'No widget — just “pauv.com to trade” under the video'}
                                       className={`px-2 py-0.5 text-[10px] font-medium capitalize transition-colors ${active ? 'bg-zinc-700 text-zinc-100' : 'bg-transparent text-zinc-500 hover:text-zinc-300'}`}
                                     >
                                       {sz}
@@ -1682,7 +1725,7 @@ export function CanvasGrid({
                               </button>
                             </div>
                           </div>
-                          {!collapsed && (selected ? (() => {
+                          {!collapsed && (marketSizeMap[entry.id] ?? 'small') !== 'bio' && (selected ? (() => {
                             const ov = marketOverrideMap[entry.id] ?? {
                               name: selected.name, industry: selected.industry ?? '',
                               photo_url: selected.photo_url,
@@ -1700,7 +1743,7 @@ export function CanvasGrid({
                             return (
                               <div>
                                 {/* Preview row (ArtistRow style, read from overrides) */}
-                                <div className="flex items-center" style={(marketSizeMap[entry.id] ?? 'large') === 'large'
+                                <div className="flex items-center" style={(marketSizeMap[entry.id] ?? 'small') === 'large'
                                   ? { gap: 7, padding: '9px 12px', border: '1px solid rgba(255,255,255,0.28)', borderRadius: 10, margin: '8px 12px' }
                                   : { gap: 12, padding: '10px 12px', borderBottom: '1px solid #1a1a1a' }}>
                                   {/* Avatar — click to open photo picker */}
@@ -1903,10 +1946,7 @@ export function CanvasGrid({
             );
           })}
 
-          {isCarousel
-            ? <CarouselAddRow onAdd={type => onAddRow(type)} />
-            : <GhostAddCard onAdd={() => onAddRow()} />
-          }
+          {/* Manual "add row" card removed from Media. */}
 
           </div>
         </div>
