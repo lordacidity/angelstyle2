@@ -21,6 +21,7 @@ import { ErrorBoundary } from './components/ErrorBoundary';
 import { GoogleSheetsModal } from './components/GoogleSheetsModal';
 import { PhonedeckMiniPanel } from './components/PhonedeckMiniPanel';
 import { BoardWidget } from './components/BoardWidget';
+import PixelTroll from './components/PixelTroll';
 import { useBoard, type BoardRow, type BoardTable } from './hooks/useBoard';
 import { PhonedeckApp } from './phonedeck/PhonedeckApp';
 import { PhonedeckTrending } from './phonedeck/PhonedeckTrending';
@@ -316,6 +317,18 @@ export function StudioShell() {
           onImport={googleSheets.importFromSheets}
         />
       )}
+
+      {/* Wandering pixel-troll easter egg. Mounted once here so he persists
+          across section nav; shown only on Media and Board. On Media he treads
+          the top edge of the trim bar (data-troll-floor); elsewhere he walks the
+          screen bottom. Click him for a reaction. zIndex 20 keeps him above page
+          and board content (board grid tops out at z-10) but below the floating
+          Studio widgets (z-40) and the sidebar (z-30). */}
+      <PixelTroll
+        hidden={activeSection !== 'media' && activeSection !== 'board'}
+        floorSelector="[data-troll-floor]"
+        zIndex={20}
+      />
     </div>
   );
 }

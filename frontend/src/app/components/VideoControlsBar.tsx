@@ -479,7 +479,7 @@ export function VideoControlsBar({ entryId, activeRef, recordingState, videoSrc,
   const canDelete = selection !== null && segments.length > 1;
 
   return (
-    <div className="shrink-0 mx-3 mb-3 rounded-lg border border-zinc-800 bg-zinc-950 px-5 py-3 flex flex-col gap-2">
+    <div data-troll-floor className="shrink-0 mx-3 mb-3 rounded-lg border border-zinc-800 bg-zinc-950 px-5 py-3 flex flex-col gap-2">
 
       {/* ── Transport row ─────────────────────────────────────────────────── */}
       <div className="flex items-center">
