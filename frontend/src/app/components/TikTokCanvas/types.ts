@@ -36,7 +36,9 @@ export interface TikTokCanvasProps {
 }
 
 export interface TikTokCanvasRef {
-  startDownload: () => Promise<void>;
+  // Resolves to the Phonedeck upload filename when the render reached the
+  // Incoming folder (so the caller can map it back to a board row), else void.
+  startDownload: () => Promise<string | void>;
   cancelExport: () => void;
   play: () => void;
   pause: () => void;

@@ -74,7 +74,12 @@ export function useRecording(config: UseRecordingConfig) {
   const configRef = useRef(config);
   configRef.current = config;
 
-  async function startRecording(): Promise<void> {
+  async function startRecording(): Promise<string | undefined> {
+    // Set to the upload filename once the render lands in Phonedeck's Incoming
+    // folder. Returned to the caller so the Studio can later mark the source
+    // board row Posted when *this* file is pushed to a phone (export itself no
+    // longer marks anything).
+    let uploadedName: string | undefined;
     const {
       canvasRef, videoRef, brand, rowNumber, videoId,
       boxRef, videoOffsetRef, videoScaleRef,
@@ -738,6 +743,7 @@ export function useRecording(config: UseRecordingConfig) {
         form.append('files', blob, filename);
         const resp = await fetch(`${PHONEDECK_URL}/api/upload`, { method: 'POST', body: form });
         if (!resp.ok) throw new Error(await resp.text());
+        uploadedName = filename;
         setRecStatus(`In Phonedeck Incoming: ${filename}`);
         setTimeout(() => setRecStatus(''), 5000);
       } catch (saveErr) {
@@ -766,6 +772,7 @@ export function useRecording(config: UseRecordingConfig) {
       if (v) { v.muted = true; v.pause(); v.currentTime = 0; v.loop = true; v.playbackRate = 1.0; }
       abortControllerRef.current = null;
     }
+    return uploadedName;
   }
 
   function cancelRecording() {

@@ -38,7 +38,10 @@ function formatSize(bytes: number): string {
   return `${n.toFixed(i === 0 ? 0 : 1)} ${u[i]}`;
 }
 
-export function PhonedeckMiniPanel() {
+// onPushed fires with the file's name after a successful push to ≥1 phone, so
+// the Studio can mark the originating board row Posted (the board flow marks on
+// push, not on export).
+export function PhonedeckMiniPanel({ onPushed }: { onPushed?: (fileName: string) => void } = {}) {
   const [files, setFiles] = useState<FileRecord[]>([]);
   const [devices, setDevices] = useState<Device[]>([]);
   const [connected, setConnected] = useState(false);
@@ -253,6 +256,7 @@ export function PhonedeckMiniPanel() {
         body: JSON.stringify({ fileName, serials: [...selectedSerials] }),
       });
       if (!r.ok) throw new Error(await r.text());
+      onPushed?.(fileName);
       setStatus(s => ({ ...s, [fileName]: `✓ Sent to ${selectedSerials.size}` }));
       setTimeout(() => setStatus(s => { const n = { ...s }; delete n[fileName]; return n; }), 4000);
     } catch {

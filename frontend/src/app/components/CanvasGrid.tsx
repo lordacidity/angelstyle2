@@ -71,10 +71,10 @@ interface CanvasGridProps {
   // and advanced through the same "Next" pipeline (fetch → crop → caption/CTA).
   pendingBoardSend?: string | null;
   onBoardSendConsumed?: () => void;
-  // Entry ids that came from the Board widget, and a callback fired when one is
-  // exported — together they let the Export button mark the source row Posted.
-  boardSentIds?: Set<string>;
-  onEntryExported?: (entryId: string) => void;
+  // Fired when an entry is exported, with the Phonedeck upload filename. The
+  // Board flow records filename→row so a later Phonedeck push marks that row
+  // Posted (export itself no longer marks anything).
+  onEntryExported?: (entryId: string, fileName?: string) => void;
   // Optional — when provided, renders a back arrow in the toolbar that
   // returns the user to the AI Cards flow (headline + photo picker) for the
   // same person. Placeholder behaviour for now: re-enters the AI section.
@@ -701,7 +701,7 @@ export function CanvasGrid({
   settingsMap, setSettingsMap,
   pendingAiSeed, onAiSeedConsumed, onBackToAi,
   pendingBoardSend, onBoardSendConsumed,
-  boardSentIds, onEntryExported,
+  onEntryExported,
 }: CanvasGridProps) {
   const isCarousel = entries.length > 0 && entries[0].mode === 'carousel';
 
@@ -780,6 +780,13 @@ export function CanvasGrid({
   // preference alone.
   const [marketCardCollapsedMap,  setMarketCardCollapsedMap]  = useState<Record<string, boolean>>({});
   const [postCaptionCollapsedMap, setPostCaptionCollapsedMap] = useState<Record<string, boolean>>({});
+  // When ON, the generated caption is auto-copied to the clipboard as soon as it
+  // finishes generating (no need to press Copy). Toggled from the Post caption
+  // header; persisted like the fold preferences above. The ref lets the
+  // generate callback read the latest value without being a dependency.
+  const [autoCopyCaption, setAutoCopyCaption] = useState(false);
+  const autoCopyCaptionRef = useRef(autoCopyCaption);
+  autoCopyCaptionRef.current = autoCopyCaption;
   // Safe-zone guide (the red TikTok safe/unsafe-zone overlay) shown over a video
   // canvas, toggled per entry by the control beneath the canvas. Off by default.
   const [safeZoneMap, setSafeZoneMap] = useState<Record<string, boolean>>({});
@@ -792,6 +799,8 @@ export function CanvasGrid({
       if (p) setPostCaptionCollapsedMap(JSON.parse(p) as Record<string, boolean>);
       const v = window.localStorage.getItem('studio.marketWidgetVisible');
       if (v === 'false') setMarketWidgetVisible(false);
+      const ac = window.localStorage.getItem('studio.autoCopyCaption');
+      if (ac === 'true') setAutoCopyCaption(true);
     } catch { /* malformed JSON or storage disabled — silent reset to default */ }
     persistedHydratedRef.current = true;
   }, []);
@@ -803,6 +812,10 @@ export function CanvasGrid({
     if (!persistedHydratedRef.current) return;
     try { window.localStorage.setItem('studio.postCaptionCollapsed', JSON.stringify(postCaptionCollapsedMap)); } catch { /* ignore */ }
   }, [postCaptionCollapsedMap]);
+  useEffect(() => {
+    if (!persistedHydratedRef.current) return;
+    try { window.localStorage.setItem('studio.autoCopyCaption', String(autoCopyCaption)); } catch { /* ignore */ }
+  }, [autoCopyCaption]);
   useEffect(() => {
     if (!persistedHydratedRef.current) return;
     try { window.localStorage.setItem('studio.marketWidgetVisible', String(marketWidgetVisible)); } catch { /* ignore */ }
@@ -1028,7 +1041,7 @@ export function CanvasGrid({
   }, [marketMap, marketOverrideMap, sparklineMap, marketSizeMap, marketWidgetVisible]);
 
 
-  const generateSocialCaption = useCallback(async (entry: VideoEntry) => {
+  const generateSocialCaption = useCallback(async (entry: VideoEntry): Promise<string | undefined> => {
     setSocialCaptionMap(prev => ({
       ...prev,
       [entry.id]: { text: prev[entry.id]?.text ?? '', loading: true, error: null, copied: false },
@@ -1120,11 +1133,25 @@ export function CanvasGrid({
         ...prev,
         [entry.id]: { text: finalText, loading: false, error: null, copied: false },
       }));
+      // Auto-copy: as soon as the caption is done generating, drop it on the
+      // clipboard (when the toggle is on) and flash the Copied state.
+      if (autoCopyCaptionRef.current && finalText) {
+        try {
+          await navigator.clipboard.writeText(finalText);
+          setSocialCaptionMap(prev => (prev[entry.id] ? { ...prev, [entry.id]: { ...prev[entry.id]!, copied: true } } : prev));
+          setTimeout(() => setSocialCaptionMap(prev => {
+            const cur = prev[entry.id];
+            return cur ? { ...prev, [entry.id]: { ...cur, copied: false } } : prev;
+          }), 1800);
+        } catch { /* clipboard blocked — the Copy button still works */ }
+      }
+      return finalText;
     } catch (e) {
       setSocialCaptionMap(prev => ({
         ...prev,
         [entry.id]: { text: prev[entry.id]?.text ?? '', loading: false, error: String(e), copied: false },
       }));
+      return undefined;
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [fetchSparkline, brand.displayName, brand.handle]);
@@ -1878,6 +1905,20 @@ export function CanvasGrid({
                               <span className="text-[11px] font-semibold text-zinc-300 uppercase tracking-wider">Post caption</span>
                             </div>
                             <div className="flex items-center gap-1.5 shrink-0">
+                              <button
+                                onClick={() => setAutoCopyCaption(v => !v)}
+                                title={autoCopyCaption
+                                  ? 'Auto-copy is ON — captions are copied to the clipboard as soon as they finish generating'
+                                  : 'Auto-copy is OFF — turn on to copy each caption automatically when it finishes generating'}
+                                className={`flex items-center gap-1 h-7 px-2 rounded-md border transition-colors text-[10px] font-medium ${
+                                  autoCopyCaption
+                                    ? 'bg-emerald-600/15 border-emerald-700 text-emerald-300'
+                                    : 'bg-zinc-950 border-zinc-800 text-zinc-500 hover:text-zinc-300 hover:border-zinc-600'
+                                }`}
+                              >
+                                <span className={`w-1.5 h-1.5 rounded-full shrink-0 ${autoCopyCaption ? 'bg-emerald-400' : 'bg-zinc-600'}`} />
+                                Auto-copy
+                              </button>
                               {sc?.text && (
                                 <button
                                   onClick={() => copySocialCaption(entry.id)}
@@ -1964,8 +2005,7 @@ export function CanvasGrid({
           recordingState={activeRecordingState}
           videoSrc={activeVideoSrc}
           onDownloadAll={onDownloadAll}
-          markPostedOnExport={!!selectedEntry && !!boardSentIds?.has(selectedEntry.id)}
-          onExport={() => { if (selectedEntry) onEntryExported?.(selectedEntry.id); }}
+          onExport={(fileName) => { if (selectedEntry) onEntryExported?.(selectedEntry.id, fileName); }}
         />
       </div>
 

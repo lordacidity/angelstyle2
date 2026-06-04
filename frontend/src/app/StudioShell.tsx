@@ -186,10 +186,16 @@ export function StudioShell() {
   const googleSheets = useGoogleSheets({ onImport: setEntries });
 
   // One board instance for the whole shell — shared with the floating BoardWidget
-  // so a sent row can be flipped to Posted here when its video is exported.
+  // so a sent row can be flipped to Posted once its exported video is pushed to a
+  // phone from the Phonedeck panel.
   const board = useBoard();
-  // entry id → the board row it came from, so export can mark that row Posted.
+  // entry id → the board row it came from. Set when a row is sent to the
+  // generator; read at export time to remember which row a file belongs to.
   const [boardOrigins, setBoardOrigins] = useState<Record<string, { table: BoardTable; id: string }>>({});
+  // Phonedeck upload filename → the board row it came from. Populated at export
+  // time (NOT marked Posted yet); consumed when that file is pushed to a phone,
+  // which is the moment we flip the row to Posted.
+  const [pushOrigins, setPushOrigins] = useState<Record<string, { table: BoardTable; id: string }>>({});
 
   const [pendingAiSeed, setPendingAiSeed] = useState<{ imageSrc: string; headline: string; subheadline: string; subheadline2?: string; articleUrl?: string } | null>(null);
 
@@ -237,13 +243,21 @@ export function StudioShell() {
     router.push(pathForSection('media'));
   }
 
-  // Export finished for an entry — if it came from the board, flip that row to
-  // Posted (reflected in the widget's checkbox and persisted to the board DB).
-  function handleEntryExported(entryId: string) {
+  // Export finished for an entry — DON'T mark Posted here. Instead, if it came
+  // from the board and actually landed in Phonedeck Incoming (we got a filename),
+  // remember filename→row so the later "Push" can mark it Posted.
+  function handleEntryExported(entryId: string, fileName?: string) {
     const origin = boardOrigins[entryId];
-    if (origin) board.markPosted(origin.table, origin.id);
+    if (origin && fileName) setPushOrigins(prev => ({ ...prev, [fileName]: origin }));
   }
-  const boardSentIds = new Set(Object.keys(boardOrigins));
+  // A file was pushed to phone(s) from the Phonedeck panel — if it traces back to
+  // a board row, flip that row to Posted now (reflected in the widget + board DB).
+  function handlePhonedeckPushed(fileName: string) {
+    const origin = pushOrigins[fileName];
+    if (!origin) return;
+    board.markPosted(origin.table, origin.id);
+    setPushOrigins(prev => { const next = { ...prev }; delete next[fileName]; return next; });
+  }
 
   function handleResetAll() {
     resetEverything();
@@ -275,7 +289,7 @@ export function StudioShell() {
           there — kept mounted (display:none) so the SSE connection persists
           across navigation. */}
       <div style={{ display: activeSection === 'media' ? undefined : 'none' }}>
-        <PhonedeckMiniPanel />
+        <PhonedeckMiniPanel onPushed={handlePhonedeckPushed} />
       </div>
       {/* Floating Shared Board widget — left of the centered generator. Same
           board as the /board page, in a movable/resizable panel so links can be
@@ -348,7 +362,6 @@ export function StudioShell() {
                 onAiSeedConsumed={() => setPendingAiSeed(null)}
                 pendingBoardSend={pendingBoardSend}
                 onBoardSendConsumed={() => setPendingBoardSend(null)}
-                boardSentIds={boardSentIds}
                 onEntryExported={handleEntryExported}
                 onBackToAi={() => router.push(pathForSection('ai'))}
               />

@@ -16,7 +16,7 @@ export interface VideoCanvasRef {
   setBlockTopPct?: (pct: number) => void;
   getVideoElement: () => HTMLVideoElement | null;
   getTrimState: () => { trimStart: number; trimEnd: number; duration: number; blockTopPct?: number };
-  startDownload: () => Promise<void>;
+  startDownload: () => Promise<string | void>;
   cancelExport: () => void;
 }
 
@@ -137,13 +137,14 @@ interface VideoControlsBarProps {
   recordingState: RecordingState | null;
   videoSrc:       string | null;
   onDownloadAll:  () => void;
-  // Fired after a successful export. Used by the Board flow to mark the source
-  // row Posted. markPostedOnExport just relabels the button to advertise it.
-  onExport?:           () => void;
-  markPostedOnExport?: boolean;
+  // Fired after a successful export, with the Phonedeck upload filename when the
+  // render reached the Incoming folder. The Board flow uses it to remember which
+  // board row a file came from, so pushing that file later marks the row Posted.
+  // Export itself no longer marks anything.
+  onExport?: (fileName?: string) => void;
 }
 
-export function VideoControlsBar({ entryId, activeRef, recordingState, videoSrc, onExport, markPostedOnExport }: VideoControlsBarProps) {
+export function VideoControlsBar({ entryId, activeRef, recordingState, videoSrc, onExport }: VideoControlsBarProps) {
   // Once Export is pressed for this entry, the full timeline collapses to a slim
   // status bar (export progress + Download All). Reset whenever the selected
   // entry changes so each video starts in the full editor again.
@@ -666,13 +667,13 @@ export function VideoControlsBar({ entryId, activeRef, recordingState, videoSrc,
           </div>
         ) : (
           <button
-            onClick={() => { activeRef.startDownload().then(() => onExport?.()).catch(() => {}); }}
-            title={markPostedOnExport ? 'Export the video and mark its board row as Posted' : 'Export the video'}
+            onClick={() => { activeRef.startDownload().then((fileName) => onExport?.(typeof fileName === 'string' ? fileName : undefined)).catch(() => {}); }}
+            title="Export the video to Phonedeck Incoming"
             className="flex items-center gap-1.5 rounded-full bg-white px-4 py-1.5 text-xs font-semibold text-black hover:bg-zinc-100 transition-colors shrink-0">
             <svg width="11" height="11" viewBox="0 0 24 24" fill="currentColor">
               <circle cx="12" cy="12" r="9" fill="none" stroke="currentColor" strokeWidth="2"/><circle cx="12" cy="12" r="4"/>
             </svg>
-            {markPostedOnExport ? 'Export + mark posted' : 'Export'}
+            Export
           </button>
         )}
       </div>

@@ -27,7 +27,13 @@ const DEFAULT_SIZE = { w: 560, h: 520 };
 // url/caption/context to the main generator and kicks off the fetch → crop →
 // caption pipeline (wired up in StudioShell).
 export function BoardWidget({ board, onSendRow }: { board: UseBoardReturn; onSendRow: (row: BoardRow) => void }) {
-  const { rows, loading, error, toggleBool } = board;
+  const { loading, error, toggleBool } = board;
+
+  // Only show outstanding links. Once a row is triaged — Posted (via a Phonedeck
+  // push or a manual tick) or marked Unusable — drop it from the widget so the
+  // list stays focused on what's left to do. The full /board page still shows
+  // everything, including posted/unusable rows.
+  const rows = board.rows.filter((r) => !r.posted && !r.unusable);
 
   // Brief per-row "sent ✓" confirmation, since the actual result shows up in
   // the generator which may be partly behind the widget.
@@ -196,7 +202,7 @@ export function BoardWidget({ board, onSendRow }: { board: UseBoardReturn; onSen
                 {!loading && rows.length === 0 && (
                   <tr>
                     <td colSpan={7} className="border border-zinc-800 px-3 py-6 text-center text-xs text-zinc-600">
-                      No rows yet — add them on the Board page.
+                      Nothing outstanding — posted &amp; unusable rows are hidden. Add more on the Board page.
                     </td>
                   </tr>
                 )}
