@@ -591,7 +591,13 @@ export function useRecording(config: UseRecordingConfig) {
 
           const targetTs = frameIdx * EXPORT_FRAME_DURATION + clipStart;
           await advanceTo(targetTs);
-          if (!currentFrame) {
+          // `currentFrame` is reassigned inside the advanceTo() closure, so TS
+          // drops its union narrowing here and collapses it to `never` at use
+          // sites. Re-assert the real type (via `as`, which an annotation can't
+          // do because assignment-narrowing would re-apply the `never`) so the
+          // guard below narrows correctly.
+          const cf = currentFrame as { frame: VideoFrame; ts: number } | null;
+          if (!cf) {
             console.warn('[EXPORT] no frame available at idx', frameIdx, '— stopping render early');
             break;
           }
@@ -617,7 +623,7 @@ export function useRecording(config: UseRecordingConfig) {
           offCtx.beginPath();
           offCtx.rect(cropBox.x, cropBox.y, cropBox.w, cropBox.h);
           offCtx.clip();
-          offCtx.drawImage(currentFrame.frame, dx, dy, drawW, drawH);
+          offCtx.drawImage(cf.frame, dx, dy, drawW, drawH);
           offCtx.restore();
 
           // Composite the pre-baked overlay (caption for clean, header + market
@@ -660,7 +666,8 @@ export function useRecording(config: UseRecordingConfig) {
         // below deadlocks whenever clipEnd < fullDuration (i.e. the end was
         // trimmed off).
         consumerDone = true;
-        if (currentFrame) { currentFrame.frame.close(); currentFrame = null; }
+        const cfDone = currentFrame as { frame: VideoFrame; ts: number } | null;
+        if (cfDone) { cfDone.frame.close(); currentFrame = null; }
         while (frameQueue.length > 0) frameQueue.shift()!.frame.close();
         wakeProducer(); // wake it so it observes consumerDone and returns
       }

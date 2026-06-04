@@ -30,6 +30,15 @@ import { ensureFontLoaded, wrapText, drawAligned, hexToRgba, roundRectPath, draw
 import { drawSwipeArrow, drawSwipeOnCanvas } from './drawing/swipe';
 import { wrapTextOffsets, getLineSpanSegs, drawSpanLine, spansToHtml, rgbToHex, htmlToSpans } from './drawing/spans';
 
+// Swatch palette for the inline rich-text colour picker (the foreColor swatches
+// in the floating text toolbar). A spread of vivid, legible colours plus
+// black/white.
+const RICH_COLORS: readonly string[] = [
+  '#ffffff', '#000000', '#ef4444', '#f97316', '#f59e0b', '#eab308',
+  '#22c55e', '#10b981', '#06b6d4', '#3b82f6', '#6366f1', '#8b5cf6',
+  '#ec4899', '#f43f5e',
+];
+
 interface CarouselCanvasProps {
   imageSrc: string;
   videoSrc?: string;

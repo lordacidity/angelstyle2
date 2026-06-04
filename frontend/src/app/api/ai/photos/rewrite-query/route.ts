@@ -27,9 +27,9 @@ export async function POST(req: NextRequest) {
       { json: true, temperature: 0.7 },
     );
 
-    const parsed = parseJson<{ query?: string }>(raw);
-    if (!parsed.query) throw new Error('DeepSeek returned no query');
-    return NextResponse.json({ query: parsed.query });
+    const result = parseJson<{ query?: string }>(raw);
+    if (!result.query) throw new Error('DeepSeek returned no query');
+    return NextResponse.json({ query: result.query });
   } catch (err) {
     return NextResponse.json({ error: String(err) }, { status: 500 });
   }
