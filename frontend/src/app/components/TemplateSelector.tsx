@@ -1,6 +1,6 @@
 'use client';
 
-import { useRef, useState, useCallback } from 'react';
+import { useRef, useState, useCallback, useEffect } from 'react';
 import type { VideoMode } from '../types';
 import type { BrandProps, BrandLogo } from '../types';
 import { AuthForm } from './AuthForm';
@@ -86,7 +86,14 @@ const TEMPLATES: { mode: VideoMode; label: string; description: string; preview:
 
 interface TemplateSelectorProps {
   selected: VideoMode | null;
-  onSelect: (mode: VideoMode) => void;
+  // The style segment from the URL (/template/<style>), or null on /template.
+  routeStyle: VideoMode | null;
+  // Card click → navigate to /template/<style> (the shell handles what happens).
+  onPickStyle: (mode: VideoMode) => void;
+  // Carousel popup → "Standard" (fill slides yourself, go to the editor).
+  onStandard: () => void;
+  // Close the carousel popup → back to /template.
+  onCloseStyle: () => void;
   onSelectWithAi: () => void;
   onGoToBuilder: () => void;
   brand: BrandProps;
@@ -109,13 +116,18 @@ interface TemplateSelectorProps {
 }
 
 export function TemplateSelector({
-  selected, onSelect, onSelectWithAi, onGoToBuilder,
+  selected, routeStyle, onPickStyle, onStandard, onCloseStyle, onSelectWithAi, onGoToBuilder,
   brand, loading, saving, uploading, error,
   user, authLoading, onSignIn, onSignUp, onResetPassword, onChangePassword, onSignOut,
   onSave, onUploadLogo, onDeleteLogo, onSelectLogo, onClearError,
 }: TemplateSelectorProps) {
   const fileRef = useRef<HTMLInputElement>(null);
+  // The carousel setup popup is opened by the /template/carousel route; its
+  // internal 'template' → 'content' step stays local (not its own URL).
   const [carouselStep, setCarouselStep] = useState<null | 'template' | 'content'>(null);
+  useEffect(() => {
+    setCarouselStep(routeStyle === 'carousel' ? 'template' : null);
+  }, [routeStyle]);
   const [displayName, setDisplayName] = useState(brand.displayName);
   const [handle, setHandle] = useState(brand.handle);
   const [hoveredLogo, setHoveredLogo] = useState<string | null>(null);
@@ -409,7 +421,7 @@ export function TemplateSelector({
           return (
             <button
               key={mode}
-              onClick={() => mode === 'carousel' ? setCarouselStep('template') : onSelect(mode)}
+              onClick={() => onPickStyle(mode)}
               className="group relative flex flex-col items-center gap-4 focus:outline-none transition-transform duration-150 hover:scale-[1.02] active:scale-[0.98]"
             >
               <div
@@ -448,7 +460,7 @@ export function TemplateSelector({
       {carouselStep && (
         <div
           className="fixed inset-0 z-50 flex items-center justify-center bg-black/70"
-          onClick={() => setCarouselStep(null)}
+          onClick={onCloseStyle}
         >
           <div
             className="relative bg-zinc-950 border border-zinc-800 rounded-lg w-full max-w-2xl mx-4 p-6 flex flex-col gap-6"
@@ -456,7 +468,7 @@ export function TemplateSelector({
           >
             {/* Close */}
             <button
-              onClick={() => setCarouselStep(null)}
+              onClick={onCloseStyle}
               className="absolute top-4 right-4 w-7 h-7 flex items-center justify-center rounded-md text-zinc-600 hover:text-zinc-300 hover:bg-zinc-800 transition-colors"
             >
               <svg width="14" height="14" viewBox="0 0 14 14" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round">
@@ -513,7 +525,7 @@ export function TemplateSelector({
                 </div>
                 <div className="flex gap-2">
                   <button
-                    onClick={() => { setCarouselStep(null); onGoToBuilder(); }}
+                    onClick={onGoToBuilder}
                     className="flex-1 px-4 py-2 rounded-md bg-zinc-900 border border-zinc-800 text-zinc-300 hover:bg-zinc-800 hover:border-zinc-700 hover:text-white text-sm font-medium transition-colors"
                   >
                     Edit template
@@ -537,13 +549,13 @@ export function TemplateSelector({
                 </div>
                 <div className="flex gap-2">
                   <button
-                    onClick={() => { setCarouselStep(null); onSelect('carousel'); }}
+                    onClick={onStandard}
                     className="flex-1 px-4 py-2 rounded-md bg-zinc-900 border border-zinc-800 text-zinc-300 hover:bg-zinc-800 hover:border-zinc-700 hover:text-white text-sm font-medium transition-colors"
                   >
                     Standard
                   </button>
                   <button
-                    onClick={() => { setCarouselStep(null); onSelectWithAi(); }}
+                    onClick={onSelectWithAi}
                     className="flex-1 px-4 py-2 rounded-md bg-white text-black hover:bg-zinc-100 text-sm font-semibold transition-colors"
                   >
                     With AI ✦

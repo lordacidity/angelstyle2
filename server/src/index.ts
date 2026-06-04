@@ -184,15 +184,28 @@ app.post("/api/files/:name/backlog", (req, res) => {
   res.json(rec);
 });
 
+// Tracks whether we've already logged an adb failure so a missing/stopped adb
+// doesn't spam the server log on every poll. Reset once a list succeeds again.
+let devicesWarned = false;
 app.get("/api/devices", async (_req, res) => {
   try {
     const devices = await listDevices();
+    devicesWarned = false;
     const enriched = devices.map((d) => ({ ...d, name: store.getPhoneName(d.serial) ?? null }));
     res.json(enriched);
   } catch (err) {
-    res.status(500).json({ error: String(err) });
+    // adb missing / not running / no devices: reply with an empty list (200)
+    // rather than a 500, so the polling clients (mini-panel + deck) don't make
+    // the browser log a failed request every few seconds. "No devices" simply
+    // reads as "none connected". Logged once until adb recovers.
+    if (!devicesWarned) {
+      console.warn("[devices] adb unavailable — returning empty device list:", String(err));
+      devicesWarned = true;
+    }
+    res.json([]);
   }
 });
+
 
 // Local "reel catalogue" — every successful push spawns a copy at
 // ~/Downloads/reel catalogue/MM-DD-YYYY/<phone-name>/<filename>. This is the

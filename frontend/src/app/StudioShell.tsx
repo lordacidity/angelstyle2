@@ -1,23 +1,34 @@
 'use client';
 
+// StudioShell — the persistent Studio app shell. Rendered once by the (studio)
+// route-group layout, so it stays mounted across all section navigations and
+// nothing (live phone feed, AI wizard, video rows, scroll) resets when the URL
+// changes. The visible section is derived from the pathname instead of local
+// state; the thin route page.tsx files just make each URL resolve.
+
 import React, { lazy, Suspense, useEffect, useState } from 'react';
+import { usePathname, useRouter } from 'next/navigation';
 import { useVideoEntries } from './hooks/useVideoEntries';
 import { useGoogleSheets } from './hooks/useGoogleSheets';
 import { useBrandKit } from './hooks/useBrandKit';
 import { useAuth } from './hooks/useAuth';
 import type { CarouselSettings } from './components/carouselTypes';
 import { Sidebar } from './components/Sidebar';
+import { BoardSection } from './components/BoardSection';
 import { TemplateSelector } from './components/TemplateSelector';
 import { CanvasGrid } from './components/CanvasGrid';
 import { ErrorBoundary } from './components/ErrorBoundary';
 import { GoogleSheetsModal } from './components/GoogleSheetsModal';
 import { PhonedeckMiniPanel } from './components/PhonedeckMiniPanel';
+import { BoardWidget } from './components/BoardWidget';
+import { useBoard, type BoardRow, type BoardTable } from './hooks/useBoard';
 import { PhonedeckApp } from './phonedeck/PhonedeckApp';
 import { PhonedeckTrending } from './phonedeck/PhonedeckTrending';
 import { PhonedeckImages } from './phonedeck/PhonedeckImages';
 import { GRID_BG_STYLE } from '@/lib/ui-constants';
 import { makeEmptyEntry } from '@/lib/entry';
-import type { AppSection, VideoMode } from './types';
+import { sectionFromPath, pathForSection, parseStyle } from '@/lib/sections';
+import type { VideoMode } from './types';
 
 const AiCardsSection = lazy(() =>
   import('./components/AiCardsSection').then(m => ({ default: m.AiCardsSection }))
@@ -55,8 +66,12 @@ function PhonedeckPane({ visible, children }: { visible: boolean; children: Reac
   );
 }
 
-export default function Home() {
-  const [activeSection, setActiveSection] = useState<AppSection>('template');
+export function StudioShell() {
+  const pathname = usePathname();
+  const router = useRouter();
+  const activeSection = sectionFromPath(pathname);
+  const routeStyle = parseStyle(pathname); // /template/<style> → 'twitter'|'caption'|'carousel'|null
+
   const [selectedTemplate, setSelectedTemplate] = useState<VideoMode | null>(null);
   const [carouselSettingsMap, setCarouselSettingsMap] = useState<Record<string, CarouselSettings>>({});
   const { user, loading: authLoading, signIn, signUp, signOut, resetPassword, changePassword } = useAuth();
@@ -70,7 +85,18 @@ export default function Home() {
 
   const googleSheets = useGoogleSheets({ onImport: setEntries });
 
+  // One board instance for the whole shell — shared with the floating BoardWidget
+  // so a sent row can be flipped to Posted here when its video is exported.
+  const board = useBoard();
+  // entry id → the board row it came from, so export can mark that row Posted.
+  const [boardOrigins, setBoardOrigins] = useState<Record<string, { table: BoardTable; id: string }>>({});
+
   const [pendingAiSeed, setPendingAiSeed] = useState<{ imageSrc: string; headline: string; subheadline: string; subheadline2?: string; articleUrl?: string } | null>(null);
+
+  // Set to an entry id when the Board widget's send arrow drops a row into the
+  // generator; CanvasGrid picks it up, runs the fetch→crop→caption pipeline for
+  // that entry, then clears it.
+  const [pendingBoardSend, setPendingBoardSend] = useState<string | null>(null);
 
   // Once the user has visited AI Cards, keep that section mounted (just hidden)
   // so its internal state — picked talent, fetched stories, drafted headline,
@@ -78,6 +104,21 @@ export default function Home() {
   // arrow. Without this, AiCardsSection unmounts and resets to step 1.
   const [aiEverVisited, setAiEverVisited] = useState(false);
   useEffect(() => { if (activeSection === 'ai') setAiEverVisited(true); }, [activeSection]);
+
+  // Template-style sub-routes drive selection: /template/twitter|caption set the
+  // mode and advance to the editor; /template/carousel just marks carousel
+  // selected (TemplateSelector then shows its setup popup).
+  useEffect(() => {
+    if (routeStyle === 'twitter' || routeStyle === 'caption') {
+      setSelectedTemplate(routeStyle);
+      setEntries(prev => prev.map(e => ({ ...e, mode: routeStyle })));
+      const t = setTimeout(() => router.push(pathForSection('media')), 400);
+      return () => clearTimeout(t);
+    }
+    if (routeStyle === 'carousel') {
+      setSelectedTemplate('carousel');
+    }
+  }, [routeStyle]); // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => {
     const raw = sessionStorage.getItem('ai-card-seed');
@@ -89,14 +130,14 @@ export default function Home() {
       // Go through the normal carousel template flow so savedSlides loads before we apply content
       setSelectedTemplate('carousel');
       setEntries(prev => prev.map(e => ({ ...e, mode: 'carousel' as const })));
-      setTimeout(() => setActiveSection('media'), 400);
+      setTimeout(() => router.push(pathForSection('media')), 400);
     } catch { /* malformed seed — ignore */ }
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   function handleTemplateSelect(mode: VideoMode) {
     setSelectedTemplate(mode);
     setEntries(prev => prev.map(e => ({ ...e, mode })));
-    setTimeout(() => setActiveSection('media'), 400);
+    setTimeout(() => router.push(pathForSection('media')), 400);
   }
 
   function handleBuildCard(seed: { imageSrc: string; headline: string; subheadline: string; subheadline2?: string; articleUrl?: string }) {
@@ -104,10 +145,31 @@ export default function Home() {
     handleTemplateSelect('carousel');
   }
 
+  // Board widget → generator. Replace the current rows with a single fresh entry
+  // carrying this row's link/caption/context, then hand its id to CanvasGrid via
+  // pendingBoardSend so it auto-fetches and advances to cropping. Carousel mode
+  // can't crop a raw video, so we fall back to a video mode.
+  function handleSendBoardRow(row: BoardRow) {
+    const mode: VideoMode = entries[0]?.mode && entries[0].mode !== 'carousel' ? entries[0].mode : 'twitter';
+    const id = Date.now().toString();
+    setEntries([{ ...makeEmptyEntry(id, mode), url: row.url, caption: row.vidCaption, context: row.context }]);
+    setBoardOrigins(prev => ({ ...prev, [id]: { table: board.active, id: row.id } }));
+    setPendingBoardSend(id);
+    router.push(pathForSection('media'));
+  }
+
+  // Export finished for an entry — if it came from the board, flip that row to
+  // Posted (reflected in the widget's checkbox and persisted to the board DB).
+  function handleEntryExported(entryId: string) {
+    const origin = boardOrigins[entryId];
+    if (origin) board.markPosted(origin.table, origin.id);
+  }
+  const boardSentIds = new Set(Object.keys(boardOrigins));
+
   function handleResetAll() {
     resetEverything();
     setSelectedTemplate(null);
-    setActiveSection('template');
+    router.push(pathForSection('template'));
   }
 
   // "Clear" in the media toolbar: wipe all rows back to one empty entry (keeping
@@ -129,9 +191,15 @@ export default function Home() {
       <div style={{ display: activeSection === 'media' ? undefined : 'none' }}>
         <PhonedeckMiniPanel />
       </div>
+      {/* Floating Shared Board widget — left of the centered generator. Same
+          board as the /board page, in a movable/resizable panel so links can be
+          triaged without leaving Media. Kept mounted (display:none) off-tab so
+          an in-progress draft / resize survives navigation, like the panel
+          above. */}
+      <div style={{ display: activeSection === 'media' ? undefined : 'none' }}>
+        <BoardWidget board={board} onSendRow={handleSendBoardRow} />
+      </div>
       <Sidebar
-        active={activeSection}
-        onSelect={setActiveSection}
         googleToken={googleSheets.googleToken}
         onConnectGoogle={googleSheets.connectGoogle}
         onOpenSheetsModal={() => googleSheets.setShowSheetsModal(true)}
@@ -146,7 +214,7 @@ export default function Home() {
             <Suspense fallback={<SectionLoader />}>
               <AiCardsSection
                 onBuildCard={handleBuildCard}
-                onCancel={() => setActiveSection('template')}
+                onCancel={() => router.push(pathForSection('template'))}
               />
             </Suspense>
           </div>
@@ -155,9 +223,12 @@ export default function Home() {
         {activeSection === 'template' && (
           <TemplateSelector
             selected={selectedTemplate}
-            onSelect={handleTemplateSelect}
-            onSelectWithAi={() => setActiveSection('ai')}
-            onGoToBuilder={() => setActiveSection('builder')}
+            routeStyle={routeStyle}
+            onPickStyle={(m) => router.push(`/template/${m}`)}
+            onStandard={() => handleTemplateSelect('carousel')}
+            onCloseStyle={() => router.push(pathForSection('template'))}
+            onSelectWithAi={() => router.push(pathForSection('ai'))}
+            onGoToBuilder={() => router.push(pathForSection('builder'))}
             brand={brand}
             loading={loading}
             saving={saving}
@@ -201,7 +272,11 @@ export default function Home() {
                 setSettingsMap={setCarouselSettingsMap}
                 pendingAiSeed={pendingAiSeed}
                 onAiSeedConsumed={() => setPendingAiSeed(null)}
-                onBackToAi={() => setActiveSection('ai')}
+                pendingBoardSend={pendingBoardSend}
+                onBoardSendConsumed={() => setPendingBoardSend(null)}
+                boardSentIds={boardSentIds}
+                onEntryExported={handleEntryExported}
+                onBackToAi={() => router.push(pathForSection('ai'))}
               />
             </GridSection>
           </div>
@@ -213,6 +288,14 @@ export default function Home() {
               <Suspense fallback={<SectionLoader />}>
                 <BuilderGrid brand={brand} onSelectLogo={selectLogo} userId={user?.id ?? null} />
               </Suspense>
+            </GridSection>
+          </ErrorBoundary>
+        )}
+
+        {activeSection === 'board' && (
+          <ErrorBoundary>
+            <GridSection>
+              <BoardSection />
             </GridSection>
           </ErrorBoundary>
         )}

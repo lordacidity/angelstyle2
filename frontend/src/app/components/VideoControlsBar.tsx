@@ -137,9 +137,13 @@ interface VideoControlsBarProps {
   recordingState: RecordingState | null;
   videoSrc:       string | null;
   onDownloadAll:  () => void;
+  // Fired after a successful export. Used by the Board flow to mark the source
+  // row Posted. markPostedOnExport just relabels the button to advertise it.
+  onExport?:           () => void;
+  markPostedOnExport?: boolean;
 }
 
-export function VideoControlsBar({ entryId, activeRef, recordingState, videoSrc }: VideoControlsBarProps) {
+export function VideoControlsBar({ entryId, activeRef, recordingState, videoSrc, onExport, markPostedOnExport }: VideoControlsBarProps) {
   // Once Export is pressed for this entry, the full timeline collapses to a slim
   // status bar (export progress + Download All). Reset whenever the selected
   // entry changes so each video starts in the full editor again.
@@ -661,12 +665,14 @@ export function VideoControlsBar({ entryId, activeRef, recordingState, videoSrc 
             <button onClick={() => activeRef.cancelExport()} className="text-[10px] text-red-400 hover:text-red-300 transition-colors">Cancel</button>
           </div>
         ) : (
-          <button onClick={() => activeRef.startDownload()}
+          <button
+            onClick={() => { activeRef.startDownload().then(() => onExport?.()).catch(() => {}); }}
+            title={markPostedOnExport ? 'Export the video and mark its board row as Posted' : 'Export the video'}
             className="flex items-center gap-1.5 rounded-full bg-white px-4 py-1.5 text-xs font-semibold text-black hover:bg-zinc-100 transition-colors shrink-0">
             <svg width="11" height="11" viewBox="0 0 24 24" fill="currentColor">
               <circle cx="12" cy="12" r="9" fill="none" stroke="currentColor" strokeWidth="2"/><circle cx="12" cy="12" r="4"/>
             </svg>
-            Export
+            {markPostedOnExport ? 'Export + mark posted' : 'Export'}
           </button>
         )}
       </div>

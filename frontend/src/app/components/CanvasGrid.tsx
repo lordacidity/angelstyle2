@@ -63,6 +63,14 @@ interface CanvasGridProps {
   setSettingsMap: Dispatch<SetStateAction<Record<string, CarouselSettings>>>;
   pendingAiSeed?: { imageSrc: string; headline: string; subheadline: string; subheadline2?: string; articleUrl?: string } | null;
   onAiSeedConsumed?: () => void;
+  // Set to an entry id by the Board widget's send arrow — that entry is fetched
+  // and advanced through the same "Next" pipeline (fetch → crop → caption/CTA).
+  pendingBoardSend?: string | null;
+  onBoardSendConsumed?: () => void;
+  // Entry ids that came from the Board widget, and a callback fired when one is
+  // exported — together they let the Export button mark the source row Posted.
+  boardSentIds?: Set<string>;
+  onEntryExported?: (entryId: string) => void;
   // Optional — when provided, renders a back arrow in the toolbar that
   // returns the user to the AI Cards flow (headline + photo picker) for the
   // same person. Placeholder behaviour for now: re-enters the AI section.
@@ -687,6 +695,8 @@ export function CanvasGrid({
   onFetchVideo, onSetCarouselSubMode, userId,
   settingsMap, setSettingsMap,
   pendingAiSeed, onAiSeedConsumed, onBackToAi,
+  pendingBoardSend, onBoardSendConsumed,
+  boardSentIds, onEntryExported,
 }: CanvasGridProps) {
   const isCarousel = entries.length > 0 && entries[0].mode === 'carousel';
 
@@ -694,6 +704,48 @@ export function CanvasGrid({
   const [scaleMap,                  setScaleMap]                  = useState<Record<string, number>>({});
   const [bgStateMap,                setBgStateMap]                = useState<Record<string, CarouselBgLayerState>>({});
   const [viewScale,                 setViewScale]                 = useState(0.9);
+
+  // Horizontal-only position for the whole creator/generator column. The grip
+  // handle slides it left/right (never resizes). Persisted so it stays put
+  // across refreshes. Only the grip starts a drag, so canvas trimming and the
+  // input fields are completely untouched.
+  const [hOffset, setHOffset] = useState(0);
+  const [hDragging, setHDragging] = useState(false);
+  const hDragRef = useRef({ startX: 0, startOffset: 0 });
+  const hHydratedRef = useRef(false);
+  useEffect(() => {
+    try {
+      const v = window.localStorage.getItem('studio.creatorHOffset');
+      if (v != null) { const n = parseFloat(v); if (Number.isFinite(n)) setHOffset(n); }
+    } catch { /* ignore */ }
+    hHydratedRef.current = true;
+  }, []);
+  useEffect(() => {
+    if (!hHydratedRef.current) return;
+    try { window.localStorage.setItem('studio.creatorHOffset', String(hOffset)); } catch { /* ignore */ }
+  }, [hOffset]);
+  const onCreatorGripDown = (e: React.MouseEvent) => {
+    e.preventDefault();
+    hDragRef.current = { startX: e.clientX, startOffset: hOffset };
+    setHDragging(true);
+  };
+  useEffect(() => {
+    if (!hDragging) return;
+    const onMove = (e: MouseEvent) => {
+      const dx = e.clientX - hDragRef.current.startX;
+      // Clamp so the column can't be dragged fully off-screen.
+      const limit = Math.max(120, (window.innerWidth - 72) / 2);
+      const next = Math.max(-limit, Math.min(limit, hDragRef.current.startOffset + dx));
+      setHOffset(next);
+    };
+    const onUp = () => setHDragging(false);
+    window.addEventListener('mousemove', onMove);
+    window.addEventListener('mouseup', onUp);
+    return () => {
+      window.removeEventListener('mousemove', onMove);
+      window.removeEventListener('mouseup', onUp);
+    };
+  }, [hDragging]);
   const [recordingStateMap,         setRecordingStateMap]         = useState<Record<string, RecordingState>>({});
   const [carouselRecordingStateMap, setCarouselRecordingStateMap] = useState<Record<string, RecordingState>>({});
   const [canvasRefVersion,          setCanvasRefVersion]          = useState(0);
@@ -1072,6 +1124,21 @@ export function CanvasGrid({
     await generateSocialCaption({ ...entry, data });
   }, [onFetchVideo, generateSocialCaption]);
 
+  // Board widget "send": StudioShell drops the chosen row into a single entry
+  // and sets pendingBoardSend to its id. Treat it exactly like clicking the
+  // media Next arrow on that row — fetch the video (revealing the crop editor)
+  // and chain the caption + CTA. Run once, then clear so it can't re-fire.
+  useEffect(() => {
+    if (!pendingBoardSend) return;
+    const entry = entries.find(e => e.id === pendingBoardSend);
+    onBoardSendConsumed?.();
+    if (entry && entry.mode !== 'carousel' && entry.url.trim()) {
+      setSelectedId(entry.id);
+      void handleFetchThenGenerate(entry);
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [pendingBoardSend]);
+
   const copySocialCaption = useCallback(async (entryId: string) => {
     const text = socialCaptionMap[entryId]?.text;
     if (!text) return;
@@ -1308,10 +1375,26 @@ export function CanvasGrid({
       {/* ── Vertical scroll column ── */}
       <div
         ref={scrollRef}
-        className="flex-1 overflow-y-auto scroll-smooth"
+        className="flex-1 overflow-y-auto overflow-x-hidden scroll-smooth"
         style={{ paddingRight: isSelectedCarousel && selectedEntry ? 360 : 0 }}
       >
-        <div className="flex flex-col items-center gap-8 py-6 px-4" style={{ zoom: viewScale }}>
+        {/* Horizontal-move wrapper — the grip slides the whole creator left/right. */}
+        <div style={{ transform: `translateX(${hOffset}px)` }}>
+          {/* Grip handle */}
+          <div className="flex justify-center pt-1 select-none">
+            <button
+              onMouseDown={onCreatorGripDown}
+              title="Drag left / right to move the creator"
+              className={`flex items-center gap-1 rounded-full border border-zinc-800 bg-zinc-950/80 px-2 py-0.5 text-[9px] font-medium uppercase tracking-wider text-zinc-500 hover:text-zinc-300 hover:border-zinc-600 transition-colors ${hDragging ? 'cursor-grabbing' : 'cursor-grab'}`}
+            >
+              <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <polyline points="9 6 3 12 9 18" />
+                <polyline points="15 6 21 12 15 18" />
+              </svg>
+              Move
+            </button>
+          </div>
+          <div className="flex flex-col items-center gap-8 pt-2 pb-6 px-4" style={{ zoom: viewScale }}>
 
           {entries.map((entry, index) => {
             const isSelected      = entry.id === (selectedEntry?.id ?? '');
@@ -1798,17 +1881,24 @@ export function CanvasGrid({
             : <GhostAddCard onAdd={() => onAddRow()} />
           }
 
+          </div>
         </div>
       </div>
 
-      {/* ── Video controls bar — shared bottom panel for video templates ── */}
-      <div className="bg-zinc-950" style={{ paddingRight: isCarouselVideoSelected ? 360 : 0 }}>
+      {/* ── Video controls bar — shared bottom panel for video templates ──
+          relative z-50 lifts the trimmer + export controls above the floating
+          Studio widgets (BoardWidget / Phonedeck panel, z-40) so they never
+          cover the editor. Safe to compete at the root stacking level: no
+          ancestor between here and the page root creates a stacking context. */}
+      <div className="relative z-50 bg-zinc-950" style={{ paddingRight: isCarouselVideoSelected ? 360 : 0 }}>
         <VideoControlsBar
           entryId={showVideoControls ? selectedEntry!.id : null}
           activeRef={activeVideoRef}
           recordingState={activeRecordingState}
           videoSrc={activeVideoSrc}
           onDownloadAll={onDownloadAll}
+          markPostedOnExport={!!selectedEntry && !!boardSentIds?.has(selectedEntry.id)}
+          onExport={() => { if (selectedEntry) onEntryExported?.(selectedEntry.id); }}
         />
       </div>
 

@@ -1,10 +1,11 @@
 'use client';
 
+import Link from 'next/link';
+import { usePathname } from 'next/navigation';
 import type { AppSection } from '../types';
+import { sectionFromPath, pathForSection } from '@/lib/sections';
 
 interface SidebarProps {
-  active: AppSection;
-  onSelect: (s: AppSection) => void;
   googleToken: { accessToken: string } | null;
   onConnectGoogle: () => void;
   onOpenSheetsModal: () => void;
@@ -83,6 +84,17 @@ const NAV: { id: AppSection; label: string; icon: React.ReactNode }[] = [
     ),
   },
   {
+    id: 'board',
+    label: 'Board',
+    // 2×2 grid — a shared spreadsheet of links/info.
+    icon: (
+      <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+        <rect x="3" y="3" width="18" height="18" rx="2"/>
+        <path d="M3 9h18M3 15h18M9 3v18M15 3v18"/>
+      </svg>
+    ),
+  },
+  {
     id: 'schedule',
     label: 'Schedule',
     icon: (
@@ -97,19 +109,19 @@ const NAV: { id: AppSection; label: string; icon: React.ReactNode }[] = [
 ];
 
 export function Sidebar({
-  active, onSelect,
   googleToken, onConnectGoogle, onOpenSheetsModal, onDisconnectGoogle, onResetAll,
 }: SidebarProps) {
+  const active: AppSection = sectionFromPath(usePathname());
   return (
     <aside className="fixed top-0 left-0 h-screen w-[72px] bg-zinc-950 border-r border-zinc-800 flex flex-col z-30">
-      {/* Nav */}
+      {/* Nav — real links so each section has its own URL (prefetch + open in new tab) */}
       <nav className="flex-1 px-2 py-4 flex flex-col gap-1">
         {NAV.map(({ id, label, icon }) => {
           const isActive = active === id;
           return (
-            <button
+            <Link
               key={id}
-              onClick={() => onSelect(id)}
+              href={pathForSection(id)}
               className={`w-full flex flex-col items-center gap-2 py-2.5 px-1 rounded-lg transition-colors ${
                 isActive
                   ? 'text-white'
@@ -118,7 +130,7 @@ export function Sidebar({
             >
               {icon}
               <span className="text-[9px] font-medium leading-none">{label}</span>
-            </button>
+            </Link>
           );
         })}
       </nav>

@@ -290,6 +290,20 @@ export function useRecording(config: UseRecordingConfig) {
       const clipDuration = Math.max(0.1, clipEnd - clipStart);
       const totalFrames = Math.floor(clipDuration * EXPORT_FPS);
 
+      // Progress is reported from the decode + encode loops, which run once per
+      // sample / frame — thousands of times for a long clip. Pushing every value
+      // into React state floods it faster than it can render and trips React's
+      // "Maximum update depth exceeded" guard. Publish only when the bar would
+      // visibly move (≥1%), so the total number of state updates stays ~constant
+      // (~70) regardless of clip length. Endpoints (0.95, 1) are set directly.
+      let lastReportedProgress = 0;
+      const reportProgress = (p: number) => {
+        if (p - lastReportedProgress >= 0.01) {
+          lastReportedProgress = p;
+          setRecProgress(p);
+        }
+      };
+
       console.log('[EXPORT] fullDuration:', fullDuration, 'clipStart:', clipStart, 'clipEnd:', clipEnd, 'clipDuration:', clipDuration, 'totalFrames:', totalFrames);
 
       // ── Extract AVC decoder description from MP4Box ──────────────────────────
@@ -383,6 +397,10 @@ export function useRecording(config: UseRecordingConfig) {
       const frameQueue: Array<{ frame: VideoFrame; ts: number }> = [];
       let decoderError: Error | null = null;
       let producerDone = false;
+      // Set once the render loop exits (trimmed clip fully drawn). The producer
+      // watches this so it can stop decoding the unneeded tail instead of
+      // deadlocking on backpressure with no consumer left to drain the queue.
+      let consumerDone = false;
       let outputCount = 0;
       let consumerWaiter: (() => void) | null = null;
       let producerWaiter: (() => void) | null = null;
@@ -419,7 +437,13 @@ export function useRecording(config: UseRecordingConfig) {
           for (let i = 0; i < videoSamples.length; i++) {
             if (signal.aborted) throw new Error('Cancelled');
             if (decoderError) throw decoderError;
+            // Consumer finished the trimmed clip — samples past clipEnd are
+            // unneeded. Stop now; continuing would fill frameQueue to
+            // MAX_BUFFERED and park on producerWaiter forever (no consumer left
+            // to wake us). This is what made end-trimmed exports hang.
+            if (consumerDone) return;
             while (frameQueue.length >= MAX_BUFFERED) {
+              if (consumerDone) return;
               await new Promise<void>((r) => { producerWaiter = r; });
               if (signal.aborted) throw new Error('Cancelled');
               if (decoderError) throw decoderError;
@@ -430,7 +454,7 @@ export function useRecording(config: UseRecordingConfig) {
               timestamp: s.timestamp * 1_000_000,
               data: s.data,
             }));
-            setRecProgress(0.05 + (i / videoSamples.length) * 0.1);
+            reportProgress(0.05 + (i / videoSamples.length) * 0.1);
           }
           console.log('[EXPORT] all samples submitted, flushing...');
           await decoder.flush();
@@ -587,12 +611,17 @@ export function useRecording(config: UseRecordingConfig) {
           const sample = new VideoSample(offscreen, { timestamp: targetTs, duration: EXPORT_FRAME_DURATION });
           await videoSource.add(sample);
           sample.close();
-          setRecProgress(0.15 + (frameIdx / totalFrames) * 0.7);
+          reportProgress(0.15 + (frameIdx / totalFrames) * 0.7);
         }
       } finally {
+        // Tell the producer to stop decoding the (now unneeded) tail, then wake
+        // it so it observes the flag and returns — otherwise `await producer`
+        // below deadlocks whenever clipEnd < fullDuration (i.e. the end was
+        // trimmed off).
+        consumerDone = true;
         if (currentFrame) { currentFrame.frame.close(); currentFrame = null; }
         while (frameQueue.length > 0) frameQueue.shift()!.frame.close();
-        wakeProducer(); // in case it's still waiting on backpressure
+        wakeProducer(); // wake it so it observes consumerDone and returns
       }
 
       // Wait for producer (decode + flush) to complete before closing decoder.

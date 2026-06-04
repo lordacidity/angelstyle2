@@ -29,5 +29,8 @@ npm-debug.log*
 .env
 .env.local
 
+# Claude Code local (personal) settings
+.claude/settings.local.json
+
 # Misc
 *.tsbuildinfo

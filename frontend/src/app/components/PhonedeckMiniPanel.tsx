@@ -49,12 +49,16 @@ export function PhonedeckMiniPanel() {
   // top-left in viewport coords (set on first drag, then sticky).
   const [position, setPosition] = useState<{ x: number; y: number } | null>(null);
   const [dragging, setDragging] = useState(false);
+  // Panel size. null = default (w-64 / auto height). {w,h} = user-resized.
+  const [size, setSize] = useState<{ w: number; h: number } | null>(null);
+  const [resizing, setResizing] = useState(false);
   const panelRef = useRef<HTMLDivElement>(null);
   const dragStateRef = useRef({
     startMouseX: 0, startMouseY: 0,
     startPanelX: 0, startPanelY: 0,
     moved: false,
   });
+  const resizeStateRef = useRef({ startX: 0, startY: 0, startW: 0, startH: 0 });
   const hydratedRef = useRef(false);
 
   // Hydrate collapsed + position from localStorage so the panel stays where
@@ -70,6 +74,13 @@ export function PhonedeckMiniPanel() {
           setPosition(parsed);
         }
       }
+      const s = window.localStorage.getItem('studio.phonedeckPanelSize');
+      if (s) {
+        const parsed = JSON.parse(s) as { w: number; h: number };
+        if (typeof parsed?.w === 'number' && typeof parsed?.h === 'number') {
+          setSize(parsed);
+        }
+      }
     } catch { /* ignore */ }
     hydratedRef.current = true;
   }, []);
@@ -83,6 +94,12 @@ export function PhonedeckMiniPanel() {
       if (position) window.localStorage.setItem('studio.phonedeckPanelPosition', JSON.stringify(position));
     } catch { /* ignore */ }
   }, [position]);
+  useEffect(() => {
+    if (!hydratedRef.current) return;
+    try {
+      if (size) window.localStorage.setItem('studio.phonedeckPanelSize', JSON.stringify(size));
+    } catch { /* ignore */ }
+  }, [size]);
 
   // Drag — header is the grab handle. Clicking the header (no movement) still
   // toggles collapse; moving past a 3px threshold flips into drag mode.
@@ -128,6 +145,33 @@ export function PhonedeckMiniPanel() {
       window.removeEventListener('mouseup', onUp);
     };
   }, [dragging]);
+
+  // Resize — bottom-right corner grip. Grows/shrinks the panel within sane
+  // bounds; the size sticks (localStorage) like the position.
+  const onResizeMouseDown = (e: React.MouseEvent) => {
+    if (!panelRef.current) return;
+    e.preventDefault();
+    e.stopPropagation();
+    const rect = panelRef.current.getBoundingClientRect();
+    resizeStateRef.current = { startX: e.clientX, startY: e.clientY, startW: rect.width, startH: rect.height };
+    setResizing(true);
+  };
+  useEffect(() => {
+    if (!resizing) return;
+    const onMove = (e: MouseEvent) => {
+      const rs = resizeStateRef.current;
+      const w = Math.max(220, Math.min(window.innerWidth - 40, rs.startW + (e.clientX - rs.startX)));
+      const h = Math.max(140, Math.min(window.innerHeight - 40, rs.startH + (e.clientY - rs.startY)));
+      setSize({ w, h });
+    };
+    const onUp = () => setResizing(false);
+    window.addEventListener('mousemove', onMove);
+    window.addEventListener('mouseup', onUp);
+    return () => {
+      window.removeEventListener('mousemove', onMove);
+      window.removeEventListener('mouseup', onUp);
+    };
+  }, [resizing]);
 
   // Live file feed.
   useEffect(() => {
@@ -222,19 +266,22 @@ export function PhonedeckMiniPanel() {
   // When position is null, fall back to className's bottom-4 right-4. Once
   // the user starts dragging (or we hydrated a saved position), pin via inline
   // style instead.
-  const positionStyle: React.CSSProperties | undefined = position
-    ? { left: position.x, top: position.y, bottom: 'auto', right: 'auto' }
-    : undefined;
+  const panelStyle: React.CSSProperties = {
+    ...(position ? { left: position.x, top: position.y, bottom: 'auto', right: 'auto' } : {}),
+    ...(size ? { width: size.w } : {}),
+    // Height only applies when expanded — collapsed shows the header alone.
+    ...(size && !collapsed ? { height: size.h } : {}),
+  };
 
   return (
     <div
       ref={panelRef}
-      className="fixed bottom-4 right-4 w-64 bg-zinc-950 border border-zinc-800 rounded-lg shadow-2xl z-40 overflow-hidden select-none"
-      style={positionStyle}
+      className="fixed bottom-4 right-4 w-64 bg-zinc-950 border border-zinc-800 rounded-lg shadow-2xl z-40 overflow-hidden select-none flex flex-col"
+      style={panelStyle}
     >
       <div
         onMouseDown={onHeaderMouseDown}
-        className={`w-full flex items-center justify-between gap-2 px-3 py-2 border-b border-zinc-800 hover:bg-zinc-900 transition-colors ${dragging ? 'cursor-grabbing' : 'cursor-grab'}`}
+        className={`w-full flex items-center justify-between gap-2 px-3 py-2 border-b border-zinc-800 hover:bg-zinc-900 transition-colors shrink-0 ${dragging ? 'cursor-grabbing' : 'cursor-grab'}`}
         title={connected ? 'Phonedeck connected — drag to move, click to collapse' : 'Phonedeck offline — drag to move'}
       >
         <div className="flex items-center gap-2 min-w-0">
@@ -255,7 +302,7 @@ export function PhonedeckMiniPanel() {
         </div>
       </div>
       {!collapsed && (
-        <div className="max-h-72 overflow-y-auto">
+        <div className={`overflow-y-auto ${size ? 'flex-1 min-h-0' : 'max-h-72'}`}>
           {!connected ? (
             <div className="px-3 py-4 text-center text-[10px] text-zinc-600 leading-relaxed">
               Phonedeck server offline.<br />Start <code className="text-zinc-500">npm run dev</code> in <code className="text-zinc-500">phonedeck/server</code>.
@@ -334,6 +381,20 @@ export function PhonedeckMiniPanel() {
               })}
             </div>
           )}
+        </div>
+      )}
+
+      {/* Resize grip — bottom-right corner (only when expanded). */}
+      {!collapsed && (
+        <div
+          onMouseDown={onResizeMouseDown}
+          title="Drag to resize"
+          className="absolute bottom-0 right-0 z-10 flex items-end justify-end p-0.5 cursor-nwse-resize"
+          style={{ width: 16, height: 16 }}
+        >
+          <svg width="10" height="10" viewBox="0 0 10 10" fill="none" stroke="currentColor" strokeWidth="1.2" className="text-zinc-600">
+            <path d="M9 3 L3 9 M9 6 L6 9" strokeLinecap="round" />
+          </svg>
         </div>
       )}
     </div>
