@@ -38,6 +38,7 @@ export interface UseRecordingConfig {
   marketData?: MarketData | null;
   marketAvatarImgRef?: MutableRefObject<HTMLImageElement | null>;
   marketAvatarUrlRef?: MutableRefObject<string | null>;
+  pauvLogoImgRef?: MutableRefObject<HTMLImageElement | null>;
 }
 
 export function useRecording(config: UseRecordingConfig) {
@@ -46,6 +47,12 @@ export function useRecording(config: UseRecordingConfig) {
   const [recStatus, setRecStatus] = useState('');
   const abortControllerRef = useRef<AbortController | null>(null);
 
+  // Always-current snapshot of config. startRecording reads from this ref so
+  // that a stale imperative handle (one render behind due to useImperativeHandle
+  // commit timing) still captures the latest marketData/caption/etc.
+  const configRef = useRef(config);
+  configRef.current = config;
+
   async function startRecording(): Promise<void> {
     const {
       canvasRef, videoRef, brand, rowNumber, videoId,
@@ -53,8 +60,8 @@ export function useRecording(config: UseRecordingConfig) {
       trimStartRef, trimEndRef, includeEditRef,
       logoImgRef, verifiedImgRef,
       overlayCaption, overlayLogoSrc, overlayDisplayName, overlayHandle, overlayVerified,
-      marketData, marketAvatarImgRef, marketAvatarUrlRef,
-    } = config;
+      marketData, marketAvatarImgRef, marketAvatarUrlRef, pauvLogoImgRef,
+    } = configRef.current;
 
     const canvas = canvasRef.current;
     const video = videoRef.current;
@@ -384,6 +391,16 @@ export function useRecording(config: UseRecordingConfig) {
         });
       }
 
+      // Pre-load Pauv logo for the "link in bio" line.
+      if (pauvLogoImgRef) {
+        await new Promise<void>((resolve) => {
+          const img = new Image();
+          img.onload = () => { pauvLogoImgRef.current = img; resolve(); };
+          img.onerror = () => resolve();
+          img.src = '/pauvlogo.png';
+        });
+      }
+
       await output.start();
 
       // ── Streaming decode + render ────────────────────────────────────────────
@@ -529,6 +546,8 @@ export function useRecording(config: UseRecordingConfig) {
             size: marketData.size ?? 'large',
             avatarImgRef: marketAvatarImgRef,
             lastPhotoUrlRef: marketAvatarUrlRef,
+            pauvLogoImgRef,
+            arrowOpacity: 0, // triangle animated per-frame below
           });
         }
       }
@@ -607,6 +626,28 @@ export function useRecording(config: UseRecordingConfig) {
           // the cropBox stays painted over the video, matching the old per-frame
           // ordering bit-for-bit.
           offCtx.drawImage(overlaySprite, 0, 0);
+
+          // Per-frame CTA animation: numbers flip every few seconds + triangle pulses.
+          if (!isClean && marketData && marketAvatarImgRef && marketAvatarUrlRef) {
+            const pulse = 0.2 + 0.8 * (0.5 + 0.5 * Math.sin(2 * Math.PI * targetTs * 0.75));
+            drawMarketRow({
+              ctx: offCtx as any,
+              cx: 0,
+              videoBottomY: cropBoxFrozen.y + cropBoxFrozen.h,
+              cw: CANVAS_W,
+              name: marketData.name,
+              subtitle: marketData.industry ?? marketData.subcategory ?? '—',
+              photo_url: marketData.photo_url,
+              priceUsd: marketData.price.usd,
+              lifetimeChangePct: marketData.price.lifetimeChangePct,
+              sparkline: marketData.sparkline,
+              size: marketData.size ?? 'large',
+              avatarImgRef: marketAvatarImgRef,
+              lastPhotoUrlRef: marketAvatarUrlRef,
+              triangleOnly: true,
+              arrowOpacity: pulse,
+            });
+          }
 
           const sample = new VideoSample(offscreen, { timestamp: targetTs, duration: EXPORT_FRAME_DURATION });
           await videoSource.add(sample);
