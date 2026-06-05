@@ -238,3 +238,87 @@ export const GIFT_ART = {
 };
 export const DIG_FINDS = ['bone', 'worm', 'chest', 'coin'];     // what turns up when he digs
 export const LOVE_GIFTS = ['flower', 'heart', 'coin', 'star'];  // what he leaves you when smitten with you
+
+// ---- THE MONSTER (kill the troll in front of the cop and, three minutes later,
+// he claws back: drinks a potion, shakes to pieces, and erupts into a giant
+// horned red beast that rampages over the widgets). A big, detailed, hideous
+// thing — char-keyed (drawn via blitKeyed): o=dark outline, r=body red,
+// R=highlight, d=dark bruise/shadow, h=horn bone, H=horn shadow, e=glowing eye,
+// p=pupil, t=fangs, m=mouth/maw, g=gums/tongue, k=back-/shoulder-spikes,
+// c=claws/talons. 20 wide; the last four rows are the leg stance (swapped for the
+// two walk frames). ----------------------------------------------------------------
+export const MONSTER_SCALE = 2.2;
+export const MONSTER_COLORS = {
+  o: '#1d0606', r: '#c2241f', R: '#ec5a4c', d: '#7a1414',
+  h: '#efe6cd', H: '#b39256', e: '#ffe14d', p: '#160404',
+  t: '#fff8e6', m: '#2a0606', g: '#8a1f3a', k: '#2c1822', c: '#f2e8c8',
+};
+const M_BODY = [
+  'h..................h', 'Hho..............ohH', 'oHho............ohHo', '.oHho..........ohHo.',
+  '..oHho........ohHo..', '..oHhoo......oohHo..', '..ooorooooooorooo...', '..orrrrrrrrrrrrro...',
+  '..orddddddddddddro..', '..oreeprrrrrrpeero..', '..orepprddddrppero..', '..orrRRRRRRRRRRrro..',
+  '..orrrrrddddrrrrro..', '..orrrrrrrrrrrrrro..', '.oottttttttttttttoo.', '.otmtgtgtgtgtgtmto..',
+  '.ottgmgmgmgmgmgtto..', '..ottttttttttttto...', '..ooooooooooooooo...', 'kkorrrrrrrrrrrroko..',
+  'crrdRRRRRRRRRRdrrc..', '.crrrrddddddrrrrc...', '..orrddrrrrddrrro...', '..orrrrrrrrrrrrro...',
+];
+const M_LEGS_STAND = ['....orr......rro....', '....orr......rro....', '....crr......rrc....', '....ccc......ccc....'];
+const M_LEGS_A = ['...orr........rro...', '...orr........rro...', '...crr........rrc...', '...ccc........ccc...'];
+const M_LEGS_B = ['.....orr....rro.....', '.....orr....rro.....', '.....crr....rrc.....', '.....ccc....ccc.....'];
+export const MONSTER = [...M_BODY, ...M_LEGS_STAND];
+export const MONSTER_WALK_A = [...M_BODY, ...M_LEGS_A];
+export const MONSTER_WALK_B = [...M_BODY, ...M_LEGS_B];
+
+// the potion he downs right before the change (raised to his mouth, then glugged).
+export const POTION_COLORS = { o: '#10231a', g: '#bfe9d6', l: '#b46bff', k: '#8a5a2b' };
+export const POTION = ['..k..', '..k..', '.ggg.', '.glg.', 'glllg', 'glllg', '.ggg.'];
+
+// ---- DEATH (shoot the monster five times and he finally drops): he keels over and
+// lies on his SIDE — a deflated profile you can still read as him: horns up, a shut
+// eye, the slack fanged jaw, a caved-in belly, limbs splayed, tail trailing. Over a
+// few minutes he rots to a skeleton while wildflowers bloom and butterflies gather,
+// then sinks into the earth as the flowers stay. The corpse reuses MONSTER_COLORS;
+// the skeleton has its own bone palette. 30 wide, facing left. --------------------
+export const MONSTER_CORPSE = [
+  '..h.....h.....................', '..hH...Hh.....................', '.ohHrrrHho....................',
+  '.orrrrrrro.......oooooo.......', '.oprrrrrro.....oorrrrrroo.....', 'oomggrttto..oorrrrrrrrrroo....',
+  '.ottttoorrrrrrrrrrrrrrrrrro...', '.orrrrrrrrrddddddddrrrrrrro...', '.orrrrrrrrrrrrrrrrrrrrrrrro...',
+  '.orrrrrrrrrrrrrrrrrrrrrrrro...', '.occooccooccooccooccooccco....',
+];
+export const SKELETON_COLORS = { o: '#3a352c', b: '#efe6cd', B: '#cdbf9b', h: '#d8c89a', e: '#1a1712' };
+export const SKELETON = [
+  '..h.....h.....................', '..bh...hb.....................', '.obbbbbbbo....................',
+  '.obbeebbbo......bbbbbb........', '.obbbbbbbo...bbbbbbbbbbb......', 'oobbbobbbo.bb.b.b.b.b.b.bbb...',
+  '.obbbbbo..bbbbbbbbbbbbbbbbb...', '..ooo...b.b.b.b.b.b.b.b.b.....', '........bbb..bbb..bbb..bbb....',
+  '........bb...bb...bb...bb.....', '........oooooooooooooooooo....',
+];
+
+// ---- GARDEN WILDLIFE: the meadow that springs up after the beast falls grows for
+// a quarter-hour into pockets of forest, and now and then a critter wanders across.
+// Both are char-keyed (drawn via blitKeyed), facing RIGHT (mirrored when they head
+// left). The rabbit hops (two poses — crouched on the ground, splayed mid-leap); the
+// deer trots (two leg frames). w=fur/coat, g=fur shadow, e=eye, p=pink nose/ear,
+// t=fluffy tail. ------------------------------------------------------------------
+export const RABBIT_COLORS = { w: '#edece7', g: '#c3c0b7', e: '#1a1712', p: '#f2a6bd', t: '#f8f6f1' };
+export const RABBIT = [               // crouched / landing
+  '.......w.w', '.......p.p', '.......www', 'tt....wwwe',
+  'twwwwwwwwp', '.wwwwwwww.', '.gg..gg...', '.gg..gg...',
+];
+export const RABBIT_HOP = [           // stretched out mid-leap, legs fore & aft
+  '........ww', '........pp', '.......www', '.....wwwwe',
+  'tt..wwwwwp', '.wwwwwwww.', 'gg......gg', '.g......g.',
+];
+
+// the deer — d=coat, D=back shadow, l=pale belly, o=legs/hoof/nose, e=eye, w=rump
+// patch, h=little antlers. 16 wide; last three rows are the leg stance (two trot
+// frames). Facing right.
+export const DEER_COLORS = { d: '#a06a38', D: '#82542a', l: '#d8bb8c', o: '#4d3119', e: '#15110b', w: '#f2ece1', h: '#6b4a2a' };
+const DEER_BODY = [
+  '.............h.h', '..............h.', '.............dd.', '............dde.',
+  '............ddo.', '...........dd...', '..wDDDDDDDDd....', '.wdddddddddd....',
+  '.wddddddddddl...', '.oddddddddddl...',
+];
+const DEER_LEGS_A = ['...o.o....o.o...', '...o.o....o.o...', '..oo.oo..oo.oo..'];
+const DEER_LEGS_B = ['..o..o...o...o..', '..o..o...o...o..', '.oo.oo...oo.oo..'];
+export const DEER = [...DEER_BODY, ...DEER_LEGS_A];
+export const DEER_WALK_A = DEER;
+export const DEER_WALK_B = [...DEER_BODY, ...DEER_LEGS_B];

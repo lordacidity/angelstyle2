@@ -7,6 +7,9 @@ import {
   UFO, UFO2, CHUTE, MEAT_PIXEL, MEAT_COLORS, MEATS,
   LADY, DOG, DOG2, DOG_OPEN, COP_SCALE, COP_COLORS, POLICE, POLICE_WRITE,
   GIFT_PIXEL, GIFT_ART, DIG_FINDS, LOVE_GIFTS,
+  MONSTER, MONSTER_WALK_A, MONSTER_WALK_B, MONSTER_COLORS, MONSTER_SCALE,
+  POTION, POTION_COLORS, MONSTER_CORPSE, SKELETON, SKELETON_COLORS,
+  RABBIT, RABBIT_HOP, RABBIT_COLORS, DEER_WALK_A, DEER_WALK_B, DEER_COLORS,
 } from './pixelTroll/sprites';
 import { SPEECH, POLICE_TROLL, POLICE_COP, SPEECH_FED, SPEECH_GRABBED, SPEECH_POKED } from './pixelTroll/speech';
 
@@ -73,6 +76,20 @@ import { SPEECH, POLICE_TROLL, POLICE_COP, SPEECH_FED, SPEECH_GRABBED, SPEECH_PO
  * reload, which wipes his saved mood); killing the cop just sends the troll
  * running — and if he's still seething he'll be back with another officer.
  *
+ * And if you DO gun him down in front of the cop, that's not the end of him. Three
+ * minutes later he claws his way back — strolls in, downs a potion, shakes himself
+ * apart, and erupts into a giant horned red beast with glowing eyes and fangs that
+ * stomps around shoving and smashing the floating widgets. Right-click bursts him
+ * in a screen-wide splatter, but he only reforms angrier; it takes five shots to
+ * finally drop him. And when he falls it turns gentle: his crumpled corpse slowly
+ * rots to a skeleton over a few minutes as wildflowers bloom and butterflies
+ * gather, then the skeleton sinks into the earth — and the flowers stay. From there
+ * a whole meadow keeps creeping outward over ~15 minutes until the screen is dotted
+ * with pockets of forest (grass, bushes, vine-draped trees, rocks, butterfly
+ * clouds) with the odd rabbit or deer crossing through. (Debug: Shift+M summons the
+ * monster now; Shift+K drops him now; Shift+D jumps to just after he's sunk;
+ * Shift+G fast-forwards the garden.)
+ *
  * Pure canvas, one green color (red when riled) — the only exceptions are the meat
  * (a few food hues), the policeman's blue uniform, and the speech bubbles. No images.
  */
@@ -108,7 +125,6 @@ export default function PixelTroll({ hidden = false, floorSelector = '', obstacl
       grab: null, drop: null, dropSeed: null, splats: [], shotAt: null,
       meats: [], feast: null, widget: null,
       gifts: [], giftT: rand(20000, 35000),       // collectibles on the floor + a timer for love-gifts
-      gear: 0,                                     // accessory tier worn (0 none, 1 shades, 2 crown) — set from storage below
       // getting dropped or whacked makes him bolt — and bolt FASTER the more it
       // keeps happening (the streak only resets once he gets a visit in peace).
       // furyT just animates the rage cloud when he really can't stand you.
@@ -120,6 +136,10 @@ export default function PixelTroll({ hidden = false, floorSelector = '', obstacl
       // policePending latches the moment he bottoms out at −100 so his mood can
       // drift back up while he's away without him forgetting to bring the cop.
       cop: null, copSpeech: null, policeStopX: 0, banished: false, policePending: false, policeKill: null,
+      // kill him in front of the cop and, 3 minutes later, he claws back as a horned
+      // monster (startMonster). Shoot THAT five times and the gentle death/bloom
+      // scene takes over (T.death). Both are in-memory only — a reload clears them.
+      monster: null, monsterReturnAt: 0, death: null,
       // latched when he's won all the way to +100 → his next free beat is a big
       // heart-pouring love celebration (mirror of policePending at the bottom).
       lovePending: false,
@@ -158,21 +178,19 @@ export default function PixelTroll({ hidden = false, floorSelector = '', obstacl
       catch { return 0; }
     }
     function saveMood() { try { window.localStorage.setItem(MOOD_KEY, String(Math.round(T.mood))); } catch { /* private mode / SSR — skip */ } }
-    // Accessories he's unlocked (worn forever once earned) + a running count of the
-    // gifts you've collected, both persisted alongside his mood.
-    const GEAR_KEY = 'phonedeck_troll_gear', GIFT_KEY = 'phonedeck_troll_gifts';
-    function loadGear() { try { const v = parseInt(window.localStorage.getItem(GEAR_KEY), 10); return Number.isFinite(v) ? Math.max(0, Math.min(2, v)) : 0; } catch { return 0; } }
-    function saveGear() { try { window.localStorage.setItem(GEAR_KEY, String(T.gear)); } catch { /* skip */ } }
+    // A running count of the gifts you've collected, persisted in localStorage.
+    const GIFT_KEY = 'phonedeck_troll_gifts';
     let giftCount = (() => { try { const v = parseInt(window.localStorage.getItem(GIFT_KEY), 10); return Number.isFinite(v) ? v : 0; } catch { return 0; } })();
     const saveGiftCount = () => { try { window.localStorage.setItem(GIFT_KEY, String(giftCount)); } catch { /* skip */ } };
-    T.gear = loadGear();   // restore his earned accessory now that GEAR_KEY is initialized
+    // His shades / crown now follow his CURRENT mood (see drawGear) rather than being
+    // a permanent unlock, so clear any tier left stuck in old caches (that's what was
+    // making him wear the crown forever once he'd hit +100 just once).
+    try { window.localStorage.removeItem('phonedeck_troll_gear'); } catch { /* skip */ }
     function bumpMood(d) {
       const before = T.mood;
       T.mood = Math.max(-100, Math.min(100, before + d));
       if (T.mood <= -100 && before > -100) { T.policePending = true; T.lovePending = false; }  // hit the bottom → a cop next
       if (T.mood >= 100 && before < 100) { T.lovePending = true; T.policePending = false; }     // hit the top → a love celebration
-      if (T.mood >= 60 && T.gear < 1) { T.gear = 1; saveGear(); }     // earns shades at +60
-      if (T.mood >= 100 && T.gear < 2) { T.gear = 2; saveGear(); }    // ...and a crown at +100
       saveMood();
     }
     function moodTier() {
@@ -2207,16 +2225,18 @@ export default function PixelTroll({ hidden = false, floorSelector = '', obstacl
       ctx.fillStyle = GREEN;
     }
 
-    // Accessories he's earned (worn forever): shades at +60, a gold crown at +100.
+    // Accessories that track his CURRENT mood (not a permanent unlock): shades when
+    // he's smitten (+60), a gold crown only when he's right at the top (+96…+100).
     // Drawn on his head for the upright face-poses, like the angry brows.
     function drawGear(cx, feetY, scale, yOff) {
-      if (!T.gear) return;
+      const tier = T.mood >= 96 ? 2 : T.mood >= 60 ? 1 : 0;
+      if (!tier) return;
       const rows = POSES[T.pose] || STAND, px = PIXEL * scale, size = Math.ceil(px);
       const w = spriteW(rows), h = rows.length, left = cx - (w * px) / 2, top = feetY - h * px + yOff;
       const eyeRow = T.pose === 'stretch' ? 5 : 4;
       const seg = (c, r, col) => { ctx.fillStyle = col; ctx.fillRect(Math.round(left + c * px), Math.round(top + r * px), size, size); };
-      if (T.gear === 1) { for (let c = 1; c <= 10; c++) seg(c, eyeRow, '#0e1a2a'); }   // sunglasses bar over the eyes
-      else if (T.gear >= 2) { seg(3, -1, GOLD); seg(5, -1, GOLD); seg(7, -1, GOLD); for (let c = 3; c <= 7; c++) seg(c, 0, GOLD); }  // little crown
+      if (tier === 1) { for (let c = 1; c <= 10; c++) seg(c, eyeRow, '#0e1a2a'); }   // sunglasses bar over the eyes
+      else { seg(3, -1, GOLD); seg(5, -1, GOLD); seg(7, -1, GOLD); for (let c = 3; c <= 7; c++) seg(c, 0, GOLD); }  // little crown
     }
 
     // Weather that tracks his mood: a drizzly gray cloud when he's down, a warm
@@ -2550,6 +2570,754 @@ export default function PixelTroll({ hidden = false, floorSelector = '', obstacl
       ctx.restore();
     }
 
+    // ════════════════════════════════════════════════════════════════════════
+    // THE MONSTER + the death/bloom scene. Kill the troll in front of the cop and,
+    // three minutes later, he claws back: strolls in, downs a potion, shakes
+    // himself apart, and erupts into a giant horned red beast that stomps around
+    // shoving and smashing the floating widgets. Right-click bursts him in a
+    // screen-wide splatter — but he just reforms angrier; it takes FIVE shots to
+    // finally drop him. When he falls it turns beautiful: his crumpled corpse rots
+    // to a skeleton over five minutes while wildflowers bloom and butterflies
+    // gather, then the skeleton spends three minutes sinking into the earth and the
+    // flowers stay. As it sinks the meadow takes over (growGarden / stepCritters):
+    // over ~15 minutes it creeps out to both edges as clustered pockets of forest —
+    // grass, bushes, vine-draped trees, rocks, butterfly clouds — with the odd rabbit
+    // or deer crossing through. (Debug: Shift+M summons him; Shift+K drops him;
+    // Shift+G fast-forwards the garden.)
+    // ════════════════════════════════════════════════════════════════════════
+    const HITSTUN_MS = 300;           // a shot reels him this long (he flashes + reels, doesn't vanish)
+    const MONSTER_HP = 5;
+    const DEATH_FALL_MS = 1080;       // his pixels come apart and rain down into the corpse pose
+    const DEATH_BODY_SCALE = 1.7;     // the wide sprawled corpse / skeleton
+    const DEATH_CORPSE_MS = 300000;   // 5 min: corpse rots to a skeleton, flowers bloom in
+    const DEATH_SINK_MS = 180000;     // 3 min: the skeleton sinks under; the flowers remain
+    const FLOWER_COLORS = ['#ff6b9d', '#ffd24a', '#b46bff', '#ff8a5c', '#7ad0ff', '#ff5c8a', '#fff1a8'];
+    const BFLY_COLORS = ['#ff6b9d', '#ffd24a', '#b46bff', '#7ad0ff', '#ff8a5c', '#9d7bff'];
+    // Once the skeleton starts to sink, the wildflowers don't just stay — a whole
+    // meadow creeps outward from where he fell and, over a quarter of an hour, fills
+    // the screen edge to edge with clustered pockets of forest: grass, more flowers,
+    // bushes, rocks, vine-draped trees, drifting clouds of butterflies, and the odd
+    // rabbit or deer ambling across. (See growGarden / stepCritters / drawDeath.)
+    const GARDEN_SPREAD_MS = 900000;  // 15 min: the green tide reaches both edges
+    const GRASS_GREENS = ['#2faa5e', '#39b86a', '#268f4f', '#46c277', '#1f8a48'];
+    const BUSH_GREENS = ['#2c9b54', '#247f46', '#34a862', '#1d723e'];
+    const TREE_GREENS = ['#2f9d57', '#268a4b', '#3aa866', '#1f7a42', '#43b56f'];
+    const TREE_DARKS = ['#1c6e3c', '#175e33', '#21794a', '#155a30'];   // canopy shadow side
+    const TREE_LITES = ['#5ccb86', '#6fd897', '#4fc07c', '#7ee0a4'];   // sun-struck highlight
+    const PINE_GREENS = ['#1f7a46', '#176237', '#268a4f', '#14653a'];  // cooler evergreen needles
+    const PINE_DARKS = ['#114e2c', '#0d4426', '#155a33'];
+    const VINE_GREENS = ['#2faa5e', '#3aa866', '#268a4b'];
+    const TRUNK_BROWNS = ['#6b4a2a', '#5a3d22', '#7a5733'];
+    const TRUNK_DARKS = ['#4a3119', '#3d2814', '#553c20'];
+    const BLOSSOM_COLORS = ['#ffd1e6', '#ffe6a8', '#ffc9b0', '#f6d6ff'];
+    const ROCK_GREYS = ['#9a9aa2', '#80808a', '#b0b0b8', '#6c6c76'];
+    const BERRY_COLORS = ['#ff5c8a', '#ff8a5c', '#b46bff', '#7ad0ff', '#ffd24a'];
+    const MOUNT_COLORS = ['#7b8a9c', '#6e7d90', '#8895a6', '#74839a'];
+    const MOUNT_SHADES = ['#5d6b7d', '#566375', '#637084'];
+    const SNOW_WHITE = '#f4f7fb';
+    const shovedEls = new Set();      // widgets he's shoved out of place (reset on unmount)
+
+    // Persistently nudge a widget across the screen (accumulating), with a little
+    // tilt — clamped so it never flies fully off. Uses the independent translate /
+    // rotate props (like bumpWidget) so it doesn't stomp the panel's own transform.
+    function shoveWidget(el, dx, dy) {
+      if (!el) return;
+      const maxX = window.innerWidth * 0.6, maxY = window.innerHeight * 0.45;
+      const sx = Math.max(-maxX, Math.min(maxX, (el.__trollShoveX || 0) + dx));
+      const sy = Math.max(-maxY, Math.min(maxY, (el.__trollShoveY || 0) + dy));
+      el.__trollShoveX = sx; el.__trollShoveY = sy;
+      const rot = Math.max(-14, Math.min(14, sx * 0.04));
+      try { el.style.translate = `${Math.round(sx)}px ${Math.round(sy)}px`; el.style.rotate = `${rot.toFixed(1)}deg`; } catch { /* gone */ }
+      shovedEls.add(el);
+    }
+
+    // Any widget he walks into while rampaging gets shoved + showered in debris.
+    // (Obstacle rects are re-snapshotted a few times a second, not every frame.)
+    function smashWidgets(m, dt) {
+      m._obsT = (m._obsT || 0) + dt;
+      if (!m._obs || m._obsT > 150) { m._obs = readObstacles(); m._obsT = 0; }
+      const obs = m._obs; if (!obs.length) return;
+      const px = PIXEL * m.scale;
+      const bw = spriteW(MONSTER) * px * 0.6, bh = MONSTER.length * px;
+      const bx0 = m.x - bw / 2, bx1 = m.x + bw / 2, feetY = groundY();
+      const by0 = feetY - bh, by1 = feetY, now = performance.now();
+      for (const r of obs) {
+        if (Math.min(bx1, r.right) - Math.max(bx0, r.left) <= 0) continue;
+        if (Math.min(by1, r.bottom) - Math.max(by0, r.top) <= 0) continue;
+        if (r.el.__trollSmashT && now - r.el.__trollSmashT < 260) continue;
+        r.el.__trollSmashT = now;
+        shoveWidget(r.el, m.dir * rand(28, 64), -rand(0, 26));
+        m.smashPulse = 1;
+        const dcx = (Math.max(bx0, r.left) + Math.min(bx1, r.right)) / 2;
+        for (let i = 0; i < 10; i++) {
+          const ang = rand(-Math.PI, 0), sp = rand(120, 360);
+          T.confetti.push({ x: dcx, y: r.top, vx: Math.cos(ang) * sp, vy: Math.sin(ang) * sp, life: rand(400, 900), size: Math.round(rand(2, 6)), color: Math.random() < 0.5 ? '#c2241f' : '#9a9a9a' });
+        }
+      }
+    }
+
+    function spawnMonsterBurst(cx, cy) {
+      for (let i = 0; i < 50; i++) {
+        const ang = rand(-Math.PI, Math.PI), sp = rand(120, 520);
+        T.confetti.push({ x: cx, y: cy, vx: Math.cos(ang) * sp, vy: Math.sin(ang) * sp - 60, life: rand(600, 1300), size: Math.round(rand(3, 9)), color: Math.random() < 0.5 ? '#c2241f' : '#2b2b33' });
+      }
+    }
+
+    // Bring him back as the monster: enters → drinks the potion → transforms → rampages.
+    function startMonster() {
+      const dir = Math.random() < 0.5 ? 1 : -1;
+      T.monster = {
+        phase: 'arrive', t: 0, dir, mirror: dir < 0, x: dir === 1 ? -off : W() + off,
+        scale: 1, legT: 0, legFlip: false, shakeX: 0, yOff: 0,
+        trollPose: 'stand', flush: 0, potionT: 0, target: W() / 2 + rand(-W() * 0.1, W() * 0.1),
+        hp: MONSTER_HP, spd: 240, smashPulse: 0, roarT: 1500, exploding: 0, hitFlash: 0, kb: 0, speech: null,
+      };
+    }
+
+    function stepMonster(dt) {
+      const m = T.monster; m.t += dt;
+      if (m.speech) { m.speech.t += dt; if (m.speech.t >= m.speech.dur) m.speech = null; }
+
+      if (m.phase === 'arrive') {                         // strolls back in (still a plain green troll)
+        m.mirror = m.dir < 0;
+        const reached = m.dir === 1 ? m.x >= m.target : m.x <= m.target;
+        if (!reached) {
+          m.x += m.dir * 150 * dt / 1000;
+          m.legT += dt; if (m.legT > 120) { m.legT = 0; m.legFlip = !m.legFlip; }
+          m.trollPose = m.legFlip ? 'walkB' : 'walkA';
+        } else { m.trollPose = 'stand'; if (m.t > 1400) { m.phase = 'potion'; m.t = 0; m.potionT = 0; } }
+        return;
+      }
+      if (m.phase === 'potion') {                         // raises a potion and glugs it
+        m.trollPose = 'stand'; m.mirror = false;
+        m.potionT = Math.min(1, m.t / 700);
+        if (m.t > 900) m.shakeX = rand(-2, 2);
+        if (m.t >= 2100) { m.phase = 'transform'; m.t = 0; }
+        return;
+      }
+      if (m.phase === 'transform') {                      // shakes harder and harder, flushes red, swells up
+        const k = Math.min(1, m.t / 1900);
+        m.flush = k;
+        m.shakeX = rand(-1, 1) * (4 + k * 18);
+        m.scale = 1 + k * (MONSTER_SCALE - 1);
+        m._smokeT = (m._smokeT || 0) + dt;
+        if (m._smokeT > 70) {
+          m._smokeT = 0;
+          T.confetti.push({ x: m.x + rand(-22, 22), y: groundY() - rand(20, 130), vx: rand(-60, 60), vy: rand(-150, -40), life: rand(500, 1100), size: Math.round(rand(3, 7)), color: Math.random() < 0.5 ? '#7a1f1f' : '#2b2b33' });
+        }
+        if (m.t >= 1900) {                                // ...POP. The beast is out.
+          m.phase = 'rampage'; m.t = 0; m.scale = MONSTER_SCALE;
+          m.target = rand(off, W() - off); m.dir = m.target > m.x ? 1 : -1; m.roarT = 300;
+          spawnMonsterBurst(m.x, groundY() - MONSTER.length * PIXEL * MONSTER_SCALE * 0.5);
+          m.speech = { text: 'RRRAAAGH', color: '#ff4d4d', t: 0, dur: 1600 };
+        }
+        return;
+      }
+      // ── rampage ──
+      if (m.exploding > 0) {                              // hit-stun: he reels and is knocked back, but stays up
+        m.exploding -= dt;
+        m.hitFlash = Math.max(0, m.hitFlash - dt / 200);
+        m.shakeX = rand(-9, 9);
+        if (m.kb) { m.x += m.kb * dt / 1000; m.kb *= Math.pow(0.86, dt / 16); if (Math.abs(m.kb) < 12) m.kb = 0; }
+        m.x = Math.max(off * 0.4, Math.min(W() - off * 0.4, m.x));
+        if (m.exploding <= 0) { m.exploding = 0; m.spd = Math.min(560, m.spd * 1.1); }  // shakes it off — faster, angrier
+        return;
+      }
+      if (m.hitFlash > 0) m.hitFlash = Math.max(0, m.hitFlash - dt / 200);
+      m.scale = MONSTER_SCALE + (m.smashPulse > 0 ? m.smashPulse * 0.18 : 0);
+      if (m.smashPulse > 0) m.smashPulse = Math.max(0, m.smashPulse - dt / 180);
+      const reached = m.dir === 1 ? m.x >= m.target : m.x <= m.target;
+      if (reached) { m.target = rand(off, W() - off); m.dir = m.target > m.x ? 1 : -1; }
+      m.mirror = m.dir < 0;
+      m.x += m.dir * m.spd * dt / 1000;
+      m.legT += dt; if (m.legT > 140) { m.legT = 0; m.legFlip = !m.legFlip; m.shakeX = rand(-4, 4); }  // ground-shaking stomp
+      smashWidgets(m, dt);
+      m.roarT -= dt;
+      if (m.roarT <= 0) { m.roarT = rand(2600, 5200); if (!m.speech) m.speech = { text: pick(['RRRAAAGH', 'GRAAAH!', '*SMASH*', 'MINE NOW']), color: '#ff4d4d', t: 0, dur: 1500 }; }
+    }
+
+    // A right-click hit while he rampages. Blood flies, he flashes white, reels,
+    // and is knocked back — but he does NOT vanish; he just wears the damage and
+    // keeps coming. Five hits and he finally drops.
+    function explodeMonster(clientX, clientY) {
+      const m = T.monster; if (!m) return;
+      const canvasTop = window.innerHeight - canvas.height;
+      const gx = clientX, gy = clientY - canvasTop;
+      spawnSplats(gx, gy, '#c2241f');                     // a wound-spray of gore at the hit
+      for (let i = 0; i < 44; i++) {
+        const ang = rand(-Math.PI, Math.PI), sp = rand(90, 520);
+        T.confetti.push({ x: gx, y: gy, vx: Math.cos(ang) * sp, vy: Math.sin(ang) * sp - 80, life: rand(500, 1300), size: Math.round(rand(2, 8)), color: Math.random() < 0.35 ? '#2b2b33' : '#c2241f' });
+      }
+      m.hp -= 1;
+      if (m.hp <= 0) { killMonster(m.x, gy); return; }
+      m.hitFlash = 1; m.exploding = HITSTUN_MS;           // flash + reel (stays on his feet)
+      m.kb = (gx <= m.x ? 1 : -1) * 240;                  // knocked away from the shot
+      m.speech = { text: pick(['RRAAGH!', 'is that ALL?', "can't kill me", 'AGAIN. again.']), color: '#ff4d4d', t: 0, dur: 1400 };
+    }
+
+    // The lethal (fifth) hit: he reels, then CRUMPLES — the standing beast comes apart
+    // into its own pixels, which tumble and rain down, each settling EXACTLY onto its
+    // spot in the corpse pose. He collapses in place (no sideways topple), so the rot,
+    // flowers and butterflies all centre on him.
+    function killMonster(cx, cy) {
+      const m = T.monster;
+      spawnSplats(cx, cy, '#c2241f');                    // the fatal shot
+      const scale = (m && m.scale) || MONSTER_SCALE;
+      const fallSign = m ? (m.dir >= 0 ? 1 : -1) : 1;     // which way the slumped heap faces
+      const corpseHalf = spriteW(MONSTER_CORPSE) * PIXEL * DEATH_BODY_SCALE / 2;
+      const margin = corpseHalf + 14;
+      const landX = Math.max(margin, Math.min(W() - margin, (m && m.x) || cx));  // crumples in place
+      const dir = -fallSign, mirror = m ? m.mirror : false;
+      // build the pixel crumple: standing pixels → corpse pixels (driven by the corpse
+      // set, so the last frame is the corpse exactly). Top pixels let go a touch later
+      // and fall further; each tumbles down with a little gravity arc + sideways jitter.
+      const src = spriteCells(MONSTER, MONSTER_COLORS, landX, groundY(), scale, mirror);
+      const tgt = spriteCells(MONSTER_CORPSE, MONSTER_COLORS, landX, groundY(), DEATH_BODY_SCALE, dir < 0);
+      const bodyH = MONSTER.length * PIXEL * scale;
+      const crumble = tgt.map((t, i) => {
+        const s = src[(i * 7919) % src.length];           // spread the mapping around the body
+        const high = Math.max(0, Math.min(1, (groundY() - s.y) / bodyH));   // 0 at feet … 1 at the horns
+        return {
+          x0: s.x, y0: s.y, tx: t.x, ty: t.y, color: t.color, px: t.px,
+          delay: high * 240 + rand(0, 160),              // higher bits hold on, then drop
+          dur: rand(420, 620), pop: rand(8, 40) * high,  // a small upward kick before gravity wins
+          jit: rand(-1, 1),
+        };
+      });
+      T.death = {
+        phase: 'fall', t: 0, x: landX, standX: landX, scale, fallSign, crumble,
+        uprightMirror: mirror, dir,                       // corpse keeps his facing
+        landed: false, decomp: 0, sink: 0, flowers: [], butterflies: [], motes: [],
+        flowerT: 0, flutterT: 0, moteT: 0,
+        // the long meadow→forest spread (kicks in once the skeleton starts sinking)
+        gardenOn: false, gardenT: 0, patchT: 0, critterT: 0, pockets: [],
+        grass: [], bushes: [], trees: [], vines: [], rocks: [], critters: [], mountains: [],
+      };
+      T.monster = null;
+    }
+
+    function hitMonster(e) {
+      const m = T.monster; if (!m) return false;
+      const px = PIXEL * m.scale;
+      const w = spriteW(MONSTER) * px, h = MONSTER.length * px;
+      const canvasTop = window.innerHeight - canvas.height, cx = m.x + (m.shakeX || 0);
+      return e.clientX >= cx - w / 2 - 10 && e.clientX <= cx + w / 2 + 10
+        && e.clientY >= canvasTop + (groundY() - h + (m.yOff || 0)) - 10
+        && e.clientY <= canvasTop + groundY() + 10;
+    }
+
+    // A char-keyed blitter (like drawCop) but taking any colour map — used for the
+    // monster, his potion, the corpse, and the skeleton.
+    function blitKeyed(rows, colors, cx, feetY, scale, mirror, yOff = 0) {
+      const w = spriteW(rows), h = rows.length, px = PIXEL * scale, size = Math.ceil(px);
+      const left = cx - (w * px) / 2, top = feetY - h * px + yOff;
+      for (let r = 0; r < h; r++) {
+        const row = rows[r];
+        for (let c = 0; c < row.length; c++) {
+          const ch = row[c];
+          if (ch === '.' || ch === ' ') continue;
+          const cc = mirror ? (w - 1 - c) : c;
+          ctx.fillStyle = colors[ch] || GREEN;
+          ctx.fillRect(Math.round(left + cc * px), Math.round(top + r * px), size, size);
+        }
+      }
+    }
+
+    // Every painted cell of a char-keyed sprite as a flat list of {x, y, color, px}
+    // in canvas coords — same placement maths as blitKeyed. Used to build the death
+    // crumple: the standing beast's pixels are the start points, the corpse sprite's
+    // pixels the targets, so the scatter lands EXACTLY in his death pose.
+    function spriteCells(rows, colors, cx, feetY, scale, mirror) {
+      const w = spriteW(rows), h = rows.length, px = PIXEL * scale, left = cx - (w * px) / 2, top = feetY - h * px;
+      const out = [];
+      for (let r = 0; r < h; r++) {
+        const row = rows[r];
+        for (let c = 0; c < row.length; c++) {
+          const ch = row[c];
+          if (ch === '.' || ch === ' ') continue;
+          const cc = mirror ? (w - 1 - c) : c;
+          out.push({ x: left + cc * px, y: top + r * px, color: colors[ch] || GREEN, px });
+        }
+      }
+      return out;
+    }
+
+    function drawPotion(m) {
+      const headY = groundY() - STAND_H;
+      blitKeyed(POTION, POTION_COLORS, m.x + 16 - m.potionT * 12, headY + 12 - m.potionT * 4, 1.2, false, 0);
+    }
+    // Like blit, but fills EVERY non-empty cell with the current fillStyle (used to
+    // paint a one-colour overlay of a char-keyed sprite — the damage bruise + the
+    // white hit-flash that ride on top of the monster's normal colours).
+    function blitMask(rows, cx, feetY, scale, mirror, yOff = 0) {
+      const w = spriteW(rows), h = rows.length, px = PIXEL * scale, size = Math.ceil(px);
+      const left = cx - (w * px) / 2, top = feetY - h * px + yOff;
+      for (let r = 0; r < h; r++) {
+        const row = rows[r];
+        for (let c = 0; c < row.length; c++) {
+          if (row[c] === '.' || row[c] === ' ') continue;
+          const cc = mirror ? (w - 1 - c) : c;
+          ctx.fillRect(Math.round(left + cc * px), Math.round(top + r * px), size, size);
+        }
+      }
+    }
+    function drawMonsterBody(m) {
+      const rows = m.phase === 'rampage' ? (m.legFlip ? MONSTER_WALK_B : MONSTER_WALK_A) : MONSTER;
+      const cx = m.x + m.shakeX, fy = groundY(), yo = m.yOff || 0;
+      blitKeyed(rows, MONSTER_COLORS, cx, fy, m.scale, m.mirror, yo);
+      const dmg = m.hp != null ? (MONSTER_HP - m.hp) / MONSTER_HP : 0;
+      if (dmg > 0) {                                       // darkens / bruises as the hits pile up
+        ctx.globalAlpha = dmg * 0.5; ctx.fillStyle = '#3d0808';
+        blitMask(rows, cx, fy, m.scale, m.mirror, yo); ctx.globalAlpha = 1;
+      }
+      if (m.hitFlash > 0) {                                // the white pop the instant he's shot
+        ctx.globalAlpha = Math.min(1, m.hitFlash); ctx.fillStyle = '#ffffff';
+        blitMask(rows, cx, fy, m.scale, m.mirror, yo); ctx.globalAlpha = 1;
+      }
+    }
+    function drawMonster() {
+      const m = T.monster; if (!m) return;
+      if (m.phase === 'arrive' || m.phase === 'potion') {
+        ctx.fillStyle = GREEN; ctx.globalAlpha = 1;
+        blit(POSES[m.trollPose] || STAND, m.x + m.shakeX, groundY(), 1, m.mirror, 0);
+        ctx.globalAlpha = 1;
+        if (m.phase === 'potion') drawPotion(m);
+      } else if (m.phase === 'transform') {
+        if ((m.flush || 0) < 0.7) {                       // troll flushing red + swelling...
+          ctx.fillStyle = mix((m.flush || 0) / 0.7); ctx.globalAlpha = 1;
+          blit(STAND, m.x + m.shakeX, groundY(), m.scale, false, 0);
+          ctx.globalAlpha = 1;
+        } else { drawMonsterBody(m); }                    // ...then it's the beast
+      } else { drawMonsterBody(m); }                      // rampage (incl. hit-stun) — always visible now
+      if (m.speech) {
+        const headTop = (m.phase === 'arrive' || m.phase === 'potion')
+          ? groundY() - STAND_H
+          : groundY() - MONSTER.length * PIXEL * m.scale + (m.yOff || 0);
+        drawBubble(m.speech.text, m.speech.color, 1, m.x + m.shakeX, headTop);
+      }
+    }
+
+    // ── the death / bloom scene ──────────────────────────────────────────────
+    function addFlower(D, x) {
+      const fx = x != null ? x : D.x + rand(-130, 130);
+      D.flowers.push({
+        x: Math.max(6, Math.min(W() - 6, fx)), h: rand(22, 62), grow: 0, t: 0,
+        color: pick(FLOWER_COLORS), petals: Math.floor(rand(5, 7)), spin: rand(0, Math.PI), phase: rand(0, Math.PI * 2),
+      });
+    }
+    function addButterfly(D, x) {
+      const cx = x != null ? x : D.x;
+      const baseY = groundY() - rand(60, 190);
+      D.butterflies.push({ x: cx + rand(-30, 30), cx, y: baseY, baseY, t: rand(0, 1000), vx: rand(-30, 30), range: x != null ? rand(40, 110) : rand(50, 150), driftPhase: rand(0, Math.PI * 2), color: pick(BFLY_COLORS), color2: pick(BFLY_COLORS) });
+    }
+
+    // ── the meadow→forest spread ───────────────────────────────────────────────
+    // Each piece grows from nothing (grow 0→1 at its own rate) so the forest visibly
+    // springs up rather than popping in. They cluster into "pockets" that creep
+    // outward from where he fell until, ~15 min on, they reach both screen edges.
+    function addGrass(D, x) {
+      const blades = [];
+      const n = Math.floor(rand(4, 9));
+      for (let i = 0; i < n; i++) blades.push({ dx: rand(-8, 8), h: rand(7, 19), lean: rand(-3, 3), shade: pick(GRASS_GREENS) });
+      D.grass.push({ x, grow: 0, rate: 1 / rand(1400, 2800), t: rand(0, 1000), blades });
+    }
+    function addBush(D, x) {
+      D.bushes.push({
+        x, grow: 0, rate: 1 / rand(7000, 14000), t: rand(0, 1000), r: rand(13, 24),
+        color: pick(BUSH_GREENS), color2: pick(BUSH_GREENS),
+        berries: Math.random() < 0.5 ? Math.floor(rand(2, 6)) : 0, berryColor: pick(BERRY_COLORS), seed: Math.floor(rand(0, 360)),
+      });
+    }
+    function addTree(D, x) {
+      const pine = Math.random() < 0.32;                   // a few are evergreens
+      const tall = pine ? rand(120, 215) : rand(95, 185);
+      D.trees.push({
+        kind: pine ? 'pine' : 'leafy', x, grow: 0, rate: 1 / rand(22000, 46000), t: rand(0, 1000),
+        h: tall, w: pine ? rand(34, 50) : rand(36, 58),
+        trunk: pick(TRUNK_BROWNS), trunkDark: pick(TRUNK_DARKS),
+        canopy: pick(pine ? PINE_GREENS : TREE_GREENS), canopy2: pick(pine ? PINE_GREENS : TREE_GREENS),
+        canopyDark: pick(pine ? PINE_DARKS : TREE_DARKS), canopyLite: pick(TREE_LITES),
+        blossom: !pine && Math.random() < 0.4 ? pick(BLOSSOM_COLORS) : null,
+        // evergreens slowly gather a snow dusting on their tiers (some of them)
+        snow: 0, snowRate: pine && Math.random() < 0.55 ? 1 / rand(360000, 600000) : 0, seed: Math.floor(rand(0, 999)),
+      });
+      if (!pine && Math.random() < 0.55) addVine(D, x + rand(-16, 16), tall);   // a vine trailing from a leafy tree
+    }
+    function addMountain(D) {
+      const h = rand(120, 215);                            // about as tall as the trees — no monoliths
+      const w = h * rand(1.3, 2.0);
+      const n = Math.floor(rand(4, 8));                    // a jagged ridge of several peaks
+      const ridge = [];
+      for (let i = 0; i <= n; i++) ridge.push(rand(0.45, 0.92));
+      ridge[Math.floor(rand(1, n))] = 1;                   // one dominant summit
+      ridge[0] = rand(0.12, 0.3); ridge[n] = rand(0.12, 0.3);  // taper down to the foothills at the edges
+      D.mountains.push({
+        x: rand(W() * 0.08, W() * 0.92), grow: 0, rate: 1 / rand(150000, 280000),   // rises very slowly (~2.5–4.5 min)
+        snow: 0, snowRate: 1 / rand(360000, 660000),                                 // snow creeps in slower still
+        h, w, ridge, base: pick(MOUNT_COLORS), shade: pick(MOUNT_SHADES),
+      });
+    }
+    function addVine(D, x, fromH) {
+      D.vines.push({ x, grow: 0, rate: 1 / rand(9000, 18000), t: rand(0, 1000), len: rand(40, Math.max(54, fromH * 0.7)), top: fromH * rand(0.5, 0.82), sway: rand(0, Math.PI * 2), color: pick(VINE_GREENS), leaves: Math.floor(rand(3, 7)) });
+    }
+    function addRock(D, x) {
+      D.rocks.push({ x, grow: 0, rate: 1 / rand(900, 2000), t: 0, w: rand(11, 27), h: rand(7, 16), color: pick(ROCK_GREYS), color2: pick(ROCK_GREYS) });
+    }
+
+    // One growth tick: expand the reach a little, then either open a fresh pocket out
+    // toward the frontier or thicken an existing one with the next piece of foliage.
+    function growGarden(D, dt) {
+      D.gardenT = Math.min(GARDEN_SPREAD_MS, D.gardenT + dt);
+      const prog = D.gardenT / GARDEN_SPREAD_MS;
+      const reach = 80 + prog * (W() * 0.95);                 // creeps out to cover the whole width
+      const dens = Math.max(0.6, Math.min(2.2, W() / 1366));  // bigger screens → a richer forest
+      const CAP = { grass: Math.round(72 * dens), flower: Math.round(96 * dens), bush: Math.round(26 * dens), rock: Math.round(20 * dens), tree: Math.round(13 * dens), bfly: Math.round(22 * dens) };
+      // a few small jagged peaks rise far off in the back, staggered across the spread
+      const wantMtn = prog > 0.7 ? 4 : prog > 0.5 ? 3 : prog > 0.32 ? 2 : prog > 0.2 ? 1 : 0;
+      if (D.mountains.length < wantMtn && Math.random() < 0.5) addMountain(D);
+      D.patchT += dt;
+      if (D.patchT < rand(1500, 2700)) return;                // spaced out so it eases in over the 15 min
+      D.patchT = 0;
+
+      let pk;                                                 // open a new pocket at the frontier, or thicken one
+      if (!D.pockets.length || Math.random() < 0.34) {
+        const side = Math.random() < 0.5 ? -1 : 1;
+        const px = Math.max(20, Math.min(W() - 20, D.x + side * rand(reach * 0.4, reach)));
+        pk = { x: px, n: 0 }; D.pockets.push(pk);
+      } else { pk = pick(D.pockets); }
+      const x = Math.max(8, Math.min(W() - 8, pk.x + rand(-60, 60)));
+      pk.n++;
+
+      const roll = Math.random();
+      if (roll < 0.30 && D.grass.length < CAP.grass) addGrass(D, x);
+      else if (roll < 0.58 && D.flowers.length < CAP.flower) addFlower(D, x);
+      else if (roll < 0.72 && D.bushes.length < CAP.bush) addBush(D, x);
+      else if (roll < 0.82 && D.rocks.length < CAP.rock) addRock(D, x);
+      else if (roll < 0.90 && D.trees.length < CAP.tree) addTree(D, x);
+      else { const k = Math.floor(rand(2, 5)); for (let i = 0; i < k && D.butterflies.length < CAP.bfly; i++) addButterfly(D, x); }  // a pocket of butterflies
+      if (pk.n <= 2 && D.grass.length < CAP.grass) addGrass(D, x + rand(-22, 22));   // never leave a pocket on bare dirt
+    }
+
+    // The occasional rabbit (hopping) or deer (trotting) that crosses the meadow.
+    function spawnCritter(D) {
+      const kind = Math.random() < 0.62 ? 'rabbit' : 'deer';
+      const dir = Math.random() < 0.5 ? 1 : -1;
+      const x = dir === 1 ? -70 : W() + 70;
+      if (kind === 'rabbit') D.critters.push({ kind, x, dir, speed: rand(150, 215), hopT: rand(0, 760), yOff: 0, t: 0, airborne: false });
+      else D.critters.push({ kind, x, dir, speed: rand(90, 145), legT: 0, legFlip: false, t: 0 });
+    }
+    function stepCritters(D, dt) {
+      D.critterT -= dt;
+      if (D.critterT <= 0 && D.critters.length < 2 && D.gardenT > 30000) { D.critterT = rand(45000, 100000); spawnCritter(D); }
+      for (let i = D.critters.length - 1; i >= 0; i--) {
+        const c = D.critters[i]; c.t += dt;
+        if (c.kind === 'rabbit') {
+          const period = 760; c.hopT += dt; if (c.hopT >= period) c.hopT -= period;
+          const ph = c.hopT / period;
+          c.yOff = -Math.sin(Math.PI * ph) * 26;             // up over the top of each hop
+          c.airborne = c.yOff < -3;
+          c.x += c.dir * c.speed * dt / 1000 * (0.35 + Math.sin(Math.PI * ph) * 0.95);  // springs forward mid-leap
+        } else {
+          c.x += c.dir * c.speed * dt / 1000;
+          c.legT += dt; if (c.legT > 165) { c.legT = 0; c.legFlip = !c.legFlip; }
+        }
+        if ((c.dir > 0 && c.x > W() + 90) || (c.dir < 0 && c.x < -90)) D.critters.splice(i, 1);
+      }
+    }
+    function addMote(D) {
+      D.motes.push({ x: D.x + rand(-220, 220), y: groundY() - rand(0, 24), vx: rand(-10, 10), vy: -rand(8, 28), life: rand(3200, 6200), size: Math.round(rand(1, 3)), color: pick(['#fff6c8', '#ffe14d', '#bfe9d6', '#ffd9ec']) });
+    }
+
+    function stepDeath(dt) {
+      const D = T.death; D.t += dt;
+      for (const f of D.flowers) { f.t += dt; if (f.grow < 1) f.grow = Math.min(1, f.grow + dt / 4200); }
+      for (const b of D.butterflies) {
+        const home = b.cx != null ? b.cx : D.x;
+        b.t += dt; b.x += b.vx * dt / 1000;
+        if (b.x < home - b.range) b.vx = Math.abs(b.vx);
+        else if (b.x > home + b.range) b.vx = -Math.abs(b.vx);
+        if (Math.random() < 0.01) b.vx = rand(-34, 34);
+        b.y = b.baseY + Math.sin(b.t / 700 + b.driftPhase) * 16;
+      }
+      for (let i = D.motes.length - 1; i >= 0; i--) {
+        const p = D.motes[i]; p.x += p.vx * dt / 1000; p.y += p.vy * dt / 1000; p.life -= dt;
+        if (p.life <= 0) D.motes.splice(i, 1);
+      }
+      D.moteT += dt; if (D.moteT > 520 && D.motes.length < 44) { D.moteT = 0; addMote(D); }
+
+      // once the spread has begun, keep growing the meadow and crossing the critters,
+      // and ease every fresh sprout up from nothing.
+      if (D.gardenOn) {
+        growGarden(D, dt);
+        stepCritters(D, dt);
+        for (const g of D.grass) { g.t += dt; if (g.grow < 1) g.grow = Math.min(1, g.grow + g.rate * dt); }
+        for (const b of D.bushes) { b.t += dt; if (b.grow < 1) b.grow = Math.min(1, b.grow + b.rate * dt); }
+        for (const tr of D.trees) { tr.t += dt; if (tr.grow < 1) tr.grow = Math.min(1, tr.grow + tr.rate * dt); if (tr.snowRate && tr.snow < 1) tr.snow = Math.min(1, tr.snow + tr.snowRate * dt); }
+        for (const v of D.vines) { v.t += dt; if (v.grow < 1) v.grow = Math.min(1, v.grow + v.rate * dt); }
+        for (const rk of D.rocks) { if (rk.grow < 1) rk.grow = Math.min(1, rk.grow + rk.rate * dt); }
+        for (const mt of D.mountains) { if (mt.grow < 1) mt.grow = Math.min(1, mt.grow + mt.rate * dt); if (mt.snow < 1) mt.snow = Math.min(1, mt.snow + mt.snowRate * dt); }
+      }
+
+      if (D.phase === 'fall') {                            // pixels rain down, hit the ground, settle into the corpse
+        if (!D.landed && D.t >= DEATH_FALL_MS * 0.72) {    // the THUD — dust + a last spray of gore as they pile up
+          D.landed = true;
+          for (let i = 0; i < 22; i++) {
+            const ang = rand(-Math.PI, 0), sp = rand(80, 300);
+            T.confetti.push({ x: D.x + rand(-50, 50), y: groundY() - 4, vx: Math.cos(ang) * sp, vy: Math.sin(ang) * sp, life: rand(300, 750), size: Math.round(rand(2, 6)), color: Math.random() < 0.45 ? '#c2241f' : '#8a7a5a' });
+          }
+        }
+        if (D.t >= DEATH_FALL_MS) { D.phase = 'corpse'; D.t = 0; }
+        return;
+      }
+      if (D.phase === 'corpse') {                          // 5 min: rot to a skeleton; flowers + butterflies move in
+        D.decomp = Math.min(1, D.t / DEATH_CORPSE_MS);
+        if (D.decomp > 0.28) { D.flowerT += dt; if (D.flowerT > 2600 && D.flowers.length < 20) { D.flowerT = 0; addFlower(D); } }
+        if (D.decomp > 0.5) { D.flutterT += dt; if (D.flutterT > 4200 && D.butterflies.length < 8) { D.flutterT = 0; addButterfly(D); } }
+        if (D.t >= DEATH_CORPSE_MS) { D.phase = 'sink'; D.t = 0; D.gardenOn = true; D.critterT = rand(22000, 48000); }
+      } else if (D.phase === 'sink') {                     // 3 min: the skeleton sinks under; the meadow spreads out
+        D.sink = Math.min(1, D.t / DEATH_SINK_MS);
+        if (D.t >= DEATH_SINK_MS) { D.phase = 'rest'; D.t = 0; }
+      }
+    }
+
+    function drawFlower(f) {
+      const baseY = groundY(), sway = Math.sin(f.t / 600 + f.phase) * 2 * f.grow;
+      const bx = f.x + sway, topY = baseY - f.h * f.grow, stemH = f.h * f.grow;
+      ctx.fillStyle = '#2faa5e';
+      ctx.fillRect(Math.round(bx - 1), Math.round(topY), 2, Math.round(baseY - topY));
+      if (f.grow > 0.5) {                                  // a couple of leaves on the stem
+        ctx.fillRect(Math.round(bx - 5), Math.round(baseY - stemH * 0.55), 5, 2);
+        ctx.fillRect(Math.round(bx + 1), Math.round(baseY - stemH * 0.4), 5, 2);
+      }
+      const s = 3 * f.grow;
+      ctx.fillStyle = f.color;
+      for (let i = 0; i < f.petals; i++) {                 // a ring of petals...
+        const a = (i / f.petals) * Math.PI * 2 + f.spin;
+        ctx.fillRect(Math.round(bx + Math.cos(a) * s * 1.4 - s / 2), Math.round(topY + Math.sin(a) * s * 1.4 - s / 2), Math.ceil(s), Math.ceil(s));
+      }
+      ctx.fillStyle = '#ffe14d';                           // ...around a golden centre
+      ctx.fillRect(Math.round(bx - s / 2), Math.round(topY - s / 2), Math.ceil(s), Math.ceil(s));
+    }
+    function drawButterfly(b) {
+      const flap = Math.abs(Math.sin(b.t / 90)), wx = 2 + flap * 4;
+      ctx.fillStyle = '#2a2a2a';
+      ctx.fillRect(Math.round(b.x - 1), Math.round(b.y - 3), 2, 7);
+      ctx.fillStyle = b.color;
+      ctx.fillRect(Math.round(b.x - 1 - wx), Math.round(b.y - 3), Math.round(wx), 4);
+      ctx.fillRect(Math.round(b.x + 1), Math.round(b.y - 3), Math.round(wx), 4);
+      ctx.fillStyle = b.color2;
+      ctx.fillRect(Math.round(b.x - 1 - wx * 0.8), Math.round(b.y + 1), Math.round(wx * 0.8), 3);
+      ctx.fillRect(Math.round(b.x + 1), Math.round(b.y + 1), Math.round(wx * 0.8), 3);
+    }
+
+    // ── garden flora (blocky, to sit beside the pixel flowers) ──────────────────
+    // A chunky pixel disc — the leaf-clump primitive bushes and tree canopies are
+    // built from. Stepped on a 4px grid so it reads as pixel art, not a smooth circle.
+    function fillBlob(cx, cy, r) {
+      const step = 5, r2 = r * r;
+      for (let yy = -r; yy <= r; yy += step)
+        for (let xx = -r; xx <= r; xx += step)
+          if (xx * xx + yy * yy <= r2) ctx.fillRect(Math.round(cx + xx), Math.round(cy + yy), step, step);
+    }
+    function drawGrass(gr) {
+      if (gr.grow <= 0) return;
+      const baseY = groundY();
+      for (const bl of gr.blades) {
+        const h = bl.h * gr.grow, x0 = gr.x + bl.dx;
+        const sway = Math.sin(gr.t / 520 + bl.dx) * 1.5 * gr.grow;
+        ctx.fillStyle = bl.shade;
+        for (let s = 0; s < 3; s++) {                        // three segments → a little curve/lean
+          const t0 = s / 3, yy = baseY - h * (t0 + 1 / 3);
+          const xx = x0 + (sway + bl.lean) * (t0 + 0.2);
+          ctx.fillRect(Math.round(xx), Math.round(yy), 2, Math.ceil(h / 3) + 1);
+        }
+      }
+    }
+    function drawBush(b) {
+      if (b.grow <= 0) return;
+      const r = b.r * b.grow, baseY = groundY(), cy = baseY - r * 0.7;
+      const breeze = Math.sin(b.t / 1500 + b.seed) * 1.5 * b.grow;
+      ctx.fillStyle = b.color; fillBlob(b.x - r * 0.5 + breeze, cy, r * 0.8);
+      ctx.fillStyle = b.color2; fillBlob(b.x + r * 0.5 + breeze, cy, r * 0.8);
+      ctx.fillStyle = b.color; fillBlob(b.x + breeze, cy - r * 0.4, r * 0.85);
+      if (b.berries) {                                       // a few berries tucked in
+        ctx.fillStyle = b.berryColor;
+        for (let i = 0; i < b.berries; i++) {
+          const a = ((b.seed + i * 97) % 360) * Math.PI / 180, rr = r * 0.6;
+          ctx.fillRect(Math.round(b.x + breeze + Math.cos(a) * rr), Math.round(cy + Math.sin(a) * rr * 0.7), 3, 3);
+        }
+      }
+    }
+    // A blocky filled triangle (apex at top), used for the evergreen tiers and the
+    // mountains — stepped on the pixel grid so it matches the rest of the scene.
+    function fillTri(apexX, apexY, halfW, baseY, step = 5) {
+      const hgt = baseY - apexY; if (hgt <= 0) return;
+      for (let yy = 0; yy <= hgt; yy += step) {
+        const hw = halfW * (yy / hgt), y = apexY + yy;
+        ctx.fillRect(Math.round(apexX - hw), Math.round(y), Math.max(step, Math.round(hw * 2)), step);
+      }
+    }
+    function drawTree(tr) {
+      if (tr.grow <= 0) return;
+      const baseY = groundY(), h = tr.h * tr.grow, w = tr.w * tr.grow;
+      const sway = Math.sin(tr.t / 1600 + tr.x) * 3 * tr.grow, cx = tr.x + sway;
+      if (tr.kind === 'pine') {                              // layered evergreen on a short trunk
+        const trunkW = Math.max(4, Math.round(w * 0.16)), trunkH = h * 0.14;
+        ctx.fillStyle = tr.trunk; ctx.fillRect(Math.round(tr.x - trunkW / 2), Math.round(baseY - trunkH), trunkW, Math.round(trunkH));
+        ctx.fillStyle = tr.trunkDark; ctx.fillRect(Math.round(tr.x + trunkW / 2 - 2), Math.round(baseY - trunkH), 2, Math.round(trunkH));
+        const topY = baseY - h, botY = baseY - trunkH * 0.6, tiers = 4, span = botY - topY;
+        for (let i = 0; i < tiers; i++) {                    // wide skirt at the bottom up to a point
+          const apexY = topY + span * (i / tiers) * 0.82;
+          const tierBaseY = topY + span * ((i + 1) / tiers);
+          const halfW = (w / 2) * (0.34 + (i / (tiers - 1)) * 0.66);
+          ctx.fillStyle = i % 2 ? tr.canopy2 : tr.canopy;
+          fillTri(cx, apexY, halfW, tierBaseY);
+          ctx.fillStyle = tr.canopyDark;                     // a shaded underside to each tier
+          fillTri(cx + halfW * 0.35, tierBaseY - span / tiers * 0.5, halfW * 0.5, tierBaseY);
+          if (tr.snow > 0.02) {                              // a slow dusting of snow on the tier tops
+            ctx.fillStyle = SNOW_WHITE; ctx.globalAlpha = Math.min(1, tr.snow);
+            fillTri(cx, apexY, halfW * (0.4 + tr.snow * 0.3), apexY + span / tiers * 0.5);
+            ctx.globalAlpha = 1;
+          }
+        }
+        return;
+      }
+      // leafy tree: a shaded trunk, then three tonal passes over a clump of leaves
+      const trunkW = Math.max(5, Math.round(w * 0.2)), trunkTop = baseY - h * 0.6;
+      ctx.fillStyle = tr.trunk; ctx.fillRect(Math.round(tr.x - trunkW / 2), Math.round(trunkTop), trunkW, Math.round(baseY - trunkTop));
+      ctx.fillStyle = tr.trunkDark; ctx.fillRect(Math.round(tr.x + trunkW / 2 - 2), Math.round(trunkTop), 2, Math.round(baseY - trunkTop));
+      ctx.fillStyle = tr.trunk;                              // a branch stub each side, reaching up into the leaves
+      ctx.fillRect(Math.round(tr.x - trunkW / 2 - 6), Math.round(trunkTop + 6), 8, 3);
+      ctx.fillRect(Math.round(tr.x + trunkW / 2 - 2), Math.round(trunkTop + 14), 8, 3);
+      const cMid = baseY - h + h * 0.32;
+      const blobs = [[0, -h * 0.04, 1], [-w * 0.34, h * 0.1, 0.72], [w * 0.34, h * 0.1, 0.72], [-w * 0.16, h * 0.26, 0.66], [w * 0.18, h * 0.24, 0.66], [0, h * 0.2, 0.86]];
+      for (let i = 0; i < blobs.length; i++) {               // base fill
+        ctx.fillStyle = i % 2 ? tr.canopy2 : tr.canopy;
+        fillBlob(cx + blobs[i][0], cMid + blobs[i][1], w * 0.42 * blobs[i][2]);
+      }
+      ctx.fillStyle = tr.canopyDark;                         // shadow gathers low and to the right
+      fillBlob(cx + w * 0.2, cMid + h * 0.22, w * 0.3);
+      fillBlob(cx + w * 0.04, cMid + h * 0.28, w * 0.26);
+      ctx.fillStyle = tr.canopyLite;                         // sun catches the upper-left
+      fillBlob(cx - w * 0.22, cMid - h * 0.08, w * 0.26);
+      fillBlob(cx - w * 0.02, cMid - h * 0.12, w * 0.2);
+      if (tr.blossom) {                                      // a sprinkle of blossom / fruit
+        ctx.fillStyle = tr.blossom;
+        for (let i = 0; i < 10; i++) {
+          const a = ((tr.seed + i * 137) % 360) * Math.PI / 180, rr = w * 0.4 * (0.4 + (i % 4) * 0.18);
+          ctx.fillRect(Math.round(cx + Math.cos(a) * rr), Math.round(cMid + Math.sin(a) * rr * 0.8), 3, 3);
+        }
+      }
+    }
+    // The far peaks — small, atmospheric, jagged (a ridge of several summits, not a
+    // single triangle), rising very slowly with snow that creeps down the tips over
+    // many minutes. Drawn behind everything else. Traces the ridge as a polygon, then
+    // re-fills the upper band clipped white for the snow caps so it follows the jags.
+    function ridgePath(mt, h) {
+      const baseY = groundY(), lx = mt.x - mt.w / 2, n = mt.ridge.length - 1;
+      ctx.beginPath(); ctx.moveTo(lx, baseY);
+      for (let i = 0; i <= n; i++) ctx.lineTo(lx + (mt.w * i) / n, baseY - h * mt.ridge[i]);
+      ctx.lineTo(lx + mt.w, baseY); ctx.closePath();
+    }
+    function drawMountain(mt) {
+      if (mt.grow <= 0) return;
+      const baseY = groundY(), h = mt.h * mt.grow;
+      ctx.globalAlpha = 0.9;
+      ctx.fillStyle = mt.base; ridgePath(mt, h); ctx.fill();
+      ctx.strokeStyle = mt.shade; ctx.lineWidth = 2; ridgePath(mt, h); ctx.stroke();  // a little ridge definition
+      if (mt.snow > 0.01) {                                  // snow caps the jagged tips, creeping down
+        const snowLine = baseY - h * (0.6 + Math.min(1, mt.snow) * 0.22);
+        ctx.save();
+        ctx.beginPath(); ctx.rect(mt.x - mt.w / 2, 0, mt.w, Math.max(0, snowLine)); ctx.clip();
+        ctx.fillStyle = SNOW_WHITE; ridgePath(mt, h); ctx.fill();
+        ctx.restore();
+      }
+      ctx.globalAlpha = 1;
+    }
+    function drawVine(v) {
+      if (v.grow <= 0) return;
+      const baseY = groundY(), topY = baseY - v.top, len = v.len * v.grow;
+      const segs = Math.max(4, Math.round(len / 6)), every = Math.max(1, Math.round(segs / v.leaves));
+      ctx.fillStyle = v.color;
+      for (let s = 0; s < segs; s++) {
+        const t0 = s / segs, yy = topY + len * t0;
+        const xx = v.x + Math.sin(t0 * 6 + v.t / 900 + v.sway) * 6 * v.grow;
+        ctx.fillRect(Math.round(xx - 1), Math.round(yy), 3, 4);
+        if (s % every === 0) { ctx.fillRect(Math.round(xx + 2), Math.round(yy), 4, 3); ctx.fillRect(Math.round(xx - 5), Math.round(yy + 2), 4, 3); }
+      }
+    }
+    function drawRock(rk) {
+      if (rk.grow <= 0) return;
+      const baseY = groundY(), w = rk.w * rk.grow, h = rk.h * rk.grow, step = 5;
+      for (let yy = -h; yy <= 0; yy += step)
+        for (let xx = -w; xx <= w; xx += step) {
+          const ex = xx / w, ey = yy / h;
+          if (ex * ex + ey * ey <= 1) { ctx.fillStyle = yy < -h * 0.5 ? rk.color2 : rk.color; ctx.fillRect(Math.round(rk.x + xx), Math.round(baseY + yy - step), step, step); }
+        }
+    }
+    function drawCritter(c) {
+      if (c.kind === 'rabbit') blitKeyed(c.airborne ? RABBIT_HOP : RABBIT, RABBIT_COLORS, c.x, groundY(), 0.9, c.dir < 0, c.yOff || 0);
+      else blitKeyed(c.legFlip ? DEER_WALK_B : DEER_WALK_A, DEER_COLORS, c.x, groundY(), 1.25, c.dir < 0, 0);
+    }
+
+    // The death crumple: every pixel of the standing beast falls from where it was to
+    // where it belongs in the corpse pose. Each holds for its delay, then travels over
+    // its own duration with a little upward kick, gravity-accelerated drop and a touch
+    // of sideways tumble — so it reads as the body coming apart and raining into a
+    // heap, and the final frame is the corpse EXACTLY.
+    function drawMonsterCrumble(D) {
+      for (const p of D.crumble) {
+        const k = Math.max(0, Math.min(1, (D.t - p.delay) / p.dur));
+        const ex = k * (2 - k);                          // ease-out for the horizontal slide
+        const ey = k * k;                                 // ease-in (gravity) for the fall
+        const x = p.x0 + (p.tx - p.x0) * ex + (k > 0 && k < 1 ? Math.sin(D.t / 50 + p.x0) * p.jit * (1 - k) : 0);
+        const y = p.y0 + (p.ty - p.y0) * ey - Math.sin(Math.PI * k) * p.pop;
+        ctx.fillStyle = p.color;
+        ctx.fillRect(Math.round(x), Math.round(y), Math.ceil(p.px), Math.ceil(p.px));
+      }
+    }
+
+    function drawDeath() {
+      const D = T.death;
+      if (D.phase !== 'fall') {                            // a soft warm halo, once he's down and resting
+        const gx = D.x, gy = groundY() - 70;
+        const grd = ctx.createRadialGradient(gx, gy, 8, gx, gy, 300);
+        grd.addColorStop(0, 'rgba(255,238,200,0.12)'); grd.addColorStop(1, 'rgba(255,238,200,0)');
+        ctx.fillStyle = grd; ctx.fillRect(0, 0, W(), canvas.height);
+      }
+      // the far mountains sit furthest back, then the tall foliage (trees → their
+      // vines → bushes → rocks)
+      for (const mt of D.mountains) drawMountain(mt);
+      for (const tr of D.trees) drawTree(tr);
+      for (const v of D.vines) drawVine(v);
+      for (const b of D.bushes) drawBush(b);
+      for (const rk of D.rocks) drawRock(rk);
+      for (const p of D.motes) {                          // drifting light motes / pollen
+        ctx.globalAlpha = Math.max(0, Math.min(0.7, p.life / 1500)) * 0.7;
+        ctx.fillStyle = p.color; ctx.fillRect(Math.round(p.x), Math.round(p.y), p.size, p.size);
+      }
+      ctx.globalAlpha = 1;
+      if (D.phase === 'fall') {                            // his pixels rain down into the corpse pose
+        drawMonsterCrumble(D);
+      } else if (D.phase !== 'rest') {                     // corpse cross-fades to skeleton, then sinks under
+        const sinkPx = (D.sink || 0) * (SKELETON.length * PIXEL * DEATH_BODY_SCALE + 36);
+        const feetY = groundY() + sinkPx, alphaSink = Math.max(0, 1 - (D.sink || 0) * 0.92);
+        const skelK = Math.min(1, Math.max(0, (D.decomp - 0.25) / 0.55));
+        ctx.globalAlpha = (1 - skelK) * alphaSink;
+        if (ctx.globalAlpha > 0.01) blitKeyed(MONSTER_CORPSE, MONSTER_COLORS, D.x, feetY, DEATH_BODY_SCALE, D.dir < 0, 0);
+        ctx.globalAlpha = skelK * alphaSink;
+        if (ctx.globalAlpha > 0.01) blitKeyed(SKELETON, SKELETON_COLORS, D.x, feetY, DEATH_BODY_SCALE, D.dir < 0, 0);
+        ctx.globalAlpha = 1;
+      }
+      // foreground: grass at his feet, then the flowers, the wandering critters, and
+      // the butterflies drifting over the top of it all.
+      for (const g of D.grass) drawGrass(g);
+      for (const f of D.flowers) drawFlower(f);
+      for (const c of D.critters) drawCritter(c);
+      for (const b of D.butterflies) drawButterfly(b);
+      ctx.fillStyle = GREEN; ctx.globalAlpha = 1;
+    }
+
     // ── Cursor affection ───────────────────────────────────────────────────
     // Where the pointer is (in canvas coords), how fast it's moving, and how long
     // it's lingered over / near him. Drives petting, tickling, and batting at the
@@ -2589,10 +3357,21 @@ export default function PixelTroll({ hidden = false, floorSelector = '', obstacl
       T.floorY += (targetFloor - T.floorY) * Math.min(1, dt / 120);
       ctx.clearRect(0, 0, canvas.width, canvas.height);
 
-      // Banished (you shot him or the cop during the police scene): he's gone for
-      // good this session — only a hard reload brings him back. We still run the
-      // entity pass so the final gore/poof fades out, then nothing.
+      // Banished (you shot the troll during the police scene): the ordinary troll is
+      // gone for this session. But three minutes on he claws back as the MONSTER —
+      // and once that's been shot down, the gentle death/bloom scene plays out. All
+      // of it lives off in its own branch; only a hard reload truly resets it.
       if (T.banished) {
+        if (!T.monster && !T.death && T.monsterReturnAt && now >= T.monsterReturnAt) startMonster(now);
+        if (T.monster || T.death) {
+          if (canvas.style.zIndex !== '60') canvas.style.zIndex = '60';  // ride over the widgets
+          if (T.monster) { stepMonster(dt, now); drawMonster(dt); }
+          else { stepDeath(dt, now); drawDeath(dt); }
+          drawEntities(dt);                              // gore / debris from his bursts, on top
+          if (showScore) drawScore();
+          raf = requestAnimationFrame(loop);
+          return;
+        }
         const zw = String(T.splats.length ? 60 : zIndex);
         if (canvas.style.zIndex !== zw) canvas.style.zIndex = zw;
         drawEntities(dt);
@@ -2902,9 +3681,10 @@ export default function PixelTroll({ hidden = false, floorSelector = '', obstacl
         T.confetti.push({ x: gx, y: gy, vx: Math.cos(ang) * sp, vy: Math.sin(ang) * sp - 70, life: rand(600, 1400), size: Math.round(rand(2, 7)), color: Math.random() < 0.3 ? bit : RED });
       }
       T.policeKill = target; T.speech = null;            // the police step now runs the survivor's escape
-      if (target === 'troll') {                          // killed in front of the cop → gone for good
+      if (target === 'troll') {                          // killed in front of the cop → gone for good...
         T.mood = 0; T.policePending = false;
         try { window.localStorage.setItem(MOOD_KEY, '0'); } catch { /* ignore */ }
+        T.monsterReturnAt = performance.now() + 180000;  // ...but in 3 minutes he comes back, and he's not a troll anymore
       }
     }
 
@@ -2916,6 +3696,16 @@ export default function PixelTroll({ hidden = false, floorSelector = '', obstacl
     // (whichever you hit) and the other one bolts. Shift + right-click drops big food.
     function onContextMenu(e) {
       if (hiddenRef.current) return;
+      // Monster rampage: right-click bursts him in a screen-wide splatter — but he
+      // just reforms, angrier. It takes five hits to finally drop him. Handled
+      // first, since during the monster T.mode/T.action are stale (he's "banished").
+      if (T.monster) {
+        if (T.monster.phase !== 'rampage' || T.monster.exploding > 0) return;
+        if (!hitMonster(e)) return;
+        e.preventDefault(); clearSelection();
+        explodeMonster(e.clientX, e.clientY);
+        return;
+      }
       // Shift + right-click → drop a BIG cut of meat. Works even while he's away
       // (it summons him out), so it's handled before the away/shot guards below.
       if (e.shiftKey && !T.banished) {
@@ -2987,13 +3777,54 @@ export default function PixelTroll({ hidden = false, floorSelector = '', obstacl
     }
     window.addEventListener('mousedown', onFeed);
 
-    // Shift+A → toggle the bottom-right mood meter. Ignored while you're typing in
-    // a field (and on key auto-repeat) so it doesn't fight real input or flicker.
+    // Shift+A toggles the mood meter; Shift+M / Shift+K are debug triggers for the
+    // monster (summon / drop). Shift+D jumps straight to the moment the skeleton has
+    // just sunk (the bare flower cluster) and Shift+G fast-forwards the garden's
+    // 15-min spread. Ignored while you're typing in a field (and on key auto-repeat)
+    // so they don't fight real input or flicker.
     function onKeyDown(e) {
-      if (e.repeat || !e.shiftKey || (e.code !== 'KeyA' && e.key !== 'A' && e.key !== 'a')) return;
+      if (e.repeat || !e.shiftKey) return;
       const el = e.target;
       if (el && (el.isContentEditable || /^(INPUT|TEXTAREA|SELECT)$/.test(el.tagName))) return;
-      showScore = !showScore;
+      const code = e.code, key = e.key;
+      if (code === 'KeyM' || key === 'M' || key === 'm') {       // debug: summon the monster right now
+        if (!T.monster) {
+          T.banished = true; T.death = null; T.cop = null; T.copSpeech = null; T.policeKill = null; T.speech = null;
+          startMonster();
+        }
+        return;
+      }
+      if (code === 'KeyK' || key === 'K' || key === 'k') {       // debug: drop the monster (start the bloom scene)
+        if (T.monster && T.monster.phase === 'rampage' && !T.monster.exploding) {
+          killMonster(T.monster.x, groundY() - MONSTER.length * PIXEL * T.monster.scale * 0.5);
+        }
+        return;
+      }
+      if (code === 'KeyD' || key === 'D' || key === 'd') {       // debug: jump to right after the skeleton has sunk
+        T.banished = true; T.monster = null; T.cop = null; T.copSpeech = null; T.policeKill = null; T.speech = null;
+        const x = W() / 2;
+        const D = {
+          phase: 'rest', t: 0, x, standX: x, scale: MONSTER_SCALE, fallSign: 1,
+          uprightMirror: false, dir: -1, landed: true, decomp: 1, sink: 1,
+          flowers: [], butterflies: [], motes: [], flowerT: 0, flutterT: 0, moteT: 0,
+          gardenOn: true, gardenT: 0, patchT: 0, critterT: rand(8000, 20000), pockets: [],
+          grass: [], bushes: [], trees: [], vines: [], rocks: [], critters: [], mountains: [],
+        };
+        for (let i = 0; i < 14; i++) { addFlower(D); D.flowers[D.flowers.length - 1].grow = 1; }   // the cluster he left behind
+        for (let i = 0; i < 6; i++) addButterfly(D);
+        T.death = D;
+        return;
+      }
+      if (code === 'KeyG' || key === 'G' || key === 'g') {       // debug: fast-forward the meadow→forest spread
+        const D = T.death;
+        if (D) {
+          if (D.phase === 'fall' || D.phase === 'corpse') { D.phase = 'sink'; D.t = 0; D.decomp = 1; }
+          D.gardenOn = true; D.gardenT = Math.min(GARDEN_SPREAD_MS, D.gardenT + 150000); // jump ~2.5 min on
+          for (let i = 0; i < 26; i++) { D.patchT = 9999; growGarden(D, 16); }            // and sprout a fresh wave at once
+        }
+        return;
+      }
+      if (code === 'KeyA' || key === 'A' || key === 'a') showScore = !showScore;
     }
     window.addEventListener('keydown', onKeyDown);
 
@@ -3009,6 +3840,7 @@ export default function PixelTroll({ hidden = false, floorSelector = '', obstacl
 
     return () => {
       saveMood();                                        // keep his latest feelings across reloads
+      shovedEls.forEach((el) => { try { el.style.translate = ''; el.style.rotate = ''; } catch { /* gone */ } });
       cancelAnimationFrame(raf);
       window.removeEventListener('resize', resize);
       window.removeEventListener('click', onClick);

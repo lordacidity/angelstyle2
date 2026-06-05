@@ -102,7 +102,7 @@ function LaunchServerButton() {
   }
 
   return (
-    <div className="fixed bottom-3 left-[84px] z-[25]">
+    <div className="fixed bottom-3 left-[84px] z-[15]">
       {open && (
         <div className="absolute bottom-full left-0 mb-2 w-[370px] rounded-lg border border-zinc-800 bg-zinc-950/95 p-3 shadow-xl backdrop-blur">
           <div className="mb-2 flex items-start justify-between gap-2">
