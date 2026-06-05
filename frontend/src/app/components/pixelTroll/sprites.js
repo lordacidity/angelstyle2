@@ -197,16 +197,44 @@ export const DOG_OPEN = [                                  // jaws gaping open a
   '..##..##.....##..##.....', '..##..##.....##..##.....',
 ];
 
-// ---- the policeman (shows up only when he's SUPER furious with you): peaked cap,
-// uniform, takes notes while the troll complains. Faces left by default. ~13×15.
+// ---- the policeman (shows up only when he's SUPER furious with you): a green
+// troll cop in a blue uniform — peaked cap with a gold badge, a chest badge, and
+// dark trousers/shoes. Takes notes while the troll complains. Faces left by
+// default. ~12×15. Char-keyed (drawn via drawCop), so each char picks a colour
+// from COP_COLORS; '.' is empty. k=cap, o=brim/belt/shoes, f=green face/hands,
+// u=blue uniform, b=gold badge.
 export const COP_SCALE = 1.1;
+export const COP_COLORS = {
+  o: '#0e1a3a',   // near-black navy: cap brim, belt, shoes
+  k: '#1d2f5e',   // cap navy
+  u: '#2f4d96',   // uniform blue
+  b: '#ffd24a',   // badge / button gold
+  f: '#00e676',   // green troll skin (face / hands)
+};
 export const POLICE = [
-  '...######...', '..########..', '.##########.', '...######...', '...#.##.#...',
-  '...######...', '..########..', '.###.####.#.', '##..######..', '##..######..',
-  '.#..######..', '....####....', '...##..##...', '...##..##...', '...##..##...',
+  '...kkkkkk...', '..kkkbbkkk..', '.oooooooooo.', '...ffffff...', '...f.ff.f...',
+  '...ffffff...', '..uuuuuuuu..', '.uuu.buuu.u.', 'uu..uuuuuu..', 'uu..uuuuuu..',
+  '.u..uuuuuu..', '....oooo....', '...uu..uu...', '...uu..uu...', '...oo..oo...',
 ];
 export const POLICE_WRITE = [                              // pencil hand dips to scribble
-  '...######...', '..########..', '.##########.', '...######...', '...#.##.#...',
-  '...######...', '..########..', '.#####.###.#', '##..######.#', '##..######..',
-  '.#..######..', '....####....', '...##..##...', '...##..##...', '...##..##...',
+  '...kkkkkk...', '..kkkbbkkk..', '.oooooooooo.', '...ffffff...', '...f.ff.f...',
+  '...ffffff...', '..uuuuuuuu..', '.uubuu.uuu.u', 'uu..uuuuuu.u', 'uu..uuuuuu..',
+  '.u..uuuuuu..', '....oooo....', '...uu..uu...', '...uu..uu...', '...oo..oo...',
 ];
+
+// ---- collectibles: little items he digs up (bone / worm / chest / coin) or
+// leaves you as gifts when he loves you (flower / heart / coin / star). Each is a
+// tiny single-colour glyph; click one on the floor to collect it. (drawn via a
+// mini blitter; '#' = the item's colour.)
+export const GIFT_PIXEL = 4;
+export const GIFT_ART = {
+  coin:   { color: '#ffd24a', rows: ['.###.', '#####', '##.##', '#####', '.###.'] },
+  flower: { color: '#ff6b9d', rows: ['.#.#.', '#####', '.###.', '..#..', '.###.'] },
+  heart:  { color: '#ff6b9d', rows: ['.#.#.', '#####', '#####', '.###.', '..#..'] },
+  star:   { color: '#ffd24a', rows: ['..#..', '#.#.#', '.###.', '#.#.#', '..#..'] },
+  bone:   { color: '#efe6cd', rows: ['##.##', '#####', '..#..', '#####', '##.##'] },
+  chest:  { color: '#c98a4b', rows: ['.####.', '######', '##.###', '######'] },
+  worm:   { color: '#ff8fbf', rows: ['.##...', '####..', '.####.', '..####', '...##.'] },
+};
+export const DIG_FINDS = ['bone', 'worm', 'chest', 'coin'];     // what turns up when he digs
+export const LOVE_GIFTS = ['flower', 'heart', 'coin', 'star'];  // what he leaves you when smitten with you

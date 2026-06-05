@@ -18,4 +18,3 @@ export const POLICE_COP   = ["mhm.", "noted.", "go on…", "i see.", "uh huh.", 
 export const SPEECH_FED =     { good: ["mmm!", "thank you!", "so good", "yum!", "my favorite", "aw, thanks"], bad: ["...thanks i guess", "fine. thanks.", "still don't like you", "whatever. food."] };
 export const SPEECH_GRABBED = { good: ["hey!", "put me down!", "whoa!", "wheee?", "careful!"], bad: ["let GO of me", "get your hands off me", "fuck off!", "don't touch me"] };
 export const SPEECH_POKED =   { good: ["hi!", "hee", "that tickles", "hey you", "oh hi"], bad: ["stop poking me", "quit it", "ow", "rude", "knock it off"] };
-export const SPEECH_MELT =    ["FUCK OFF", "STOP IT", "GODDAMNIT", "I SAID STOP", "ENOUGH"];

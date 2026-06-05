@@ -5,9 +5,10 @@ import { GREEN, RED, GOLD, HEART, PIXEL, mix, spriteW, rand, pick,
 import {
   POSES, STAND, BOOT, Z_GLYPH, NOTE_GLYPH, STAR_GLYPH, HEART_GLYPH,
   UFO, UFO2, CHUTE, MEAT_PIXEL, MEAT_COLORS, MEATS,
-  LADY, DOG, DOG2, DOG_OPEN, COP_SCALE, POLICE, POLICE_WRITE,
+  LADY, DOG, DOG2, DOG_OPEN, COP_SCALE, COP_COLORS, POLICE, POLICE_WRITE,
+  GIFT_PIXEL, GIFT_ART, DIG_FINDS, LOVE_GIFTS,
 } from './pixelTroll/sprites';
-import { SPEECH, POLICE_TROLL, POLICE_COP, SPEECH_FED, SPEECH_GRABBED, SPEECH_POKED, SPEECH_MELT } from './pixelTroll/speech';
+import { SPEECH, POLICE_TROLL, POLICE_COP, SPEECH_FED, SPEECH_GRABBED, SPEECH_POKED } from './pixelTroll/speech';
 
 /**
  * A very pixelated, all-green troll that lives along the very bottom edge of the
@@ -31,9 +32,9 @@ import { SPEECH, POLICE_TROLL, POLICE_COP, SPEECH_FED, SPEECH_GRABBED, SPEECH_PO
  * off-screen, gets the hiccups, takes a static shock, melts into a puddle,
  * bursts into tears, blows hearts, hits the jackpot, blows a raspberry, drops
  * into the splits, and more. Eighteen poke-reactions, one picked at random per
- * click — and if you keep poking him too fast, he reaches his limit and does
- * something he'd rather you didn't see. He can flush green→red and fade out, so
- * a `color`/`alpha` pair rides alongside `pose` for tinting and dissolving.
+ * click — a single spaced-out poke warms him up, while jabbing fast just annoys
+ * him. He can flush green→red and fade out, so a `color`/`alpha` pair rides
+ * alongside `pose` for tinting and dissolving.
  *
  * And he's grabbable: click-and-hold and you can drag him around — he dangles
  * from the cursor kicking and fighting, riding OVER the floating widgets. Let go
@@ -45,7 +46,10 @@ import { SPEECH, POLICE_TROLL, POLICE_COP, SPEECH_FED, SPEECH_GRABBED, SPEECH_PO
  * And he's feedable: shift+click blank space and a small Minecraft-style cut of
  * meat — a chop on the bone, a marbled steak, a drumstick, a T-bone — appears right
  * where you clicked and drops to his floor; wherever he is (even off-screen) he
- * comes running, chomps it down bite by bite, and looks pleased.
+ * comes running, chomps it down bite by bite, and looks pleased. Shift+RIGHT-click
+ * instead drops a BIG cut he can't resist — it summons him out on the spot, and
+ * when he's mad he won't come clean: he peeks around the corner and up from the
+ * ground, then bursts out, snatches it in a blur, and bolts (so it's hard to hit).
  *
  * And he has FEELINGS about you that build over time (persisted in localStorage,
  * slowly drifting back to neutral). Feeding him and the occasional friendly poke
@@ -57,14 +61,20 @@ import { SPEECH, POLICE_TROLL, POLICE_COP, SPEECH_FED, SPEECH_GRABBED, SPEECH_PO
  * you've really earned it — crude, explicit abuse. (In-house easter egg; the
  * profanity is intentional.)
  *
+ * And if you win him ALL the way to the top (+100 love — feed him, be kind), he
+ * throws a little celebration: he turns heart-pink, bounces for joy, blows "I LOVE
+ * YOU!" and pours out a fountain of hearts under a big pulsing heart overhead.
+ *
  * And if you push him ALL the way to the bottom, he stops coming alone — he shows
- * up with a police officer, points at you and reels off his complaints while the
- * cop stands there taking notes. Right-click (shoot) the troll OR the cop during
- * that scene and he's gone for good — until a hard reload, which brings him back
- * with a clean slate (his saved mood is wiped).
+ * up, dead-center, with a blue-uniformed police officer, points at you and reels
+ * off his complaints while the cop stands there taking notes. You can right-click
+ * (shoot) the troll OR the cop individually: whichever you hit bursts, and the
+ * other one panics and bolts. Killing the troll ends him for good (until a hard
+ * reload, which wipes his saved mood); killing the cop just sends the troll
+ * running — and if he's still seething he'll be back with another officer.
  *
  * Pure canvas, one green color (red when riled) — the only exceptions are the meat
- * (a few food hues) and the speech bubbles. No images.
+ * (a few food hues), the policeman's blue uniform, and the speech bubbles. No images.
  */
 
 export default function PixelTroll({ hidden = false, floorSelector = '', obstacleSelector = '', zIndex = 30 }) {
@@ -94,18 +104,25 @@ export default function PixelTroll({ hidden = false, floorSelector = '', obstacl
       t: 0, dur: 0, legT: 0, legFlip: false, poseT: 0, poseFlip: false,
       target: 0, speed: 0, babySpawned: false, sneezed: false, zTimer: 0,
       baby: null, confetti: [], zzz: [],
-      lady: null, hearts: [], heartSent: false, landed: false, pool: null, ufo: null, dog: null, boot: null, flick: null,
+      lady: null, hearts: [], heartSent: false, landed: false, pool: null, ufo: null, dog: null, boot: null, flick: null, friend: null,
       grab: null, drop: null, dropSeed: null, splats: [], shotAt: null,
-      meats: [], feast: null,
+      meats: [], feast: null, widget: null,
+      gifts: [], giftT: rand(20000, 35000),       // collectibles on the floor + a timer for love-gifts
+      gear: 0,                                     // accessory tier worn (0 none, 1 shades, 2 crown) — set from storage below
       // getting dropped or whacked makes him bolt — and bolt FASTER the more it
       // keeps happening (the streak only resets once he gets a visit in peace).
       // furyT just animates the rage cloud when he really can't stand you.
-      pendingFlee: false, fleeStreak: 0, furyT: 0,
+      pendingFlee: false, fleeStreak: 0, furyT: 0, petMoodT: 0, weatherT: 0,
       // how he feels about you (−100 hate … +100 love). Drifts toward 0 over time;
       // food / gentle pokes warm him, dragging / shooting / poke-spam sour him.
       mood: loadMood(), speech: null, lastSpoke: 0, nextChatter: rand(6000, 13000), moodSaveT: 0,
       // the police scene (super-furious) + the permanent banish it can trigger.
-      cop: null, copSpeech: null, policeStopX: 0, banished: false,
+      // policePending latches the moment he bottoms out at −100 so his mood can
+      // drift back up while he's away without him forgetting to bring the cop.
+      cop: null, copSpeech: null, policeStopX: 0, banished: false, policePending: false, policeKill: null,
+      // latched when he's won all the way to +100 → his next free beat is a big
+      // heart-pouring love celebration (mirror of policePending at the bottom).
+      lovePending: false,
       nextVisit: performance.now() + rand(5000, 9000),
       floorY: canvas.height, // current floor, eased toward the trim bar / screen bottom
     };
@@ -141,7 +158,23 @@ export default function PixelTroll({ hidden = false, floorSelector = '', obstacl
       catch { return 0; }
     }
     function saveMood() { try { window.localStorage.setItem(MOOD_KEY, String(Math.round(T.mood))); } catch { /* private mode / SSR — skip */ } }
-    function bumpMood(d) { T.mood = Math.max(-100, Math.min(100, T.mood + d)); saveMood(); }
+    // Accessories he's unlocked (worn forever once earned) + a running count of the
+    // gifts you've collected, both persisted alongside his mood.
+    const GEAR_KEY = 'phonedeck_troll_gear', GIFT_KEY = 'phonedeck_troll_gifts';
+    function loadGear() { try { const v = parseInt(window.localStorage.getItem(GEAR_KEY), 10); return Number.isFinite(v) ? Math.max(0, Math.min(2, v)) : 0; } catch { return 0; } }
+    function saveGear() { try { window.localStorage.setItem(GEAR_KEY, String(T.gear)); } catch { /* skip */ } }
+    let giftCount = (() => { try { const v = parseInt(window.localStorage.getItem(GIFT_KEY), 10); return Number.isFinite(v) ? v : 0; } catch { return 0; } })();
+    const saveGiftCount = () => { try { window.localStorage.setItem(GIFT_KEY, String(giftCount)); } catch { /* skip */ } };
+    T.gear = loadGear();   // restore his earned accessory now that GEAR_KEY is initialized
+    function bumpMood(d) {
+      const before = T.mood;
+      T.mood = Math.max(-100, Math.min(100, before + d));
+      if (T.mood <= -100 && before > -100) { T.policePending = true; T.lovePending = false; }  // hit the bottom → a cop next
+      if (T.mood >= 100 && before < 100) { T.lovePending = true; T.policePending = false; }     // hit the top → a love celebration
+      if (T.mood >= 60 && T.gear < 1) { T.gear = 1; saveGear(); }     // earns shades at +60
+      if (T.mood >= 100 && T.gear < 2) { T.gear = 2; saveGear(); }    // ...and a crown at +100
+      saveMood();
+    }
     function moodTier() {
       const m = T.mood;
       if (m >= 55) return 'loved';
@@ -256,8 +289,10 @@ export default function PixelTroll({ hidden = false, floorSelector = '', obstacl
     }
 
     function planVisit() {
-      // pushed all the way to the bottom → this whole visit is the police scene.
-      if (superMad() && !T.banished) { T.queue = ['police']; return; }
+      // pushed all the way to the bottom (now, or latched when he hit −100 earlier)
+      // → this whole visit is the police scene, even if his mood has since drifted up.
+      if ((T.policePending || superMad()) && !T.banished) { T.policePending = false; T.queue = ['police']; return; }
+      if (T.lovePending) { T.lovePending = false; T.queue = ['lovefest']; return; }   // won all the way to +100 → a celebration
       const tier = moodTier();
       const sour = tier === 'disliked' || tier === 'hated' || tier === 'furious';
       const entrance = pick(['walkIn', 'walkIn', 'emerge']);
@@ -286,7 +321,10 @@ export default function PixelTroll({ hidden = false, floorSelector = '', obstacl
       // just finished an exit (or fled) → he's gone; don't idle back into view.
       if (T.leaving) {
         if (T.action !== 'pflee') T.fleeStreak = 0;   // left in peace / died → the escalation resets
-        T.leaving = false; T.idleStreak = 0; T.mode = 'away'; T.speech = null; T.nextVisit = now + awayDelay(); return;
+        T.leaving = false; T.idleStreak = 0; T.mode = 'away'; T.speech = null;
+        // if he's owed a police visit or a love celebration, he's back fast for it;
+        // otherwise the usual mood-scaled wait (the madder he is, the longer he's gone).
+        T.nextVisit = now + ((T.policePending || T.lovePending) ? rand(2500, 5000) : awayDelay()); return;
       }
       if (T.queue.length) {
         T.idleStreak = 0;
@@ -321,11 +359,11 @@ export default function PixelTroll({ hidden = false, floorSelector = '', obstacl
     // Screen-wide blood splatter (the right-click "shot"). Each blob sticks where
     // it lands ON the whole canvas — over widgets and all — holds, runs a drip
     // downward, then fades out. A few are green (bits of him in the spray).
-    function spawnSplats(cx, cy) {
+    function spawnSplats(cx, cy, bitColor = GREEN) {
       const add = (x, y, size, green) => {
         const big = size > 7;
         T.splats.push({
-          x, y, size, color: green ? GREEN : RED,
+          x, y, size, color: green ? bitColor : RED,
           hold: rand(60, 520), drip: 0,
           dripMax: big ? rand(18, 150) : 0, dripV: rand(26, 80),
           life: rand(3200, 6200), fade: rand(800, 1700),
@@ -350,7 +388,7 @@ export default function PixelTroll({ hidden = false, floorSelector = '', obstacl
       }
     }
 
-    // ── Food (shift+click) ─────────────────────────────────────────────────
+    // ── Food (shift+click = small cut, shift+right-click = BIG cut) ──────────
     // The nearest hunk of meat still on the board — what he'll lope toward next.
     function nearestMeat() {
       let best = null, bd = Infinity;
@@ -363,27 +401,52 @@ export default function PixelTroll({ hidden = false, floorSelector = '', obstacl
     }
     // Shift+click conjures a cut of meat right where the cursor is. It then drops
     // under gravity to his floor and waits there to be eaten. (If you click at or
-    // below the floor it just lands immediately.)
-    function spawnMeat(clientX, clientY) {
+    // below the floor it just lands immediately.) `big` (shift + right-click)
+    // makes a double-size cut that's drawn bigger and summons him on the spot.
+    function spawnMeat(clientX, clientY, big = false) {
       if (T.meats.length >= 5) return;                  // don't let the plate pile up forever
       const kind = pick(MEATS);
       const canvasTop = window.innerHeight - canvas.height;
       const floor = groundY();
       const y = Math.min(floor, Math.max(0, clientY - canvasTop)); // its BOTTOM, at the click point
+      const margin = big ? 44 : 20;
       T.meats.push({
-        kind, rows: kind.rows,
-        x: Math.max(20, Math.min(W() - 20, clientX)),   // keep it on-screen
+        kind, rows: kind.rows, big, px: big ? MEAT_PIXEL * 2 : MEAT_PIXEL,
+        x: Math.max(margin, Math.min(W() - margin, clientX)),   // keep it on-screen
         y, vy: 0,
         landed: y >= floor, gone: false, claimed: false,
         eat: 0, biteSide: 1, life: 0,
       });
     }
 
+    // ── Collectibles (gifts he leaves / treasure he digs up) ────────────────
+    // A little item pops onto the floor with a toss; it sparkles, and you click it
+    // to collect (bumps a saved tally). `pop` gives it some upward launch.
+    function spawnGift(kind, x, pop) {
+      if (T.gifts.length >= 6) return;
+      T.gifts.push({ kind, x: Math.max(16, Math.min(W() - 16, x)), y: groundY() - (pop ? 4 : 0), vy: pop ? -rand(180, 320) : 0, vx: rand(-40, 40), landed: !pop, life: 0, sparkleT: 0 });
+    }
+    // Click on a gift to collect it. Returns true if one was hit (so the click
+    // doesn't fall through to a poke). Coords are canvas-space.
+    function collectGiftAt(gx, gy) {
+      for (let i = T.gifts.length - 1; i >= 0; i--) {
+        const g = T.gifts[i];
+        const art = GIFT_ART[g.kind], w = spriteW(art.rows) * GIFT_PIXEL, h = art.rows.length * GIFT_PIXEL;
+        if (gx >= g.x - w / 2 - 8 && gx <= g.x + w / 2 + 8 && gy >= g.y - h - 8 && gy <= g.y + 8) {
+          for (let j = 0; j < 12; j++) { const ang = rand(-Math.PI, 0), sp = rand(80, 220);   // a little collect sparkle
+            T.confetti.push({ x: g.x, y: g.y - h / 2, vx: Math.cos(ang) * sp, vy: Math.sin(ang) * sp, life: rand(300, 700), size: Math.round(rand(2, 4)), color: art.color }); }
+          T.gifts.splice(i, 1); giftCount++; saveGiftCount();
+          return true;
+        }
+      }
+      return false;
+    }
+
     function startAction(name, now) {
       T.mode = 'active'; T.action = name; T.t = 0;
       T.yOffset = 0; T.scale = 1; T.shakeX = 0; T.mirror = false; T.color = GREEN; T.alpha = 1;
       T.leaving = false; // only exits / flee re-assert this below
-      T.lady = null; T.pool = null; T.ufo = null; T.dog = null; T.boot = null; T.flick = null; // clear any lingering cameo props
+      T.lady = null; T.pool = null; T.ufo = null; T.dog = null; T.boot = null; T.flick = null; T.friend = null; // clear any lingering cameo props
       T.feast = null; // (the meal sets this up again in its own case)
       if (name !== 'police') { T.cop = null; T.copSpeech = null; } // the police scene sets these up itself
       switch (name) {
@@ -424,7 +487,7 @@ export default function PixelTroll({ hidden = false, floorSelector = '', obstacl
         case 'roll':
           T.dir = T.x < W() / 2 ? 1 : -1; T.target = T.dir === 1 ? W() - off : off; T.speed = rand(300, 460);
           break;
-        case 'dig': T.dur = rand(2600, 3600); T.poseT = 0; break;
+        case 'dig': T.dur = rand(2600, 3600); T.poseT = 0; T.sneezed = false; break;   // sneezed flag = "already unearthed a find"
         case 'faint': T.dur = rand(2400, 3200); break;
         case 'headbang': T.dur = rand(1800, 2800); break;
         case 'kick': T.dir = T.x < W() / 2 ? 1 : -1; T.dur = 1100; break;
@@ -433,12 +496,54 @@ export default function PixelTroll({ hidden = false, floorSelector = '', obstacl
 
         case 'feast': {                                 // someone dropped food — go wolf it down
           const m = nearestMeat();
-          T.feast = { meat: m, ate: false, sided: false, biteT: 0, afterT: 0, wait: 0, burped: false };
+          const big = !!(m && m.big);
+          const sneaky = big && T.mood <= -18;          // a mad troll won't stroll up to a BIG meal — he sneaks
+          T.feast = {
+            meat: m, big, sneaky, phase: sneaky ? 'peek' : 'go',
+            ate: false, sided: false, biteT: 0, afterT: 0, wait: 0, burped: false, peekT: 0, peekN: 0,
+          };
           if (m) { m.claimed = true; T.dir = m.x > T.x ? 1 : -1; }
-          T.speed = rand(165, 245);                     // an eager trot toward dinner
+          T.speed = sneaky ? rand(680, 900) : rand(165, 245);   // a sneaky snatch is a blur; else an eager trot
           T.dur = 22000;                                // hard cap; really ends when the plate's clean
           break;
         }
+
+        case 'lovefest':                                // MAX LOVE (+100) → he turns pink and showers you in hearts
+          T.dur = 6000; T.heartSent = false; T.landed = false; T.sneezed = false; T.zTimer = 0; T.poseT = 0;
+          break;
+
+        // ---- cursor affection (hover / nearby pointer) ----
+        case 'pet': T.dur = 600000; T.petMoodT = 0; T.zTimer = 0; break;   // held while you hover gently over him
+        case 'tickle': T.dur = 600000; T.petMoodT = 0; T.zTimer = 0; break;
+        case 'chase': T.dur = 9000; T.poseT = 0; break;                    // bats at / creeps toward the cursor
+        case 'flinch': T.dur = 700; break;                                 // soured → recoils from the cursor
+
+        // ---- he uses the floating Studio panels ----
+        case 'napWidget': {                             // climb onto a panel and sleep on top
+          const obs = readObstacles().filter((r) => r.top > Math.max(30, groundY() - 320) && r.top < groundY() - 30 && (r.right - r.left) > 60);
+          if (!obs.length) { startAction('pause', now); return; }          // no usable ledge → just pause
+          let best = obs[0], bd = Infinity;
+          for (const r of obs) { const cx = (r.left + r.right) / 2, d = Math.abs(cx - T.x); if (d < bd) { bd = d; best = r; } }
+          T.widget = { cx: (best.left + best.right) / 2, top: best.top, el: best.el, up: false, climbT: 0 };
+          T.speed = rand(70, 110); T.dur = rand(6500, 9500); T.zTimer = 0;
+          break;
+        }
+        case 'leanWidget': {                            // walk to a panel's side, lean on it, give it a shove
+          const obs = readObstacles().filter((r) => (r.right - r.left) > 50);
+          if (!obs.length) { startAction('pause', now); return; }
+          let best = obs[0], bd = Infinity;
+          for (const r of obs) { const cx = (r.left + r.right) / 2, d = Math.abs(cx - T.x); if (d < bd) { bd = d; best = r; } }
+          const half = spriteW(STAND) * PIXEL * 0.5;
+          const onLeft = T.x < (best.left + best.right) / 2;               // approach the nearer side
+          T.widget = { el: best.el, standX: onLeft ? best.left - half + 4 : best.right + half - 4, lean: onLeft ? 1 : -1 };
+          T.speed = rand(60, 95); T.dur = rand(3200, 5200); T.poseT = 0;
+          break;
+        }
+
+        // ---- app-driven reactions + boredom ----
+        case 'cheer': T.dur = 2600; T.heartSent = false; T.sneezed = false; break;   // something good happened
+        case 'fret': T.dur = 2200; T.heartSent = false; T.poseT = 0; break;          // something went wrong
+        case 'bored': T.dur = 2800; T.heartSent = false; break;                       // you've ignored him
 
         // ---- click reactions (poke responses) ----
         case 'pstartle': T.dur = 900; break;
@@ -461,7 +566,6 @@ export default function PixelTroll({ hidden = false, floorSelector = '', obstacl
         case 'pjackpot': T.dur = 1800; T.sneezed = false; break;
         case 'praspberry': T.dur = 1700; T.sneezed = false; break;
         case 'psplit': T.dur = 1600; break;
-        case 'pmeltdown': T.dur = 3200; T.poseT = 0; T.zTimer = 0; T.sneezed = false; T.landed = false; break;
         case 'pflick': {                                // double-click WHACK → he goes flying, tumbling, bouncing
           const dir = Math.random() < 0.5 ? -1 : 1;
           T.flick = {
@@ -547,6 +651,20 @@ export default function PixelTroll({ hidden = false, floorSelector = '', obstacl
           T.dir = Math.random() < 0.5 ? 1 : -1; T.mirror = T.dir < 0;
           T.pool = { x: T.x, grow: 0, sink: 0 };
           break;
+        case 'friend': {                                // a buddy troll drops by and they play
+          T.dur = 8000;
+          const fromRight = T.x < W() / 2;              // friend comes from the far side
+          const dirIn = fromRight ? -1 : 1;
+          const stopX = Math.max(60, Math.min(W() - 60, T.x + (fromRight ? 1 : -1) * 72));
+          const startX = fromRight ? W() + off : -off;
+          T.friend = {
+            x: startX, stopX, dir: dirIn, speed: Math.max(200, Math.abs(startX - stopX) / 1.4),
+            pose: 'walkA', mirror: dirIn < 0, yOff: 0, legT: 0, legFlip: false, gone: false,
+            act: pick(['highfive', 'dance', 'tag']),
+          };
+          T.sneezed = false; T.poseT = 0;
+          break;
+        }
         case 'ufo': {                                   // abducted by a flying saucer
           T.leaving = true; T.dur = 6000;
           const dir = Math.random() < 0.5 ? 1 : -1;     // travels this way across the screen
@@ -579,10 +697,10 @@ export default function PixelTroll({ hidden = false, floorSelector = '', obstacl
           const dir = fromLeft ? 1 : -1;                // travel direction across the screen
           T.dir = dir;
           T.x = fromLeft ? -off : W() + off;            // troll enters from this edge
-          T.policeStopX = fromLeft ? W() * 0.42 : W() * 0.58;
+          T.policeStopX = W() / 2 + dir * 46;           // confrontation centered: troll just past center, cop ~46px the other side
           const exitDist = (dir === 1 ? (W() - T.policeStopX) : T.policeStopX) + off + 110;
           T.cop = { x: T.x - dir * 80, dir, yOff: 0, legT: 0, legFlip: false, writeT: 0, writing: false, mirror: dir < 0, exitSpeed: Math.max(170, exitDist / 3.0) };
-          T.copSpeech = null; T.speech = null; T.poseT = 0;
+          T.copSpeech = null; T.speech = null; T.poseT = 0; T.policeKill = null;
           break;
         }
 
@@ -773,6 +891,10 @@ export default function PixelTroll({ hidden = false, floorSelector = '', obstacl
           }
         } else {
           T.yOffset = Math.max(0, T.yOffset - dt * 0.4); T.pose = 'stand';   // pop back up
+          if (!T.sneezed) {                              // ...and about half the time, he's struck something
+            T.sneezed = true;
+            if (Math.random() < 0.5) spawnGift(pick(DIG_FINDS), T.x, true);
+          }
         }
         return T.t >= T.dur;
       }
@@ -835,8 +957,54 @@ export default function PixelTroll({ hidden = false, floorSelector = '', obstacl
       if (a === 'feast') {                              // trots to the meat, chomps it down, looks pleased
         const F = T.feast;
         if (!F) return true;
-        if (F.ate) {                                    // belly full — happy little jig, one content burp
-          F.afterT += dt;
+
+        // Sneaky big-meal approach (only when he's mad): he won't walk up to it —
+        // he peeks around the screen edge and pokes his head up out of the ground
+        // to case it, then BURSTS out, snatches it in a blur, and bolts. All of it
+        // is deliberately hard to land a shot on.
+        if (F.sneaky && F.phase === 'peek') {
+          const m = F.meat;
+          if (!m || m.gone) return true;                // food vanished before he committed
+          const edge = m.x < W() / 2 ? 'left' : 'right';
+          const dirToFood = edge === 'left' ? 1 : -1;
+          const PEEK = 1500;                            // one peek cycle (rise → watch → duck back)
+          const k = F.peekT / PEEK;
+          T.scale = 1; T.shakeX = 0;
+          if (F.peekN % 2 === 1) {                      // ...pokes his head up out of the ground, scanning
+            const spot = m.x - dirToFood * (off * 1.4 + (F.peekN * 23) % 70);
+            T.x = Math.max(off * 0.5, Math.min(W() - off * 0.5, spot));
+            const headPeek = 6 * PIXEL, down = STAND_H - headPeek;
+            if (k < 0.25) T.yOffset = STAND_H - (k / 0.25) * headPeek;            // rise to peek
+            else if (k < 0.75) { T.yOffset = down; T.pose = (Math.floor(F.peekT / 200) % 2) ? 'lookL' : 'lookR'; }
+            else T.yOffset = down + ((k - 0.75) / 0.25) * headPeek;               // sink back under
+            T.mirror = m.x < T.x;
+          } else {                                      // ...leans in around the screen edge, just his head showing
+            const hidden = edge === 'left' ? -off * 0.55 : W() + off * 0.55;
+            const shown  = edge === 'left' ? -off * 0.16 : W() + off * 0.16;
+            T.yOffset = 0; T.mirror = edge === 'right'; // face inward, toward the food
+            T.pose = (Math.floor(F.peekT / 200) % 2) ? 'lookL' : 'lookR';
+            if (k < 0.25) T.x = hidden + (shown - hidden) * (k / 0.25);
+            else if (k < 0.75) T.x = shown;
+            else T.x = shown + (hidden - shown) * ((k - 0.75) / 0.25);
+          }
+          F.peekT += dt;
+          if (F.peekT >= PEEK) { F.peekT = 0; F.peekN++; }
+          if (F.peekN >= 3) {                           // done casing it → explode out of hiding
+            F.phase = 'dash';
+            T.x = edge === 'left' ? -off : W() + off;   // start the sprint fully off the near edge
+            T.yOffset = 0; T.dir = dirToFood;
+          }
+          return false;
+        }
+
+        if (F.ate) {                                    // belly full
+          if (F.sneaky) {                               // snatched it — no victory dance, just GONE
+            T.leaving = true; T.mirror = T.dir < 0;
+            T.x += T.dir * Math.max(T.speed, 760) * dt / 1000;
+            animLegs(dt, 'walkA', 'walkB', 50);
+            return T.x < -off || T.x > W() + off;
+          }
+          F.afterT += dt;                               // happy little jig, one content burp
           if (F.afterT < 900) {
             T.pose = (Math.floor(F.afterT / 160) % 2) ? 'wave' : 'jump';
             T.yOffset = -Math.abs(Math.sin(F.afterT / 130)) * 8;
@@ -853,12 +1021,12 @@ export default function PixelTroll({ hidden = false, floorSelector = '', obstacl
         }
         const m = F.meat;
         if (!m || m.gone) { F.ate = true; F.afterT = 0; return false; }  // food vanished out from under him → just wrap up
-        const reach = spriteW(STAND) * PIXEL * T.scale * 0.5 + 8;
+        const reach = spriteW(STAND) * PIXEL * T.scale * 0.5 + 8 + (F.big ? 12 : 0);
         const dx = m.x - T.x;
-        if (Math.abs(dx) > reach) {                     // hustle over to it
+        if (Math.abs(dx) > reach) {                     // hustle / sprint over to it
           T.dir = dx > 0 ? 1 : -1; T.mirror = T.dir < 0;
           T.x += T.dir * T.speed * dt / 1000;
-          animLegs(dt, 'walkA', 'walkB', 80);           // quick, eager steps
+          animLegs(dt, 'walkA', 'walkB', F.sneaky ? 45 : 80);   // a blur when he's snatching, else eager steps
           T.yOffset = 0;
           return false;
         }
@@ -871,10 +1039,11 @@ export default function PixelTroll({ hidden = false, floorSelector = '', obstacl
         }
         if (!F.sided) { F.sided = true; m.biteSide = (T.x <= m.x) ? 1 : -1; }  // eat from whichever side he reached it on
         F.biteT += dt;
-        const period = 220;
+        const period = F.sneaky ? 95 : 220;             // a frantic snatch vs an unhurried meal
+        const bite = F.sneaky ? 0.34 : 0.2;
         if (F.biteT >= period) {                        // a bite comes off every chomp
           F.biteT -= period;
-          m.eat = Math.min(1, m.eat + 0.2);             // five bites and it's gone
+          m.eat = Math.min(1, m.eat + bite);            // ~5 unhurried bites, or ~3 frantic gulps
           for (let i = 0; i < 6; i++) T.confetti.push({ // crumbs / juice spray off the bite
             x: m.x + rand(-6, 6), y: groundY() - rand(2, 14),
             vx: rand(-90, 90), vy: rand(-150, -40), life: rand(300, 700), size: Math.round(rand(2, 4)),
@@ -882,14 +1051,176 @@ export default function PixelTroll({ hidden = false, floorSelector = '', obstacl
           });
           if (m.eat >= 1) {                             // last bite — full belly, warms to you
             m.gone = true; F.ate = true; F.afterT = 0;
-            bumpMood(15);
-            if (Math.random() < 0.5) sayEvent(SPEECH_FED);  // only comments on the food about half the time
+            bumpMood(F.sneaky ? 8 : 15);                // a stolen meal mellows him a little; a calm one, a lot
+            if (!F.sneaky && Math.random() < 0.5) sayEvent(SPEECH_FED);  // only comments on the food about half the time
           }
         }
         const biting = F.biteT < period * 0.45;
         T.pose = biting ? 'headDown' : 'sit';           // duck down to bite, sit up to chew
         T.yOffset = 0; T.shakeX = biting ? rand(-1.5, 1.5) : 0;
         return false;
+      }
+
+      // ---- max-love celebration (+100) -----------------------------------
+      if (a === 'lovefest') {                           // turns heart-pink and showers you in hearts
+        T.color = HEART; T.shakeX = 0;
+        T.pose = (Math.floor(T.t / 150) % 2) ? 'wave' : 'jump';   // overjoyed bouncing
+        T.yOffset = -Math.abs(Math.sin(T.t / 110)) * 14;
+        T.mirror = (Math.floor(T.t / 300) % 2) === 0;
+        if (!T.heartSent && T.t > 250) { T.heartSent = true; say('I LOVE YOU!', '#e0418f'); }
+        if (!T.sneezed && T.t > 3200) { T.sneezed = true; say(pick(["you're my favorite!", "best human ever!", "i'm so happy!"]), '#159a52'); }
+        T.zTimer += dt;
+        if (T.zTimer > 60) {                            // a continuous fountain of hearts pouring up out of him
+          T.zTimer = 0;
+          for (let i = 0, n = 2 + Math.floor(rand(0, 3)); i < n; i++) {
+            const ang = rand(-Math.PI * 0.85, -Math.PI * 0.15), sp = rand(70, 250);
+            T.hearts.push({
+              x: T.x + rand(-16, 16), y: groundY() - STAND_H * 0.7,
+              vx: Math.cos(ang) * sp, vy: Math.sin(ang) * sp,
+              life: rand(1400, 2600), maxLife: 2600, sc: rand(0.4, 1.0),
+            });
+          }
+        }
+        if (!T.landed && T.t > T.dur - 500) {           // one last big burst as it wraps up
+          T.landed = true;
+          for (let i = 0; i < 22; i++) {
+            const ang = rand(-Math.PI, 0), sp = rand(120, 360);
+            T.hearts.push({
+              x: T.x + rand(-10, 10), y: groundY() - STAND_H * 0.6,
+              vx: Math.cos(ang) * sp, vy: Math.sin(ang) * sp, life: rand(1200, 2200), maxLife: 2200, sc: rand(0.5, 1.1),
+            });
+          }
+        }
+        return T.t >= T.dur;
+      }
+
+      // ---- cursor affection ----------------------------------------------
+      if (a === 'pet') {                                // hover gently over him → he leans in, content, warming up
+        T.color = GREEN; T.scale = 1; T.shakeX = 0;
+        T.mirror = cur.x < T.x;                         // leans toward the cursor
+        T.pose = (Math.floor(T.t / 520) % 3 === 0) ? 'lookR' : 'sit';
+        T.yOffset = -Math.abs(Math.sin(T.t / 360)) * 2;
+        T.petMoodT += dt;
+        if (T.petMoodT > 850) { T.petMoodT = 0; bumpMood(1); }   // gradual, gentle warming
+        T.zTimer += dt;
+        if (T.zTimer > 700) {                           // the odd contented little heart
+          T.zTimer = 0;
+          T.hearts.push({ x: T.x + rand(-8, 8), y: groundY() - STAND_H * 0.8, vx: rand(-8, 8), vy: rand(-24, -14), life: 1200, maxLife: 1200, sc: 0.4 });
+        }
+        return !cursorOverTroll(22) || cur.speed > 270 || T.t >= T.dur;  // cursor left or started jiggling → done
+      }
+      if (a === 'tickle') {                            // jiggle the cursor on him → he cracks up
+        T.color = GREEN; T.scale = 1;
+        T.pose = (Math.floor(T.t / 90) % 2) ? 'ball' : 'ball2';
+        T.yOffset = -Math.abs(Math.sin(T.t / 80)) * 6; T.shakeX = rand(-3, 3);
+        T.petMoodT += dt;
+        if (T.petMoodT > 650) { T.petMoodT = 0; bumpMood(1); }
+        if (!T.speech && Math.random() < 0.012) say(pick(['hehe!', 'haha stop!', 'that tickles!', 'eee!']), '#159a52');
+        T.zTimer += dt;
+        if (T.zTimer > 480) { T.zTimer = 0; T.hearts.push({ x: T.x + rand(-10, 10), y: groundY() - STAND_H * 0.7, vx: rand(-14, 14), vy: rand(-30, -16), life: 1000, maxLife: 1000, sc: 0.4 }); }
+        return !cursorOverTroll(24) || cur.speed < 80 || T.t >= T.dur;   // stopped jiggling / left → done
+      }
+      if (a === 'chase') {                             // pointer hovering nearby → he bats at it / creeps to sniff it
+        T.color = GREEN; T.scale = 1;
+        if (cursorOverTroll(10)) return true;           // cursor came onto him → let pet/tickle take over
+        if (!cursorNearTroll(120)) return true;         // cursor wandered off → give up
+        T.mirror = cur.x < T.x;
+        const dx = cur.x - T.x, stillMs = performance.now() - cur.lastT;
+        if (Math.abs(dx) > 46 && stillMs > 350) {       // parked nearby → creep over to investigate
+          T.dir = dx > 0 ? 1 : -1;
+          T.x += T.dir * 72 * dt / 1000; animLegs(dt, 'walkA', 'walkB', 120); T.yOffset = 0;
+        } else {                                        // bat at it like a cat
+          T.pose = (Math.floor(T.t / 120) % 2) ? 'wave' : 'kick';
+          T.yOffset = -Math.abs(Math.sin(T.t / 100)) * 4; T.shakeX = rand(-1, 1);
+        }
+        return T.t >= T.dur;
+      }
+      if (a === 'flinch') {                            // soured → wary recoil away from the cursor
+        T.color = mix(0.3); T.scale = 1;
+        const away = cur.x < T.x ? 1 : -1;
+        if (T.t < 250) { T.pose = 'jump'; T.yOffset = -Math.sin(Math.PI * T.t / 250) * 10; T.x += away * 65 * dt / 1000; }
+        else { T.pose = (Math.floor(T.t / 100) % 2) ? 'lookL' : 'lookR'; T.shakeX = rand(-2, 2); T.yOffset = 0; }
+        T.mirror = cur.x < T.x;                          // keeps a wary eye on the cursor
+        return T.t >= T.dur;
+      }
+
+      // ---- panel interactions --------------------------------------------
+      if (a === 'napWidget') {                          // climb onto a panel and snooze on top
+        const Wd = T.widget;
+        if (!Wd) return true;
+        const sitY = Wd.top - groundY();                // negative → lifts his feet up onto the ledge
+        if (!Wd.up && Math.abs(T.x - Wd.cx) >= 8) {      // walk over along the floor
+          T.dir = Wd.cx > T.x ? 1 : -1; T.mirror = T.dir < 0;
+          T.x += T.dir * T.speed * dt / 1000; animLegs(dt, 'walkA', 'walkB', 130); T.yOffset = 0;
+          return false;
+        }
+        if (!Wd.up) { Wd.up = true; Wd.climbT = 0; T.x = Wd.cx; }
+        Wd.climbT += dt;
+        if (Wd.climbT < 380) {                          // hop up onto it
+          T.pose = 'jump'; T.mirror = false;
+          T.yOffset = sitY * (Wd.climbT / 380) - Math.sin(Math.PI * Wd.climbT / 380) * 12;
+          return false;
+        }
+        T.yOffset = sitY;
+        if (T.t < T.dur - 520) {                         // curl up and sleep, little Z's drifting off the ledge
+          T.pose = 'laydown'; T.shakeX = 0;
+          T.zTimer += dt;
+          if (T.zTimer > 820) { T.zTimer = 0; T.zzz.push({ x: T.x + rand(6, 26), y: Wd.top - 30, vx: rand(5, 16), vy: rand(-54, -42), life: 1900, maxLife: 1900 }); }
+          return false;
+        }
+        const k = (T.t - (T.dur - 520)) / 520;          // hop back down
+        T.pose = 'jump'; T.yOffset = sitY * (1 - k) - Math.sin(Math.PI * k) * 10;
+        return T.t >= T.dur;
+      }
+      if (a === 'leanWidget') {                         // lean against a panel's side and shove it
+        const Wd = T.widget;
+        if (!Wd) return true;
+        if (Math.abs(T.x - Wd.standX) >= 6 && T.t < T.dur - 600) {  // amble over to the side
+          T.dir = Wd.standX > T.x ? 1 : -1; T.mirror = T.dir < 0;
+          T.x += T.dir * T.speed * dt / 1000; animLegs(dt, 'walkA', 'walkB', 130); T.yOffset = 0;
+          if (Math.abs(T.x - Wd.standX) < 6) T.x = Wd.standX;
+          return false;
+        }
+        T.x = Wd.standX; T.mirror = Wd.lean < 0;         // face into the panel
+        T.pose = 'stretch'; T.yOffset = 0; T.shakeX = Math.sin(T.t / 280);
+        T.poseT += dt;
+        if (T.poseT > 1100) { T.poseT = 0; bumpWidget(Wd.el, Wd.lean * 220, 0); T.shakeX = rand(-2, 2); }  // a lazy shove → it wobbles
+        return T.t >= T.dur;
+      }
+
+      // ---- app-driven reactions + boredom --------------------------------
+      if (a === 'cheer') {                              // the app says something good happened → he celebrates
+        T.color = GREEN; T.scale = 1;
+        T.pose = (Math.floor(T.t / 150) % 2) ? 'wave' : 'jump';
+        T.yOffset = -Math.abs(Math.sin(T.t / 120)) * 12; T.mirror = (Math.floor(T.t / 300) % 2) === 0;
+        if (!T.sneezed && T.t > 120) {                  // a confetti pop
+          T.sneezed = true;
+          for (let i = 0; i < 24; i++) { const ang = rand(-Math.PI * 0.9, -Math.PI * 0.1), sp = rand(150, 360);
+            T.confetti.push({ x: T.x + rand(-8, 8), y: groundY() - STAND_H * 0.7, vx: Math.cos(ang) * sp, vy: Math.sin(ang) * sp, life: rand(800, 1500), size: Math.round(rand(3, 6)), color: pick([GREEN, GOLD, HEART, '#7fd3ff']) }); }
+        }
+        if (!T.heartSent && T.t > 160) { T.heartSent = true; say(pick(['nice!', "let's go!", 'woohoo!', 'great work!', 'we did it!']), '#159a52'); }
+        return T.t >= T.dur;
+      }
+      if (a === 'fret') {                               // the app says something went wrong → he frets
+        T.color = mix(0.2); T.scale = 1;
+        T.pose = (Math.floor(T.t / 110) % 2) ? 'lookL' : 'lookR'; T.shakeX = rand(-2, 2);
+        T.yOffset = -Math.abs(Math.sin(T.t / 140)) * 3;
+        if (!T.heartSent && T.t > 160) { T.heartSent = true; say(pick(['uh oh', 'yikes', 'oh no', "that's not good", 'eep!']), '#d22'); }
+        T.poseT += dt;
+        if (T.poseT > 220) {                            // little anxious sweat drops
+          T.poseT = 0;
+          for (let i = 0; i < 2; i++) T.confetti.push({ x: T.x + rand(-12, 12), y: groundY() - STAND_H * 0.9, vx: rand(-30, 30), vy: rand(-60, -20), life: rand(300, 600), size: Math.round(rand(2, 4)), color: '#7fd3ff' });
+        }
+        return T.t >= T.dur;
+      }
+      if (a === 'bored') {                              // you've ignored him a while → he angles for attention
+        T.color = GREEN; T.scale = 1; T.mirror = false;
+        const m = T.t % 1600;
+        if (m < 600) { T.pose = 'pointUp'; T.yOffset = 0; T.shakeX = rand(-1, 1); }        // *tap tap* the glass
+        else if (m < 1100) { T.pose = 'stretch'; T.yOffset = -Math.min(6, (m - 600) / 60); T.shakeX = 0; }  // yawn / stretch
+        else { T.pose = (Math.floor(m / 130) % 2) ? 'lookL' : 'lookR'; T.yOffset = 0; }    // peer around for you
+        if (!T.heartSent && T.t > 200) { T.heartSent = true; say(pick(['you still there?', 'helloo?', '*taps glass*', 'bored...', 'hey, look at me!']), '#1c1c1c'); }
+        return T.t >= T.dur;
       }
 
       // ---- ultra-rare cameos ---------------------------------------------
@@ -966,6 +1297,46 @@ export default function PixelTroll({ hidden = false, floorSelector = '', obstacl
         }
         if (T.t >= T.dur) T.lady = null;
         return T.t >= T.dur;
+      }
+      if (a === 'friend') {                             // a buddy troll runs in, they play, he heads off
+        const F = T.friend;
+        if (!F) return T.t >= T.dur;
+        const ENTER = 2000, PLAY_END = 6200;
+        if (T.t < ENTER) {                              // friend hustles in; troll turns and waves
+          const reached = F.dir === -1 ? F.x <= F.stopX : F.x >= F.stopX;
+          if (!reached) { F.x += F.dir * F.speed * dt / 1000; F.legT += dt; if (F.legT > 70) { F.legT = 0; F.legFlip = !F.legFlip; } F.pose = F.legFlip ? 'walkB' : 'walkA'; F.mirror = F.dir < 0; }
+          else { F.pose = 'stand'; F.mirror = T.x < F.x; }
+          T.pose = 'wave'; T.mirror = F.x < T.x; T.yOffset = 0; T.shakeX = 0;
+        } else if (T.t < PLAY_END) {                    // ...the activity
+          F.mirror = T.x < F.x; T.mirror = F.x < T.x;   // face each other
+          const pt = T.t - ENTER;
+          if (F.act === 'highfive') {                   // both leap up and slap hands
+            const phase = (pt % 950) / 950, up = -Math.sin(Math.PI * phase) * 22;
+            T.yOffset = up; F.yOff = up;
+            T.pose = up < -6 ? 'pointUp' : 'stand'; F.pose = up < -6 ? 'pointUp' : 'stand';
+            if (phase > 0.46 && phase < 0.54) for (let i = 0; i < 2; i++) T.confetti.push({ x: (T.x + F.x) / 2 + rand(-6, 6), y: groundY() + up - STAND_H * 0.9, vx: rand(-60, 60), vy: rand(-80, -20), life: rand(250, 500), size: Math.round(rand(2, 4)), color: GOLD });
+          } else if (F.act === 'dance') {               // a little dance-off, notes flying
+            const fr = ['pointUp', 'wave', 'headDown', 'jump'];
+            T.pose = fr[Math.floor(pt / 180) % fr.length]; F.pose = fr[Math.floor((pt + 90) / 180) % fr.length];
+            T.yOffset = -Math.abs(Math.sin(pt / 130)) * 8; F.yOff = -Math.abs(Math.sin((pt + 200) / 130)) * 8;
+            if (Math.random() < 0.05) T.zzz.push({ x: (T.x + F.x) / 2 + rand(-30, 30), y: groundY() - STAND_H * 0.95, vx: rand(-22, 22), vy: rand(-52, -40), life: 1500, maxLife: 1500, glyph: NOTE_GLYPH });
+          } else {                                      // tag: they bounce around each other
+            const phase = (pt % 760) / 760;
+            T.yOffset = -Math.abs(Math.sin(Math.PI * phase)) * 16; T.pose = T.yOffset < -5 ? 'jump' : 'squash';
+            F.yOff = -Math.abs(Math.sin(Math.PI * ((pt + 380) % 760) / 760)) * 16; F.pose = F.yOff < -5 ? 'jump' : 'squash';
+          }
+        } else {                                        // friend waves and runs back off
+          if (!T.sneezed) { T.sneezed = true; bumpMood(5); }   // that was fun → warms him a little
+          F.dir = F.x >= T.x ? 1 : -1;
+          F.x += F.dir * Math.max(F.speed, 280) * dt / 1000;
+          F.legT += dt; if (F.legT > 70) { F.legT = 0; F.legFlip = !F.legFlip; }
+          F.pose = F.legFlip ? 'walkB' : 'walkA'; F.mirror = F.dir < 0; F.yOff = 0;
+          T.pose = 'wave'; T.mirror = F.x < T.x; T.yOffset = 0;
+          if (F.x < -off - 40 || F.x > W() + off + 40) F.gone = true;
+        }
+        const done = T.t >= T.dur || F.gone;
+        if (done) T.friend = null;
+        return done;
       }
       if (a === 'bloodDeath') {                         // kneels, vomits blood, dies, sinks
         const KNEEL = 700, VOMIT = 3200, FALL = 3800, SINK = 4500;
@@ -1158,7 +1529,32 @@ export default function PixelTroll({ hidden = false, floorSelector = '', obstacl
       if (a === 'police') {                             // marches in with a cop, rants while the cop takes notes, both leave
         const ENTER = 2400, RANT_END = 11500;
         const C = T.cop;
-        if (!C) return T.t >= T.dur;
+        if (!C && !T.policeKill) return T.t >= T.dur;
+
+        // Someone got shot mid-scene → the survivor panics and bolts, then it ends.
+        if (T.policeKill === 'troll') {                 // troll's dead (gore already out) → cop flees, troll's banished
+          T.alpha = 0;                                  // body gone; only the gore remains
+          if (C) {
+            const fd = C.x < W() / 2 ? -1 : 1;
+            C.mirror = fd < 0; C.writing = false;
+            C.x += fd * 600 * dt / 1000;
+            C.legT += dt; if (C.legT > 65) { C.legT = 0; C.legFlip = !C.legFlip; }
+            C.yOff = -Math.abs(Math.sin(T.t / 60)) * 3; // panicked little hops
+            if (C.x > -off - 70 && C.x < W() + off + 70 && T.t < T.dur) return false;
+          }
+          T.cop = null; T.copSpeech = null; T.banished = true;  // cop's clear (or timed out) → he's gone for good
+          return true;
+        }
+        if (T.policeKill === 'cop') {                   // cop's dead → troll bolts (and lives to summon another)
+          T.cop = null; T.copSpeech = null;
+          T.leaving = true; T.color = GREEN;
+          const fd = T.x < W() / 2 ? -1 : 1;
+          T.mirror = fd < 0; T.x += fd * 650 * dt / 1000;
+          animLegs(dt, 'walkA', 'walkB', 50);
+          T.yOffset = 0; T.shakeX = rand(-2, 2);        // scared
+          return T.x < -off || T.x > W() + off || T.t >= T.dur;
+        }
+
         const dir = T.dir, trollStop = T.policeStopX, copStop = trollStop - dir * 92;
         if (T.t < ENTER) {                              // the two of them march in
           const reachedT = dir === 1 ? T.x >= trollStop : T.x <= trollStop;
@@ -1443,47 +1839,6 @@ export default function PixelTroll({ hidden = false, floorSelector = '', obstacl
         else { T.pose = 'stand'; T.yOffset = -Math.sin(Math.PI * (T.t - (T.dur - 300)) / 300) * 6; }
         return T.t >= T.dur;
       }
-      if (a === 'pmeltdown') {                          // poked past his limit — overloads and blows up
-        const BUILD = 1600, BOOM = 1750, GONE = 2400;
-        if (T.t < BUILD) {                              // builds up: redder, hotter, vibrating harder
-          const k = T.t / BUILD;
-          T.color = mix(k); T.scale = 1 + k * 0.3;
-          T.pose = (Math.floor(T.t / (90 - k * 60)) % 2) ? 'headDown' : 'stand';
-          T.shakeX = rand(-1, 1) * (2 + k * 16);
-          T.zTimer += dt;
-          if (T.zTimer > 200 - k * 150) {               // steam venting faster and faster
-            T.zTimer = 0;
-            for (let i = 0; i < 3; i++) T.confetti.push({
-              x: T.x + rand(-16, 16), y: groundY() - STAND_H * rand(0.8, 1.2),
-              vx: rand(-50, 50), vy: rand(-180, -80), life: rand(400, 800), size: Math.round(rand(3, 6)), color: RED,
-            });
-          }
-        } else if (T.t < BOOM) {                        // ...KABOOM — bursts into a cloud of bits
-          if (!T.sneezed) {
-            T.sneezed = true;
-            for (let i = 0; i < 60; i++) {
-              const ang = rand(-Math.PI, Math.PI), sp = rand(120, 520);
-              T.confetti.push({
-                x: T.x, y: groundY() - STAND_H * 0.5,
-                vx: Math.cos(ang) * sp, vy: Math.sin(ang) * sp - 60,
-                life: rand(700, 1500), size: Math.round(rand(3, 7)),
-                color: Math.random() < 0.5 ? RED : GREEN,
-              });
-            }
-          }
-          T.alpha = 0;
-        } else if (T.t < GONE) {                        // a beat of empty air where he was
-          T.alpha = 0;
-        } else {                                        // poofs back in, good as new (and sheepish)
-          const k = (T.t - GONE) / (T.dur - GONE);
-          T.alpha = 1; T.color = GREEN; T.scale = 1;
-          T.pose = k < 0.5 ? 'ball' : 'stand';
-          T.yOffset = -Math.sin(Math.PI * Math.min(1, k)) * 8;
-          if (k < 0.06 && !T.landed) { T.landed = true; spawnConfetti(T.x, groundY() - 6); }
-        }
-        return T.t >= T.dur;
-      }
-
       if (a === 'pflick') {                             // flicked like a bug — arcs, ricochets off widgets, settles
         const F = T.flick;
         if (!F) return true;
@@ -1549,6 +1904,13 @@ export default function PixelTroll({ hidden = false, floorSelector = '', obstacl
         T.x = G.cx;
         T.yOffset = (G.cy + STAND_H * 0.5) - groundY(); // center pinned to the pointer
         G.struggleT += dt;
+        if (T.mood >= 40) {                             // he trusts you → just dangles happily, no fight
+          T.pose = (Math.floor(G.struggleT / 260) % 2) ? 'wave' : 'sit';
+          T.shakeX = Math.sin(G.struggleT / 200) * 1.5; T.mirror = cur.x < T.x;
+          G.puffT += dt;
+          if (G.puffT > 900) { G.puffT = 0; T.hearts.push({ x: T.x + rand(-8, 8), y: groundY() + T.yOffset - STAND_H * 0.5, vx: rand(-8, 8), vy: rand(-22, -12), life: 1100, maxLife: 1100, sc: 0.4 }); }
+          return false;
+        }
         const fr = ['kick', 'jump', 'wave', 'pointUp', 'stretch', 'kick', 'headDown'];
         T.pose = fr[Math.floor(G.struggleT / 80) % fr.length];
         T.shakeX = rand(-5, 5);
@@ -1774,7 +2136,7 @@ export default function PixelTroll({ hidden = false, floorSelector = '', obstacl
     // growing bite is taken out of the side he's eating from (m.eat: 0→1).
     function drawMeat(m) {
       const rows = m.rows, w = spriteW(rows), h = rows.length;
-      const px = MEAT_PIXEL, size = Math.ceil(px);
+      const px = m.px || MEAT_PIXEL, size = Math.ceil(px);   // big cut = double-size pixels
       const left = m.x - (w * px) / 2, top = m.y - h * px;
       const eaten = Math.round(m.eat * w);
       for (let r = 0; r < h; r++) {
@@ -1787,6 +2149,93 @@ export default function PixelTroll({ hidden = false, floorSelector = '', obstacl
           ctx.fillRect(Math.round(left + c * px), Math.round(top + r * px), size, size);
         }
       }
+    }
+
+    // The cop blitter — like blit, but each char keys into a colour (his blue
+    // uniform, gold badge, green troll skin), with mirror + scale like the troll.
+    function drawCop(rows, cx, feetY, scale, mirror, yOff = 0) {
+      const w = spriteW(rows), h = rows.length, px = PIXEL * scale, size = Math.ceil(px);
+      const left = cx - (w * px) / 2, top = feetY - h * px + yOff;
+      for (let r = 0; r < h; r++) {
+        const row = rows[r];
+        for (let c = 0; c < row.length; c++) {
+          const ch = row[c];
+          if (ch === '.' || ch === ' ') continue;
+          const cc = mirror ? (w - 1 - c) : c;
+          ctx.fillStyle = COP_COLORS[ch] || GREEN;
+          ctx.fillRect(Math.round(left + cc * px), Math.round(top + r * px), size, size);
+        }
+      }
+    }
+
+    // A smooth (non-pixelated) heart, for the big max-love heart — a blocky glyph
+    // scaled up just reads as a square, so this one's drawn with curves. (cx, topY)
+    // is the top-center; w is the width, height a touch less.
+    function drawHeart(cx, topY, w, color) {
+      const h = w * 0.9;
+      ctx.save();
+      ctx.fillStyle = color;
+      ctx.beginPath();
+      ctx.moveTo(cx, topY + h * 0.27);
+      ctx.bezierCurveTo(cx, topY, cx - w * 0.5, topY, cx - w * 0.5, topY + h * 0.32);          // left lobe
+      ctx.bezierCurveTo(cx - w * 0.5, topY + h * 0.62, cx - w * 0.18, topY + h * 0.8, cx, topY + h);  // down to the point
+      ctx.bezierCurveTo(cx + w * 0.18, topY + h * 0.8, cx + w * 0.5, topY + h * 0.62, cx + w * 0.5, topY + h * 0.32);
+      ctx.bezierCurveTo(cx + w * 0.5, topY, cx, topY, cx, topY + h * 0.27);                    // right lobe
+      ctx.closePath();
+      ctx.fill();
+      ctx.restore();
+    }
+
+    // Collectibles on the floor: each falls in, sits with a little bob and a
+    // blinking shine, and fades after a minute if you don't click it.
+    function drawGifts(dt) {
+      for (let i = T.gifts.length - 1; i >= 0; i--) {
+        const g = T.gifts[i];
+        if (!g.landed) {
+          g.vy += 1400 * dt / 1000; g.y += g.vy * dt / 1000; g.x += g.vx * dt / 1000; g.vx *= 0.98;
+          if (g.y >= groundY()) { g.y = groundY(); g.landed = true; g.vy = 0; }
+        } else { g.life += dt; if (g.life > 60000) { T.gifts.splice(i, 1); continue; } }
+        const art = GIFT_ART[g.kind], rows = art.rows, w = spriteW(rows), h = rows.length, px = GIFT_PIXEL, size = Math.ceil(px);
+        const bob = g.landed ? Math.sin(g.life / 260) * 1.5 : 0;
+        const left = g.x - (w * px) / 2, top = g.y - h * px + bob;
+        ctx.globalAlpha = g.life > 56000 ? Math.max(0, 1 - (g.life - 56000) / 4000) : 1;
+        ctx.fillStyle = art.color;
+        for (let r = 0; r < h; r++) for (let c = 0; c < rows[r].length; c++) if (rows[r][c] === '#') ctx.fillRect(Math.round(left + c * px), Math.round(top + r * px), size, size);
+        if (g.landed && Math.floor(g.life / 480) % 4 === 0) { ctx.fillStyle = '#ffffff'; ctx.fillRect(Math.round(left + w * px - 2), Math.round(top), 2, 2); }   // blinking shine
+        ctx.globalAlpha = 1;
+      }
+      ctx.fillStyle = GREEN;
+    }
+
+    // Accessories he's earned (worn forever): shades at +60, a gold crown at +100.
+    // Drawn on his head for the upright face-poses, like the angry brows.
+    function drawGear(cx, feetY, scale, yOff) {
+      if (!T.gear) return;
+      const rows = POSES[T.pose] || STAND, px = PIXEL * scale, size = Math.ceil(px);
+      const w = spriteW(rows), h = rows.length, left = cx - (w * px) / 2, top = feetY - h * px + yOff;
+      const eyeRow = T.pose === 'stretch' ? 5 : 4;
+      const seg = (c, r, col) => { ctx.fillStyle = col; ctx.fillRect(Math.round(left + c * px), Math.round(top + r * px), size, size); };
+      if (T.gear === 1) { for (let c = 1; c <= 10; c++) seg(c, eyeRow, '#0e1a2a'); }   // sunglasses bar over the eyes
+      else if (T.gear >= 2) { seg(3, -1, GOLD); seg(5, -1, GOLD); seg(7, -1, GOLD); for (let c = 3; c <= 7; c++) seg(c, 0, GOLD); }  // little crown
+    }
+
+    // Weather that tracks his mood: a drizzly gray cloud when he's down, a warm
+    // sun + drifting petals when he's smitten with you. (cx, headTop) in canvas px.
+    function drawRain(cx, headTop) {
+      const cloudY = headTop - 16;
+      ctx.fillStyle = '#8a93a0';
+      for (const [dx, pw, ph] of [[-11, 9, 6], [0, 12, 7], [10, 9, 6]]) ctx.fillRect(Math.round(cx + dx - pw / 2), Math.round(cloudY - ph / 2), pw, ph);
+      ctx.fillStyle = '#7fb6e8';
+      for (let i = 0; i < 5; i++) { const rx = cx - 14 + i * 7, phase = (T.weatherT / 300 + i * 0.37) % 1; ctx.fillRect(Math.round(rx), Math.round(cloudY + 6 + phase * 22), 2, 5); }
+      ctx.fillStyle = GREEN;
+    }
+    function drawSun(cx, headTop) {
+      const sx = cx + 24, sunY = headTop - 22;
+      ctx.fillStyle = '#ffe08a';
+      ctx.fillRect(Math.round(sx - 6), Math.round(sunY - 6), 12, 12);
+      for (let i = 0; i < 8; i++) { const a = i * Math.PI / 4 + T.weatherT / 1200; ctx.fillRect(Math.round(sx + Math.cos(a) * 11 - 1), Math.round(sunY + Math.sin(a) * 11 - 1), 2, 2); }
+      if (Math.random() < 0.025) T.confetti.push({ x: cx + rand(-30, 30), y: headTop - 28, vx: rand(-12, 12), vy: rand(8, 20), life: rand(1400, 2200), size: 3, color: pick(['#ff9ec4', '#ffd24a', '#9be7b4']) });
+      ctx.fillStyle = GREEN;
     }
 
     // Poses where his face is upright with the eyes at their usual row — the only
@@ -1834,6 +2283,8 @@ export default function PixelTroll({ hidden = false, floorSelector = '', obstacl
 
     function drawEntities(dt) {
       ctx.fillStyle = GREEN;
+
+      drawGifts(dt);            // collectibles on the floor (gifts he leaves / treasure he digs up)
 
       // food (shift+click): each cut falls from the sky, lands on his floor, and
       // sits waiting to be eaten. Drawn over him so a chomped piece reads in front.
@@ -1889,6 +2340,13 @@ export default function PixelTroll({ hidden = false, floorSelector = '', obstacl
         ctx.fillStyle = GREEN;
       }
 
+      // the buddy troll (friend cameo) — a lighter green so you can tell them apart
+      if (T.friend && !T.friend.gone) {
+        ctx.fillStyle = '#5be0a0';
+        blit(POSES[T.friend.pose] || STAND, T.friend.x, groundY(), 1, T.friend.mirror, T.friend.yOff || 0);
+        ctx.fillStyle = GREEN;
+      }
+
       // confetti
       for (let i = T.confetti.length - 1; i >= 0; i--) {
         const p = T.confetti[i];
@@ -1898,7 +2356,7 @@ export default function PixelTroll({ hidden = false, floorSelector = '', obstacl
         ctx.fillRect(Math.round(p.x), Math.round(p.y), p.size, p.size);
       }
 
-      // floating hearts (kiss + swoon + giggle)
+      // floating hearts (kiss + swoon + giggle + the max-love fountain)
       ctx.fillStyle = HEART;
       for (let i = T.hearts.length - 1; i >= 0; i--) {
         const p = T.hearts[i];
@@ -1906,6 +2364,13 @@ export default function PixelTroll({ hidden = false, floorSelector = '', obstacl
         if (p.life <= 0) { T.hearts.splice(i, 1); continue; }
         const sc = (p.sc || 0.5) * (0.7 + 0.3 * (p.life / p.maxLife));
         blit(HEART_GLYPH, p.x, p.y, sc, false);
+      }
+      // max-love celebration: a big smooth pulsing heart floating over his head
+      if (T.action === 'lovefest' && T.mode === 'active') {
+        const pulse = 1 + Math.sin(T.t / 160) * 0.14;
+        const w = 80 * pulse, h = w * 0.9;
+        const bottomY = groundY() + T.yOffset - STAND_H * 1.15;   // the point hovers just above his head
+        drawHeart(T.x, bottomY - h, w, HEART);
       }
       ctx.fillStyle = GREEN;
 
@@ -1945,11 +2410,12 @@ export default function PixelTroll({ hidden = false, floorSelector = '', obstacl
         if (D.full) ctx.fillRect(Math.round(D.x - 16), Math.round(groundY() - 52), 32, 18); // full belly bulge
       }
 
-      // the policeman (super-furious "report you" cameo) — drawn over the troll
+      // the policeman (super-furious "report you" cameo) — a blue-uniformed troll
+      // cop, drawn over the troll
       if (T.cop) {
         const C = T.cop;
+        drawCop(C.writing ? POLICE_WRITE : POLICE, C.x, groundY(), COP_SCALE, C.mirror, C.yOff || 0);
         ctx.fillStyle = GREEN;
-        blit(C.writing ? POLICE_WRITE : POLICE, C.x, groundY(), COP_SCALE, C.mirror, C.yOff || 0);
       }
 
       // ( shift+x cameo ) — drawn over him
@@ -2068,6 +2534,7 @@ export default function PixelTroll({ hidden = false, floorSelector = '', obstacl
       ctx.font = '600 11px ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif';
       ctx.fillStyle = 'rgba(255,255,255,0.6)';
       ctx.fillText('TROLL MOOD', x + pad, y + 14);
+      if (giftCount > 0) { ctx.textAlign = 'right'; ctx.fillStyle = 'rgba(255,210,74,0.85)'; ctx.fillText(`${giftCount} gifts`, x + boxW - pad, y + 14); ctx.textAlign = 'left'; }
       ctx.font = '700 16px ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif';
       ctx.fillStyle = accent;
       ctx.fillText(`${m > 0 ? '+' : ''}${m}`, x + pad, y + 33);
@@ -2082,6 +2549,32 @@ export default function PixelTroll({ hidden = false, floorSelector = '', obstacl
       ctx.fillStyle = 'rgba(255,255,255,0.45)'; ctx.fillRect(mid - 1, barY - 2, 2, barH + 4);
       ctx.restore();
     }
+
+    // ── Cursor affection ───────────────────────────────────────────────────
+    // Where the pointer is (in canvas coords), how fast it's moving, and how long
+    // it's lingered over / near him. Drives petting, tickling, and batting at the
+    // cursor — see the bookkeeping block in the loop and the pet/tickle/chase/flinch
+    // actions. Updated on every mousemove (not just while dragging).
+    const cur = { x: -1e4, y: -1e4, has: false, lastT: 0, speed: 0, overT: 0, nearT: 0, cdUntil: 0 };
+    const CURSOR_ACTS = new Set(['pet', 'tickle', 'chase', 'flinch']);
+    function cursorOverTroll(pad = 14) {
+      if (!cur.has) return false;
+      const rows = POSES[T.pose] || STAND, px = PIXEL * T.scale;
+      const w = spriteW(rows) * px, h = rows.length * px, cx = T.x + T.shakeX, feetY = groundY();
+      return cur.x >= cx - w / 2 - pad && cur.x <= cx + w / 2 + pad
+        && cur.y >= feetY - h + T.yOffset - pad && cur.y <= feetY + pad;
+    }
+    function cursorNearTroll(rad) {
+      if (!cur.has) return false;
+      const cx = T.x + T.shakeX, cy = groundY() + T.yOffset - STAND_H * T.scale * 0.5;
+      return Math.hypot(cur.x - cx, cur.y - cy) < rad;
+    }
+
+    // App-driven reactions: the app dispatches `window` CustomEvents like
+    //   window.dispatchEvent(new CustomEvent('pixeltroll', { detail: { type: 'posted' } }))
+    // and he cheers (good) or frets (anything matching error/fail/warn). And if you
+    // haven't engaged HIM in a long while, he gets bored and tries to get noticed.
+    let pendingReact = null, lastInteractT = performance.now(), boredCdUntil = 0;
 
     let raf, last = performance.now();
     let showScore = false;   // toggled by Shift+A
@@ -2120,19 +2613,32 @@ export default function PixelTroll({ hidden = false, floorSelector = '', obstacl
       // While he's dragged / dropping — or while blood is on the screen — lift the
       // whole canvas above the floating widgets (z-40) so he/the gore ride OVER
       // them; otherwise sit back at the normal layer behind them.
-      const zWant = String((DRAG_ACTIONS.has(T.action) && T.mode === 'active') || T.splats.length ? 60 : zIndex);
+      const onLedge = T.action === 'napWidget' && T.widget && T.widget.up;   // up on a panel → ride over it
+      const zWant = String((DRAG_ACTIONS.has(T.action) && T.mode === 'active') || T.splats.length || onLedge ? 60 : zIndex);
       if (canvas.style.zIndex !== zWant) canvas.style.zIndex = zWant;
 
       // Food on the floor lures him over: it interrupts his idle wandering and
       // even calls him in from off-screen, but never breaks a scripted cameo, a
       // poke reaction, a drag/drop/shot, an exit already underway, or a meal in
       // progress. Re-arms each frame until he's actually on the 'feast' action.
+      // Those things only block him while he's actually ON-SCREEN — once he's away
+      // he's always fair game, so food reliably summons him even right after he
+      // fled or snatched the last cut (when T.action is still a stale poke/feast).
       const lure = T.meats.find((m) => !m.gone);
       const protectedAct = SPECIALS.has(T.action) || DRAG_ACTIONS.has(T.action)
         || CLICK_SET.has(T.action) || T.action === 'feast';
-      if (lure && !protectedAct && !(T.mode === 'active' && T.leaving)) {
-        if (T.mode === 'away') T.x = lure.x < W() / 2 ? -off : W() + off;  // stroll in from the near edge
-        startAction('feast', now);
+      const busy = T.mode === 'active' && (protectedAct || T.leaving);
+      if (lure && !busy) {
+        // A BIG cut + a mad mood = a sneaky approach. If he's out and about when it
+        // lands, he doesn't blink into a peek (looks like he vanishes) — he exits
+        // properly first, then creeps back for it from off-screen.
+        const wantsSneaky = T.mood <= -18 && T.meats.some((m) => !m.gone && m.big);
+        if (wantsSneaky && T.mode === 'active') {
+          startAction(pick(['runOff', 'burrow']), now);  // duck out the proper way, then sneak back
+        } else {
+          if (T.mode === 'away') T.x = lure.x < W() / 2 ? -off : W() + off;  // stroll in from the near edge
+          startAction('feast', now);
+        }
       }
 
       // Ambient chatter — every so often, while he's just hanging around (not mid
@@ -2142,6 +2648,54 @@ export default function PixelTroll({ hidden = false, floorSelector = '', obstacl
       if (T.mode === 'active' && calm && !T.leaving && !T.speech && now - T.lastSpoke > T.nextChatter) {
         sayAmbient();
         T.nextChatter = rand(18000, 33000);            // chatty — a line every ~20-30s while he's around
+      }
+
+      // Maxed-out love → the moment he's free (not mid-cameo/poke/drag/meal/exit) he
+      // bursts into a heart-pouring celebration right where he stands.
+      if (T.lovePending && T.mode === 'active' && calm && !T.leaving) {
+        T.lovePending = false;
+        startAction('lovefest', now);
+      }
+
+      // ── Cursor affection: hover over him (still = pet, jiggle = tickle) or just
+      // nearby (he bats at / investigates the cursor). A soured troll won't have it —
+      // he flinches away instead. Only when he's free (calm, on-screen, settled).
+      const stillMs = now - cur.lastT;
+      if (stillMs > 80) cur.speed *= Math.pow(0.9, dt / 16);  // bleed speed toward 0 when the pointer's idle
+      const overHim = cursorOverTroll(16), nearHim = !overHim && cursorNearTroll(74);
+      if (overHim) { cur.overT += dt; cur.nearT = 0; }
+      else if (nearHim) { cur.nearT += dt; cur.overT = 0; }
+      else { cur.overT = 0; cur.nearT = 0; }
+      if (T.mode === 'active' && calm && !T.leaving && !CURSOR_ACTS.has(T.action)) {
+        const wary = T.mood <= -40;                     // doesn't trust you → recoils from the cursor
+        if (wary && (overHim || nearHim) && now > cur.cdUntil) { cur.cdUntil = now + 1400; startAction('flinch', now); }
+        else if (!wary && overHim && cur.speed > 240) startAction('tickle', now);
+        else if (!wary && overHim && cur.overT > 220 && cur.speed < 130) startAction('pet', now);
+        else if (!wary && nearHim && cur.nearT > 500) startAction('chase', now);
+      }
+      if (overHim || nearHim) lastInteractT = now;      // engaging him resets his boredom
+
+      // App-event reaction (cheer / fret) — fires when he's on-screen and free; a
+      // stale event (>4s) is dropped. Then: boredom if you've ignored him for ~52s.
+      if (pendingReact) {
+        if (now - pendingReact.t > 4000) pendingReact = null;
+        else if (T.mode === 'active' && calm && !T.leaving) {
+          startAction(pendingReact.kind === 'bad' ? 'fret' : 'cheer', now);
+          pendingReact = null;
+        }
+      } else if (T.mode === 'active' && calm && !T.leaving && now - lastInteractT > 52000 && now > boredCdUntil) {
+        boredCdUntil = now + 30000;                     // don't nag constantly
+        startAction('bored', now);
+      }
+
+      // Smitten with you (mood high) → he periodically leaves you a little gift.
+      if (T.mood >= 55 && T.mode === 'active' && calm && !T.leaving) {
+        T.giftT -= dt;
+        if (T.giftT <= 0) {
+          T.giftT = rand(22000, 40000);
+          spawnGift(pick(LOVE_GIFTS), T.x + rand(-20, 20), true);
+          if (!T.speech && Math.random() < 0.6) say(pick(['for you!', 'a little something', 'here!', 'i found this!']), '#159a52');
+        }
       }
 
       if (T.mode === 'away') {
@@ -2157,16 +2711,20 @@ export default function PixelTroll({ hidden = false, floorSelector = '', obstacl
         // churning red rage-cloud overhead when he REALLY hates you. Only on
         // upright face-poses, and never mid-cameo / drag / death.
         const mood = T.mood;
-        const showRage = mood <= -18 && FACE_POSES.has(T.pose) && T.alpha > 0.4
+        const facey = FACE_POSES.has(T.pose) && T.alpha > 0.4
           && !SPECIALS.has(T.action) && !DRAG_ACTIONS.has(T.action) && T.action !== 'shot';
-        if (showRage) {
+        const cx = T.x + T.shakeX, feetY = groundY();
+        if (facey) drawGear(cx, feetY, T.scale, T.yOffset);   // shades / crown he's earned
+        if (facey && mood <= -18) {                   // angry brows when soured; rage cloud when he really hates you
           T.furyT += dt;
-          const cx = T.x + T.shakeX, feetY = groundY();
           drawBrows(cx, feetY, T.scale, T.yOffset);
-          if (mood <= -82) {                          // really hates you → rage cloud over his (actual) head
-            const rows = POSES[T.pose] || STAND;
-            drawFury(cx, feetY - rows.length * PIXEL * T.scale + T.yOffset);
-          }
+          if (mood <= -82) drawFury(cx, feetY - (POSES[T.pose] || STAND).length * PIXEL * T.scale + T.yOffset);
+        }
+        if (facey) {                                  // mood weather: drizzle when down, sun + petals when smitten
+          T.weatherT += dt;
+          const headTop = feetY - (POSES[T.pose] || STAND).length * PIXEL * T.scale + T.yOffset;
+          if (mood <= -30 && mood > -82) drawRain(cx, headTop);
+          else if (mood >= 55) drawSun(cx, headTop);
         }
         if (done) beginNext(now);
       }
@@ -2178,10 +2736,8 @@ export default function PixelTroll({ hidden = false, floorSelector = '', obstacl
     raf = requestAnimationFrame(loop);
 
     // Click the troll → he busts out one of his random poke-reactions (topples
-    // over dazed, hiccups, gets zapped, melts, hits the jackpot, ...). And if
-    // you keep poking him FAST (6 hits inside ~1.1s each), he hits his limit and
-    // melts down — a click during a reaction doesn't restart it, but it still
-    // counts toward that streak, so a flurry of pokes builds to the blow-up.
+    // over dazed, hiccups, gets zapped, melts, hits the jackpot, ...). A single,
+    // spaced-out poke is friendly and warms him; jabbing fast just annoys him.
     // Works anytime (not gated to generating). The canvas stays pointer-events:none
     // so the page underneath keeps its clicks; we just hit-test his bounding box.
     let pokeStreak = 0, lastPoke = 0;
@@ -2207,16 +2763,15 @@ export default function PixelTroll({ hidden = false, floorSelector = '', obstacl
 
     function onClick(e) {
       if (suppressClick) { suppressClick = false; return; }           // trailing click after a drag — ignore
-      if (hiddenRef.current || T.mode === 'away') return;
-      if (SPECIALS.has(T.action) || T.action === 'pmeltdown' || DRAG_ACTIONS.has(T.action)) return; // never interrupt a cameo / meltdown / drag
+      if (hiddenRef.current) return;
+      if (collectGiftAt(e.clientX, e.clientY - (window.innerHeight - canvas.height))) return;  // clicked a gift → pocket it
+      if (T.mode === 'away') return;
+      if (SPECIALS.has(T.action) || DRAG_ACTIONS.has(T.action)) return; // never interrupt a cameo / drag
       if (!hitTroll(e, 14)) return;
 
       const now = performance.now();
       pokeStreak = (now - lastPoke < 1100) ? pokeStreak + 1 : 1;
       lastPoke = now;
-      if (pokeStreak >= 6) {                       // poked past his limit → meltdown (overrides any reaction)
-        pokeStreak = 0; bumpMood(-15); say(pick(SPEECH_MELT), '#d22'); startAction('pmeltdown', now); return;
-      }
       // an occasional, spaced-out poke is friendly (warms him); jabbing fast barely
       // counts and just annoys him.
       bumpMood(pokeStreak === 1 ? 6 : pokeStreak <= 3 ? 1 : -2);
@@ -2234,7 +2789,7 @@ export default function PixelTroll({ hidden = false, floorSelector = '', obstacl
     function onMouseDown(e) {
       if (hiddenRef.current || T.mode === 'away') return;
       if (e.detail >= 2 && hitTroll(e, 22)) { e.preventDefault(); clearSelection(); }
-      if (e.button === 0 && !SPECIALS.has(T.action) && T.action !== 'pmeltdown'
+      if (e.button === 0 && !SPECIALS.has(T.action)
           && !DRAG_ACTIONS.has(T.action) && hitTroll(e, 18)) {
         drag = { startX: e.clientX, startY: e.clientY, grabbing: false };
       }
@@ -2245,13 +2800,23 @@ export default function PixelTroll({ hidden = false, floorSelector = '', obstacl
     // grabbed — pinned to the cursor, kicking and fighting — and rides OVER the
     // widgets (the canvas is lifted; no collision while held). Releasing drops him.
     function onMouseMove(e) {
+      // Track the pointer for the cursor-affection behaviors (always, even when not
+      // dragging). Canvas sits at bottom:0 full-height, so canvas coords == client.
+      const nowM = performance.now();
+      const cyl = e.clientY - (window.innerHeight - canvas.height);
+      if (cur.has) {
+        const dtm = Math.max(1, nowM - cur.lastT);
+        cur.speed = cur.speed * 0.6 + (Math.hypot(e.clientX - cur.x, cyl - cur.y) / dtm * 1000) * 0.4;
+      }
+      cur.x = e.clientX; cur.y = cyl; cur.has = true; cur.lastT = nowM;
+
       if (!drag) return;
       if (hiddenRef.current || T.mode === 'away') { drag = null; return; }
       if (!drag.grabbing) {
         if (Math.hypot(e.clientX - drag.startX, e.clientY - drag.startY) < 6) return;
         drag.grabbing = true;
         startAction('grab', performance.now());
-        bumpMood(-4); sayEvent(SPEECH_GRABBED);            // manhandling him sours his mood
+        bumpMood(T.mood >= 40 ? 0 : -4); sayEvent(SPEECH_GRABBED);   // if he trusts you, being picked up is fine; else it sours him
         const G0 = T.grab;
         if (G0) { G0.cx = e.clientX; G0.cy = e.clientY; G0.lastClientX = e.clientX; G0.lastClientY = e.clientY; G0.lastT = performance.now(); }
       }
@@ -2305,6 +2870,7 @@ export default function PixelTroll({ hidden = false, floorSelector = '', obstacl
 
     // If the pointer leaves the window mid-grab, drop him where he is.
     function onDocLeave() {
+      cur.has = false; cur.overT = 0; cur.nearT = 0;       // pointer's gone → no cursor affection
       if (drag && drag.grabbing) { drag = null; suppressClick = true; releaseDrag(); }
       else drag = null;
     }
@@ -2321,42 +2887,67 @@ export default function PixelTroll({ hidden = false, floorSelector = '', obstacl
       const vTop = canvasTop + (groundY() - h + (C.yOff || 0)) - 16, vBottom = canvasTop + groundY() + 16;
       return e.clientX >= left && e.clientX <= right && e.clientY >= vTop && e.clientY <= vBottom;
     }
-    // Shooting EITHER of them during the police scene and he's gone for good (this
-    // session) — like he packed up and left. A hard reload starts him over fresh:
-    // we wipe his saved mood so he comes back neutral, not still seething.
-    function banishForever(clientX, clientY) {
+    // During the police scene you can pick off the troll OR the cop, individually.
+    // Whichever you hit bursts in a screen-wide splatter (green bits for the troll,
+    // blue for the cop); the police-scene choreography then makes the OTHER one
+    // panic and bolt. Killing the troll ends him for good this session (mood wiped
+    // on reload); killing the cop just sends the troll running.
+    function killInScene(target, clientX, clientY) {
       const canvasTop = window.innerHeight - canvas.height;
       const gx = clientX, gy = clientY - canvasTop;
-      spawnSplats(gx, gy);                               // a final gory exit, screen-wide
+      const bit = target === 'cop' ? COP_COLORS.u : GREEN;   // bits of whoever was hit
+      spawnSplats(gx, gy, bit);                          // a gory exit, screen-wide
       for (let i = 0; i < 44; i++) {
         const ang = rand(-Math.PI, Math.PI), sp = rand(80, 460);
-        T.confetti.push({ x: gx, y: gy, vx: Math.cos(ang) * sp, vy: Math.sin(ang) * sp - 70, life: rand(600, 1400), size: Math.round(rand(2, 7)), color: Math.random() < 0.3 ? GREEN : RED });
+        T.confetti.push({ x: gx, y: gy, vx: Math.cos(ang) * sp, vy: Math.sin(ang) * sp - 70, life: rand(600, 1400), size: Math.round(rand(2, 7)), color: Math.random() < 0.3 ? bit : RED });
       }
-      T.banished = true; T.mood = 0;
-      try { window.localStorage.setItem(MOOD_KEY, '0'); } catch { /* ignore */ }
-      T.cop = null; T.copSpeech = null; T.speech = null; T.dog = null; T.boot = null;
-      T.action = null; T.mode = 'away'; T.leaving = false;
+      T.policeKill = target; T.speech = null;            // the police step now runs the survivor's escape
+      if (target === 'troll') {                          // killed in front of the cop → gone for good
+        T.mood = 0; T.policePending = false;
+        try { window.localStorage.setItem(MOOD_KEY, '0'); } catch { /* ignore */ }
+      }
     }
 
     // Right-click him → he's shot dead: bursts into pieces, blood splatters across
     // the whole screen (over the widgets and all), then drips down and fades. A
     // few green bits fly in the spray. Overrides any poke / flick / drag — and
     // works mid-air too, so you can pick him off while he floats down the chute.
-    // BUT during the police scene, shooting him OR the cop banishes him for good.
+    // DURING the police scene you instead pick off the troll OR the cop individually
+    // (whichever you hit) and the other one bolts. Shift + right-click drops big food.
     function onContextMenu(e) {
-      if (hiddenRef.current || T.mode === 'away') return;
+      if (hiddenRef.current) return;
+      // Shift + right-click → drop a BIG cut of meat. Works even while he's away
+      // (it summons him out), so it's handled before the away/shot guards below.
+      if (e.shiftKey && !T.banished) {
+        const el = e.target;
+        if (el && (el.isContentEditable || /^(INPUT|TEXTAREA|SELECT)$/.test(el.tagName))) return; // don't fight real editing
+        e.preventDefault(); clearSelection();
+        spawnMeat(e.clientX, e.clientY, true);
+        return;
+      }
+      if (T.mode === 'away') return;
       if (T.action === 'shot') return;
-      if (T.action === 'police') {                       // the climax: a shot here ends him permanently
-        if (!hitTroll(e, 18) && !hitCop(e)) return;
+      if (T.action === 'police') {                       // the climax: pick off the troll or the cop — the other bolts
+        if (T.policeKill) return;                        // a kill's already underway
+        const onTroll = hitTroll(e, 18), onCop = hitCop(e);
+        if (!onTroll && !onCop) return;
         e.preventDefault(); clearSelection();
         drag = null; pokeStreak = 0;
-        banishForever(e.clientX, e.clientY);
+        const dTroll = Math.abs(e.clientX - (T.x + T.shakeX));
+        const dCop = T.cop ? Math.abs(e.clientX - T.cop.x) : Infinity;
+        const target = (onCop && (!onTroll || dCop <= dTroll)) ? 'cop' : 'troll';
+        killInScene(target, e.clientX, e.clientY);
         return;
       }
       if (!hitTroll(e, 18)) return;
       e.preventDefault(); clearSelection();
       drag = null; pokeStreak = 0;                       // (right-click emits no `click`, so nothing to suppress)
-      T.mood = Math.min(T.mood, -70); saveMood();        // a kill always leaves him 'mad' (hated) — but one shot alone won't tip him to furious
+      // A kill hits his mood: if he's not yet badly soured (above −50) it drops him
+      // straight to −70; once he's already at/below −50, each shot gouges off another
+      // −30 — so repeated kills march him down toward the police scene.
+      T.mood = T.mood <= -50 ? Math.max(-100, T.mood - 30) : -70;
+      if (T.mood <= -100) { T.policePending = true; T.lovePending = false; }  // bottomed out → he WILL be back with a cop
+      saveMood();
       T.speech = null;
       T.shotAt = { x: T.x, yOff: T.yOffset };            // burst right where he is now (even falling / dangling)
       startAction('shot', performance.now());
@@ -2369,10 +2960,10 @@ export default function PixelTroll({ hidden = false, floorSelector = '', obstacl
     // A flick overrides whatever poke he's mid-way through (but not a cameo).
     function onDblClick(e) {
       if (hiddenRef.current || T.mode === 'away') return;
-      if (SPECIALS.has(T.action) || T.action === 'pmeltdown' || DRAG_ACTIONS.has(T.action)) return; // not mid-cameo / meltdown / drag
+      if (SPECIALS.has(T.action) || DRAG_ACTIONS.has(T.action)) return; // not mid-cameo / drag
       if (!hitTroll(e, 22)) return;                    // a touch more forgiving than a poke
       e.preventDefault(); clearSelection();            // belt-and-suspenders: kill any word selection
-      pokeStreak = 0;                                  // a flick resets the meltdown streak
+      pokeStreak = 0;                                  // a flick resets the poke streak
       bumpMood(-12);                                   // getting whacked across the room makes him MAD (a lone poke never does)
       bumpFlee();                                      // ...and once he stops tumbling, he bolts — faster each time
       startAction('pflick', performance.now());
@@ -2406,6 +2997,16 @@ export default function PixelTroll({ hidden = false, floorSelector = '', obstacl
     }
     window.addEventListener('keydown', onKeyDown);
 
+    // App hook: dispatch `new CustomEvent('pixeltroll', { detail: { type } })` from
+    // anywhere in the app and he reacts — cheers for good news, frets for anything
+    // matching error/fail/warn. Ignored while hidden or banished.
+    function onAppEvent(e) {
+      const type = e && e.detail && e.detail.type;
+      if (!type || hiddenRef.current || T.banished) return;
+      pendingReact = { kind: /error|fail|warn|bad/i.test(type) ? 'bad' : 'good', t: performance.now() };
+    }
+    window.addEventListener('pixeltroll', onAppEvent);
+
     return () => {
       saveMood();                                        // keep his latest feelings across reloads
       cancelAnimationFrame(raf);
@@ -2419,6 +3020,7 @@ export default function PixelTroll({ hidden = false, floorSelector = '', obstacl
       window.removeEventListener('contextmenu', onContextMenu);
       window.removeEventListener('dblclick', onDblClick);
       window.removeEventListener('keydown', onKeyDown);
+      window.removeEventListener('pixeltroll', onAppEvent);
     };
   }, []);
 

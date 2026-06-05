@@ -28,6 +28,10 @@ export const MIDS = [
   'backflip', 'splits', 'cartwheel', 'sleep', 'shake', 'giant', 'walk', 'jump',
   'moonwalk', 'disco', 'roll', 'dig', 'headbang', 'kick', 'trampoline',
   'breakdance', 'faint', 'sneeze',
+  // he interacts with the floating Studio panels (napWidget climbs on top and
+  // sleeps; leanWidget rests against the side and shoves it). Both fall back to a
+  // pause when there's no usable panel on-screen.
+  'napWidget', 'leanWidget',
 ];
 
 // He never just disappears — every visit ends on one of these, picked at random.
@@ -43,10 +47,9 @@ export const CLICK_REACTS = [
   'pspin', 'psplat', 'pbounce', 'ptantrum', 'pblush',
   'phiccup', 'pzap', 'pmelt', 'pcry', 'plove', 'pjackpot', 'praspberry', 'psplit',
 ];
-// 'pmeltdown' isn't in the random pool — it only fires when you poke him past
-// his limit (see onClick) — but it still belongs in the set so a click can't
-// interrupt it once it starts.
-export const CLICK_SET = new Set([...CLICK_REACTS, 'pmeltdown', 'pflick']);
+// 'pflick' (the double-click whack) isn't in the random pool, but it belongs in
+// the set so a click can't interrupt it once it starts.
+export const CLICK_SET = new Set([...CLICK_REACTS, 'pflick']);
 
 // Breathers slotted between his tricks so he doesn't fire them back-to-back:
 // mostly just stand around a few (randomized) seconds, sometimes amble a bit.
@@ -55,10 +58,11 @@ export const REST_BEATS = ['pause', 'pause', 'mosey'];
 // Ultra-rare cameos: ~1% each, swapped in for a normal trick. Cinematic, scripted,
 // and never interruptible by a click. See stepAction for the choreography.
 export const MID_SET = new Set(MIDS);
-export const RARES = ['smitten', 'bloodDeath', 'ufo', 'dog', 'stomp'];
-// 'police' is scripted like the rares (uninterruptible) but never random — it only
-// fires when he's pushed past furious (see planVisit / superMad).
-export const SPECIALS = new Set([...RARES, 'police']);
+export const RARES = ['smitten', 'bloodDeath', 'ufo', 'dog', 'stomp', 'friend'];
+// 'police' and 'lovefest' are scripted like the rares (uninterruptible) but never
+// random — they fire off the mood extremes: 'police' when he's pushed to −100,
+// 'lovefest' when he's won all the way to +100 (see planVisit / the mood latches).
+export const SPECIALS = new Set([...RARES, 'police', 'lovefest']);
 
 // Drag-and-drop set: while he's grabbed or mid-drop he rides OVER the floating
 // widgets (canvas lifted above them) and isn't pokeable/flickable. 'shot' is the
