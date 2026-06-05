@@ -10,20 +10,20 @@
 // flex-column parent that owns the header above it.
 
 import React, { useCallback, useEffect, useRef, useState } from 'react';
-import { type UseBoardReturn, type TextField, type BoardRow, TEXT_FIELDS } from '../hooks/useBoard';
+import { type UseBoardReturn, type TextField, TEXT_FIELDS } from '../hooks/useBoard';
 import { BoardTabs } from './BoardTabs';
 
 // Left-of-context "watch the clip and draft the context" button. Gemini reads
 // the linked video (motion + speech) and fills the Context cell, so it doesn't
 // have to be written by hand.
-function AutoContextButton({ row, onRun }: { row: BoardRow; onRun: (row: BoardRow) => Promise<void> }) {
+function AutoContextButton({ url, onRun }: { url: string; onRun: () => Promise<void> }) {
   const [loading, setLoading] = useState(false);
   const [err, setErr] = useState<string | null>(null);
-  const disabled = loading || !row.url.trim();
+  const disabled = loading || !url.trim();
   async function run() {
     if (disabled) return;
     setLoading(true); setErr(null);
-    try { await onRun(row); }
+    try { await onRun(); }
     catch (e) { setErr(e instanceof Error ? e.message : 'Failed'); }
     finally { setLoading(false); }
   }
@@ -31,7 +31,7 @@ function AutoContextButton({ row, onRun }: { row: BoardRow; onRun: (row: BoardRo
     <button
       onClick={run}
       disabled={disabled}
-      title={err ?? (row.url.trim() ? 'Auto-write context — Gemini watches the linked clip' : 'Add a link first')}
+      title={err ?? (url.trim() ? 'Auto-write context — Gemini watches the linked clip' : 'Add a link first')}
       className={`mt-1 ml-1 flex h-6 w-6 shrink-0 items-center justify-center rounded-md transition-colors disabled:opacity-30 ${
         err ? 'text-red-400 hover:bg-red-950/40' : 'text-zinc-500 hover:bg-zinc-800 hover:text-violet-300'
       }`}
@@ -113,7 +113,7 @@ export function BoardGrid({ board }: { board: UseBoardReturn }) {
   const {
     rows, loading, error,
     draft, setDraft, draftHasContent, posting, urlInputRef,
-    onTextChange, onTextCommit, toggleBool, deleteRow, postDraft, autoContext,
+    onTextChange, onTextCommit, toggleBool, deleteRow, postDraft, autoContext, autoContextDraft,
   } = board;
 
   function renderTextCell(
@@ -200,11 +200,25 @@ export function BoardGrid({ board }: { board: UseBoardReturn }) {
               </td>
               {TEXT_FIELDS.map((f) => (
                 <td key={f.key} className="border border-zinc-800 p-0">
-                  {renderTextCell(
-                    f.key, f.multiline, draft[f.key],
-                    (v) => setDraft((d) => ({ ...d, [f.key]: v })),
-                    undefined,
-                    f.key === 'url',
+                  {f.key === 'context' ? (
+                    // Generate the context from just the link, before posting —
+                    // the ✨ writes into the draft so you can tweak then Post.
+                    <div className="flex items-start">
+                      <AutoContextButton url={draft.url} onRun={autoContextDraft} />
+                      <div className="min-w-0 flex-1">
+                        {renderTextCell(
+                          f.key, f.multiline, draft[f.key],
+                          (v) => setDraft((d) => ({ ...d, [f.key]: v })),
+                        )}
+                      </div>
+                    </div>
+                  ) : (
+                    renderTextCell(
+                      f.key, f.multiline, draft[f.key],
+                      (v) => setDraft((d) => ({ ...d, [f.key]: v })),
+                      undefined,
+                      f.key === 'url',
+                    )
                   )}
                 </td>
               ))}
@@ -253,7 +267,7 @@ export function BoardGrid({ board }: { board: UseBoardReturn }) {
                     {f.key === 'context' ? (
                       // Context cell carries the ✨ auto-write button on its left.
                       <div className="flex items-start">
-                        <AutoContextButton row={row} onRun={autoContext} />
+                        <AutoContextButton url={row.url} onRun={() => autoContext(row)} />
                         <div className="min-w-0 flex-1">
                           {renderTextCell(
                             f.key, f.multiline, row[f.key],

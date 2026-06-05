@@ -85,6 +85,10 @@ export interface UseBoardReturn {
   // 2-sentence Context, then persist into the Context cell. Throws on failure so
   // the caller (the ✨ button) can surface the message.
   autoContext: (row: BoardRow) => Promise<void>;
+  // Same as autoContext, but for the not-yet-posted quick-add draft: writes the
+  // generated context into the draft's Context cell so you can review it (and
+  // tweak) before hitting Post. Lets you add just a link and generate from there.
+  autoContextDraft: () => Promise<void>;
 }
 
 export function useBoard(): UseBoardReturn {
@@ -178,7 +182,9 @@ export function useBoard(): UseBoardReturn {
       });
       if (!res.ok) throw new Error((await res.json().catch(() => ({}))).error ?? `HTTP ${res.status}`);
       const row: BoardRow = await res.json();
-      setRowsByTable((prev) => ({ ...prev, [tableAtPost]: [...(prev[tableAtPost] ?? []), row] }));
+      // Newest on top — prepend so the just-added row appears at the top of the
+      // board (matches the DESC load order in board-db listRows).
+      setRowsByTable((prev) => ({ ...prev, [tableAtPost]: [row, ...(prev[tableAtPost] ?? [])] }));
       setDraft(EMPTY_DRAFT);
       urlInputRef.current?.focus();
     } catch (e) {
@@ -221,13 +227,12 @@ export function useBoard(): UseBoardReturn {
     }
   }, []);
 
-  // Auto-context: the link is all the board row has, so resolve it the same way
-  // the media tab does (/api/download → playable url), hand the clip to Gemini
-  // (/api/ai/auto-context), and write the result straight into the Context cell.
-  // We patch+save the explicit value here rather than going through onTextChange/
-  // onTextCommit, whose commit re-reads (stale) closure state.
-  const autoContext = useCallback(async (row: BoardRow) => {
-    const link = row.url.trim();
+  // Auto-context core: the link is all we have, so resolve it the same way the
+  // media tab does (/api/download → playable url), hand the clip to Gemini
+  // (/api/ai/auto-context), and return the drafted 2-sentence Context. Throws on
+  // failure so callers (the ✨ buttons) can surface the message.
+  const resolveContext = useCallback(async (rawLink: string): Promise<string> => {
+    const link = rawLink.trim();
     if (!link) throw new Error('Add a link first.');
 
     const dl = await fetch('/api/download', {
@@ -258,16 +263,29 @@ export function useBoard(): UseBoardReturn {
     });
     const data = await r.json().catch(() => ({})) as { context?: string; error?: string };
     if (!r.ok || data.error || !data.context) throw new Error(data.error || 'Auto-context failed.');
+    return data.context.trim();
+  }, []);
 
-    const text = data.context.trim();
+  // Existing-row auto-context: write straight into the Context cell. We patch+save
+  // the explicit value here rather than going through onTextChange/onTextCommit,
+  // whose commit re-reads (stale) closure state.
+  const autoContext = useCallback(async (row: BoardRow) => {
+    const text = await resolveContext(row.url);
     patchLocal(row.id, { context: text });
     void savePatch(row.id, { context: text });
-  }, [patchLocal, savePatch]);
+  }, [resolveContext, patchLocal, savePatch]);
+
+  // Draft auto-context: generate from the quick-add link before the row exists,
+  // dropping the result into the draft so it posts (or gets tweaked) from there.
+  const autoContextDraft = useCallback(async () => {
+    const text = await resolveContext(draft.url);
+    setDraft((d) => ({ ...d, context: text }));
+  }, [resolveContext, draft.url]);
 
   return {
     active, setActive, rows, rowsByTable, loading, error, setError,
     draft, setDraft, draftHasContent, posting, urlInputRef,
     onTextChange, onTextCommit, toggleBool, deleteRow, postDraft, markPosted,
-    autoContext,
+    autoContext, autoContextDraft,
   };
 }

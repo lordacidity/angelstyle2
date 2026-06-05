@@ -150,9 +150,9 @@ const SELECT_COLS =
 export async function listRows(table: BoardTable): Promise<BoardRow[]> {
   await ensureSchema();
   const r = await getPool().query<DbRow>(
-    // Oldest first so rows read top-to-bottom like a spreadsheet and new rows
-    // append at the bottom.
-    `SELECT ${SELECT_COLS} FROM ${PHYSICAL[table]} ORDER BY created_at ASC`,
+    // Newest first — the board reads top-to-bottom with the most recent rows up
+    // top, and freshly-added rows land at the top of the list.
+    `SELECT ${SELECT_COLS} FROM ${PHYSICAL[table]} ORDER BY created_at DESC`,
   );
   return r.rows.map(toRow);
 }
