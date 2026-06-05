@@ -22,10 +22,10 @@ import { useRecording } from './hooks/useRecording';
 export type { TikTokCanvasRef, MarketData, SparkPoint } from './types';
 
 // Vertical split of the leftover black space around the block: the space ABOVE
-// the block is 1.5 parts to the 2 parts BELOW it (top : bottom = 1.5 : 2).
-const TOP_RATIO = 1.5;
+// the block is 1.4 parts to the 2 parts BELOW it (top : bottom = 1.4 : 2).
+const TOP_RATIO = 1.4;
 const BOTTOM_RATIO = 2;
-const TOP_FRAC = TOP_RATIO / (TOP_RATIO + BOTTOM_RATIO); // ≈ 0.4286
+const TOP_FRAC = TOP_RATIO / (TOP_RATIO + BOTTOM_RATIO); // ≈ 0.4118
 
 export const TikTokCanvas = forwardRef<TikTokCanvasRef, TikTokCanvasProps>(function TikTokCanvas({
   videoSrc,
@@ -296,6 +296,7 @@ export const TikTokCanvas = forwardRef<TikTokCanvasRef, TikTokCanvasProps>(funct
             lifetimeChangePct: marketData.price.lifetimeChangePct,
             sparkline: marketData.sparkline,
             size: marketData.size ?? 'large',
+            ctaCategory: marketData.ctaCategory,
             avatarImgRef: marketAvatarImgRef,
             lastPhotoUrlRef: marketAvatarUrlRef,
             pauvLogoImgRef,
@@ -352,8 +353,8 @@ export const TikTokCanvas = forwardRef<TikTokCanvasRef, TikTokCanvasProps>(funct
   }
 
   // Auto-size + position the crop box so the whole block (header → video → CTA)
-  // sits with the black space ABOVE it 1.5 parts to the 2 parts below it
-  // (top : bottom = 1.5 : 2). The fixed chrome (header + CTA) is constant, so the
+  // sits with the black space ABOVE it 1.4 parts to the 2 parts below it
+  // (top : bottom = 1.4 : 2). The fixed chrome (header + CTA) is constant, so the
   // leftover black space is CANVAS_H - splitChrome - videoHeight; blockTop is
   // TOP_FRAC of that leftover. The "link in bio" line is intentionally left OUT
   // of splitChrome so it reads as part of the bottom black space, not the block.
@@ -389,7 +390,7 @@ export const TikTokCanvas = forwardRef<TikTokCanvasRef, TikTokCanvasProps>(funct
     setBox({ ...b });
   }
 
-  // Re-apply the 1.5:2 top:bottom split using the CURRENT photo size (unlike
+  // Re-apply the 1.4:2 top:bottom split using the CURRENT photo size (unlike
   // anchorBlockTop, which re-fits the photo to its natural height). Used when the
   // chrome changes height — CTA toggled small/large, caption edited — or after a
   // manual resize, so the block re-centers vertically without resetting the size

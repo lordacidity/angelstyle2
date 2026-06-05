@@ -439,6 +439,7 @@ export function StudioShell() {
       <PixelTroll
         hidden={activeSection !== 'media' && activeSection !== 'board'}
         floorSelector="[data-troll-floor]"
+        obstacleSelector="[data-troll-obstacle]"
         zIndex={20}
       />
 

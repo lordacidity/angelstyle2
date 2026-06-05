@@ -81,6 +81,10 @@ export interface UseBoardReturn {
   // Force a row's Posted flag true (local + persisted). Used when a video that
   // came from this board is exported — see [[board widget send]] in BoardWidget.
   markPosted: (table: BoardTable, id: string) => void;
+  // Resolve the row's link → playable clip → let Gemini watch it and draft the
+  // 2-sentence Context, then persist into the Context cell. Throws on failure so
+  // the caller (the ✨ button) can surface the message.
+  autoContext: (row: BoardRow) => Promise<void>;
 }
 
 export function useBoard(): UseBoardReturn {
@@ -217,9 +221,53 @@ export function useBoard(): UseBoardReturn {
     }
   }, []);
 
+  // Auto-context: the link is all the board row has, so resolve it the same way
+  // the media tab does (/api/download → playable url), hand the clip to Gemini
+  // (/api/ai/auto-context), and write the result straight into the Context cell.
+  // We patch+save the explicit value here rather than going through onTextChange/
+  // onTextCommit, whose commit re-reads (stale) closure state.
+  const autoContext = useCallback(async (row: BoardRow) => {
+    const link = row.url.trim();
+    if (!link) throw new Error('Add a link first.');
+
+    const dl = await fetch('/api/download', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ url: link }),
+    });
+    const dlData = await dl.json().catch(() => ({})) as {
+      id?: string; play?: string; hdplay?: string; wmplay?: string;
+      title?: string; author?: { nickname?: string }; error?: string;
+    };
+    if (!dl.ok || dlData.error) throw new Error(dlData.error || 'Could not fetch the video.');
+    // Raw playable URL — NOT bestVideoUrl(), which returns the browser /api/proxy
+    // path. The route fetches this server-side, where the proxy isn't needed.
+    const videoUrl = dlData.play || dlData.hdplay || dlData.wmplay || '';
+    if (!videoUrl) throw new Error('No video found at that link.');
+
+    const r = await fetch('/api/ai/auto-context', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        videoUrl,
+        sourceUrl: link,            // original share link → used to pull comments
+        videoId:   dlData.id || undefined,
+        title:     dlData.title || undefined,
+        author:    dlData.author?.nickname || undefined,
+      }),
+    });
+    const data = await r.json().catch(() => ({})) as { context?: string; error?: string };
+    if (!r.ok || data.error || !data.context) throw new Error(data.error || 'Auto-context failed.');
+
+    const text = data.context.trim();
+    patchLocal(row.id, { context: text });
+    void savePatch(row.id, { context: text });
+  }, [patchLocal, savePatch]);
+
   return {
     active, setActive, rows, rowsByTable, loading, error, setError,
     draft, setDraft, draftHasContent, posting, urlInputRef,
     onTextChange, onTextCommit, toggleBool, deleteRow, postDraft, markPosted,
+    autoContext,
   };
 }

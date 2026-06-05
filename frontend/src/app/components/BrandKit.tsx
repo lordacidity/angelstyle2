@@ -8,7 +8,7 @@
 // machine (localStorage), so each person keeps their own and no login is needed.
 
 import { useRef, useState, useCallback } from 'react';
-import type { BrandProps, BrandLogo } from '../types';
+import type { BrandProps, BrandLogo, BrandCategory } from '../types';
 
 interface BrandKitProps {
   brand: BrandProps;
@@ -16,7 +16,7 @@ interface BrandKitProps {
   saving?: boolean;
   uploading?: boolean;
   error?: string | null;
-  onSave: (displayName: string, handle: string) => Promise<boolean>;
+  onSave: (displayName: string, handle: string, category: BrandCategory) => Promise<boolean>;
   onUploadLogo: (file: File) => void;
   onDeleteLogo: (id: string) => void;
   onSelectLogo: (url: string) => void;
@@ -30,6 +30,7 @@ export function BrandKit({
   const fileRef = useRef<HTMLInputElement>(null);
   const [displayName, setDisplayName] = useState(brand.displayName);
   const [handle, setHandle] = useState(brand.handle);
+  const [category, setCategory] = useState<BrandCategory>(brand.category);
   const [hoveredLogo, setHoveredLogo] = useState<string | null>(null);
   const [saved, setSaved] = useState(false);
   const savedTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -37,24 +38,25 @@ export function BrandKit({
   // Re-seed the editable fields whenever the saved brand changes (e.g. after it
   // loads from Supabase) — React's "adjust state during render" pattern, keyed
   // off the last brand we synced from.
-  const [syncedFrom, setSyncedFrom] = useState({ displayName: brand.displayName, handle: brand.handle });
-  if (syncedFrom.displayName !== brand.displayName || syncedFrom.handle !== brand.handle) {
-    setSyncedFrom({ displayName: brand.displayName, handle: brand.handle });
+  const [syncedFrom, setSyncedFrom] = useState({ displayName: brand.displayName, handle: brand.handle, category: brand.category });
+  if (syncedFrom.displayName !== brand.displayName || syncedFrom.handle !== brand.handle || syncedFrom.category !== brand.category) {
+    setSyncedFrom({ displayName: brand.displayName, handle: brand.handle, category: brand.category });
     setDisplayName(brand.displayName);
     setHandle(brand.handle);
+    setCategory(brand.category);
   }
 
-  const isDirty = displayName !== brand.displayName || handle !== brand.handle;
+  const isDirty = displayName !== brand.displayName || handle !== brand.handle || category !== brand.category;
   const canSave = isDirty && displayName.trim().length > 0 && handle.trim().length > 0;
 
   const handleSave = useCallback(async () => {
-    const ok = await onSave(displayName, handle);
+    const ok = await onSave(displayName, handle, category);
     if (ok) {
       setSaved(true);
       if (savedTimer.current) clearTimeout(savedTimer.current);
       savedTimer.current = setTimeout(() => setSaved(false), 2500);
     }
-  }, [onSave, displayName, handle]);
+  }, [onSave, displayName, handle, category]);
 
   function handleFile(e: React.ChangeEvent<HTMLInputElement>) {
     const file = e.target.files?.[0];
@@ -175,6 +177,31 @@ export function BrandKit({
               placeholder="e.g. @Pauv"
               className="w-full bg-zinc-900 border border-zinc-800 focus:border-zinc-600 rounded-lg px-3 py-2.5 text-sm text-white placeholder-zinc-600 outline-none transition-colors"
             />
+          </div>
+
+          {/* Category — drives the bio CTA wording ("pauv.com to trade Artists"
+              vs "…Athletes") in the Media generator. */}
+          <div className="flex flex-col gap-1.5">
+            <label className="text-xs font-medium text-zinc-500 uppercase tracking-wider">Category</label>
+            <div className="grid grid-cols-2 gap-2">
+              {(['artists', 'athletes'] as const).map(cat => {
+                const active = category === cat;
+                return (
+                  <button
+                    key={cat}
+                    type="button"
+                    onClick={() => setCategory(cat)}
+                    className={`py-2.5 rounded-lg text-sm font-medium capitalize transition-colors ${
+                      active
+                        ? 'bg-white text-black'
+                        : 'bg-zinc-900 border border-zinc-800 text-zinc-400 hover:border-zinc-600 hover:text-zinc-200'
+                    }`}
+                  >
+                    {cat}
+                  </button>
+                );
+              })}
+            </div>
           </div>
         </div>
 

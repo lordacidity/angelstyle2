@@ -2,7 +2,7 @@
 
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { supabase } from '@/lib/supabase';
-import type { BrandProps, BrandLogo } from '../types';
+import type { BrandProps, BrandLogo, BrandCategory } from '../types';
 
 // The Pauv logo ships as a static asset in frontend/public, so the brand kit
 // always has a working logo with zero Supabase/auth dependency. Any logos that
@@ -17,10 +17,12 @@ const EMPTY_BRAND: BrandProps = {
   logos: STATIC_LOGOS,
   displayName: '',
   handle: '',
+  category: 'artists',
 };
 
 function toDbHandle(h: string) { return h.replace(/^@+/, ''); }
 function toDisplayHandle(h: string) { return h.startsWith('@') ? h : `@${h}`; }
+function toCategory(v: string | null): BrandCategory { return v === 'athletes' ? 'athletes' : 'artists'; }
 
 // Logos are shared (Supabase, under the one Pauv account) so everyone pulls from
 // the same logo library. Display name + handle are PER-PERSON: each machine
@@ -30,22 +32,25 @@ function toDisplayHandle(h: string) { return h.startsWith('@') ? h : `@${h}`; }
 // never set them locally.
 const LS_DISPLAY_NAME = 'brandkit.displayName';
 const LS_HANDLE       = 'brandkit.handle';
+const LS_CATEGORY     = 'brandkit.category';
 
-function readLocalIdentity(): { displayName: string | null; handle: string | null } {
-  if (typeof window === 'undefined') return { displayName: null, handle: null };
+function readLocalIdentity(): { displayName: string | null; handle: string | null; category: string | null } {
+  if (typeof window === 'undefined') return { displayName: null, handle: null, category: null };
   try {
     return {
       displayName: window.localStorage.getItem(LS_DISPLAY_NAME),
       handle:      window.localStorage.getItem(LS_HANDLE),
+      category:    window.localStorage.getItem(LS_CATEGORY),
     };
-  } catch { return { displayName: null, handle: null }; }
+  } catch { return { displayName: null, handle: null, category: null }; }
 }
 
-function writeLocalIdentity(displayName: string, dbHandle: string): void {
+function writeLocalIdentity(displayName: string, dbHandle: string, category: BrandCategory): void {
   if (typeof window === 'undefined') return;
   try {
     window.localStorage.setItem(LS_DISPLAY_NAME, displayName);
     window.localStorage.setItem(LS_HANDLE,       dbHandle);
+    window.localStorage.setItem(LS_CATEGORY,     category);
   } catch { /* localStorage disabled — silent no-op, UI state still updates */ }
 }
 
@@ -75,6 +80,7 @@ export function useBrandKit(userId: string | null) {
       setBrand({
         displayName: local.displayName ?? '',
         handle: local.handle ? toDisplayHandle(local.handle) : '',
+        category: toCategory(local.category),
         logos: STATIC_LOGOS,
         logoSrc: STATIC_LOGOS[0].url,
       });
@@ -104,6 +110,7 @@ export function useBrandKit(userId: string | null) {
         setBrand({
           displayName: local.displayName ?? '',
           handle: local.handle ? toDisplayHandle(local.handle) : '',
+          category: toCategory(local.category),
           logos: STATIC_LOGOS,
           logoSrc: STATIC_LOGOS[0].url,
         });
@@ -138,6 +145,7 @@ export function useBrandKit(userId: string | null) {
       setBrand({
         displayName,
         handle: handleRaw ? toDisplayHandle(handleRaw) : '',
+        category: toCategory(local.category),
         logos,
         logoSrc: logos[0]?.url ?? '',
       });
@@ -148,18 +156,18 @@ export function useBrandKit(userId: string | null) {
     load();
   }, [userId]);
 
-  const save = useCallback(async (displayName: string, handle: string): Promise<boolean> => {
+  const save = useCallback(async (displayName: string, handle: string, category: BrandCategory): Promise<boolean> => {
     // Per-machine identity: write localStorage only, with NO auth dependency.
     // Supabase is intentionally NOT updated (each machine keeps its own name/
-    // handle off the shared account), and we deliberately do NOT require a
-    // signed-in userId — the name/@ are purely local, so they save even when the
+    // handle/category off the shared account), and we deliberately do NOT require
+    // a signed-in userId — these are purely local, so they save even when the
     // shared Supabase account is unavailable (e.g. creds not configured).
     // uploadLogo() still creates the brand_kit row when it's needed for the
     // (shared) logo library.
     setSaving(true);
     const dbHandle = toDbHandle(handle);
-    writeLocalIdentity(displayName, dbHandle);
-    setBrand(prev => ({ ...prev, displayName, handle: toDisplayHandle(dbHandle) }));
+    writeLocalIdentity(displayName, dbHandle, category);
+    setBrand(prev => ({ ...prev, displayName, handle: toDisplayHandle(dbHandle), category }));
     setSaving(false);
     return true;
   }, [setBrand]);

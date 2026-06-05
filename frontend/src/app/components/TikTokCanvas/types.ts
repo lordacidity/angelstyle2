@@ -69,6 +69,9 @@ export interface MarketData {
   /** CTA size: 'large' = full row, 'small' = one-line, 'bio' = just the "pauv.com
    *  to trade" link (no market row). Defaults to 'large'. */
   size?: 'large' | 'small' | 'bio';
+  /** For the bio CTA only — appends a bold talent category to the link, e.g.
+   *  "pauv.com to trade Artists" / "…Athletes". From the brand kit. */
+  ctaCategory?: 'artists' | 'athletes';
   price: {
     usd: number | null;
     lifetimeChangePct: number | null;

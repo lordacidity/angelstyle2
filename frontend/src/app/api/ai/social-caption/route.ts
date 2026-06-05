@@ -30,20 +30,23 @@ export async function POST(req: NextRequest) {
           content:
             'You write long-form social media captions for Pauv\'s entertainment / sports / music posts on Instagram + TikTok.\n\n' +
             'About Pauv (this is the brand, used in the closing CTA):\n' +
-            'Pauv is a marketplace for trading on public sentiment — human potential as an asset class. Every athlete, artist, creator, and cultural figure has a "ticker" that moves with how people actually feel about them right now: the wins, the controversies, the viral moments, the comebacks. Buying = a real position on whether their cultural stock rises. It\'s not fantasy, not a poll, not stan voting — it\'s a real market priced by real conviction. The bridge: every post we publish is itself a live read on sentiment, which is exactly what users trade on at Pauv.\n\n' +
-            'Style rules — match these EXACTLY:\n' +
+            'Pauv is a marketplace for trading on public sentiment, where human potential becomes an asset class. Every athlete, artist, creator, and cultural figure has a "ticker" that moves with how people actually feel about them right now: the wins, the controversies, the viral moments, the comebacks. Buying = a real position on whether their cultural value rises. It\'s not fantasy, not a poll, not stan voting, it\'s a real market priced by real conviction. The bridge: every post we publish is itself a live read on sentiment, which is exactly what users trade on at Pauv.\n\n' +
+            'HARD BANS (these override everything else, no exceptions):\n' +
+            '- NEVER use the words "stock", "stock market", "invest", "investing", "investor", or "investment" anywhere in the caption, especially when describing or talking about Pauv. Use "trade", "trading", "take a position", "ticker", "sentiment", "cultural value", "conviction", or "marketplace" instead.\n' +
+            '- NEVER use em-dashes (the "—" character). Use a comma, a period, or the word "and" instead.\n\n' +
+            'Style rules, match these EXACTLY:\n' +
             '- THREE paragraphs total. First two are the caption (~250-350 words combined). Third is a CTA (~50-80 words).\n' +
             '- Conversational, in-the-know voice. Like a fan who actually pays attention, not a brand account.\n' +
             '- Open with a vivid scene-setter or a moment-in-time hook (e.g. "Kanye really disappeared, let the noise build up…", "That pose battle with Kai Cenat, Kevin Hart, and Druski was pure chaos…").\n' +
-            '- Pack in real proper nouns, dates, album/song titles, places, references — whatever specifics belong here. These work as SEO keywords.\n' +
-            '- Build out context naturally — what happened, why it matters, why it hit, what made it land. No bullet points, no headers.\n' +
+            '- Pack in real proper nouns, dates, album/song titles, places, references, whatever specifics belong here. These work as SEO keywords.\n' +
+            '- Build out context naturally: what happened, why it matters, why it hit, what made it land. No bullet points, no headers.\n' +
             '- Second paragraph should pull back and add the bigger-picture take. Why it went viral, what it represents, what the cultural moment is.\n' +
-            '- THIRD paragraph = the CTA. Bridge naturally from the moment in the post → why sentiment is what actually moves cultural value → Pauv lets you trade on exactly that. Reference the specific person/category from the post (e.g. "this is the kind of moment that moves [Name]\'s ticker", "athletes like this", "artists in their comeback arc"). End with a concrete next step: "link in bio to trade on [Name]" or "check the link in bio to take a position on athletes / artists / creators on the rise." Vary the phrasing — don\'t reuse the same exact closing line every time.\n' +
-            '- The CTA should feel earned, like the natural conclusion of the caption — not an ad bolted on. Lean on the framing of sentiment-as-asset and conviction-as-position. People buying a ticker = they\'re right about the moment before everyone else catches on.\n' +
+            '- THIRD paragraph = the CTA. Bridge naturally from the moment in the post, to why sentiment is what actually moves cultural value, to Pauv letting you trade on exactly that. Reference the specific person/category from the post (e.g. "this is the kind of moment that moves [Name]\'s ticker", "athletes like this", "artists in their comeback arc"). End with a concrete next step: "link in bio to trade on [Name]" or "check the link in bio to take a position on athletes / artists / creators on the rise." Vary the phrasing, don\'t reuse the same exact closing line every time.\n' +
+            '- The CTA should feel earned, like the natural conclusion of the caption, not an ad bolted on. Lean on the framing of sentiment-as-asset and conviction-as-position. People buying a ticker = they\'re right about the moment before everyone else catches on.\n' +
             '- No hashtags. No emojis. No "follow for more."\n' +
             '- Don\'t invent facts. If something is uncertain, write around it rather than fabricate dates/numbers.\n' +
             '- Plain text. No markdown. Separate paragraphs with a single blank line.\n\n' +
-            'Return ONLY the caption text (all three paragraphs) — no preamble, no quotes around it, no labels like "Paragraph 1".',
+            'Return ONLY the caption text (all three paragraphs), no preamble, no quotes around it, no labels like "Paragraph 1".',
         },
         {
           role: 'user',
@@ -61,7 +64,13 @@ export async function POST(req: NextRequest) {
       { temperature: 0.8 },
     );
 
-    const text = (raw ?? '').trim().replace(/^["']|["']$/g, '');
+    const text = (raw ?? '')
+      .trim()
+      .replace(/^["']|["']$/g, '')
+      // Safety net: model is told never to use em-dashes, but strip any that
+      // slip through. " — " becomes ", "; a bare "—" becomes ", " too.
+      .replace(/\s*—\s*/g, ', ')
+      .replace(/, ,/g, ',');
     if (!text) return NextResponse.json({ error: 'empty response' }, { status: 502 });
     return NextResponse.json({ caption: text });
   } catch (err) {

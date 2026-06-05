@@ -59,6 +59,7 @@ export function BoardWidget({ board, onSendRow }: { board: UseBoardReturn; onSen
   return (
     <div
       ref={panelRef}
+      data-troll-obstacle
       // Resting spot: left of the centered generator, vertically centered. The
       // hook pins an absolute position (clearing the centering translate) on the
       // first drag/resize.

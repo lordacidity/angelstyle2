@@ -1002,7 +1002,7 @@ export function CanvasGrid({
     // Bio CTA needs no talent — it's just the "pauv.com to trade" line under the
     // video — so return a minimal record (no name / price / sparkline).
     if (sizePref === 'bio') {
-      return { name: '', ticker: '', photo_url: null, industry: null, subcategory: null, sparkline: null, size: 'bio', price: { usd: null, lifetimeChangePct: null } };
+      return { name: '', ticker: '', photo_url: null, industry: null, subcategory: null, sparkline: null, size: 'bio', ctaCategory: brand.category, price: { usd: null, lifetimeChangePct: null } };
     }
     const sel = marketMap[entryId];
     if (!sel) return null;
@@ -1038,7 +1038,7 @@ export function CanvasGrid({
         lifetimeChangePct: !isNaN(pctNum ?? NaN) ? pctNum  : syntheticPct,
       },
     };
-  }, [marketMap, marketOverrideMap, sparklineMap, marketSizeMap, marketWidgetVisible]);
+  }, [marketMap, marketOverrideMap, sparklineMap, marketSizeMap, marketWidgetVisible, brand.category]);
 
 
   const generateSocialCaption = useCallback(async (entry: VideoEntry): Promise<string | undefined> => {

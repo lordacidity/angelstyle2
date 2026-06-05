@@ -9,9 +9,45 @@
 // Renders a fragment (tabs / error / scrollable table) meant to drop into a
 // flex-column parent that owns the header above it.
 
-import React, { useCallback, useEffect, useRef } from 'react';
-import { type UseBoardReturn, type TextField, TEXT_FIELDS } from '../hooks/useBoard';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
+import { type UseBoardReturn, type TextField, type BoardRow, TEXT_FIELDS } from '../hooks/useBoard';
 import { BoardTabs } from './BoardTabs';
+
+// Left-of-context "watch the clip and draft the context" button. Gemini reads
+// the linked video (motion + speech) and fills the Context cell, so it doesn't
+// have to be written by hand.
+function AutoContextButton({ row, onRun }: { row: BoardRow; onRun: (row: BoardRow) => Promise<void> }) {
+  const [loading, setLoading] = useState(false);
+  const [err, setErr] = useState<string | null>(null);
+  const disabled = loading || !row.url.trim();
+  async function run() {
+    if (disabled) return;
+    setLoading(true); setErr(null);
+    try { await onRun(row); }
+    catch (e) { setErr(e instanceof Error ? e.message : 'Failed'); }
+    finally { setLoading(false); }
+  }
+  return (
+    <button
+      onClick={run}
+      disabled={disabled}
+      title={err ?? (row.url.trim() ? 'Auto-write context — Gemini watches the linked clip' : 'Add a link first')}
+      className={`mt-1 ml-1 flex h-6 w-6 shrink-0 items-center justify-center rounded-md transition-colors disabled:opacity-30 ${
+        err ? 'text-red-400 hover:bg-red-950/40' : 'text-zinc-500 hover:bg-zinc-800 hover:text-violet-300'
+      }`}
+    >
+      {loading ? (
+        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" style={{ animation: 'spin 1s linear infinite' }}>
+          <path d="M21 12a9 9 0 1 1-6.219-8.56" />
+        </svg>
+      ) : (
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor">
+          <path d="M12 2.5l1.6 4.3a4 4 0 0 0 2.4 2.4l4.3 1.6-4.3 1.6a4 4 0 0 0-2.4 2.4L12 19.5l-1.6-4.3a4 4 0 0 0-2.4-2.4L3.7 11.2l4.3-1.6a4 4 0 0 0 2.4-2.4z" />
+        </svg>
+      )}
+    </button>
+  );
+}
 
 const CELL_BASE =
   'w-full bg-transparent px-2 py-1.5 text-[13px] leading-snug text-zinc-200 outline-none placeholder:text-zinc-700 focus:bg-zinc-900/60';
@@ -77,7 +113,7 @@ export function BoardGrid({ board }: { board: UseBoardReturn }) {
   const {
     rows, loading, error,
     draft, setDraft, draftHasContent, posting, urlInputRef,
-    onTextChange, onTextCommit, toggleBool, deleteRow, postDraft,
+    onTextChange, onTextCommit, toggleBool, deleteRow, postDraft, autoContext,
   } = board;
 
   function renderTextCell(
@@ -214,10 +250,24 @@ export function BoardGrid({ board }: { board: UseBoardReturn }) {
                 </td>
                 {TEXT_FIELDS.map((f) => (
                   <td key={f.key} className="border border-zinc-800 p-0">
-                    {renderTextCell(
-                      f.key, f.multiline, row[f.key],
-                      (v) => onTextChange(row.id, f.key, v),
-                      () => onTextCommit(row, f.key),
+                    {f.key === 'context' ? (
+                      // Context cell carries the ✨ auto-write button on its left.
+                      <div className="flex items-start">
+                        <AutoContextButton row={row} onRun={autoContext} />
+                        <div className="min-w-0 flex-1">
+                          {renderTextCell(
+                            f.key, f.multiline, row[f.key],
+                            (v) => onTextChange(row.id, f.key, v),
+                            () => onTextCommit(row, f.key),
+                          )}
+                        </div>
+                      </div>
+                    ) : (
+                      renderTextCell(
+                        f.key, f.multiline, row[f.key],
+                        (v) => onTextChange(row.id, f.key, v),
+                        () => onTextCommit(row, f.key),
+                      )
                     )}
                   </td>
                 ))}

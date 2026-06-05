@@ -99,6 +99,8 @@ export interface DrawMarketRowOptions {
   arrowOpacity?: number;
   triangleOnly?: boolean;
   size?: 'large' | 'small' | 'bio';
+  /** bio CTA only: appends a bold " Artists" / " Athletes" after "to trade". */
+  ctaCategory?: 'artists' | 'athletes';
 }
 
 // Avatar outline: a circle by default, or a rounded square when `cornerRadius`
@@ -146,6 +148,7 @@ export function drawMarketRow({
   ctx, cx, videoBottomY, cw,
   name, subtitle, photo_url, priceUsd, lifetimeChangePct, sparkline,
   avatarImgRef, lastPhotoUrlRef, pauvLogoImgRef, arrowOpacity = 1, triangleOnly = false, size = 'large',
+  ctaCategory,
 }: DrawMarketRowOptions): void {
   const isSmall   = size === 'small';
   const isBio     = size === 'bio';
@@ -212,17 +215,28 @@ export function drawMarketRow({
   // "Link in bio" — light grey, centered under the CTA box. Drawn for every size;
   // `linkSize` lets the bio variant render it a little bigger.
   const drawLinkInBio = (linkSize: number = LINK_SIZE) => {
-    ctx.font = `500 ${linkSize}px ${SANS}`;
-    ctx.fillStyle = COLOR_LINK;
-    const txt = 'to trade';
-    const txtW = ctx.measureText(txt).width;
-    const logoH = linkSize;
-    const logoW = logoH; // square-ish, will render at natural aspect via drawImage
-    const gap       = Math.round(4 * S);
-    const logoGap   = 0;
-    const totalW = logoW + gap + txtW;
-    const baseY  = cy + rowH + LINK_GAP + linkSize;
-    const startX = cx + cw / 2 - totalW / 2;
+    // One shared font (Inter at `linkSize`) for every segment — only the weight
+    // and colour change between them, so ".com", "to trade" and the category all
+    // sit on the SAME baseline at the SAME size, on one line.
+    const font = (weight: number) => `${weight} ${linkSize}px Inter, ${SANS}`;
+    const dotCom = '.com';
+    const txt    = 'to trade';
+    // Bio CTA only: a bold talent category after "to trade", e.g.
+    // "pauv.com to trade Artists" / "…Athletes". Same font + size as "to trade",
+    // just bold and white. Leading space separates it from "trade".
+    const catLabel = (isBio && ctaCategory) ? (ctaCategory === 'athletes' ? 'Athletes' : 'Artists') : '';
+    const catText  = catLabel ? ` ${catLabel}` : '';
+
+    // Measure each segment in the exact weight it's drawn with, so the centering
+    // and the inter-segment offsets are pixel-accurate (no drift, no overlap).
+    ctx.font = font(600); const dotComW = ctx.measureText(dotCom).width;
+    ctx.font = font(400); const txtW    = ctx.measureText(txt).width;
+    ctx.font = font(700); const catW    = catText ? ctx.measureText(catText).width : 0;
+
+    const logoH   = linkSize;
+    const gap     = Math.round(4 * S); // space between ".com" and "to trade"
+    const logoGap = 0;
+    const baseY   = cy + rowH + LINK_GAP + linkSize;
 
     // Draw Pauv logo if loaded
     let logo: HTMLImageElement | null = pauvLogoImgRef?.current ?? null;
@@ -232,24 +246,41 @@ export function drawMarketRow({
       logo.src = '/pauvlogo.png';
       logo.onload = () => { if (pauvLogoImgRef) pauvLogoImgRef.current = logo; };
     }
-    const dotCom = '.com';
-    ctx.font = `600 ${linkSize}px Inter, ${SANS}`;
-    const dotComW = ctx.measureText(dotCom).width;
 
     if (logo?.complete && logo.naturalWidth > 0) {
       const aspect = logo.naturalWidth / logo.naturalHeight;
       const dw = Math.round(logoH * aspect);
-      const totalWithDotCom = dw + logoGap + dotComW + gap + txtW;
-      const x = cx + cw / 2 - totalWithDotCom / 2;
-      ctx.drawImage(logo, x, baseY - logoH + Math.round(2.5 * S), dw, logoH);
-      ctx.fillStyle = COLOR_WHITE;
+      // Whole line: [logo].com␣to trade␣Artists — centered as a single unit.
+      const totalW = dw + logoGap + dotComW + gap + txtW + catW;
+      const x = cx + cw / 2 - totalW / 2;
+      // pauvlogo.png is the "pauv" wordmark whose long "p" descender fills the
+      // bottom 23% of the image — the "auv" baseline sits at 0.77 of its height
+      // (measured from the asset). drawImage places the whole box, so to land
+      // the wordmark on the text baseline (descender hanging below, like real
+      // text) we drop it by that descender depth. It SCALES with logo height —
+      // the old fixed nudge left the bigger bio logo floating above the line.
+      // The extra ~2px drops it a hair below the baseline so the "p" clearly
+      // clears ".com to trade".
+      const logoDrop = Math.round(logoH * 0.23) + Math.round(0.8 * S);
+      ctx.drawImage(logo, x, baseY - logoH + logoDrop, dw, logoH);
+      ctx.font = font(600); ctx.fillStyle = COLOR_WHITE;
       ctx.fillText(dotCom, x + dw + logoGap, baseY);
-      ctx.font = `400 ${linkSize}px Inter, ${SANS}`;
-      ctx.fillStyle = COLOR_LINK;
-      ctx.fillText(txt, x + dw + logoGap + dotComW + gap, baseY);
+      const tradeX = x + dw + logoGap + dotComW + gap;
+      ctx.font = font(400); ctx.fillStyle = COLOR_LINK;
+      ctx.fillText(txt, tradeX, baseY);
+      if (catText) {
+        ctx.font = font(700); ctx.fillStyle = COLOR_WHITE;
+        ctx.fillText(catText, tradeX + txtW, baseY);
+      }
     } else {
-      ctx.font = `500 ${linkSize}px ${SANS}`;
-      ctx.fillText(txt, cx + cw / 2 - txtW / 2, baseY);
+      // No logo yet — center "to trade" (+ category) on its own, same baseline.
+      const fbX = cx + cw / 2 - (txtW + catW) / 2;
+      ctx.font = font(400); ctx.fillStyle = COLOR_LINK;
+      ctx.fillText(txt, fbX, baseY);
+      if (catText) {
+        ctx.font = font(700); ctx.fillStyle = COLOR_WHITE;
+        ctx.fillText(catText, fbX + txtW, baseY);
+      }
     }
   };
 

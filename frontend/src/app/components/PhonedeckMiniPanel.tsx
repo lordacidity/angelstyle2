@@ -280,6 +280,7 @@ export function PhonedeckMiniPanel({ onPushed }: { onPushed?: (fileName: string)
   return (
     <div
       ref={panelRef}
+      data-troll-obstacle
       className="fixed bottom-4 right-4 w-64 bg-zinc-950 border border-zinc-800 rounded-lg shadow-2xl z-40 overflow-hidden select-none flex flex-col"
       style={panelStyle}
     >
