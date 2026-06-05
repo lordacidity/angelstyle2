@@ -224,7 +224,7 @@ export function drawMarketRow({
     // Bio CTA only: a bold talent category after "to trade", e.g.
     // "pauv.com to trade Artists" / "…Athletes". Same font + size as "to trade",
     // just bold and white. Leading space separates it from "trade".
-    const catLabel = (isBio && ctaCategory) ? (ctaCategory === 'athletes' ? 'Athletes' : 'Artists') : '';
+    const catLabel = (isBio && ctaCategory) ? (ctaCategory === 'athletes' ? 'athletes' : 'artists') : '';
     const catText  = catLabel ? ` ${catLabel}` : '';
 
     // Measure each segment in the exact weight it's drawn with, so the centering
