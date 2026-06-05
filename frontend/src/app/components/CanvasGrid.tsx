@@ -951,7 +951,10 @@ export function CanvasGrid({
   }, []);
 
   // Drop a chosen talent into the Market widget for an entry — mirrors exactly
-  // what the auto-pick does so a manual override behaves identically.
+  // what the auto-pick does so a manual override behaves identically. Then, if a
+  // caption has already been generated, rewrite its closing CTA paragraph to name
+  // the newly-chosen talent (the auto-pick does this on generate; a manual swap
+  // must do it too, or the caption keeps naming the old person).
   const applyTalent = useCallback((entryId: string, t: Talent) => {
     setMarketMap(prev => ({ ...prev, [entryId]: t }));
     setSparklineMap(prev => ({ ...prev, [entryId]: prev[entryId] ?? generateFallbackSparkline(t.ticker) }));
@@ -966,8 +969,36 @@ export function CanvasGrid({
       },
     }));
     setPersonPickerEntryId(null);
+
+    // Re-sync the caption's CTA paragraph to the new person (best-effort).
+    const existing = socialCaptionMap[entryId]?.text;
+    if (existing?.trim()) {
+      setSocialCaptionMap(prev => (prev[entryId] ? { ...prev, [entryId]: { ...prev[entryId]!, loading: true, error: null } } : prev));
+      fetch('/api/ai/rewrite-cta', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          generatedCaption: existing,
+          talentName:       t.name,
+          talentIndustry:   t.industry ?? undefined,
+          brand: { displayName: brand.displayName || 'Pauv', handle: brand.handle || '@Pauv' },
+        }),
+      })
+        .then(r => r.ok ? r.json() : Promise.reject(new Error('rewrite failed')))
+        .then((data: { ctaParagraph?: string; error?: string }) => {
+          if (data.error || !data.ctaParagraph) return;
+          const paras = existing.split(/\n\s*\n/);
+          if (paras.length > 0) {
+            paras[paras.length - 1] = data.ctaParagraph;
+            const next = paras.join('\n\n');
+            setSocialCaptionMap(prev => (prev[entryId] ? { ...prev, [entryId]: { ...prev[entryId]!, text: next, copied: false } } : prev));
+          }
+        })
+        .catch(() => { /* best-effort — leave the caption as-is on failure */ })
+        .finally(() => setSocialCaptionMap(prev => (prev[entryId] ? { ...prev, [entryId]: { ...prev[entryId]!, loading: false } } : prev)));
+    }
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [fetchSparkline]);
+  }, [fetchSparkline, socialCaptionMap, brand.displayName, brand.handle]);
 
   // "Clear" (top-right) — wipe every per-entry working state and reset the rows
   // to a single fresh entry, dropping the user back to the empty insert form
