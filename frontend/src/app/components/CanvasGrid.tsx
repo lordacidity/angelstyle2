@@ -1032,8 +1032,17 @@ export function CanvasGrid({
     const sizePref = marketSizeMap[entryId] ?? 'small';
     // Bio CTA needs no talent — it's just the "pauv.com to trade" line under the
     // video — so return a minimal record (no name / price / sparkline).
+    //
+    // ctaCategory derives from the display name first, not the brand.category
+    // toggle: each machine's brand kit ("Pauv Athletes" / "Pauv Artists" / etc.)
+    // should drive the wording the bio renders. The toggle is the fallback for
+    // display names that don't mention either word (e.g. just "Pauv").
+    const bioCategory: 'artists' | 'athletes' =
+      /athletes/i.test(brand.displayName) ? 'athletes' :
+      /artists/i.test(brand.displayName)  ? 'artists'  :
+      brand.category;
     if (sizePref === 'bio') {
-      return { name: '', ticker: '', photo_url: null, industry: null, subcategory: null, sparkline: null, size: 'bio', ctaCategory: brand.category, price: { usd: null, lifetimeChangePct: null } };
+      return { name: '', ticker: '', photo_url: null, industry: null, subcategory: null, sparkline: null, size: 'bio', ctaCategory: bioCategory, price: { usd: null, lifetimeChangePct: null } };
     }
     const sel = marketMap[entryId];
     if (!sel) return null;
@@ -1069,7 +1078,7 @@ export function CanvasGrid({
         lifetimeChangePct: !isNaN(pctNum ?? NaN) ? pctNum  : syntheticPct,
       },
     };
-  }, [marketMap, marketOverrideMap, sparklineMap, marketSizeMap, marketWidgetVisible, brand.category]);
+  }, [marketMap, marketOverrideMap, sparklineMap, marketSizeMap, marketWidgetVisible, brand.category, brand.displayName]);
 
 
   const generateSocialCaption = useCallback(async (entry: VideoEntry): Promise<string | undefined> => {
