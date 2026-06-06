@@ -98,9 +98,35 @@ export interface DrawMarketRowOptions {
   pauvLogoImgRef?: MutableRefObject<HTMLImageElement | null>;
   arrowOpacity?: number;
   triangleOnly?: boolean;
+  /** Inverts the bullish treatment: red text/arrow, down-pointing triangle, and
+   *  a declining sparkline. Defaults to false (green/up). */
+  down?: boolean;
   size?: 'large' | 'small' | 'bio';
   /** bio CTA only: appends a bold " Artists" / " Athletes" after "to trade". */
   ctaCategory?: 'artists' | 'athletes';
+}
+
+// Filled price-change triangle. Points up (▲) by default; `down` flips it to a
+// down-pointing (▼) triangle within the same vertical band so an up and a down
+// arrow occupy identical layout space. Geometry mirrors the SVG path
+// "m12 0 10.392 14.25H1.608z" in viewBox 24×18.
+function drawTriangle(
+  ctx: CanvasRenderingContext2D,
+  x: number, top: number, w: number, h: number, down: boolean,
+): void {
+  const tip = h * 0.792;
+  ctx.beginPath();
+  if (down) {
+    ctx.moveTo(x + w * 0.5,   top + tip);
+    ctx.lineTo(x + w * 0.933, top);
+    ctx.lineTo(x + w * 0.067, top);
+  } else {
+    ctx.moveTo(x + w * 0.5,   top);
+    ctx.lineTo(x + w * 0.933, top + tip);
+    ctx.lineTo(x + w * 0.067, top + tip);
+  }
+  ctx.closePath();
+  ctx.fill();
 }
 
 // Avatar outline: a circle by default, or a rounded square when `cornerRadius`
@@ -148,8 +174,10 @@ export function drawMarketRow({
   ctx, cx, videoBottomY, cw,
   name, subtitle, photo_url, priceUsd, lifetimeChangePct, sparkline,
   avatarImgRef, lastPhotoUrlRef, pauvLogoImgRef, arrowOpacity = 1, triangleOnly = false, size = 'large',
-  ctaCategory,
+  ctaCategory, down = false,
 }: DrawMarketRowOptions): void {
+  // Bullish by default; `down` flips the colour, arrow direction, and sparkline.
+  const changeColor = down ? COLOR_NEGATIVE : COLOR_POSITIVE;
   const isSmall   = size === 'small';
   const isBio     = size === 'bio';
   const rowH      = isBio ? 0 : (isSmall ? MARKET_ROW_H_SMALL : MARKET_ROW_H);
@@ -171,7 +199,7 @@ export function drawMarketRow({
   if (triangleOnly && lifetimeChangePct != null) {
     if (isBio) return; // bio CTA has no market row / arrow to animate
     const changeText = `${Math.abs(lifetimeChangePct).toFixed(1)}%`;
-    ctx.fillStyle = COLOR_POSITIVE;
+    ctx.fillStyle = changeColor;
     ctx.globalAlpha = arrowOpacity;
     if (isSmall) {
       // Mirror the small-variant arrow geometry exactly (see the small block below)
@@ -185,12 +213,7 @@ export function drawMarketRow({
       const changeBaseline = Math.round(midY + SM_CHANGE_SIZE * 0.35);
       const arrowCY  = changeBaseline - SM_CHANGE_SIZE * 0.35;
       const arrowTop = arrowCY - SM_ARROW_H / 2;
-      ctx.beginPath();
-      ctx.moveTo(arrowX + SM_ARROW_W * 0.5,   arrowTop);
-      ctx.lineTo(arrowX + SM_ARROW_W * 0.933, arrowTop + SM_ARROW_H * 0.792);
-      ctx.lineTo(arrowX + SM_ARROW_W * 0.067, arrowTop + SM_ARROW_H * 0.792);
-      ctx.closePath();
-      ctx.fill();
+      drawTriangle(ctx, arrowX, arrowTop, SM_ARROW_W, SM_ARROW_H, down);
     } else {
       ctx.font = `500 ${CHANGE_SIZE}px ${MONO}`;
       const changeTxtW = ctx.measureText(changeText).width;
@@ -201,12 +224,7 @@ export function drawMarketRow({
       const aX      = rightEdge - ARROW_W - ARROW_GAP - changeTxtW;
       const arrowCY  = changeBaseline - CHANGE_SIZE * 0.35 + Math.round(1 * S);
       const arrowTop = arrowCY - ARROW_H / 2;
-      ctx.beginPath();
-      ctx.moveTo(aX + ARROW_W * 0.5,   arrowTop);
-      ctx.lineTo(aX + ARROW_W * 0.933, arrowTop + ARROW_H * 0.792);
-      ctx.lineTo(aX + ARROW_W * 0.067, arrowTop + ARROW_H * 0.792);
-      ctx.closePath();
-      ctx.fill();
+      drawTriangle(ctx, aX, arrowTop, ARROW_W, ARROW_H, down);
     }
     ctx.globalAlpha = 1;
     return;
@@ -403,10 +421,10 @@ export function drawMarketRow({
       ctx.fillText(priceText, priceX, Math.round(midY + SM_PRICE_SIZE * 0.35));
     }
 
-    // Change — MARKETING: always positive (green + up arrow)
+    // Change — green + up arrow by default, red + down arrow when `down`.
     if (lifetimeChangePct != null) {
       const changeBaseline = Math.round(midY + SM_CHANGE_SIZE * 0.35);
-      ctx.fillStyle = COLOR_POSITIVE;
+      ctx.fillStyle = changeColor;
       const arrowCY  = changeBaseline - SM_CHANGE_SIZE * 0.35;
       const arrowTop = arrowCY - SM_ARROW_H / 2;
       // Respect arrowOpacity so the export's static sprite (baked at opacity 0)
@@ -414,15 +432,10 @@ export function drawMarketRow({
       // matching the large variant. Without this the small arrow bakes in solid
       // (never blinks) and the animated one lands elsewhere.
       ctx.globalAlpha = arrowOpacity;
-      ctx.beginPath();
-      ctx.moveTo(arrowX + SM_ARROW_W * 0.5,   arrowTop);
-      ctx.lineTo(arrowX + SM_ARROW_W * 0.933, arrowTop + SM_ARROW_H * 0.792);
-      ctx.lineTo(arrowX + SM_ARROW_W * 0.067, arrowTop + SM_ARROW_H * 0.792);
-      ctx.closePath();
-      ctx.fill();
+      drawTriangle(ctx, arrowX, arrowTop, SM_ARROW_W, SM_ARROW_H, down);
       ctx.globalAlpha = 1;
       ctx.font = `500 ${SM_CHANGE_SIZE}px ${MONO}`;
-      ctx.fillStyle = COLOR_POSITIVE;
+      ctx.fillStyle = changeColor;
       ctx.fillText(changeText, changeTextX, changeBaseline);
     }
     drawLinkInBio();
@@ -479,16 +492,18 @@ export function drawMarketRow({
   // higher than it starts), but drawn in its natural order so it has real ups
   // and downs along the way — not a flat monotonic climb.
   if (sparkline && sparkline.length >= 1) {
-    const sparkColor = COLOR_POSITIVE;
+    const sparkColor = changeColor;
 
     const sparkLeft  = priceRightEdge - priceColW - SPARK_MARGIN_R - SPARK_W;
     const sparkTop   = midY - SPARK_H / 2;
     const pad        = (2 / 32) * SPARK_H;
 
     // Single-point sparklines come back from the API for brand-new markets —
-    // pad to two so we always have a line segment to draw.
+    // pad to two so we always have a line segment to draw. When `down`, reverse
+    // the (net-rising) series so it reads as a believable decline instead.
     const rawVals = sparkline.map(p => p.value);
-    const vals = rawVals.length === 1 ? [rawVals[0]!, rawVals[0]!] : rawVals;
+    const dirVals = down ? [...rawVals].reverse() : rawVals;
+    const vals = dirVals.length === 1 ? [dirVals[0]!, dirVals[0]!] : dirVals;
     const vMin = Math.min(...vals);
     const vMax = Math.max(...vals);
     const vRange = vMax - vMin;
@@ -532,26 +547,17 @@ export function drawMarketRow({
   }
 
   if (lifetimeChangePct != null) {
-    // MARKETING: always render the change as positive. The displayed % already
-    // uses Math.abs() above so the number is unsigned; we force the color +
-    // arrow direction to match.
-    const color = COLOR_POSITIVE;
-
+    // Green + up arrow by default; red + down arrow when `down`. The displayed %
+    // already uses Math.abs() above so the number stays unsigned either way.
     ctx.font = `500 ${CHANGE_SIZE}px ${MONO}`;
-    ctx.fillStyle = color;
+    ctx.fillStyle = changeColor;
     const aX     = priceRightEdge - ARROW_W - ARROW_GAP - changeTxtW;
 
     const arrowCY  = changeBaseline - CHANGE_SIZE * 0.35 + Math.round(1 * S);
     const arrowTop = arrowCY - ARROW_H / 2;
 
-    // Triangle matching SVG path: m12 0 10.392 14.25H1.608z in viewBox 24×18 — always up.
     ctx.globalAlpha = arrowOpacity;
-    ctx.beginPath();
-    ctx.moveTo(aX + ARROW_W * 0.5,   arrowTop);
-    ctx.lineTo(aX + ARROW_W * 0.933, arrowTop + ARROW_H * 0.792);
-    ctx.lineTo(aX + ARROW_W * 0.067, arrowTop + ARROW_H * 0.792);
-    ctx.closePath();
-    ctx.fill();
+    drawTriangle(ctx, aX, arrowTop, ARROW_W, ARROW_H, down);
     ctx.globalAlpha = 1;
 
     ctx.fillText(changeText, aX + ARROW_W + ARROW_GAP, changeBaseline);

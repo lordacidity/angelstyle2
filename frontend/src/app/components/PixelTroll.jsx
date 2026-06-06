@@ -72,12 +72,11 @@ import { SPEECH, POLICE_TROLL, POLICE_COP, SPEECH_FED, SPEECH_GRABBED, SPEECH_PO
  * up, dead-center, with a blue-uniformed police officer, points at you and reels
  * off his complaints while the cop stands there taking notes. You can right-click
  * (shoot) the troll OR the cop individually: whichever you hit bursts, and the
- * other one panics and bolts. Killing the troll ends him for good (until a hard
- * reload, which wipes his saved mood); killing the cop just sends the troll
- * running — and if he's still seething he'll be back with another officer.
+ * other one panics and bolts. Either kill ends the whole thing — everything else
+ * stops and his saved mood is wiped — but it's not the end of him.
  *
- * And if you DO gun him down in front of the cop, that's not the end of him. Three
- * minutes later he claws his way back — strolls in, downs a potion, shakes himself
+ * Because if you gun down EITHER one in front of the cop, two minutes later he
+ * claws his way back — strolls in, downs a potion, shakes himself
  * apart, and erupts into a giant horned red beast with glowing eyes and fangs that
  * stomps around shoving and smashing the floating widgets. Right-click bursts him
  * in a screen-wide splatter, but he only reforms angrier; it takes five shots to
@@ -136,8 +135,8 @@ export default function PixelTroll({ hidden = false, floorSelector = '', obstacl
       // policePending latches the moment he bottoms out at −100 so his mood can
       // drift back up while he's away without him forgetting to bring the cop.
       cop: null, copSpeech: null, policeStopX: 0, banished: false, policePending: false, policeKill: null,
-      // kill him in front of the cop and, 3 minutes later, he claws back as a horned
-      // monster (startMonster). Shoot THAT five times and the gentle death/bloom
+      // kill either one in front of the cop and, 2 minutes later, he claws back as a
+      // horned monster (startMonster). Shoot THAT five times and the gentle death/bloom
       // scene takes over (T.death). Both are in-memory only — a reload clears them.
       monster: null, monsterReturnAt: 0, death: null,
       // latched when he's won all the way to +100 → his next free beat is a big
@@ -1563,14 +1562,18 @@ export default function PixelTroll({ hidden = false, floorSelector = '', obstacl
           T.cop = null; T.copSpeech = null; T.banished = true;  // cop's clear (or timed out) → he's gone for good
           return true;
         }
-        if (T.policeKill === 'cop') {                   // cop's dead → troll bolts (and lives to summon another)
+        if (T.policeKill === 'cop') {                   // cop's dead → troll bolts, then returns as the monster
           T.cop = null; T.copSpeech = null;
           T.leaving = true; T.color = GREEN;
           const fd = T.x < W() / 2 ? -1 : 1;
           T.mirror = fd < 0; T.x += fd * 650 * dt / 1000;
           animLegs(dt, 'walkA', 'walkB', 50);
           T.yOffset = 0; T.shakeX = rand(-2, 2);        // scared
-          return T.x < -off || T.x > W() + off || T.t >= T.dur;
+          const done = T.x < -off || T.x > W() + off || T.t >= T.dur;
+          // Bolted off-screen → everything stops; the monster claws back in 2 min
+          // (monsterReturnAt was set in killInScene) via the banished branch.
+          if (done) { T.cop = null; T.copSpeech = null; T.banished = true; }
+          return done;
         }
 
         const dir = T.dir, trollStop = T.policeStopX, copStop = trollStop - dir * 92;
@@ -2571,8 +2574,8 @@ export default function PixelTroll({ hidden = false, floorSelector = '', obstacl
     }
 
     // ════════════════════════════════════════════════════════════════════════
-    // THE MONSTER + the death/bloom scene. Kill the troll in front of the cop and,
-    // three minutes later, he claws back: strolls in, downs a potion, shakes
+    // THE MONSTER + the death/bloom scene. Kill the troll OR the cop in front of
+    // the cop and, two minutes later, he claws back: strolls in, downs a potion, shakes
     // himself apart, and erupts into a giant horned red beast that stomps around
     // shoving and smashing the floating widgets. Right-click bursts him in a
     // screen-wide splatter — but he just reforms angrier; it takes FIVE shots to
@@ -2629,6 +2632,30 @@ export default function PixelTroll({ hidden = false, floorSelector = '', obstacl
       const rot = Math.max(-14, Math.min(14, sx * 0.04));
       try { el.style.translate = `${Math.round(sx)}px ${Math.round(sy)}px`; el.style.rotate = `${rot.toFixed(1)}deg`; } catch { /* gone */ }
       shovedEls.add(el);
+    }
+
+    // Send every shoved widget back to its home spot — eases it in (animating from
+    // where it sits now to zero) and clears the inline nudge so it's exactly as it
+    // was. Called when the monster dies and again on unmount.
+    function restoreWidgets() {
+      shovedEls.forEach((el) => {
+        const sx = el.__trollShoveX || 0, sy = el.__trollShoveY || 0;
+        const rot = Math.max(-14, Math.min(14, sx * 0.04));
+        try {
+          el.style.translate = ''; el.style.rotate = '';           // home position
+          if ((sx || sy) && typeof el.animate === 'function') {    // ease back from where he left it
+            el.animate(
+              [
+                { translate: `${Math.round(sx)}px ${Math.round(sy)}px`, rotate: `${rot.toFixed(1)}deg` },
+                { translate: '0px 0px', rotate: '0deg' },
+              ],
+              { duration: 600, easing: 'cubic-bezier(.22,1,.36,1)' },
+            );
+          }
+        } catch { /* gone */ }
+        el.__trollShoveX = 0; el.__trollShoveY = 0;
+      });
+      shovedEls.clear();
     }
 
     // Any widget he walks into while rampaging gets shoved + showered in debris.
@@ -2761,6 +2788,7 @@ export default function PixelTroll({ hidden = false, floorSelector = '', obstacl
     // flowers and butterflies all centre on him.
     function killMonster(cx, cy) {
       const m = T.monster;
+      restoreWidgets();                                  // he's down → the widgets he shoved ease back home
       spawnSplats(cx, cy, '#c2241f');                    // the fatal shot
       const scale = (m && m.scale) || MONSTER_SCALE;
       const fallSign = m ? (m.dir >= 0 ? 1 : -1) : 1;     // which way the slumped heap faces
@@ -3357,8 +3385,8 @@ export default function PixelTroll({ hidden = false, floorSelector = '', obstacl
       T.floorY += (targetFloor - T.floorY) * Math.min(1, dt / 120);
       ctx.clearRect(0, 0, canvas.width, canvas.height);
 
-      // Banished (you shot the troll during the police scene): the ordinary troll is
-      // gone for this session. But three minutes on he claws back as the MONSTER —
+      // Banished (you shot the troll OR the cop during the police scene): the ordinary
+      // troll is gone for this session. But two minutes on he claws back as the MONSTER —
       // and once that's been shot down, the gentle death/bloom scene plays out. All
       // of it lives off in its own branch; only a hard reload truly resets it.
       if (T.banished) {
@@ -3669,8 +3697,8 @@ export default function PixelTroll({ hidden = false, floorSelector = '', obstacl
     // During the police scene you can pick off the troll OR the cop, individually.
     // Whichever you hit bursts in a screen-wide splatter (green bits for the troll,
     // blue for the cop); the police-scene choreography then makes the OTHER one
-    // panic and bolt. Killing the troll ends him for good this session (mood wiped
-    // on reload); killing the cop just sends the troll running.
+    // panic and bolt. Either kill ends the troll for this session (mood wiped) and
+    // stops everything else — then, 2 minutes later, he returns as the monster.
     function killInScene(target, clientX, clientY) {
       const canvasTop = window.innerHeight - canvas.height;
       const gx = clientX, gy = clientY - canvasTop;
@@ -3681,11 +3709,13 @@ export default function PixelTroll({ hidden = false, floorSelector = '', obstacl
         T.confetti.push({ x: gx, y: gy, vx: Math.cos(ang) * sp, vy: Math.sin(ang) * sp - 70, life: rand(600, 1400), size: Math.round(rand(2, 7)), color: Math.random() < 0.3 ? bit : RED });
       }
       T.policeKill = target; T.speech = null;            // the police step now runs the survivor's escape
-      if (target === 'troll') {                          // killed in front of the cop → gone for good...
-        T.mood = 0; T.policePending = false;
-        try { window.localStorage.setItem(MOOD_KEY, '0'); } catch { /* ignore */ }
-        T.monsterReturnAt = performance.now() + 180000;  // ...but in 3 minutes he comes back, and he's not a troll anymore
-      }
+      // Kill EITHER one in front of the cop and the whole thing is over — the
+      // troll's gone for this session and everything else stops. But 2 minutes
+      // later he claws back as the monster (the survivor's bolt sets `banished`,
+      // and the banished branch fires startMonster once monsterReturnAt lands).
+      T.mood = 0; T.policePending = false;
+      try { window.localStorage.setItem(MOOD_KEY, '0'); } catch { /* ignore */ }
+      T.monsterReturnAt = performance.now() + 120000;
     }
 
     // Right-click him → he's shot dead: bursts into pieces, blood splatters across
@@ -3802,6 +3832,7 @@ export default function PixelTroll({ hidden = false, floorSelector = '', obstacl
       }
       if (code === 'KeyD' || key === 'D' || key === 'd') {       // debug: jump to right after the skeleton has sunk
         T.banished = true; T.monster = null; T.cop = null; T.copSpeech = null; T.policeKill = null; T.speech = null;
+        restoreWidgets();                                        // skip the kill, but still un-shove any widgets
         const x = W() / 2;
         const D = {
           phase: 'rest', t: 0, x, standX: x, scale: MONSTER_SCALE, fallSign: 1,

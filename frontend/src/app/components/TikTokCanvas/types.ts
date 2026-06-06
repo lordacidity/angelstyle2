@@ -72,6 +72,9 @@ export interface MarketData {
   /** For the bio CTA only — appends a bold talent category to the link, e.g.
    *  "pauv.com to trade Artists" / "…Athletes". From the brand kit. */
   ctaCategory?: 'artists' | 'athletes';
+  /** When true, render the change as a LOSS: red, down arrow, and a declining
+   *  sparkline — the inverse of the default bullish (green/up) treatment. */
+  down?: boolean;
   price: {
     usd: number | null;
     lifetimeChangePct: number | null;

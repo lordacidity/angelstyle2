@@ -19,32 +19,57 @@ export interface EmojiDef {
   pinned?: boolean;
 }
 
-// Curated set. Pinned: 😂 and 🔥 (as requested). All are single-codepoint
-// emoji so the filename is just the unified hex — no variation selectors.
+// Curated set. Pinned: 😂 🔥 🤣 (the sideways/rolling laugh, reachable via @cry).
+// All are single-codepoint emoji so the filename is just the unified hex — no
+// variation selectors.
 export const EMOJIS: EmojiDef[] = [
   { char: '😂', unified: '1f602', name: 'Face with Tears of Joy', keywords: ['laugh', 'lol', 'haha', 'crying laughing', 'funny'], pinned: true },
   { char: '🔥', unified: '1f525', name: 'Fire', keywords: ['lit', 'hot', 'flame', 'fire'], pinned: true },
+  // Sideways laughing — reachable by typing "@cry" (per request) as well as the
+  // usual rofl/lmao terms. Pinned to the front of the picker.
+  { char: '🤣', unified: '1f923', name: 'Rolling on the Floor Laughing', keywords: ['cry', 'rofl', 'lmao', 'laugh', 'funny', 'sideways'], pinned: true },
   { char: '😀', unified: '1f600', name: 'Grinning Face', keywords: ['smile', 'happy', 'grin'] },
+  { char: '😊', unified: '1f60a', name: 'Smiling Face with Smiling Eyes', keywords: ['smile', 'happy', 'blush', 'warm'] },
   { char: '😅', unified: '1f605', name: 'Grinning Face with Sweat', keywords: ['nervous', 'sweat', 'phew', 'laugh'] },
-  { char: '🤣', unified: '1f923', name: 'Rolling on the Floor Laughing', keywords: ['rofl', 'lmao', 'laugh', 'funny'] },
+  { char: '😉', unified: '1f609', name: 'Winking Face', keywords: ['wink', 'flirt', 'joke'] },
+  { char: '😏', unified: '1f60f', name: 'Smirking Face', keywords: ['smirk', 'smug', 'sly'] },
   { char: '😍', unified: '1f60d', name: 'Smiling Face with Heart-Eyes', keywords: ['love', 'heart', 'crush', 'adore'] },
+  { char: '🤩', unified: '1f929', name: 'Star-Struck', keywords: ['starstruck', 'amazed', 'wow', 'excited'] },
   { char: '😎', unified: '1f60e', name: 'Smiling Face with Sunglasses', keywords: ['cool', 'sunglasses', 'chill'] },
   { char: '🥳', unified: '1f973', name: 'Partying Face', keywords: ['party', 'celebrate', 'birthday'] },
+  { char: '🥺', unified: '1f97a', name: 'Pleading Face', keywords: ['plead', 'puppy', 'please', 'beg', 'cute'] },
   { char: '😭', unified: '1f62d', name: 'Loudly Crying Face', keywords: ['cry', 'sob', 'sad', 'tears'] },
+  { char: '😤', unified: '1f624', name: 'Face with Steam From Nose', keywords: ['triumph', 'steam', 'mad', 'determined'] },
+  { char: '🙄', unified: '1f644', name: 'Face with Rolling Eyes', keywords: ['eyeroll', 'whatever', 'annoyed', 'ugh'] },
   { char: '😱', unified: '1f631', name: 'Face Screaming in Fear', keywords: ['scream', 'shock', 'omg', 'scared'] },
+  { char: '🤯', unified: '1f92f', name: 'Exploding Head', keywords: ['mind blown', 'shocked', 'wow', 'omg'] },
   { char: '🤔', unified: '1f914', name: 'Thinking Face', keywords: ['think', 'hmm', 'consider'] },
+  { char: '🤡', unified: '1f921', name: 'Clown Face', keywords: ['clown', 'joke', 'fool', 'silly'] },
   { char: '💀', unified: '1f480', name: 'Skull', keywords: ['dead', 'dying', 'lol', 'skull'] },
   { char: '👀', unified: '1f440', name: 'Eyes', keywords: ['look', 'watching', 'eyes', 'shifty'] },
   { char: '🙏', unified: '1f64f', name: 'Folded Hands', keywords: ['pray', 'thanks', 'please', 'hope'] },
   { char: '💪', unified: '1f4aa', name: 'Flexed Biceps', keywords: ['strong', 'muscle', 'flex', 'gym'] },
   { char: '👏', unified: '1f44f', name: 'Clapping Hands', keywords: ['clap', 'applause', 'bravo'] },
   { char: '🙌', unified: '1f64c', name: 'Raising Hands', keywords: ['praise', 'celebrate', 'hooray'] },
+  { char: '👍', unified: '1f44d', name: 'Thumbs Up', keywords: ['yes', 'like', 'approve', 'good'] },
+  { char: '👎', unified: '1f44e', name: 'Thumbs Down', keywords: ['no', 'dislike', 'bad', 'nope'] },
+  { char: '🫡', unified: '1fae1', name: 'Saluting Face', keywords: ['salute', 'respect', 'yes sir', 'o7'] },
   { char: '🤝', unified: '1f91d', name: 'Handshake', keywords: ['deal', 'agree', 'partner', 'shake'] },
   { char: '🎉', unified: '1f389', name: 'Party Popper', keywords: ['party', 'celebrate', 'tada', 'congrats'] },
+  { char: '🎯', unified: '1f3af', name: 'Direct Hit', keywords: ['target', 'bullseye', 'goal', 'accurate'] },
   { char: '💯', unified: '1f4af', name: 'Hundred Points', keywords: ['100', 'perfect', 'agree', 'facts'] },
+  { char: '✅', unified: '2705', name: 'Check Mark Button', keywords: ['check', 'yes', 'done', 'correct'] },
+  { char: '❌', unified: '274c', name: 'Cross Mark', keywords: ['x', 'no', 'wrong', 'cancel'] },
+  { char: '⭐', unified: '2b50', name: 'Star', keywords: ['star', 'favorite', 'rating'] },
   { char: '🚀', unified: '1f680', name: 'Rocket', keywords: ['moon', 'launch', 'fast', 'rocket'] },
   { char: '📈', unified: '1f4c8', name: 'Chart Increasing', keywords: ['up', 'stocks', 'growth', 'gains', 'trade'] },
+  { char: '📉', unified: '1f4c9', name: 'Chart Decreasing', keywords: ['down', 'loss', 'drop', 'dip', 'crash'] },
   { char: '💰', unified: '1f4b0', name: 'Money Bag', keywords: ['money', 'cash', 'rich', 'profit'] },
+  { char: '💸', unified: '1f4b8', name: 'Money with Wings', keywords: ['money', 'spend', 'loss', 'cash', 'fly'] },
+  { char: '🤑', unified: '1f911', name: 'Money-Mouth Face', keywords: ['money', 'rich', 'profit', 'greedy'] },
+  { char: '💎', unified: '1f48e', name: 'Gem Stone', keywords: ['diamond', 'hands', 'hold', 'gem', 'value'] },
+  { char: '🐂', unified: '1f402', name: 'Ox', keywords: ['bull', 'bullish', 'market', 'up'] },
+  { char: '🐻', unified: '1f43b', name: 'Bear', keywords: ['bear', 'bearish', 'market', 'down'] },
   { char: '⚡', unified: '26a1', name: 'High Voltage', keywords: ['lightning', 'energy', 'fast', 'power'] },
 ];
 

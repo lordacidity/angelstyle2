@@ -767,6 +767,10 @@ export function CanvasGrid({
   // CTA widget size per entry: 'large' (full row w/ industry + sparkline) or
   // 'small' (one-line: photo, name, price, change). Defaults to 'small'.
   const [marketSizeMap,           setMarketSizeMap]           = useState<Record<string, 'large' | 'small' | 'bio'>>({});
+  // Per-entry "down" toggle: when on, the change renders as a LOSS — red text,
+  // a down arrow, and a declining sparkline — instead of the default bullish
+  // green/up treatment.
+  const [marketDownMap,           setMarketDownMap]           = useState<Record<string, boolean>>({});
   // Global toggle controlling whether the market widget is drawn on the
   // canvas (and exported). Persisted in localStorage so flipping it off
   // applies to every video — current, future, after Clear, after refresh —
@@ -934,21 +938,32 @@ export function CanvasGrid({
   const [personPickerQuery,   setPersonPickerQuery]   = useState('');
   const [allTalents,          setAllTalents]          = useState<Talent[] | null>(null);
   const [talentsLoading,      setTalentsLoading]      = useState(false);
+  const [talentsError,        setTalentsError]        = useState<string | null>(null);
+
+  // Fetch the roster once and cache it. Kept out of any setState updater (side
+  // effects in updaters fire twice under Strict Mode) and surfaces failures so
+  // the picker can show an error + Retry instead of an empty list with no clue.
+  const loadTalents = useCallback(() => {
+    setTalentsError(null);
+    setTalentsLoading(true);
+    fetch('/api/ai/talents')
+      .then(async r => {
+        const data: Talent[] | { error?: string } = await r.json().catch(() => ({}));
+        if (!r.ok || !Array.isArray(data)) {
+          throw new Error((data as { error?: string })?.error || `Roster request failed (${r.status})`);
+        }
+        setAllTalents(data);
+      })
+      .catch((e: unknown) => setTalentsError(e instanceof Error ? e.message : String(e)))
+      .finally(() => setTalentsLoading(false));
+  }, []);
 
   const openPersonPicker = useCallback((entryId: string) => {
     setPersonPickerEntryId(entryId);
     setPersonPickerQuery('');
-    setAllTalents(prev => {
-      if (prev) return prev;            // already cached — don't refetch
-      setTalentsLoading(true);
-      fetch('/api/ai/talents')
-        .then(r => r.json())
-        .then((data: Talent[] | { error?: string }) => { if (Array.isArray(data)) setAllTalents(data); })
-        .catch(() => {})
-        .finally(() => setTalentsLoading(false));
-      return prev;
-    });
-  }, []);
+    // Refetch when we have no cached roster (first open, or a prior failure).
+    if (!allTalents && !talentsLoading) loadTalents();
+  }, [allTalents, talentsLoading, loadTalents]);
 
   // Drop a chosen talent into the Market widget for an entry — mirrors exactly
   // what the auto-pick does so a manual override behaves identically. Then, if a
@@ -1014,6 +1029,7 @@ export function CanvasGrid({
     setSocialCaptionMap({});
     setMarketMap({});
     setMarketSizeMap({});
+    setMarketDownMap({});
     setMarketOverrideMap({});
     setSparklineMap({});
     // NOTE: marketCardCollapsedMap, postCaptionCollapsedMap, AND
@@ -1055,11 +1071,13 @@ export function CanvasGrid({
     const spark = generateFallbackSparkline(sel.ticker);
     const syntheticPct = syntheticPctForTicker(sel.ticker);
     const size = marketSizeMap[entryId] ?? 'small';
+    const down = marketDownMap[entryId] ?? false;
     if (!ov) {
       return {
         ...(sel as unknown as MarketData),
         sparkline: spark,
         size,
+        down,
         price: { ...sel.price, lifetimeChangePct: syntheticPct },
       };
     }
@@ -1073,12 +1091,13 @@ export function CanvasGrid({
       subcategory: sel.subcategory,
       sparkline: spark,
       size,
+      down,
       price: {
         usd:              !isNaN(priceNum ?? NaN) ? priceNum : sel.price.usd,
         lifetimeChangePct: !isNaN(pctNum ?? NaN) ? pctNum  : syntheticPct,
       },
     };
-  }, [marketMap, marketOverrideMap, sparklineMap, marketSizeMap, marketWidgetVisible, brand.category, brand.displayName]);
+  }, [marketMap, marketOverrideMap, sparklineMap, marketSizeMap, marketDownMap, marketWidgetVisible, brand.category, brand.displayName]);
 
 
   const generateSocialCaption = useCallback(async (entry: VideoEntry): Promise<string | undefined> => {
@@ -1753,6 +1772,20 @@ export function CanvasGrid({
                               <span className="text-[11px] font-semibold text-zinc-300 uppercase tracking-wider">Market</span>
                             </div>
                             <div className="flex items-center gap-2">
+                              {/* "Down" toggle — flips the change to a loss: red text,
+                                  down arrow, declining sparkline (default is green/up). */}
+                              {(() => {
+                                const isDown = marketDownMap[entry.id] ?? false;
+                                return (
+                                  <button
+                                    onClick={() => setMarketDownMap(prev => ({ ...prev, [entry.id]: !(prev[entry.id] ?? false) }))}
+                                    title={isDown ? 'Showing a loss — red, down arrow, declining chart. Click for a gain.' : 'Show this as a loss — red, down arrow, declining chart'}
+                                    className={`px-2 py-0.5 rounded-md border text-[10px] font-medium transition-colors ${isDown ? 'border-[#FF4B4B] text-[#FF4B4B] bg-[#FF4B4B]/10' : 'border-zinc-800 text-zinc-500 hover:text-zinc-300 hover:border-zinc-600'}`}
+                                  >
+                                    Down
+                                  </button>
+                                );
+                              })()}
                               {/* CTA size toggle — Large (full row) vs Small (one line). */}
                               <div className="flex items-center rounded-md border border-zinc-800 overflow-hidden">
                                 {(['large', 'small', 'bio'] as const).map(sz => {
@@ -1802,10 +1835,11 @@ export function CanvasGrid({
                               setMarketOverrideMap(prev => ({ ...prev, [entry.id]: { ...ov, ...patch } }));
                             const displayPhoto = ov.photo_url;
                             const pctVal = parseFloat(ov.lifetimeChangePct);
-                            // MARKETING: always render as positive (green + up arrow) so the
-                            // preview always encourages buying, regardless of real direction.
-                            const isPos = true;
-                            const changeColor = '#04df9d';
+                            // Bullish (green/up) by default; the "Down" toggle flips it to a
+                            // loss (red text, down arrow, declining chart).
+                            const isDown = marketDownMap[entry.id] ?? false;
+                            const isPos = !isDown;
+                            const changeColor = isDown ? '#FF4B4B' : '#04df9d';
                             return (
                               <div>
                                 {/* Preview row (ArtistRow style, read from overrides) */}
@@ -1837,8 +1871,10 @@ export function CanvasGrid({
                                   </div>
                                   {/* Sparkline — left of price+change */}
                                   {(() => {
-                                    const spark = generateFallbackSparkline(selected.ticker);
-                                    const sparkColor = '#04df9d';
+                                    const rawSpark = generateFallbackSparkline(selected.ticker);
+                                    // When "Down", reverse the net-rising series so it declines.
+                                    const spark = isDown ? [...rawSpark].reverse() : rawSpark;
+                                    const sparkColor = changeColor;
                                     const W = 96, H = 32, pad = 2;
                                     const paddedSpark = spark.length === 1 ? [spark[0]!, spark[0]!] : spark;
                                     const vals = paddedSpark.map(p => p.value);
@@ -2033,11 +2069,14 @@ export function CanvasGrid({
       </div>
 
       {/* ── Video controls bar — shared bottom panel for video templates ──
-          relative z-50 lifts the trimmer + export controls above the floating
-          Studio widgets (BoardWidget / Phonedeck panel, z-40) so they never
-          cover the editor. Safe to compete at the root stacking level: no
-          ancestor between here and the page root creates a stacking context. */}
-      <div className="relative z-50 bg-zinc-950" style={{ paddingRight: isCarouselVideoSelected ? 360 : 0 }}>
+          relative z-[70] keeps the trimmer + export controls at the very front:
+          above the floating Studio widgets (BoardWidget / Phonedeck panel, z-40)
+          AND above the PixelTroll, which stands ON the trim bar (data-troll-floor)
+          and even rides to z-60 as the monster — so the bar always draws over him
+          and his gore instead of being covered. Still below modals/dropdowns
+          (z-[1000]+). Safe to compete at the root stacking level: no ancestor
+          between here and the page root creates a stacking context. */}
+      <div className="relative z-[70] bg-zinc-950" style={{ paddingRight: isCarouselVideoSelected ? 360 : 0 }}>
         <VideoControlsBar
           entryId={showVideoControls ? selectedEntry!.id : null}
           activeRef={activeVideoRef}
@@ -2153,10 +2192,22 @@ export function CanvasGrid({
                 {talentsLoading && (
                   <p className="text-sm text-zinc-600 text-center py-8">Loading roster…</p>
                 )}
-                {!talentsLoading && results.length === 0 && (
+                {!talentsLoading && talentsError && (
+                  <div className="flex flex-col items-center gap-3 py-8">
+                    <p className="text-sm text-red-400 text-center px-4">Couldn’t load the roster.</p>
+                    <p className="text-[11px] text-zinc-600 text-center px-4 break-words">{talentsError}</p>
+                    <button
+                      onClick={loadTalents}
+                      className="px-3 py-1.5 rounded-md border border-zinc-700 text-xs font-medium text-zinc-300 hover:text-white hover:border-zinc-500 transition-colors"
+                    >
+                      Retry
+                    </button>
+                  </div>
+                )}
+                {!talentsLoading && !talentsError && results.length === 0 && (
                   <p className="text-sm text-zinc-600 text-center py-8">No matches.</p>
                 )}
-                {!talentsLoading && results.map(t => (
+                {!talentsLoading && !talentsError && results.map(t => (
                   <button
                     key={t.id}
                     onClick={() => applyTalent(personPickerEntryId, t)}

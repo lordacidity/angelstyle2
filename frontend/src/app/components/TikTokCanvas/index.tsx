@@ -297,6 +297,7 @@ export const TikTokCanvas = forwardRef<TikTokCanvasRef, TikTokCanvasProps>(funct
             sparkline: marketData.sparkline,
             size: marketData.size ?? 'large',
             ctaCategory: marketData.ctaCategory,
+            down: marketData.down,
             avatarImgRef: marketAvatarImgRef,
             lastPhotoUrlRef: marketAvatarUrlRef,
             pauvLogoImgRef,

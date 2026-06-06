@@ -2,12 +2,16 @@ import { NextResponse } from 'next/server';
 import { createClient } from '@supabase/supabase-js';
 
 // Built lazily inside the handler — constructing it at module scope makes
-// Next's build-time page-data collection evaluate it without the PAUV_SUPABASE_*
-// env vars present, which throws "supabaseUrl is required" and fails the build.
+// Next's build-time page-data collection evaluate it without the Supabase env
+// vars present, which throws "supabaseUrl is required" and fails the build.
+// Uses the MAIN read-only price-data project, same as every other /api/ai/* and
+// markets route (see frontend/src/lib/supabase.ts). The old PAUV_SUPABASE_* names
+// don't exist in .env, so createClient(undefined, undefined) threw and the
+// "Change person" roster never loaded.
 function getClient() {
   return createClient(
-    process.env.PAUV_SUPABASE_URL!,
-    process.env.PAUV_SUPABASE_ANON_KEY!,
+    process.env.NEXT_PUBLIC_SUPABASE_URL!,
+    process.env.SUPABASE_SECRET_KEY || process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
   );
 }
 
