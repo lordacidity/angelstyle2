@@ -16,7 +16,7 @@
 // persist via useFloatingPanel's localStorage keys.
 
 import React, { useState } from 'react';
-import { TABS, TEXT_FIELDS, type BoardRow, type UseBoardReturn } from '../hooks/useBoard';
+import { TEXT_FIELDS, type BoardRow, type UseBoardReturn } from '../hooks/useBoard';
 import { useFloatingPanel } from '../hooks/useFloatingPanel';
 import { BoardTabs } from './BoardTabs';
 
@@ -54,8 +54,6 @@ export function BoardWidget({ board, onSendRow }: { board: UseBoardReturn; onSen
     minHeight: 220,
   });
 
-  const activeLabel = TABS.find((t) => t.id === board.active)?.label ?? '';
-
   return (
     <div
       ref={panelRef}
@@ -75,21 +73,12 @@ export function BoardWidget({ board, onSendRow }: { board: UseBoardReturn; onSen
         title="Shared Board — drag anywhere on this bar to move, click to collapse"
       >
         <div className="flex items-center gap-2 min-w-0">
-          {/* grip dots — signals the bar is draggable */}
-          <svg width="9" height="14" viewBox="0 0 9 14" className="text-zinc-600 shrink-0" aria-hidden>
-            <g fill="currentColor">
-              <circle cx="2" cy="2" r="1.1" /><circle cx="7" cy="2" r="1.1" />
-              <circle cx="2" cy="7" r="1.1" /><circle cx="7" cy="7" r="1.1" />
-              <circle cx="2" cy="12" r="1.1" /><circle cx="7" cy="12" r="1.1" />
-            </g>
-          </svg>
           <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="text-emerald-500 shrink-0">
             <rect x="3" y="3" width="18" height="18" rx="2" />
             <line x1="3" y1="9" x2="21" y2="9" />
             <line x1="9" y1="9" x2="9" y2="21" />
           </svg>
           <span className="text-[11px] font-semibold text-zinc-300 uppercase tracking-wider">Board</span>
-          <span className="text-[10px] text-zinc-500 shrink-0">{activeLabel}</span>
         </div>
         <div className="flex items-center shrink-0">
           <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" className="text-zinc-500">

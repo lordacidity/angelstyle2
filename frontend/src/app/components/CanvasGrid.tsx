@@ -1490,7 +1490,6 @@ export function CanvasGrid({
                 <polyline points="9 6 3 12 9 18" />
                 <polyline points="15 6 21 12 15 18" />
               </svg>
-              Move
             </button>
           </div>
           <div className="flex flex-col items-center gap-8 pt-2 pb-6 px-4" style={{ zoom: viewScale }}>

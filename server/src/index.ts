@@ -197,6 +197,13 @@ app.post("/api/files/:name/save", (req, res) => {
   res.json(rec);
 });
 
+// Bulk-mark every Incoming file as past. One-tap sweep for when the user has
+// already distributed everything by other means and just wants a clean slate.
+app.post("/api/files/clear-incoming", (_req, res) => {
+  const count = filesStore.markAllNewAsSaved();
+  res.json({ ok: true, count });
+});
+
 app.post("/api/files/:name/backlog", (req, res) => {
   const rec = filesStore.markBacklog(req.params.name);
   if (!rec) { res.status(404).json({ error: "not found" }); return; }

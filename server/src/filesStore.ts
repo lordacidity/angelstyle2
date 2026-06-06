@@ -108,6 +108,26 @@ export function markBacklog(name: string): FileRecord | null {
   return records[name];
 }
 
+// Bulk-mark every "new" record as "saved" in one shot. Used by the
+// /api/files/clear-incoming endpoint to clean out the Incoming list when the
+// user has already distributed everything (e.g. via the legacy app) but the
+// records never flipped status because they weren't pushed through /api/push.
+// Returns the count of records that were flipped.
+export function markAllNewAsSaved(): number {
+  let count = 0;
+  for (const rec of Object.values(records)) {
+    if (rec.status === "new") {
+      rec.status = "saved";
+      count++;
+    }
+  }
+  if (count > 0) {
+    persist();
+    notify();
+  }
+  return count;
+}
+
 export function recordSent(name: string, event: SentEvent): FileRecord | null {
   if (!records[name]) return null;
   records[name].sentEvents.push(event);

@@ -242,6 +242,17 @@ export function PhonedeckMiniPanel({ onPushed }: { onPushed?: (fileName: string)
   const selectAll = () => setSelectedSerials(new Set(ready.map(d => d.serial)));
   const clearSelection = () => setSelectedSerials(new Set());
 
+  // Bulk-sweep the Incoming list — mark every file currently shown as past, so
+  // the panel goes empty in one tap. SSE rebroadcast updates `files` automatically.
+  const clearAllIncoming = async (e: React.MouseEvent) => {
+    e.stopPropagation(); // header's mousedown handles drag/collapse; don't trigger
+    if (incoming.length === 0) return;
+    if (!confirm(`Mark all ${incoming.length} incoming file(s) as past?`)) return;
+    try {
+      await fetch(`${PHONEDECK_URL}/api/files/clear-incoming`, { method: 'POST' });
+    } catch { /* server's offline notice already covers this */ }
+  };
+
   const pushSelected = async (fileName: string) => {
     if (selectedSerials.size === 0) {
       setStatus(s => ({ ...s, [fileName]: 'No phones selected' }));
@@ -294,11 +305,18 @@ export function PhonedeckMiniPanel({ onPushed }: { onPushed?: (fileName: string)
           <span className="text-[11px] font-semibold text-zinc-300 uppercase tracking-wider">
             Phonedeck <span className="text-zinc-500 tabular-nums">({ready.length})</span>
           </span>
-          {connected && incoming.length > 0 && (
-            <span className="text-[10px] text-zinc-500 shrink-0">{incoming.length} new</span>
-          )}
         </div>
-        <div className="flex items-center shrink-0">
+        <div className="flex items-center gap-2 shrink-0">
+          {connected && incoming.length > 0 && (
+            <button
+              onMouseDown={(e) => e.stopPropagation()}
+              onClick={clearAllIncoming}
+              title="Mark every incoming file as past"
+              className="text-[10px] text-zinc-500 hover:text-zinc-200 transition-colors"
+            >
+              Clear
+            </button>
+          )}
           <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" className="text-zinc-500">
             {collapsed
               ? <polyline points="18 15 12 9 6 15"/>
