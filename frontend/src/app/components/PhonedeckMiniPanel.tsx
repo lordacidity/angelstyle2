@@ -301,7 +301,13 @@ export function PhonedeckMiniPanel({ onPushed }: { onPushed?: (fileName: string)
         title={connected ? 'Phonedeck connected — drag to move, click to collapse' : 'Phonedeck offline — drag to move'}
       >
         <div className="flex items-center gap-2 min-w-0">
-          <span className={`w-1.5 h-1.5 rounded-full ${connected ? 'bg-[#04df9d]' : 'bg-zinc-600'}`} />
+          {/* Downward triangle — matches the Deck entry in the sidebar so the
+              floating Phonedeck panel reads as the same surface at a glance.
+              Tinted green when the SSE stream is live, zinc when offline so the
+              icon keeps the old dot's connection-status role. */}
+          <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={`shrink-0 ${connected ? 'text-[#04df9d]' : 'text-zinc-600'}`}>
+            <polygon points="4 6 20 6 12 20"/>
+          </svg>
           <span className="text-[11px] font-semibold text-zinc-300 uppercase tracking-wider">
             Phonedeck <span className="text-zinc-500 tabular-nums">({ready.length})</span>
           </span>

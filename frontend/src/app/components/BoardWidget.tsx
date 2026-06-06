@@ -84,10 +84,11 @@ export function BoardWidget({
         title="Shared Board — drag anywhere on this bar to move, click to collapse"
       >
         <div className="flex items-center gap-2 min-w-0">
+          {/* 3×3 grid — matches the Board entry in the sidebar so the floating
+              widget reads as the same surface at a glance. */}
           <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="text-emerald-500 shrink-0">
             <rect x="3" y="3" width="18" height="18" rx="2" />
-            <line x1="3" y1="9" x2="21" y2="9" />
-            <line x1="9" y1="9" x2="9" y2="21" />
+            <path d="M3 9h18M3 15h18M9 3v18M15 3v18" />
           </svg>
           <span className="text-[11px] font-semibold text-zinc-300 uppercase tracking-wider">Board</span>
         </div>
