@@ -26,7 +26,18 @@ const DEFAULT_SIZE = { w: 560, h: 520 };
 // be marked Posted when a sent video is exported. onSendRow hands a row's
 // url/caption/context to the main generator and kicks off the fetch → crop →
 // caption pipeline (wired up in StudioShell).
-export function BoardWidget({ board, onSendRow }: { board: UseBoardReturn; onSendRow: (row: BoardRow) => void }) {
+//
+// activeRowId lives in the parent (StudioShell) so the "Clear" action in the
+// generator can wipe the highlight at the same time it wipes the rows.
+export function BoardWidget({
+  board,
+  onSendRow,
+  activeRowId,
+}: {
+  board: UseBoardReturn;
+  onSendRow: (row: BoardRow) => void;
+  activeRowId: string | null;
+}) {
   const { loading, error, toggleBool } = board;
 
   // Only show outstanding links. Once a row is triaged — Posted (via a Phonedeck
@@ -128,7 +139,15 @@ export function BoardWidget({ board, onSendRow }: { board: UseBoardReturn; onSen
                 </tr>
               </thead>
               <tbody>
-                {rows.map((row) => (
+                {rows.map((row) => {
+                  // Active row: recolor every text cell green so the eye lands
+                  // on the row that's loaded in the generator. Borders/bg stay
+                  // unchanged — the colour is enough signal without the heavy
+                  // outline look.
+                  const isActive = row.id === activeRowId;
+                  const urlCls  = isActive ? 'text-emerald-400'    : 'text-sky-400';
+                  const textCls = isActive ? 'text-emerald-400/90' : 'text-zinc-300';
+                  return (
                   <tr key={row.id} className="align-middle hover:bg-zinc-900/40">
                     <td className="border border-zinc-800 text-center">
                       <input
@@ -155,7 +174,7 @@ export function BoardWidget({ board, onSendRow }: { board: UseBoardReturn; onSen
                           target="_blank"
                           rel="noreferrer"
                           title={row.url}
-                          className="block truncate text-sky-400 hover:underline"
+                          className={`block truncate ${urlCls} hover:underline`}
                           onMouseDown={(e) => e.stopPropagation()}
                         >
                           {row.url}
@@ -165,7 +184,7 @@ export function BoardWidget({ board, onSendRow }: { board: UseBoardReturn; onSen
                       )}
                     </td>
                     {(['vidCaption', 'context', 'notes'] as const).map((key) => (
-                      <td key={key} className="border border-zinc-800 px-1.5 py-1 text-[12px] text-zinc-300">
+                      <td key={key} className={`border border-zinc-800 px-1.5 py-1 text-[12px] ${textCls}`}>
                         <div className="truncate" title={row[key] || undefined}>{row[key]}</div>
                       </td>
                     ))}
@@ -188,7 +207,7 @@ export function BoardWidget({ board, onSendRow }: { board: UseBoardReturn; onSen
                       </button>
                     </td>
                   </tr>
-                ))}
+                );})}
                 {!loading && rows.length === 0 && (
                   <tr>
                     <td colSpan={7} className="border border-zinc-800 px-3 py-6 text-center text-xs text-zinc-600">

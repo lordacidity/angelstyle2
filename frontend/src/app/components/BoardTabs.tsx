@@ -30,9 +30,14 @@ export function BoardTabs({ board, compact = false }: { board: UseBoardReturn; c
           )}
         </button>
       ))}
-      <span className="ml-auto pr-2 text-[11px] text-zinc-500">
-        {loading ? 'Loading…' : `${rows.length} row${rows.length === 1 ? '' : 's'}`}
-      </span>
+      {/* Total-row count: redundant with the per-tab badges, but kept on the
+          full /board page since the loading state is otherwise invisible there.
+          Hidden in the compact widget to declutter that small surface. */}
+      {!compact && (
+        <span className="ml-auto pr-2 text-[11px] text-zinc-500">
+          {loading ? 'Loading…' : `${rows.length} row${rows.length === 1 ? '' : 's'}`}
+        </span>
+      )}
     </div>
   );
 }

@@ -203,6 +203,9 @@ export function StudioShell() {
   // generator; CanvasGrid picks it up, runs the fetch→crop→caption pipeline for
   // that entry, then clears it.
   const [pendingBoardSend, setPendingBoardSend] = useState<string | null>(null);
+  // Drives the green "currently working on" highlight in BoardWidget. Lifted
+  // here so handleClearAll can wipe it at the same time it wipes the entries.
+  const [activeBoardRowId, setActiveBoardRowId] = useState<string | null>(null);
 
   // Once the user has visited AI Cards, keep that section mounted (just hidden)
   // so its internal state — picked talent, fetched stories, drafted headline,
@@ -240,6 +243,7 @@ export function StudioShell() {
     setEntries([{ ...makeEmptyEntry(id, mode), url: row.url, caption: row.vidCaption, context: row.context }]);
     setBoardOrigins(prev => ({ ...prev, [id]: { table: board.active, id: row.id } }));
     setPendingBoardSend(id);
+    setActiveBoardRowId(row.id);
     router.push(pathForSection('media'));
   }
 
@@ -269,6 +273,7 @@ export function StudioShell() {
   // right back at the empty link / caption / context form.
   function handleClearAll() {
     setEntries(prev => [makeEmptyEntry('1', prev[0]?.mode ?? 'twitter')]);
+    setActiveBoardRowId(null);
   }
 
   // Media format toggle (Twitter / Caption / Carousel) — replaces the old
@@ -297,7 +302,7 @@ export function StudioShell() {
           an in-progress draft / resize survives navigation, like the panel
           above. */}
       <div style={{ display: activeSection === 'media' ? undefined : 'none' }}>
-        <BoardWidget board={board} onSendRow={handleSendBoardRow} />
+        <BoardWidget board={board} onSendRow={handleSendBoardRow} activeRowId={activeBoardRowId} />
       </div>
       <Sidebar
         googleToken={googleSheets.googleToken}
@@ -344,7 +349,14 @@ export function StudioShell() {
                 carouselRefsMap={carouselRefsMap}
                 brand={brand}
                 onAddRow={addRow}
-                onRemoveRow={removeRow}
+                onRemoveRow={(id) => {
+                  // Drop the board highlight whenever the entry it traces back to
+                  // gets removed, so the "currently working on" green doesn't
+                  // outlive the row in the generator.
+                  const origin = boardOrigins[id];
+                  if (origin && origin.id === activeBoardRowId) setActiveBoardRowId(null);
+                  removeRow(id);
+                }}
                 onClearAll={handleClearAll}
                 onDownloadAll={downloadAll}
                 onHandleVideoError={handleVideoError}

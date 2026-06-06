@@ -745,8 +745,14 @@ export function useRecording(config: UseRecordingConfig) {
         form.append('files', blob, filename);
         const resp = await fetch(`${PHONEDECK_URL}/api/upload`, { method: 'POST', body: form });
         if (!resp.ok) throw new Error(await resp.text());
-        uploadedName = filename;
-        setRecStatus(`In Phonedeck Incoming: ${filename}`);
+        // Phonedeck renames on filename collision (appends " (1)" etc.), so the
+        // file landing on disk may NOT match the name we sent. Read the actual
+        // stored name back from the response and report THAT to the caller, so
+        // downstream trace (boardOrigins → pushOrigins → markPosted) keys on the
+        // real filename and a later push reliably auto-marks the source row.
+        const result = await resp.json().catch(() => null) as { files?: Array<{ name: string }> } | null;
+        uploadedName = result?.files?.[0]?.name ?? filename;
+        setRecStatus(`In Phonedeck Incoming: ${uploadedName}`);
         setTimeout(() => setRecStatus(''), 5000);
       } catch (saveErr) {
         console.warn('[EXPORT] phonedeck upload failed, falling back to browser download:', saveErr);
