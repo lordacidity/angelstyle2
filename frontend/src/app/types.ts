@@ -42,7 +42,7 @@ export interface VideoData {
   images?: string[];
 }
 
-export type VideoMode = 'twitter' | 'caption' | 'carousel';
+export type VideoMode = 'twitter' | 'caption' | 'carousel' | 'charts';
 
 export interface VideoEntry {
   id: string;
