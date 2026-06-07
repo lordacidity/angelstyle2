@@ -36,10 +36,10 @@ export async function GET(req: NextRequest) {
     });
   } catch (err: unknown) {
     const msg = err instanceof Error ? err.message : String(err);
-    // 429 from Google — bubble up so the client can show a fallback
-    if (msg.includes('429') || msg.includes('Too Many')) {
+    console.error(`[trends] ${term}:`, msg.slice(0, 300));
+    if (msg.includes('429') || msg.includes('Too Many') || msg.includes('captcha') || msg.includes('CAPTCHA') || msg.includes('status code 429')) {
       return NextResponse.json({ error: 'rate_limited' }, { status: 429 });
     }
-    return NextResponse.json({ error: msg }, { status: 500 });
+    return NextResponse.json({ error: msg.slice(0, 200) }, { status: 500 });
   }
 }
