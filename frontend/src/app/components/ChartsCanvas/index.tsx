@@ -895,16 +895,37 @@ export const ChartsCanvas = forwardRef<ChartsCanvasRef, ChartsCanvasProps>(funct
 
         notify(true, 0.01, 'Recording…');
 
+        // Pause recorder + audio + animation clock when tab is hidden so the
+        // output video has no frozen-frame gaps from background throttling.
+        let hiddenAt = 0;
+        let totalHiddenMs = 0;
+        const onVisibility = () => {
+          if (document.hidden) {
+            hiddenAt = performance.now();
+            recorder.pause();
+            audioEl?.pause();
+          } else {
+            const gap = performance.now() - hiddenAt;
+            totalHiddenMs += gap;
+            animStartRef.current += gap;
+            recorder.resume();
+            if (audioEl && audioEl.paused) audioEl.play().catch(() => {});
+          }
+        };
+        document.addEventListener('visibilitychange', onVisibility);
+
         const startMs = performance.now();
         await new Promise<void>(resolve => {
           const tick = () => {
-            const p = Math.min((performance.now() - startMs) / cycleMs, 1);
+            const elapsed = performance.now() - startMs - totalHiddenMs;
+            const p = Math.min(elapsed / cycleMs, 1);
             notify(true, p, 'Recording…');
             if (p >= 1) resolve(); else requestAnimationFrame(tick);
           };
           requestAnimationFrame(tick);
         });
 
+        document.removeEventListener('visibilitychange', onVisibility);
         audioEl?.pause();
 
         recorder.stop();
