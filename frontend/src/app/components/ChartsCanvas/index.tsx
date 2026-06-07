@@ -770,13 +770,16 @@ export const ChartsCanvas = forwardRef<ChartsCanvasRef, ChartsCanvasProps>(funct
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [markets[0]?.sparkline?.length, markets[1]?.sparkline?.length]);
 
+  const proxyImgUrl = (url: string) =>
+    `/api/charts/image-proxy?url=${encodeURIComponent(url)}`;
+
   useEffect(() => {
     const url = markets[0]?.photo_url;
     if (!url) { img0Ref.current = null; return; }
     const img = new Image(); img.crossOrigin = 'anonymous';
     img.onload = () => { img0Ref.current = img; };
     img.onerror = () => { img0Ref.current = null; };
-    img.src = url;
+    img.src = proxyImgUrl(url);
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [markets[0]?.photo_url]);
 
@@ -786,7 +789,7 @@ export const ChartsCanvas = forwardRef<ChartsCanvasRef, ChartsCanvasProps>(funct
     const img = new Image(); img.crossOrigin = 'anonymous';
     img.onload = () => { img1Ref.current = img; };
     img.onerror = () => { img1Ref.current = null; };
-    img.src = url;
+    img.src = proxyImgUrl(url);
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [markets[1]?.photo_url]);
 
