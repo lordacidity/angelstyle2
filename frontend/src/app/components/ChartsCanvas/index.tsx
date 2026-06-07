@@ -841,32 +841,24 @@ export const ChartsCanvas = forwardRef<ChartsCanvasRef, ChartsCanvasProps>(funct
               ? 'video/mp4'
               : 'video/webm;codecs=vp9';
 
+        // Record video-only — audio is mixed server-side so the original MP3
+        // goes straight to AAC via FFmpeg. Routing audio through MediaRecorder
+        // encodes it as Opus which Twitter/X rejects.
         const stream = canvas.captureStream(30);
 
-        // Mix in audio track if one is selected
+        // Play audio in the browser so the user can hear it while recording,
+        // but do NOT add it to the MediaRecorder stream.
         let audioEl: HTMLAudioElement | null = null;
-        let audioCtx: AudioContext | null = null;
         if (audioUrlRef.current) {
           try {
-            audioEl = new Audio();
-            audioEl.src = audioUrlRef.current;
-            audioEl.crossOrigin = 'anonymous';
+            audioEl = new Audio(audioUrlRef.current);
             audioEl.preload = 'auto';
-            audioCtx = new AudioContext();
-            const src  = audioCtx.createMediaElementSource(audioEl);
-            const dest = audioCtx.createMediaStreamDestination();
-            src.connect(dest);
-            dest.stream.getAudioTracks().forEach(t => stream.addTrack(t));
-            // Wait until audio has enough data
             await new Promise<void>(res => {
               if (!audioEl || audioEl.readyState >= 3) { res(); return; }
               audioEl.oncanplay = () => res();
               setTimeout(res, 6000);
             });
-          } catch {
-            audioEl = null;
-            audioCtx = null;
-          }
+          } catch { audioEl = null; }
         }
 
         const cycleMs  = cycleMsRef.current;
@@ -875,16 +867,13 @@ export const ChartsCanvas = forwardRef<ChartsCanvasRef, ChartsCanvasProps>(funct
         recorder.ondataavailable = e => { if (e.data.size > 0) chunks.push(e.data); };
         recorder.start(200);
 
-        // Start audio in sync with animation
-        if (audioEl && audioCtx) {
+        if (audioEl) {
           audioEl.currentTime = 0;
-          await audioCtx.resume();
           audioEl.play().catch(() => {});
         }
 
         notify(true, 0.01, 'Recording…');
 
-        // Wait cycleMs, reporting progress each frame
         const startMs = performance.now();
         await new Promise<void>(resolve => {
           const tick = () => {
@@ -896,27 +885,27 @@ export const ChartsCanvas = forwardRef<ChartsCanvasRef, ChartsCanvasProps>(funct
         });
 
         audioEl?.pause();
-        audioCtx?.close().catch(() => {});
 
         recorder.stop();
         await new Promise<void>(r => { recorder.onstop = () => r(); });
 
-        notify(true, 0.98, 'Saving…');
+        notify(true, 0.98, 'Mixing audio…');
 
-        const rawBlob  = new Blob(chunks, { type: mimeType });
-        const filename = `${safeExportName(captionRef.current || 'charts')}.mp4`;
+        const videoBlob = new Blob(chunks, { type: mimeType });
+        const filename  = `${safeExportName(captionRef.current || 'charts')}.mp4`;
 
-        // Transcode audio to AAC so the file is compatible with Twitter/X
-        // (Chrome MediaRecorder uses Opus audio which Twitter rejects).
-        let blob = rawBlob;
+        // Mix the original MP3 into the video server-side as proper AAC.
+        // This avoids any browser codec issues entirely.
+        let blob = videoBlob;
         if (audioUrlRef.current) {
           try {
-            notify(true, 0.98, 'Fixing audio codec…');
             const tf = new FormData();
-            tf.append('file', rawBlob, filename);
-            const tr = await fetch('/api/charts/transcode-audio', { method: 'POST', body: tf });
+            tf.append('video', videoBlob, 'video.mp4');
+            tf.append('audioUrl', audioUrlRef.current);
+            const tr = await fetch('/api/charts/mix-audio', { method: 'POST', body: tf });
             if (tr.ok) blob = await tr.blob();
-          } catch { /* use rawBlob as fallback */ }
+            else console.warn('[mix-audio] failed:', await tr.text());
+          } catch (e) { console.warn('[mix-audio] error:', e); }
         }
 
         try {
