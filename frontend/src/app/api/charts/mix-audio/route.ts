@@ -14,16 +14,14 @@ async function mixAudio(videoPath: string, audioPath: string, outputPath: string
     ffmpeg()
       .input(videoPath)
       .input(audioPath)
-      // Copy H.264 video unchanged, encode MP3 → AAC-LC directly (no browser intermediate)
       .videoCodec('copy')
       .audioCodec('aac')
       .audioBitrate(192)
-      // Map video from first input, audio from second input
       .outputOptions([
         '-map', '0:v:0',
         '-map', '1:a:0',
-        '-shortest',              // trim audio to video length
-        '-movflags', 'faststart', // moov atom at front for streaming
+        '-shortest',
+        '-movflags', 'faststart',
         '-fflags', '+genpts',
       ])
       .output(outputPath)
@@ -35,14 +33,11 @@ async function mixAudio(videoPath: string, audioPath: string, outputPath: string
 
 export async function POST(req: NextRequest) {
   try {
-    const form = await req.formData();
-    const videoFile = form.get('video') as File | null;
-    const audioUrl  = form.get('audioUrl') as string | null;
+    // audioUrl passed as query param; video sent as raw binary body to avoid multipart 10MB limit
+    const { searchParams } = new URL(req.url);
+    const audioUrl = searchParams.get('audioUrl');
+    if (!audioUrl) return NextResponse.json({ error: 'audioUrl query param required' }, { status: 400 });
 
-    if (!videoFile) return NextResponse.json({ error: 'video required' }, { status: 400 });
-    if (!audioUrl)  return NextResponse.json({ error: 'audioUrl required' }, { status: 400 });
-
-    // Resolve the local audio path from the /audio/ URL
     const audioFilename = path.basename(audioUrl);
     const audioPath     = path.join(process.cwd(), 'public', 'audio', audioFilename);
     if (!existsSync(audioPath)) {
@@ -53,7 +48,7 @@ export async function POST(req: NextRequest) {
     const vidPath = path.join(os.tmpdir(), `charts-vid-${ts}.mp4`);
     const outPath = path.join(os.tmpdir(), `charts-mix-${ts}.mp4`);
 
-    await writeFile(vidPath, Buffer.from(await videoFile.arrayBuffer()));
+    await writeFile(vidPath, Buffer.from(await req.arrayBuffer()));
     await mixAudio(vidPath, audioPath, outPath);
     await unlink(vidPath).catch(() => {});
 

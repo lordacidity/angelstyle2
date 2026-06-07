@@ -895,14 +895,14 @@ export const ChartsCanvas = forwardRef<ChartsCanvasRef, ChartsCanvasProps>(funct
         const filename  = `${safeExportName(captionRef.current || 'charts')}.mp4`;
 
         // Mix the original MP3 into the video server-side as proper AAC.
-        // This avoids any browser codec issues entirely.
+        // Send video as raw binary body; audioUrl as query param — avoids 10MB multipart limit.
         let blob = videoBlob;
         if (audioUrlRef.current) {
           try {
-            const tf = new FormData();
-            tf.append('video', videoBlob, 'video.mp4');
-            tf.append('audioUrl', audioUrlRef.current);
-            const tr = await fetch('/api/charts/mix-audio', { method: 'POST', body: tf });
+            const tr = await fetch(
+              `/api/charts/mix-audio?audioUrl=${encodeURIComponent(audioUrlRef.current)}`,
+              { method: 'POST', body: videoBlob, headers: { 'Content-Type': 'video/mp4' } },
+            );
             if (tr.ok) blob = await tr.blob();
             else console.warn('[mix-audio] failed:', await tr.text());
           } catch (e) { console.warn('[mix-audio] error:', e); }

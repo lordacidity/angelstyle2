@@ -35,6 +35,7 @@ export async function middleware(req: NextRequest) {
 }
 
 export const config = {
-  // Run on everything except Next internals and the favicon (those never need the gate).
-  matcher: ['/((?!_next/static|_next/image|favicon.ico).*)'],
+  // Run on everything except Next internals, the favicon, and heavy upload endpoints
+  // (mix-audio sends large video blobs — excluding it avoids Next's 10MB middleware body limit).
+  matcher: ['/((?!_next/static|_next/image|favicon\\.ico|api/charts/mix-audio).*)'],
 };
