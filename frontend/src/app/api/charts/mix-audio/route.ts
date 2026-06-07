@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { writeFile, unlink } from 'fs/promises';
+import { writeFile, unlink, readFile } from 'fs/promises';
 import { existsSync } from 'fs';
 import path from 'path';
 import os from 'os';
@@ -57,24 +57,16 @@ export async function POST(req: NextRequest) {
     await mixAudio(vidPath, audioPath, outPath);
     await unlink(vidPath).catch(() => {});
 
-    // Stream back directly to avoid a second readFile into memory
-    const { createReadStream } = await import('fs');
-    const stream = createReadStream(outPath);
-    const { Readable } = await import('stream');
-    const webStream = Readable.toWeb(stream) as ReadableStream;
+    const outBuf = await readFile(outPath);
+    await unlink(outPath).catch(() => {});
 
-    const response = new NextResponse(webStream, {
+    return new NextResponse(outBuf, {
       status: 200,
       headers: {
         'Content-Type': 'video/mp4',
         'Content-Disposition': `attachment; filename="charts.mp4"`,
       },
     });
-
-    // Clean up temp file after response is consumed
-    response.clone().blob().then(() => unlink(outPath).catch(() => {})).catch(() => {});
-
-    return response;
   } catch (err) {
     console.error('[mix-audio]', err);
     return NextResponse.json({ error: String(err) }, { status: 500 });
