@@ -1905,9 +1905,9 @@ export function CanvasGrid({
                         toFetch.forEach(idx => { cur[idx] = false; });
                         return { ...prev, [entry.id]: cur };
                       });
-                      toFetch.forEach(idx => {
+                      toFetch.forEach((idx, i) => {
                         const term = names[idx].trim() || mks[idx]!.name;
-                        fetchChartsTrends(entry.id, idx, mks[idx]!, term);
+                        setTimeout(() => fetchChartsTrends(entry.id, idx, mks[idx]!, term), i * 15_000);
                       });
                     }}
                     onOpenPhotoPicker={(idx, query) => openPhotoPicker(`charts:${entry.id}:${idx}`, query)}
