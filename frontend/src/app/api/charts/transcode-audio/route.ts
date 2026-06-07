@@ -14,10 +14,16 @@ async function remuxToAac(inputPath: string, outputPath: string): Promise<void> 
   ffmpeg.setFfmpegPath(ffmpegPath);
   return new Promise((resolve, reject) => {
     ffmpeg(inputPath)
+      // Chrome MediaRecorder produces fragmented MP4 — tell FFmpeg to handle it
+      .inputOptions(['-fflags', '+genpts'])
       .videoCodec('copy')
+      // Force AAC-LC (mp4a.40.2) — Twitter requires this; Opus-in-MP4 is rejected
       .audioCodec('aac')
       .audioBitrate(128)
-      .outputOptions(['-movflags', 'faststart'])
+      .outputOptions([
+        '-movflags', 'faststart',  // moov atom at front — required for streaming upload
+        '-strict', 'experimental', // needed on some FFmpeg builds for AAC encoder
+      ])
       .output(outputPath)
       .on('end', () => resolve())
       .on('error', (err: Error) => reject(err))
