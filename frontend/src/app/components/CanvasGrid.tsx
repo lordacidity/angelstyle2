@@ -1889,23 +1889,25 @@ export function CanvasGrid({
                     trendsError={chartsTrendsErrorMap[entry.id] ?? null}
                     onStart={() => {
                       setChartsTrendsErrorMap(prev => ({ ...prev, [entry.id]: null }));
-                      const mks   = chartsMarketsMap[entry.id] ?? [null, null];
-                      const names = chartsNameOverrideMap[entry.id] ?? ['', ''];
-                      // Clear existing sparklines so canvas waits for fresh data
+                      const mks    = chartsMarketsMap[entry.id] ?? [null, null];
+                      const names  = chartsNameOverrideMap[entry.id] ?? ['', ''];
+                      const loaded = chartsTrendsLoadedMap[entry.id] ?? [false, false];
+                      // Only fetch slots that haven't loaded yet; clear their sparklines first
+                      const toFetch = ([0, 1] as const).filter(idx => mks[idx] && !loaded[idx]);
                       setChartsMarketsMap(prev => {
                         const cur  = prev[entry.id] ?? [null, null];
                         const next: [ChartsMarket | null, ChartsMarket | null] = [cur[0], cur[1]];
-                        if (next[0]) next[0] = { ...next[0], sparkline: undefined };
-                        if (next[1]) next[1] = { ...next[1], sparkline: undefined };
+                        toFetch.forEach(idx => { if (next[idx]) next[idx] = { ...next[idx]!, sparkline: undefined }; });
                         return { ...prev, [entry.id]: next };
                       });
-                      setChartsTrendsLoadedMap(prev => ({ ...prev, [entry.id]: [false, false] }));
-                      // Fetch both concurrently
-                      ([0, 1] as const).forEach(idx => {
-                        const market = mks[idx];
-                        if (!market) return;
-                        const term = names[idx].trim() || market.name;
-                        fetchChartsTrends(entry.id, idx, market, term);
+                      setChartsTrendsLoadedMap(prev => {
+                        const cur = [...(prev[entry.id] ?? [false, false])] as [boolean, boolean];
+                        toFetch.forEach(idx => { cur[idx] = false; });
+                        return { ...prev, [entry.id]: cur };
+                      });
+                      toFetch.forEach(idx => {
+                        const term = names[idx].trim() || mks[idx]!.name;
+                        fetchChartsTrends(entry.id, idx, mks[idx]!, term);
                       });
                     }}
                     onOpenPhotoPicker={(idx, query) => openPhotoPicker(`charts:${entry.id}:${idx}`, query)}
