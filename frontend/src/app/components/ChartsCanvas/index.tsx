@@ -903,8 +903,21 @@ export const ChartsCanvas = forwardRef<ChartsCanvasRef, ChartsCanvasProps>(funct
 
         notify(true, 0.98, 'Saving…');
 
-        const blob = new Blob(chunks, { type: mimeType });
+        const rawBlob  = new Blob(chunks, { type: mimeType });
         const filename = `${safeExportName(captionRef.current || 'charts')}.mp4`;
+
+        // Transcode audio to AAC so the file is compatible with Twitter/X
+        // (Chrome MediaRecorder uses Opus audio which Twitter rejects).
+        let blob = rawBlob;
+        if (audioUrlRef.current) {
+          try {
+            notify(true, 0.98, 'Fixing audio codec…');
+            const tf = new FormData();
+            tf.append('file', rawBlob, filename);
+            const tr = await fetch('/api/charts/transcode-audio', { method: 'POST', body: tf });
+            if (tr.ok) blob = await tr.blob();
+          } catch { /* use rawBlob as fallback */ }
+        }
 
         try {
           const form = new FormData();
