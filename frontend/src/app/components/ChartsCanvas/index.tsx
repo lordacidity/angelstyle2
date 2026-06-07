@@ -485,7 +485,7 @@ function drawCompareChart(
     ctx.fillStyle    = color;
     ctx.textAlign    = 'center';
     ctx.textBaseline = 'bottom';
-    ctx.fillText(`$${lead.price.toFixed(2)}`, cx, cy - LEAD_R - 6);
+    ctx.fillText(`$${Math.max(0.01, lead.price).toFixed(2)}`, cx, cy - LEAD_R - 6);
 
     return { price: lead.price, firstPrice };
   };
