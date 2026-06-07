@@ -867,6 +867,7 @@ export function CanvasGrid({
   // AI-suggested pairs panel
   const [aiGroups,          setAiGroups]          = useState<Array<{ a: ChartsMarket; b: ChartsMarket; reason: string }>>([]);
   const [aiGroupsLoading,   setAiGroupsLoading]   = useState(false);
+  const [aiGroupsError,     setAiGroupsError]     = useState<string | null>(null);
   const [showAiGroupsPanel, setShowAiGroupsPanel] = useState(false);
   const [aiGroupsEntryId,   setAiGroupsEntryId]   = useState<string | null>(null);
   const aiGroupsFetchedRef = useRef(false);
@@ -953,12 +954,15 @@ export function CanvasGrid({
     if (aiGroupsFetchedRef.current) return;
     aiGroupsFetchedRef.current = true;
     setAiGroupsLoading(true);
+    setAiGroupsError(null);
     try {
       const res = await fetch('/api/ai/charts-groups');
-      const data = await res.json() as { groups?: Array<{ a: ChartsMarket; b: ChartsMarket; reason: string }> };
-      if (data.groups) setAiGroups(data.groups);
-    } catch {
+      const data = await res.json() as { groups?: Array<{ a: ChartsMarket; b: ChartsMarket; reason: string }>; error?: string };
+      if (!res.ok || data.error) throw new Error(data.error || `HTTP ${res.status}`);
+      setAiGroups(data.groups ?? []);
+    } catch (err) {
       aiGroupsFetchedRef.current = false;
+      setAiGroupsError(err instanceof Error ? err.message : String(err));
     } finally {
       setAiGroupsLoading(false);
     }
@@ -2592,6 +2596,7 @@ export function CanvasGrid({
                 onClick={() => {
                   aiGroupsFetchedRef.current = false;
                   setAiGroups([]);
+                  setAiGroupsError(null);
                   openAiGroupsPanel(aiGroupsEntryId ?? '');
                 }}
                 disabled={aiGroupsLoading}
@@ -2619,6 +2624,10 @@ export function CanvasGrid({
               <div className="flex flex-col items-center justify-center h-32 gap-2">
                 <SpinnerIcon size={18} className="text-zinc-500 animate-spin" />
                 <span className="text-[11px] text-zinc-500">Asking AI…</span>
+              </div>
+            ) : aiGroupsError ? (
+              <div className="flex flex-col items-center justify-center h-32 gap-2 px-4">
+                <span className="text-[11px] text-red-400 text-center">{aiGroupsError}</span>
               </div>
             ) : aiGroups.length === 0 ? (
               <div className="flex items-center justify-center h-32">
