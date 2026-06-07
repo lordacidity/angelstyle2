@@ -19,6 +19,11 @@ export async function GET(req: NextRequest) {
       endTime:   new Date(),
     });
 
+    // Log first 200 chars of raw to diagnose unexpected responses
+    if (!raw.startsWith(')]}\'')) {
+      console.warn(`[trends] unexpected raw prefix for "${term}":`, raw.slice(0, 200));
+    }
+
     const parsed = JSON.parse(raw) as { default: { timelineData: TimelinePoint[] } };
     const timeline = parsed?.default?.timelineData ?? [];
 
