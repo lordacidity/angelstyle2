@@ -1854,7 +1854,7 @@ export function CanvasGrid({
                       if (nextMks[0] && nextMks[1]) {
                         const n0 = nextNames[0] || nextMks[0].name;
                         const n1 = nextNames[1] || nextMks[1].name;
-                        onUpdateEntry(entry.id, 'caption', `${n0} vs ${n1} dollar dominated sentiment over time:`);
+                        onUpdateEntry(entry.id, 'caption', `${n0} and ${n1}'s Pauv over time:`);
                       }
                     }}
                     allMarkets={(allTalents ?? []).map(t => ({ id: t.id, name: t.name, ticker: t.ticker, photo_url: t.photo_url, industry: t.industry }))}
@@ -2647,7 +2647,7 @@ export function CanvasGrid({
                       setChartsTrendsLoadingMap(prev => ({ ...prev, [aiGroupsEntryId]: [false, false] }));
                       const pairEntry = entries.find(e => e.id === aiGroupsEntryId);
                       if (!pairEntry?.caption.trim()) {
-                        onUpdateEntry(aiGroupsEntryId, 'caption', `${group.a.name} vs ${group.b.name} dollar dominated sentiment over time:`);
+                        onUpdateEntry(aiGroupsEntryId, 'caption', `${group.a.name} and ${group.b.name}'s Pauv over time:`);
                       }
                       setShowAiGroupsPanel(false);
                     }}
