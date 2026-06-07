@@ -287,11 +287,29 @@ function drawCompareChart(
     return { priceA: null, pctA: null, priceB: null, pctB: null };
   }
 
+  // ── Chop leading flat region: start at most 2 years before first >$1 crossing ──
+  const TWO_YEARS_MS = 2 * 365.25 * 24 * 60 * 60 * 1000;
+  const firstAboveOneTs = [sA.find(p => p.price > 1), sB.find(p => p.price > 1)]
+    .filter(Boolean)
+    .reduce((min, p) => Math.min(min, p!.t), Infinity);
+  const chopStart = isFinite(firstAboveOneTs) ? firstAboveOneTs - TWO_YEARS_MS : -Infinity;
+  const clipSeries = (s: { t: number; price: number }[]) => {
+    if (!isFinite(chopStart) || !s.length || s[0].t >= chopStart) return s;
+    const idx = s.findIndex(p => p.t >= chopStart);
+    if (idx <= 0) return s;
+    const prev = s[idx - 1];
+    const next = s[idx];
+    const ratio = (chopStart - prev.t) / (next.t - prev.t);
+    return [{ t: chopStart, price: prev.price + ratio * (next.price - prev.price) }, ...s.slice(idx)];
+  };
+  const sAc = clipSeries(sA);
+  const sBc = clipSeries(sB);
+
   // ── Time domain ──────────────────────────────────────────────────────────
   const allStarts: number[] = [];
   const allEnds:   number[] = [];
-  if (sA.length) { allStarts.push(sA[0].t); allEnds.push(sA[sA.length - 1].t); }
-  if (sB.length) { allStarts.push(sB[0].t); allEnds.push(sB[sB.length - 1].t); }
+  if (sAc.length) { allStarts.push(sAc[0].t); allEnds.push(sAc[sAc.length - 1].t); }
+  if (sBc.length) { allStarts.push(sBc[0].t); allEnds.push(sBc[sBc.length - 1].t); }
   const tStart   = Math.min(...allStarts);
   const tEnd     = Math.max(...allEnds);
   const fullSpan = Math.max(tEnd - tStart, 1);
@@ -307,8 +325,8 @@ function drawCompareChart(
       out.push({ t: cursorTime, price: lead });
     return out;
   };
-  const revA = reveal(sA);
-  const revB = reveal(sB);
+  const revA = reveal(sAc);
+  const revB = reveal(sBc);
 
   // ── Y scale from revealed data ───────────────────────────────────────────
   const rPrices = [...revA, ...revB].map(p => p.price);
@@ -320,7 +338,7 @@ function drawCompareChart(
   const vRange  = pRange + 2 * PAD_Y;
 
   // ── Grid lines from FULL data range ─────────────────────────────────────
-  const fullPrices = [...sA, ...sB].map(p => p.price);
+  const fullPrices = [...sAc, ...sBc].map(p => p.price);
   const fullMin    = fullPrices.length ? Math.min(...fullPrices) : 0;
   const fullMax    = fullPrices.length ? Math.max(...fullPrices) : 1;
   const gridStep   = niceStep((fullMax - fullMin) || 1, 6);
