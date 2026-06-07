@@ -6,8 +6,8 @@ import { createClient } from '@supabase/supabase-js';
 // env vars present, which throws "supabaseUrl is required" and fails the build.
 function getClient() {
   return createClient(
-    process.env.PAUV_SUPABASE_URL!,
-    process.env.PAUV_SUPABASE_ANON_KEY!,
+    process.env.NEXT_PUBLIC_SUPABASE_URL!,
+    process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
   );
 }
 
