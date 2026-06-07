@@ -356,6 +356,7 @@ export function ChartsInputCard({
   const captionOverlayRef = useRef<HTMLDivElement>(null);
   const [emojiTrigger, setEmojiTrigger] = useState<{ start: number; query: string } | null>(null);
 
+  const [audioOpen, setAudioOpen] = useState(false);
   const previewRef = useRef<HTMLAudioElement | null>(null);
   const [previewUrl, setPreviewUrl] = useState<string | null>(null);
   const [isPreviewPlaying, setIsPreviewPlaying] = useState(false);
@@ -580,15 +581,18 @@ export function ChartsInputCard({
 
       {/* Audio track picker */}
       <div className="rounded-lg bg-zinc-950 border border-zinc-800 overflow-hidden">
-        <div className="px-3 py-2 border-b border-zinc-800 flex items-center justify-between">
+        <button
+          type="button"
+          onClick={() => setAudioOpen(o => !o)}
+          className="w-full px-3 py-2 flex items-center justify-between hover:bg-zinc-900/60 transition-colors"
+        >
           <span className="text-[10px] font-semibold text-zinc-400 uppercase tracking-wider">Audio</span>
-          {audioTrack && (
-            <button type="button" onClick={onClearAudioTrack} className="text-zinc-600 hover:text-zinc-300 transition-colors">
-              <CloseIcon size={10} />
-            </button>
-          )}
-        </div>
-        <div className="divide-y divide-zinc-800/50">
+          <div className="flex items-center gap-2">
+            {audioTrack && <span className="text-[10px] text-emerald-400 truncate max-w-[120px]">{audioTrack.label}</span>}
+            <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" className={`text-zinc-500 transition-transform ${audioOpen ? 'rotate-180' : ''}`}><polyline points="6 9 12 15 18 9"/></svg>
+          </div>
+        </button>
+        {audioOpen && <div className="border-t border-zinc-800 divide-y divide-zinc-800/50">
           {preloadedAudios.map((audio, i) => {
             const isSelected = audio.status === 'ready' && audioTrack?.url === audio.url;
             const isThisPlaying = audio.status === 'ready' && previewUrl === audio.url && isPreviewPlaying;
@@ -708,7 +712,7 @@ export function ChartsInputCard({
             </div>
             {addError && <p className="text-[10px] text-red-400">{addError}</p>}
           </div>
-        </div>
+        </div>}
       </div>
     </div>
   );
