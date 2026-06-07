@@ -1863,7 +1863,7 @@ export function CanvasGrid({
                       if (nextMks[0] && nextMks[1]) {
                         const n0 = nextNames[0] || nextMks[0].name;
                         const n1 = nextNames[1] || nextMks[1].name;
-                        onUpdateEntry(entry.id, 'caption', `${n0} and ${n1}'s Pauv over time:`);
+                        onUpdateEntry(entry.id, 'caption', `${n0} vs ${n1}'s dollar-dominated sentiment on Pauv:`);
                       }
                     }}
                     allMarkets={(allTalents ?? []).map(t => ({ id: t.id, name: t.name, ticker: t.ticker, photo_url: t.photo_url, industry: t.industry }))}
@@ -2658,7 +2658,7 @@ export function CanvasGrid({
                       setChartsNameOverrideMap(prev => ({ ...prev, [aiGroupsEntryId]: [group.a.name, group.b.name] }));
                       setChartsTrendsLoadedMap(prev => ({ ...prev, [aiGroupsEntryId]: [false, false] }));
                       setChartsTrendsLoadingMap(prev => ({ ...prev, [aiGroupsEntryId]: [false, false] }));
-                      onUpdateEntry(aiGroupsEntryId, 'caption', `${group.a.name} and ${group.b.name}'s Pauv over time:`);
+                      onUpdateEntry(aiGroupsEntryId, 'caption', `${group.a.name} vs ${group.b.name}'s dollar-dominated sentiment on Pauv:`);
                       setShowAiGroupsPanel(false);
                     }}
                     className="w-full flex items-center gap-3 px-3 py-2.5 rounded-lg hover:bg-zinc-800 transition-colors text-left"
