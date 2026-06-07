@@ -298,16 +298,10 @@ function MarketSlot({
 
 // ── Audio tracks ──────────────────────────────────────────────────────────────
 
-export const CHARTS_AUDIO_TRACKS: { label: string; url: string }[] = [
-  { label: 'Track 1', url: 'https://www.instagram.com/reel/DUPL9DdDezI/?igsh=YXQ4b3k2Zmg4azNz' },
-  { label: 'Track 2', url: 'https://www.instagram.com/reel/DUG-FdPEuPC/?igsh=MTNqbXM5MGd3b3ZybA==' },
-  { label: 'Track 3', url: 'https://www.instagram.com/reel/DSU-Lp6jUqa/?igsh=MXEzeG9rMzI2OHk2MA==' },
-  { label: 'Track 4', url: 'https://www.instagram.com/reel/DZOTVfxtwtm/?igsh=cjhxdnd2aG91ZnBk' },
-  { label: 'Track 5', url: 'https://www.instagram.com/reel/DZN38dduyvZ/?igsh=MTlzNnk0ZHYyejk3ZQ==' },
-  { label: 'Track 6', url: 'https://www.instagram.com/reel/DZBfA23tefB/?igsh=azNlMXRsYjVzd2U=' },
-  { label: 'Track 7', url: 'https://www.instagram.com/reel/DY729qVuzhS/?igsh=MXVvZTd5cDMwb3h4' },
-  { label: 'Track 8', url: 'https://www.instagram.com/reel/DY2s7ZfuNsw/?igsh=MXFib285MjFqOHJ0eA==' },
-];
+export type PreloadedAudio =
+  | { status: 'ready'; label: string; url: string; durationMs: number }
+  | { status: 'loading'; label: string }
+  | { status: 'error' };
 
 // ── ChartsInputCard ───────────────────────────────────────────────────────────
 
@@ -326,10 +320,13 @@ interface ChartsInputCardProps {
   onStart: () => void;
   onOpenPhotoPicker: (idx: 0 | 1, query: string) => void;
   onSuggestPairs?: () => void;
+  preloadedAudios: PreloadedAudio[];
   audioTrack: { label: string; url: string; durationMs: number } | null;
-  audioLoading: boolean;
-  onSelectAudioTrack: (track: { label: string; url: string }) => void;
+  onSelectAudioTrack: (track: { label: string; url: string; durationMs: number }) => void;
   onClearAudioTrack: () => void;
+  onDeleteAudio: (idx: number) => void;
+  onAddAudio: (track: { label: string; url: string; durationMs: number }) => void;
+  onRenameAudio: (idx: number, label: string) => void;
 }
 
 export function ChartsInputCard({
@@ -347,14 +344,85 @@ export function ChartsInputCard({
   onStart,
   onOpenPhotoPicker,
   onSuggestPairs,
+  preloadedAudios,
   audioTrack,
-  audioLoading,
   onSelectAudioTrack,
   onClearAudioTrack,
+  onDeleteAudio,
+  onAddAudio,
+  onRenameAudio,
 }: ChartsInputCardProps) {
   const captionRef        = useRef<HTMLTextAreaElement>(null);
   const captionOverlayRef = useRef<HTMLDivElement>(null);
   const [emojiTrigger, setEmojiTrigger] = useState<{ start: number; query: string } | null>(null);
+
+  const previewRef = useRef<HTMLAudioElement | null>(null);
+  const [previewUrl, setPreviewUrl] = useState<string | null>(null);
+  const [isPreviewPlaying, setIsPreviewPlaying] = useState(false);
+
+  useEffect(() => () => { previewRef.current?.pause(); }, []);
+
+  const togglePreview = useCallback((url: string) => {
+    if (previewRef.current) {
+      previewRef.current.pause();
+      previewRef.current.onended = null;
+      previewRef.current = null;
+    }
+    if (previewUrl === url && isPreviewPlaying) {
+      setPreviewUrl(null);
+      setIsPreviewPlaying(false);
+      return;
+    }
+    const audio = new Audio(url);
+    audio.onended = () => setIsPreviewPlaying(false);
+    previewRef.current = audio;
+    setPreviewUrl(url);
+    setIsPreviewPlaying(true);
+    audio.play().catch(() => setIsPreviewPlaying(false));
+  }, [previewUrl, isPreviewPlaying]);
+
+  const [renamingIdx, setRenamingIdx] = useState<number | null>(null);
+  const [renameValue, setRenameValue] = useState('');
+  const renameInputRef = useRef<HTMLInputElement>(null);
+
+  const startRename = useCallback((idx: number, currentLabel: string) => {
+    setRenamingIdx(idx);
+    setRenameValue(currentLabel);
+    setTimeout(() => { renameInputRef.current?.focus(); renameInputRef.current?.select(); }, 0);
+  }, []);
+
+  const commitRename = useCallback((idx: number) => {
+    const trimmed = renameValue.trim();
+    if (trimmed) onRenameAudio(idx, trimmed);
+    setRenamingIdx(null);
+  }, [renameValue, onRenameAudio]);
+
+  const [addUrl, setAddUrl] = useState('');
+  const [addLoading, setAddLoading] = useState(false);
+  const [addError, setAddError] = useState('');
+
+  const handleAddUrl = useCallback(async () => {
+    const trimmed = addUrl.trim();
+    if (!trimmed) return;
+    setAddLoading(true);
+    setAddError('');
+    try {
+      const res = await fetch('/api/charts/save-audio', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ url: trimmed }),
+      });
+      const data = await res.json() as { url?: string; durationMs?: number; error?: string };
+      if (!res.ok || data.error) throw new Error(data.error || 'Failed');
+      const label = `Track ${preloadedAudios.length + 1}`;
+      onAddAudio({ label, url: data.url!, durationMs: data.durationMs! });
+      setAddUrl('');
+    } catch (err) {
+      setAddError(err instanceof Error ? err.message : 'Failed to download');
+    } finally {
+      setAddLoading(false);
+    }
+  }, [addUrl, preloadedAudios.length, onAddAudio]);
 
   useEffect(() => { preloadEmojiImages(); }, []);
 
@@ -520,34 +588,126 @@ export function ChartsInputCard({
             </button>
           )}
         </div>
-        <div className="p-2">
-          {audioTrack ? (
-            <div className="flex items-center gap-2 px-2 py-1.5 rounded-md bg-zinc-900 border border-zinc-800">
-              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="text-emerald-400 shrink-0">
-                <path d="M9 18V5l12-2v13"/><circle cx="6" cy="18" r="3"/><circle cx="18" cy="16" r="3"/>
-              </svg>
-              <span className="text-xs text-zinc-200 flex-1">{audioTrack.label}</span>
-              <span className="text-[10px] text-zinc-500">{(audioTrack.durationMs / 1000).toFixed(1)}s</span>
+        <div className="divide-y divide-zinc-800/50">
+          {preloadedAudios.map((audio, i) => {
+            const isSelected = audio.status === 'ready' && audioTrack?.url === audio.url;
+            const isThisPlaying = audio.status === 'ready' && previewUrl === audio.url && isPreviewPlaying;
+            return (
+              <div key={i} className={`flex items-center gap-1.5 px-3 py-2 transition-colors ${isSelected ? 'bg-zinc-800/80' : 'hover:bg-zinc-900/60'}`}>
+                <button
+                  type="button"
+                  disabled={audio.status !== 'ready'}
+                  onClick={() => audio.status === 'ready' && togglePreview(audio.url)}
+                  className="w-6 h-6 flex items-center justify-center rounded text-zinc-500 hover:text-zinc-200 disabled:opacity-30 shrink-0 transition-colors"
+                  title={isThisPlaying ? 'Pause' : 'Preview'}
+                >
+                  {audio.status === 'loading' ? (
+                    <svg className="animate-spin w-3 h-3" viewBox="0 0 24 24" fill="none">
+                      <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"/>
+                      <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"/>
+                    </svg>
+                  ) : audio.status === 'error' ? (
+                    <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="text-red-500"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+                  ) : isThisPlaying ? (
+                    <svg width="10" height="10" viewBox="0 0 24 24" fill="currentColor"><rect x="6" y="4" width="4" height="16"/><rect x="14" y="4" width="4" height="16"/></svg>
+                  ) : (
+                    <svg width="10" height="10" viewBox="0 0 24 24" fill="currentColor"><polygon points="5,3 19,12 5,21"/></svg>
+                  )}
+                </button>
+
+                {renamingIdx === i ? (
+                  <input
+                    ref={renameInputRef}
+                    value={renameValue}
+                    onChange={e => setRenameValue(e.target.value)}
+                    onBlur={() => commitRename(i)}
+                    onKeyDown={e => {
+                      if (e.key === 'Enter') commitRename(i);
+                      if (e.key === 'Escape') setRenamingIdx(null);
+                    }}
+                    className="flex-1 min-w-0 bg-zinc-800 border border-zinc-600 rounded px-1.5 py-0.5 text-xs text-white outline-none"
+                  />
+                ) : (
+                  <button
+                    type="button"
+                    disabled={audio.status !== 'ready'}
+                    onClick={() => audio.status === 'ready' && onSelectAudioTrack({ label: audio.label, url: audio.url, durationMs: audio.durationMs })}
+                    className="flex-1 flex items-center gap-2 text-left min-w-0 disabled:cursor-default"
+                  >
+                    <span className={`text-xs truncate ${isSelected ? 'text-emerald-400 font-medium' : 'text-zinc-300'}`}>
+                      {audio.status === 'ready' ? audio.label : `Track ${i + 1}`}
+                    </span>
+                    <span className="text-[10px] text-zinc-600 shrink-0">
+                      {audio.status === 'ready' ? `${(audio.durationMs / 1000).toFixed(1)}s` : audio.status === 'error' ? 'error' : '…'}
+                    </span>
+                  </button>
+                )}
+
+                {isSelected && renamingIdx !== i && <div className="w-1.5 h-1.5 rounded-full bg-emerald-400 shrink-0" />}
+
+                {audio.status === 'ready' && renamingIdx !== i && (
+                  <button
+                    type="button"
+                    onClick={() => startRename(i, audio.label)}
+                    className="w-5 h-5 flex items-center justify-center rounded text-zinc-700 hover:text-zinc-300 shrink-0 transition-colors"
+                    title="Rename"
+                  >
+                    <svg width="9" height="9" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                      <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/>
+                      <path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/>
+                    </svg>
+                  </button>
+                )}
+
+                {/* Only allow deleting custom tracks */}
+                {audio.status === 'ready' && audio.url.includes('track-custom-') && (
+                  <button
+                    type="button"
+                    onClick={() => onDeleteAudio(i)}
+                    className="w-5 h-5 flex items-center justify-center rounded text-zinc-700 hover:text-red-400 shrink-0 transition-colors"
+                    title="Remove"
+                  >
+                    <svg width="9" height="9" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
+                      <line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/>
+                    </svg>
+                  </button>
+                )}
+              </div>
+            );
+          })}
+
+          {/* Add track row */}
+          <div className="px-3 py-2 flex flex-col gap-1.5">
+            <div className="flex items-center gap-2">
+              <input
+                value={addUrl}
+                onChange={e => { setAddUrl(e.target.value); setAddError(''); }}
+                onKeyDown={e => e.key === 'Enter' && handleAddUrl()}
+                placeholder="Paste TikTok / Reel / X link…"
+                disabled={addLoading}
+                className="flex-1 min-w-0 bg-transparent text-[11px] text-zinc-400 placeholder-zinc-700 outline-none disabled:opacity-40"
+              />
+              <button
+                type="button"
+                onClick={handleAddUrl}
+                disabled={addLoading || !addUrl.trim()}
+                className="shrink-0 flex items-center justify-center w-6 h-6 rounded bg-zinc-800 hover:bg-zinc-700 disabled:opacity-30 transition-colors"
+                title="Download & add"
+              >
+                {addLoading ? (
+                  <svg className="animate-spin w-3 h-3 text-zinc-400" viewBox="0 0 24 24" fill="none">
+                    <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"/>
+                    <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"/>
+                  </svg>
+                ) : (
+                  <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" className="text-zinc-400">
+                    <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/>
+                  </svg>
+                )}
+              </button>
             </div>
-          ) : (
-            <select
-              disabled={audioLoading}
-              defaultValue=""
-              onChange={e => {
-                const track = CHARTS_AUDIO_TRACKS.find(t => t.url === e.target.value);
-                if (track) onSelectAudioTrack(track);
-                e.target.value = '';
-              }}
-              className="w-full bg-zinc-900 border border-zinc-700 rounded-md px-2.5 py-1.5 text-xs text-zinc-400 outline-none focus:border-zinc-500 disabled:opacity-40 cursor-pointer"
-            >
-              <option value="" disabled>
-                {audioLoading ? 'Fetching…' : 'Select audio track…'}
-              </option>
-              {CHARTS_AUDIO_TRACKS.map(t => (
-                <option key={t.url} value={t.url}>{t.label}</option>
-              ))}
-            </select>
-          )}
+            {addError && <p className="text-[10px] text-red-400">{addError}</p>}
+          </div>
         </div>
       </div>
     </div>

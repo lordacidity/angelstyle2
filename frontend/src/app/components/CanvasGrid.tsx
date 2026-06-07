@@ -8,6 +8,7 @@ import type { TikTokCanvasRef, MarketData, SparkPoint } from './TikTokCanvas';
 import { ChartsCanvas } from './ChartsCanvas';
 import type { ChartsCanvasRef, ChartsMarket } from './ChartsCanvas';
 import { ChartsInputCard } from './ChartsInputCard';
+import type { PreloadedAudio } from './ChartsInputCard';
 import CarouselCanvas, { CAROUSEL_PREVIEW_W } from './CarouselCanvas';
 import { CarouselSettingsPanel } from './CarouselSettingsPanel';
 import { defaultCarouselSettings } from './carouselTypes';
@@ -859,8 +860,9 @@ export function CanvasGrid({
   const [chartsRecordingStateMap, setChartsRecordingStateMap] = useState<Record<string, { isRecording: boolean; recProgress: number; recStatus: string }>>({});
 
   // Charts audio track per entry
-  const [chartsAudioMap,         setChartsAudioMap]         = useState<Record<string, { label: string; url: string; durationMs: number } | null>>({});
-  const [chartsAudioLoadingMap,  setChartsAudioLoadingMap]  = useState<Record<string, boolean>>({});
+  const [chartsAudioMap,    setChartsAudioMap]    = useState<Record<string, { label: string; url: string; durationMs: number } | null>>({});
+  // Shared library of available audio tracks (loaded once from disk)
+  const [preloadedAudios,   setPreloadedAudios]   = useState<PreloadedAudio[]>([]);
 
   // AI-suggested pairs panel
   const [aiGroups,          setAiGroups]          = useState<Array<{ a: ChartsMarket; b: ChartsMarket; reason: string }>>([]);
@@ -976,36 +978,53 @@ export function CanvasGrid({
     } catch { /* non-fatal */ }
   }, []);
 
-  const fetchChartsAudio = useCallback(async (entryId: string, track: { label: string; url: string }) => {
-    setChartsAudioLoadingMap(prev => ({ ...prev, [entryId]: true }));
-    try {
-      const dlRes = await fetch('/api/download', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ url: track.url }),
-      });
-      if (!dlRes.ok) throw new Error(await dlRes.text());
-      const dlData = await dlRes.json() as { play?: string; hdplay?: string; error?: string };
-      if (dlData.error) throw new Error(dlData.error);
-      const cdnUrl = dlData.hdplay || dlData.play || '';
-      if (!cdnUrl) throw new Error('No media URL returned');
-      const proxyUrl = `/api/proxy?url=${encodeURIComponent(cdnUrl)}&stream=1`;
-      // Measure duration by loading audio metadata
-      const durationMs = await new Promise<number>(resolve => {
-        const el = document.createElement('audio');
-        el.preload = 'metadata';
-        el.onloadedmetadata = () => resolve(el.duration * 1000);
-        el.onerror = () => resolve(0);
-        setTimeout(() => resolve(0), 15000);
-        el.src = proxyUrl;
-      });
-      setChartsAudioMap(prev => ({ ...prev, [entryId]: { label: track.label, url: proxyUrl, durationMs } }));
-    } catch {
-      setChartsAudioMap(prev => ({ ...prev, [entryId]: null }));
-    } finally {
-      setChartsAudioLoadingMap(prev => ({ ...prev, [entryId]: false }));
-    }
+  // Load audio library from disk on mount
+  useEffect(() => {
+    fetch('/api/charts/list-audio')
+      .then(r => r.json())
+      .then((tracks: Array<{ url: string; label: string; durationMs: number }>) => {
+        setPreloadedAudios(tracks.map(t => ({ status: 'ready' as const, ...t })));
+      })
+      .catch(() => {});
   }, []);
+
+  const handleAddAudio = useCallback((track: { label: string; url: string; durationMs: number }) => {
+    setPreloadedAudios(prev => [...prev, { status: 'ready' as const, ...track }]);
+  }, []);
+
+  const handleDeleteAudio = useCallback((idx: number) => {
+    setPreloadedAudios(prev => {
+      const audio = prev[idx];
+      if (audio?.status === 'ready' && audio.url.includes('track-custom-')) {
+        fetch(`/api/charts/delete-audio?url=${encodeURIComponent(audio.url)}`, { method: 'DELETE' }).catch(() => {});
+        // Clear any entry that had this track selected
+        setChartsAudioMap(cur => {
+          const next = { ...cur };
+          for (const id of Object.keys(next)) {
+            if (next[id]?.url === audio.url) next[id] = null;
+          }
+          return next;
+        });
+      }
+      return prev.filter((_, i) => i !== idx);
+    });
+  }, []);
+
+  const handleRenameAudio = useCallback((idx: number, label: string) => {
+    setPreloadedAudios(prev => prev.map((a, i) =>
+      i === idx && a.status === 'ready' ? { ...a, label } : a,
+    ));
+    // Keep selected track label in sync
+    setChartsAudioMap(cur => {
+      const audio = preloadedAudios[idx];
+      if (!audio || audio.status !== 'ready') return cur;
+      const next = { ...cur };
+      for (const id of Object.keys(next)) {
+        if (next[id]?.url === audio.url) next[id] = { ...next[id]!, label };
+      }
+      return next;
+    });
+  }, [preloadedAudios]);
 
   // Photo picker popup state
   interface PickerPhoto { url: string; thumbnail: string; title?: string }
@@ -1876,10 +1895,13 @@ export function CanvasGrid({
                     }}
                     onOpenPhotoPicker={(idx, query) => openPhotoPicker(`charts:${entry.id}:${idx}`, query)}
                     onSuggestPairs={() => openAiGroupsPanel(entry.id)}
+                    preloadedAudios={preloadedAudios}
                     audioTrack={chartsAudioMap[entry.id] ?? null}
-                    audioLoading={chartsAudioLoadingMap[entry.id] ?? false}
-                    onSelectAudioTrack={track => fetchChartsAudio(entry.id, track)}
+                    onSelectAudioTrack={track => setChartsAudioMap(prev => ({ ...prev, [entry.id]: track }))}
                     onClearAudioTrack={() => setChartsAudioMap(prev => ({ ...prev, [entry.id]: null }))}
+                    onAddAudio={handleAddAudio}
+                    onDeleteAudio={handleDeleteAudio}
+                    onRenameAudio={handleRenameAudio}
                   />
                 ) : (
                   <VideoInputCard
