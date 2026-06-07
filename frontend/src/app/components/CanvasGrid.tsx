@@ -2645,10 +2645,7 @@ export function CanvasGrid({
                       setChartsNameOverrideMap(prev => ({ ...prev, [aiGroupsEntryId]: [group.a.name, group.b.name] }));
                       setChartsTrendsLoadedMap(prev => ({ ...prev, [aiGroupsEntryId]: [false, false] }));
                       setChartsTrendsLoadingMap(prev => ({ ...prev, [aiGroupsEntryId]: [false, false] }));
-                      const pairEntry = entries.find(e => e.id === aiGroupsEntryId);
-                      if (!pairEntry?.caption.trim()) {
-                        onUpdateEntry(aiGroupsEntryId, 'caption', `${group.a.name} and ${group.b.name}'s Pauv over time:`);
-                      }
+                      onUpdateEntry(aiGroupsEntryId, 'caption', `${group.a.name} and ${group.b.name}'s Pauv over time:`);
                       setShowAiGroupsPanel(false);
                     }}
                     className="w-full flex items-center gap-3 px-3 py-2.5 rounded-lg hover:bg-zinc-800 transition-colors text-left"
