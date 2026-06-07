@@ -39,6 +39,10 @@ const BuilderGrid = lazy(() =>
   import('./components/BuilderGrid').then(m => ({ default: m.BuilderGrid }))
 );
 
+const AiPromptsSection = lazy(() =>
+  import('./components/AiPromptsSection').then(m => ({ default: m.AiPromptsSection }))
+);
+
 function SectionLoader() {
   return (
     <div className="flex items-center justify-center h-full min-h-[200px]">
@@ -395,6 +399,16 @@ export function StudioShell() {
           <ErrorBoundary>
             <GridSection>
               <BoardSection />
+            </GridSection>
+          </ErrorBoundary>
+        )}
+
+        {activeSection === 'prompts' && (
+          <ErrorBoundary>
+            <GridSection>
+              <Suspense fallback={<SectionLoader />}>
+                <AiPromptsSection />
+              </Suspense>
             </GridSection>
           </ErrorBoundary>
         )}

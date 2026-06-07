@@ -43,6 +43,10 @@ export const EMOJIS: EmojiDef[] = [
   { char: '🙄', unified: '1f644', name: 'Face with Rolling Eyes', keywords: ['eyeroll', 'whatever', 'annoyed', 'ugh'] },
   { char: '😱', unified: '1f631', name: 'Face Screaming in Fear', keywords: ['scream', 'shock', 'omg', 'scared'] },
   { char: '🤯', unified: '1f92f', name: 'Exploding Head', keywords: ['mind blown', 'shocked', 'wow', 'omg'] },
+  { char: '😲', unified: '1f632', name: 'Astonished Face', keywords: ['shocked', 'shock', 'astonished', 'gasp', 'surprised', 'wow'] },
+  { char: '🫤', unified: '1fae4', name: 'Face with Diagonal Mouth', keywords: ['side eye', 'side eyes', 'skeptical', 'unamused', 'meh', 'unsure'] },
+  { char: '😔', unified: '1f614', name: 'Pensive Face', keywords: ['disappointed', 'looking down', 'sad', 'dejected', 'down', 'pensive'] },
+  { char: '😩', unified: '1f629', name: 'Weary Face', keywords: ['moan', 'moaning', 'open mouth', 'weary', 'ugh', 'frustrated'] },
   { char: '🤔', unified: '1f914', name: 'Thinking Face', keywords: ['think', 'hmm', 'consider'] },
   { char: '🤡', unified: '1f921', name: 'Clown Face', keywords: ['clown', 'joke', 'fool', 'silly'] },
   { char: '💀', unified: '1f480', name: 'Skull', keywords: ['dead', 'dying', 'lol', 'skull'] },
@@ -70,6 +74,11 @@ export const EMOJIS: EmojiDef[] = [
   { char: '💎', unified: '1f48e', name: 'Gem Stone', keywords: ['diamond', 'hands', 'hold', 'gem', 'value'] },
   { char: '🐂', unified: '1f402', name: 'Ox', keywords: ['bull', 'bullish', 'market', 'up'] },
   { char: '🐻', unified: '1f43b', name: 'Bear', keywords: ['bear', 'bearish', 'market', 'down'] },
+  { char: '🗽', unified: '1f5fd', name: 'Statue of Liberty', keywords: ['statue of liberty', 'nyc', 'new york', 'america', 'usa', 'liberty'] },
+  { char: '🍎', unified: '1f34e', name: 'Red Apple', keywords: ['apple', 'fruit', 'red'] },
+  { char: '🧊', unified: '1f9ca', name: 'Ice', keywords: ['ice', 'ice cube', 'icecube', 'cold', 'frozen'] },
+  { char: '🍆', unified: '1f346', name: 'Eggplant', keywords: ['eggplant', 'aubergine', 'veggie'] },
+  { char: '💦', unified: '1f4a6', name: 'Sweat Droplets', keywords: ['squirt', 'splash', 'water', 'sweat', 'wet'] },
   { char: '⚡', unified: '26a1', name: 'High Voltage', keywords: ['lightning', 'energy', 'fast', 'power'] },
 ];
 

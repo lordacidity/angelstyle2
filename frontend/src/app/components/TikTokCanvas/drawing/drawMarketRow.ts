@@ -16,6 +16,9 @@ const COLOR_SEPARATOR       = '#1a1a1a'; // borderBottom in ArtistRow
 const SANS = 'Geist, system-ui, -apple-system, sans-serif';
 const MONO = '"Geist Mono", monospace';
 
+// Shared USD formatter — "1,234.56". Used for the static price and the rolling one.
+const fmtPrice = (v: number) => v.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+
 // DISPLAY_SCALE = 0.38 → multiply any UI px by (1/0.38) to get canvas px
 const S = 1 / 0.38;
 
@@ -98,12 +101,156 @@ export interface DrawMarketRowOptions {
   pauvLogoImgRef?: MutableRefObject<HTMLImageElement | null>;
   arrowOpacity?: number;
   triangleOnly?: boolean;
+  /** Mid-rotation price roll: render the price area as a quick vertical odometer
+   *  roll from `fromUsd` up to `toUsd` (progress 0→1 drives the slide). Purely a
+   *  visual flourish, set by the rotating CTA; ignored on the triangleOnly pass. */
+  priceRoll?: { fromUsd: number; toUsd: number; progress: number };
+  /** Skip the "pauv.com to trade" link line. Used by the rotating-CTA helper,
+   *  which cubes only the person card and draws the link statically itself. */
+  omitLink?: boolean;
+  /** Skip the large variant's white pill outline. The rotating-CTA helper draws
+   *  that frame statically (so it never rotates) and folds the content inside it. */
+  omitBox?: boolean;
   /** Inverts the bullish treatment: red text/arrow, down-pointing triangle, and
    *  a declining sparkline. Defaults to false (green/up). */
   down?: boolean;
   size?: 'large' | 'small' | 'bio';
   /** bio CTA only: appends a bold " Artists" / " Athletes" after "to trade". */
   ctaCategory?: 'artists' | 'athletes';
+}
+
+// "pauv.com to trade [Artists]" — light grey, centered under the CTA box. Drawn
+// for every size; `linkSize` lets the bio variant render it a little bigger. Cy
+// and rowH are recomputed from `size` so this can be called standalone (the
+// rotating-CTA helper keeps this line fixed while the person card cubes).
+export function drawCtaLink({
+  ctx, cx, cw, videoBottomY, size = 'large', ctaCategory, pauvLogoImgRef, linkSize,
+}: {
+  ctx: CanvasRenderingContext2D;
+  cx: number;
+  cw: number;
+  videoBottomY: number;
+  size?: 'large' | 'small' | 'bio';
+  ctaCategory?: 'artists' | 'athletes';
+  pauvLogoImgRef?: MutableRefObject<HTMLImageElement | null>;
+  linkSize?: number;
+}): void {
+  const isSmall = size === 'small';
+  const isBio   = size === 'bio';
+  const rowH    = isBio ? 0 : (isSmall ? MARKET_ROW_H_SMALL : MARKET_ROW_H);
+  const cy      = videoBottomY + (isBio ? CTA_TOP_GAP_BIO : isSmall ? CTA_TOP_GAP_SMALL : CTA_TOP_GAP);
+  const ls      = linkSize ?? (isBio ? BIO_LINK_SIZE : LINK_SIZE);
+
+  // One shared font (Inter at `ls`) for every segment — only the weight and
+  // colour change between them, so ".com", "to trade" and the category all sit
+  // on the SAME baseline at the SAME size, on one line.
+  const font = (weight: number) => `${weight} ${ls}px Inter, ${SANS}`;
+  const dotCom = '.com';
+  const txt    = 'to trade';
+  const catLabel = (isBio && ctaCategory) ? (ctaCategory === 'athletes' ? 'athletes' : 'artists') : '';
+  const catText  = catLabel ? ` ${catLabel}` : '';
+
+  ctx.font = font(600); const dotComW = ctx.measureText(dotCom).width;
+  ctx.font = font(400); const txtW    = ctx.measureText(txt).width;
+  ctx.font = font(700); const catW    = catText ? ctx.measureText(catText).width : 0;
+
+  const logoH   = ls;
+  const gap     = Math.round(4 * S); // space between ".com" and "to trade"
+  const logoGap = 0;
+  const baseY   = cy + rowH + LINK_GAP + ls;
+
+  let logo: HTMLImageElement | null = pauvLogoImgRef?.current ?? null;
+  if (!logo) {
+    logo = new Image();
+    logo.crossOrigin = 'anonymous';
+    logo.src = '/pauvlogo.png';
+    logo.onload = () => { if (pauvLogoImgRef) pauvLogoImgRef.current = logo; };
+  }
+
+  if (logo?.complete && logo.naturalWidth > 0) {
+    const aspect = logo.naturalWidth / logo.naturalHeight;
+    const dw = Math.round(logoH * aspect);
+    const totalW = dw + logoGap + dotComW + gap + txtW + catW;
+    const x = cx + cw / 2 - totalW / 2;
+    const logoDrop = Math.round(logoH * 0.23) + Math.round(0.8 * S);
+    ctx.drawImage(logo, x, baseY - logoH + logoDrop, dw, logoH);
+    ctx.font = font(600); ctx.fillStyle = COLOR_WHITE;
+    ctx.fillText(dotCom, x + dw + logoGap, baseY);
+    const tradeX = x + dw + logoGap + dotComW + gap;
+    ctx.font = font(400); ctx.fillStyle = COLOR_LINK;
+    ctx.fillText(txt, tradeX, baseY);
+    if (catText) {
+      ctx.font = font(700); ctx.fillStyle = COLOR_WHITE;
+      ctx.fillText(catText, tradeX + txtW, baseY);
+    }
+  } else {
+    const fbX = cx + cw / 2 - (txtW + catW) / 2;
+    ctx.font = font(400); ctx.fillStyle = COLOR_LINK;
+    ctx.fillText(txt, fbX, baseY);
+    if (catText) {
+      ctx.font = font(700); ctx.fillStyle = COLOR_WHITE;
+      ctx.fillText(catText, fbX + txtW, baseY);
+    }
+  }
+}
+
+// The tight content rectangle the rotating-CTA helper folds — hugging the
+// person card's photo + text (and, for the large variant, its white pill
+// outline) rather than the full-width row. Keeping the fold and its shading
+// inside this box is what makes the rotation read as "the card turning" instead
+// of a black band sweeping the whole width. Mirrors the layout math below so the
+// two never drift. (bio has no card to rotate, so it isn't handled here.)
+export function ctaContentBox(
+  cx: number, cw: number, videoBottomY: number, size: 'large' | 'small',
+): { x: number; w: number; top: number; h: number } {
+  const isSmall = size === 'small';
+  const rowH = isSmall ? MARKET_ROW_H_SMALL : MARKET_ROW_H;
+  const cy   = videoBottomY + (isSmall ? CTA_TOP_GAP_SMALL : CTA_TOP_GAP);
+  const midY = cy + rowH / 2;
+  if (isSmall) {
+    // Hug the photo + price cluster TIGHTLY so the words/numbers/photo sit right
+    // up against the border WITHOUT shrinking them. The layout is fixed: the
+    // avatar is left-aligned at PADDING_X, the price/change cluster is
+    // right-aligned at (cw - PADDING_X - SM_RIGHT_PAD), and the avatar (the
+    // tallest element) sets the height. Just a few px of breathing room all round.
+    const hpad  = Math.round(2 * S);
+    const vpad  = Math.round(2 * S);
+    const left  = cx + PADDING_X - hpad;
+    const right = cx + cw - PADDING_X - SM_RIGHT_PAD + hpad;
+    const bandH = SM_AVATAR_D + vpad * 2;
+    return { x: left, w: right - left, top: midY - bandH / 2, h: bandH };
+  }
+  // Large — exactly the white pill outline drawMarketRow strokes below.
+  const lgInset   = Math.round((cw - PADDING_X * 2) * 0.20 / 2);
+  const boxMargin = 80 + lgInset;
+  const byInset   = Math.round(9 * S);
+  return { x: cx + boxMargin, w: cw - boxMargin * 2, top: cy + byInset, h: rowH - byInset * 2 };
+}
+
+// The large CTA's white rounded-pill outline, drawn standalone. drawMarketRow
+// calls this for its border. Small/bio have no pill, so nothing is drawn.
+export function drawCtaBox({
+  ctx, cx, cw, videoBottomY, size,
+}: {
+  ctx: CanvasRenderingContext2D;
+  cx: number;
+  cw: number;
+  videoBottomY: number;
+  size: 'large' | 'small' | 'bio';
+}): void {
+  if (size !== 'large') return;
+  const { x: bx, w: bw, top: by, h: bh } = ctaContentBox(cx, cw, videoBottomY, 'large');
+  const br = Math.round(10 * S);
+  ctx.beginPath();
+  ctx.moveTo(bx + br, by);
+  ctx.arcTo(bx + bw, by,      bx + bw, by + bh, br);
+  ctx.arcTo(bx + bw, by + bh, bx,      by + bh, br);
+  ctx.arcTo(bx,      by + bh, bx,      by,      br);
+  ctx.arcTo(bx,      by,      bx + bw, by,      br);
+  ctx.closePath();
+  ctx.strokeStyle = 'rgba(255,255,255,0.28)'; // light, soft white
+  ctx.lineWidth = Math.max(1, Math.round(0.8 * S));
+  ctx.stroke();
 }
 
 // Filled price-change triangle. Points up (▲) by default; `down` flips it to a
@@ -127,6 +274,89 @@ function drawTriangle(
   }
   ctx.closePath();
   ctx.fill();
+}
+
+// Per-digit "odometer" roll — NumberFlow-style. Instead of sliding the whole
+// price as one block, each character is compared old→new and ONLY the columns
+// that actually change spin (old digit slides up and out of its own clip while
+// the new one rises into place from below). Unchanged digits, the comma and the
+// decimal point stay perfectly still, so a +$0.12 bump on "1,234.56 → 1,234.68"
+// rolls just the cents. progress 0→1. Purely cosmetic (driven by drawRotatingCTA).
+//
+// Characters are matched by right-offset, which decimal-aligns the two strings
+// for the common case where both have the same length (fixed 2-decimal currency).
+// When a carry lengthens the number (e.g. "999.91 → 1,000.03") the extra leading
+// characters have no old counterpart and simply rise in.
+function drawRollingPrice(
+  ctx: CanvasRenderingContext2D,
+  opts: {
+    fromText: string; toText: string; font: string; color: string;
+    baseline: number; capH: number; align: 'left' | 'right'; anchorX: number; progress: number;
+  },
+): void {
+  const { fromText, toText, font, color, baseline, capH, align, anchorX, progress } = opts;
+  ctx.font = font;
+  const toW   = ctx.measureText(toText).width;
+  // The number settles as `toText`, so lay the columns out from its left edge.
+  const startX = align === 'right' ? anchorX - toW : anchorX;
+
+  // Spacing between the digits a column rolls through. A gap (> 0) means you see
+  // clear air between consecutive numbers as they flash by, rather than them
+  // sitting stacked right on top of each other.
+  const gap  = capH * 0.5;
+  const step = capH + gap;     // vertical pitch of the stacked digits during a spin
+
+  const fromChars = [...fromText];
+  const toChars   = [...toText];
+
+  ctx.fillStyle = color;
+  let x = startX;
+  for (let i = 0; i < toChars.length; i++) {
+    const toCh = toChars[i]!;
+    const chW  = ctx.measureText(toCh).width;
+    // Counterpart in the old string at the same place value (right-aligned).
+    const rightOffset = toChars.length - 1 - i;
+    const fromIdx     = fromChars.length - 1 - rightOffset;
+    const fromCh      = fromIdx >= 0 ? fromChars[fromIdx]! : null;
+
+    if (fromCh === toCh) {
+      // Unchanged column (digit, comma or '.') — draw it static, no spin.
+      ctx.fillText(toCh, x, baseline);
+      x += chW;
+      continue;
+    }
+
+    // Build the vertical sequence of glyphs this column rolls through, in
+    // INCREASING order so the column spins UPWARD (the price is climbing). When
+    // both old and new are digits we pass through every number between them —
+    // "continuous" odometer — so 0→9 briefly flashes 1,2,…,8,9 while 0→1 just
+    // ticks once. Non-digit columns (or a newly-appeared leading digit) just
+    // do the simple old→new (or rise-in) slide.
+    let seq: string[];
+    if (fromCh != null && /[0-9]/.test(fromCh) && /[0-9]/.test(toCh)) {
+      const d0 = +fromCh, d1 = +toCh;
+      const delta = (d1 - d0 + 10) % 10;
+      seq = Array.from({ length: delta + 1 }, (_, k) => String((d0 + k) % 10));
+    } else {
+      seq = fromCh != null ? [fromCh, toCh] : [toCh];
+    }
+
+    const n = seq.length;
+    // Spin the whole stack within one slot's clip — a single digit tall plus a
+    // sliver of the gap above/below so the spacing between numbers is visible.
+    ctx.save();
+    ctx.beginPath();
+    ctx.rect(x - 1, baseline - capH - gap * 0.5, chW + 2, capH + gap + 2);
+    ctx.clip();
+    for (let k = 0; k < n; k++) {
+      // seq[k] sits in the slot when progress = k/(n-1); as progress grows the
+      // stack slides up and the later (larger) digits arrive from below.
+      const y = baseline + (k - progress * (n - 1)) * step;
+      ctx.fillText(seq[k]!, x, y);
+    }
+    ctx.restore();
+    x += chW;
+  }
 }
 
 // Avatar outline: a circle by default, or a rounded square when `cornerRadius`
@@ -174,8 +404,14 @@ export function drawMarketRow({
   ctx, cx, videoBottomY, cw,
   name, subtitle, photo_url, priceUsd, lifetimeChangePct, sparkline,
   avatarImgRef, lastPhotoUrlRef, pauvLogoImgRef, arrowOpacity = 1, triangleOnly = false, size = 'large',
-  ctaCategory, down = false,
+  ctaCategory, down = false, omitLink = false, omitBox = false, priceRoll,
 }: DrawMarketRowOptions): void {
+  // Shared with the rotating-CTA helper: when it cubes the person card it draws
+  // the "pauv.com to trade" line itself (statically), so the card sprites skip it.
+  const drawLinkInBio = (linkSize?: number) => {
+    if (omitLink) return;
+    drawCtaLink({ ctx, cx, cw, videoBottomY, size, ctaCategory, pauvLogoImgRef, linkSize });
+  };
   // Bullish by default; `down` flips the colour, arrow direction, and sparkline.
   const changeColor = down ? COLOR_NEGATIVE : COLOR_POSITIVE;
   const isSmall   = size === 'small';
@@ -230,78 +466,6 @@ export function drawMarketRow({
     return;
   }
 
-  // "Link in bio" — light grey, centered under the CTA box. Drawn for every size;
-  // `linkSize` lets the bio variant render it a little bigger.
-  const drawLinkInBio = (linkSize: number = LINK_SIZE) => {
-    // One shared font (Inter at `linkSize`) for every segment — only the weight
-    // and colour change between them, so ".com", "to trade" and the category all
-    // sit on the SAME baseline at the SAME size, on one line.
-    const font = (weight: number) => `${weight} ${linkSize}px Inter, ${SANS}`;
-    const dotCom = '.com';
-    const txt    = 'to trade';
-    // Bio CTA only: a bold talent category after "to trade", e.g.
-    // "pauv.com to trade Artists" / "…Athletes". Same font + size as "to trade",
-    // just bold and white. Leading space separates it from "trade".
-    const catLabel = (isBio && ctaCategory) ? (ctaCategory === 'athletes' ? 'athletes' : 'artists') : '';
-    const catText  = catLabel ? ` ${catLabel}` : '';
-
-    // Measure each segment in the exact weight it's drawn with, so the centering
-    // and the inter-segment offsets are pixel-accurate (no drift, no overlap).
-    ctx.font = font(600); const dotComW = ctx.measureText(dotCom).width;
-    ctx.font = font(400); const txtW    = ctx.measureText(txt).width;
-    ctx.font = font(700); const catW    = catText ? ctx.measureText(catText).width : 0;
-
-    const logoH   = linkSize;
-    const gap     = Math.round(4 * S); // space between ".com" and "to trade"
-    const logoGap = 0;
-    const baseY   = cy + rowH + LINK_GAP + linkSize;
-
-    // Draw Pauv logo if loaded
-    let logo: HTMLImageElement | null = pauvLogoImgRef?.current ?? null;
-    if (!logo) {
-      logo = new Image();
-      logo.crossOrigin = 'anonymous';
-      logo.src = '/pauvlogo.png';
-      logo.onload = () => { if (pauvLogoImgRef) pauvLogoImgRef.current = logo; };
-    }
-
-    if (logo?.complete && logo.naturalWidth > 0) {
-      const aspect = logo.naturalWidth / logo.naturalHeight;
-      const dw = Math.round(logoH * aspect);
-      // Whole line: [logo].com␣to trade␣Artists — centered as a single unit.
-      const totalW = dw + logoGap + dotComW + gap + txtW + catW;
-      const x = cx + cw / 2 - totalW / 2;
-      // pauvlogo.png is the "pauv" wordmark whose long "p" descender fills the
-      // bottom 23% of the image — the "auv" baseline sits at 0.77 of its height
-      // (measured from the asset). drawImage places the whole box, so to land
-      // the wordmark on the text baseline (descender hanging below, like real
-      // text) we drop it by that descender depth. It SCALES with logo height —
-      // the old fixed nudge left the bigger bio logo floating above the line.
-      // The extra ~2px drops it a hair below the baseline so the "p" clearly
-      // clears ".com to trade".
-      const logoDrop = Math.round(logoH * 0.23) + Math.round(0.8 * S);
-      ctx.drawImage(logo, x, baseY - logoH + logoDrop, dw, logoH);
-      ctx.font = font(600); ctx.fillStyle = COLOR_WHITE;
-      ctx.fillText(dotCom, x + dw + logoGap, baseY);
-      const tradeX = x + dw + logoGap + dotComW + gap;
-      ctx.font = font(400); ctx.fillStyle = COLOR_LINK;
-      ctx.fillText(txt, tradeX, baseY);
-      if (catText) {
-        ctx.font = font(700); ctx.fillStyle = COLOR_WHITE;
-        ctx.fillText(catText, tradeX + txtW, baseY);
-      }
-    } else {
-      // No logo yet — center "to trade" (+ category) on its own, same baseline.
-      const fbX = cx + cw / 2 - (txtW + catW) / 2;
-      ctx.font = font(400); ctx.fillStyle = COLOR_LINK;
-      ctx.fillText(txt, fbX, baseY);
-      if (catText) {
-        ctx.font = font(700); ctx.fillStyle = COLOR_WHITE;
-        ctx.fillText(catText, fbX + txtW, baseY);
-      }
-    }
-  };
-
   // Bio CTA: only the "pauv.com to trade" line — a little bigger, sitting right
   // under the video. No avatar, no market row.
   if (isBio) {
@@ -309,27 +473,10 @@ export function drawMarketRow({
     return;
   }
 
-  if (!isSmall) {
-    // Large: a white rounded-rectangle outline hugging the CTA content (small
-    // gets no box and no divider). Narrows with the content via lgInset so the
-    // box keeps its constant gap to the avatar/price and stays centered.
-    const boxMargin = 80 + lgInset;             // canvas px in from the side edges
-    const bx = cx + boxMargin;
-    const bw = cw - boxMargin * 2;
-    const byInset = Math.round(9 * S);
-    const by = cy + byInset;
-    const bh = rowH - byInset * 2;
-    const br = Math.round(10 * S);
-    ctx.beginPath();
-    ctx.moveTo(bx + br, by);
-    ctx.arcTo(bx + bw, by,      bx + bw, by + bh, br);
-    ctx.arcTo(bx + bw, by + bh, bx,      by + bh, br);
-    ctx.arcTo(bx,      by + bh, bx,      by,      br);
-    ctx.arcTo(bx,      by,      bx + bw, by,      br);
-    ctx.closePath();
-    ctx.strokeStyle = 'rgba(255,255,255,0.28)'; // light, soft white
-    ctx.lineWidth = Math.max(1, Math.round(0.8 * S));
-    ctx.stroke();
+  if (!isSmall && !omitBox) {
+    // Large: a white rounded-pill outline hugging the CTA content (small gets no
+    // box). drawCtaBox no-ops for small/bio.
+    drawCtaBox({ ctx, cx, cw, videoBottomY, size });
   }
 
   // ── Avatar ────────────────────────────────────────────────────────────────────
@@ -384,7 +531,7 @@ export function drawMarketRow({
 
   // ── Small variant — one line: name (left) · price + change (right) ───────────
   if (isSmall) {
-    const priceText  = priceUsd != null ? priceUsd.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) : '';
+    const priceText  = priceUsd != null ? fmtPrice(priceUsd) : '';
     const changeText = lifetimeChangePct != null ? `${Math.abs(lifetimeChangePct).toFixed(1)}%` : '';
 
     ctx.font = `600 ${SM_PRICE_SIZE}px ${MONO}`;
@@ -418,7 +565,17 @@ export function drawMarketRow({
     if (priceText) {
       ctx.font = `600 ${SM_PRICE_SIZE}px ${MONO}`;
       ctx.fillStyle = COLOR_WHITE;
-      ctx.fillText(priceText, priceX, Math.round(midY + SM_PRICE_SIZE * 0.35));
+      const smPriceBaseline = Math.round(midY + SM_PRICE_SIZE * 0.35);
+      if (priceRoll && priceRoll.progress > 0 && priceRoll.progress < 1) {
+        drawRollingPrice(ctx, {
+          fromText: fmtPrice(priceRoll.fromUsd), toText: fmtPrice(priceRoll.toUsd),
+          font: `600 ${SM_PRICE_SIZE}px ${MONO}`, color: COLOR_WHITE,
+          baseline: smPriceBaseline, capH: SM_PRICE_SIZE * 0.72, align: 'left', anchorX: priceX,
+          progress: priceRoll.progress,
+        });
+      } else {
+        ctx.fillText(priceText, priceX, smPriceBaseline);
+      }
     }
 
     // Change — green + up arrow by default, red + down arrow when `down`.
@@ -454,7 +611,7 @@ export function drawMarketRow({
 
   // ── Measure the price column first — needed both to place the sparkline and
   // to know how much horizontal room the name has. ────────────────────────────
-  const priceText   = priceUsd != null ? priceUsd.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) : '';
+  const priceText   = priceUsd != null ? fmtPrice(priceUsd) : '';
   const changeText  = lifetimeChangePct != null ? `${Math.abs(lifetimeChangePct).toFixed(1)}%` : '';
 
   ctx.font = `600 ${PRICE_SIZE}px ${MONO}`;
@@ -543,7 +700,16 @@ export function drawMarketRow({
   if (priceText) {
     ctx.font = `600 ${PRICE_SIZE}px ${MONO}`;
     ctx.fillStyle = COLOR_WHITE;
-    ctx.fillText(priceText, priceRightEdge - priceTextW, priceBaseline);
+    if (priceRoll && priceRoll.progress > 0 && priceRoll.progress < 1) {
+      drawRollingPrice(ctx, {
+        fromText: fmtPrice(priceRoll.fromUsd), toText: fmtPrice(priceRoll.toUsd),
+        font: `600 ${PRICE_SIZE}px ${MONO}`, color: COLOR_WHITE,
+        baseline: priceBaseline, capH: PRICE_CAP, align: 'right', anchorX: priceRightEdge,
+        progress: priceRoll.progress,
+      });
+    } else {
+      ctx.fillText(priceText, priceRightEdge - priceTextW, priceBaseline);
+    }
   }
 
   if (lifetimeChangePct != null) {

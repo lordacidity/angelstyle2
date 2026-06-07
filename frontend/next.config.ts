@@ -12,6 +12,10 @@ if (fs.existsSync(rootEnv)) process.loadEnvFile(rootEnv);
 
 const nextConfig: NextConfig = {
   poweredByHeader: false,
+  // The Aier (AI-maker) API routes shell out to bundled native binaries (ffmpeg/ffprobe/
+  // yt-dlp) and the fal client. Keep them external so Next/Turbopack doesn't try to bundle
+  // the binaries — they're resolved from node_modules at runtime instead.
+  serverExternalPackages: ['ffmpeg-static', 'ffprobe-static', 'youtube-dl-exec', '@fal-ai/client'],
   async headers() {
     return [
       {

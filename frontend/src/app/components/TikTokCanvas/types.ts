@@ -32,6 +32,9 @@ export interface TikTokCanvasProps {
   overlayVerified?: boolean;
   overlayCaption?: string;
   marketData?: MarketData | null;
+  /** Optional second CTA person. When present, the CTA card cube-rotates between
+   *  `marketData` and `marketDataAlt` every few seconds. */
+  marketDataAlt?: MarketData | null;
   onRecordingStateChange?: (state: RecordingState) => void;
 }
 

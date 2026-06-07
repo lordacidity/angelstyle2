@@ -764,13 +764,20 @@ export function CanvasGrid({
   const [socialCaptionMap, setSocialCaptionMap] = useState<Record<string, { text: string; loading: boolean; error: string | null; copied: boolean }>>({});
 
   const [marketMap,               setMarketMap]               = useState<Record<string, Talent | null>>({});
+  // Optional SECOND CTA person per entry. When set, the CTA card cube-rotates
+  // between the primary (marketMap) and this one every few seconds. Default is
+  // a single CTA (this stays null/undefined).
+  const [marketMap2,              setMarketMap2]              = useState<Record<string, Talent | null>>({});
   // CTA widget size per entry: 'large' (full row w/ industry + sparkline) or
-  // 'small' (one-line: photo, name, price, change). Defaults to 'small'.
+  // 'small' (one-line: photo, name, price, change). Defaults to 'small'. Shared
+  // by both rotating people — the cube needs both cards the same height.
   const [marketSizeMap,           setMarketSizeMap]           = useState<Record<string, 'large' | 'small' | 'bio'>>({});
   // Per-entry "down" toggle: when on, the change renders as a LOSS — red text,
   // a down arrow, and a declining sparkline — instead of the default bullish
-  // green/up treatment.
+  // green/up treatment. `marketDownMap2` is the same for the second person, so
+  // each rotating person can independently show a gain or a loss.
   const [marketDownMap,           setMarketDownMap]           = useState<Record<string, boolean>>({});
+  const [marketDownMap2,          setMarketDownMap2]          = useState<Record<string, boolean>>({});
   // Global toggle controlling whether the market widget is drawn on the
   // canvas (and exported). Persisted in localStorage so flipping it off
   // applies to every video — current, future, after Clear, after refresh —
@@ -831,6 +838,8 @@ export function CanvasGrid({
     priceUsd: string; lifetimeChangePct: string;
   }
   const [marketOverrideMap, setMarketOverrideMap] = useState<Record<string, MarketOverride>>({});
+  // Display-field overrides for the SECOND CTA person (mirrors marketOverrideMap).
+  const [marketOverrideMap2, setMarketOverrideMap2] = useState<Record<string, MarketOverride>>({});
 
   // Per-entry sparkline data (fetched when a market is selected)
   const [sparklineMap, setSparklineMap] = useState<Record<string, SparkPoint[]>>({});
@@ -890,51 +899,13 @@ export function CanvasGrid({
     } catch { /* non-fatal */ }
   }, []);
 
-  // Photo picker popup state
-  interface PickerPhoto { url: string; thumbnail: string; title?: string }
-  const [photoPickerEntryId,  setPhotoPickerEntryId]  = useState<string | null>(null);
-  const [photoPickerPhotos,   setPhotoPickerPhotos]   = useState<PickerPhoto[]>([]);
-  const [photoPickerLoading,  setPhotoPickerLoading]  = useState(false);
-  const [photoPickerQuery,    setPhotoPickerQuery]    = useState('');
-  const [photoPickerOffset,   setPhotoPickerOffset]   = useState(0);
-  const [photoPickerMore,     setPhotoPickerMore]     = useState(false);
-
-  const searchPickerPhotos = useCallback(async (query: string, offset: number, append: boolean) => {
-    if (!query.trim()) return;
-    setPhotoPickerLoading(true);
-    setPhotoPickerQuery(query);
-    try {
-      const r = await fetch('/api/ai/photos/search', {
-        method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ query, count: 9, offset }),
-      });
-      const fresh = await r.json() as PickerPhoto[];
-      setPhotoPickerPhotos(prev => append ? [...prev, ...fresh] : fresh);
-      setPhotoPickerOffset(offset + fresh.length);
-    } finally { setPhotoPickerLoading(false); }
-  }, []);
-
-  const openPhotoPicker = useCallback((entryId: string, initialQuery: string) => {
-    setPhotoPickerEntryId(entryId);
-    setPhotoPickerPhotos([]);
-    setPhotoPickerOffset(0);
-    setPhotoPickerQuery(initialQuery);
-    if (initialQuery.trim()) {
-      setPhotoPickerLoading(true);
-      fetch('/api/ai/photos/search', {
-        method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ query: initialQuery, count: 9, offset: 0 }),
-      }).then(r => r.json()).then((photos: PickerPhoto[]) => {
-        setPhotoPickerPhotos(photos);
-        setPhotoPickerOffset(photos.length);
-      }).finally(() => setPhotoPickerLoading(false));
-    }
-  }, []);
-
   // Person picker popup state — lets the user manually override whoever the CTA
   // auto-pick chose. The full Pauv roster is fetched once and cached, then
   // filtered client-side by name / ticker / industry.
   const [personPickerEntryId, setPersonPickerEntryId] = useState<string | null>(null);
+  // Which CTA slot the picker is choosing for: 1 = primary person, 2 = the
+  // optional second (rotating) person.
+  const [personPickerSlot,    setPersonPickerSlot]    = useState<1 | 2>(1);
   const [personPickerQuery,   setPersonPickerQuery]   = useState('');
   const [allTalents,          setAllTalents]          = useState<Talent[] | null>(null);
   const [talentsLoading,      setTalentsLoading]      = useState(false);
@@ -958,12 +929,20 @@ export function CanvasGrid({
       .finally(() => setTalentsLoading(false));
   }, []);
 
-  const openPersonPicker = useCallback((entryId: string) => {
+  const openPersonPicker = useCallback((entryId: string, slot: 1 | 2 = 1) => {
     setPersonPickerEntryId(entryId);
+    setPersonPickerSlot(slot);
     setPersonPickerQuery('');
     // Refetch when we have no cached roster (first open, or a prior failure).
     if (!allTalents && !talentsLoading) loadTalents();
   }, [allTalents, talentsLoading, loadTalents]);
+
+  // Remove the second (rotating) CTA person for an entry — back to a single CTA.
+  const removeSecondPerson = useCallback((entryId: string) => {
+    setMarketMap2(prev => { const next = { ...prev }; delete next[entryId]; return next; });
+    setMarketOverrideMap2(prev => { const next = { ...prev }; delete next[entryId]; return next; });
+    setMarketDownMap2(prev => { const next = { ...prev }; delete next[entryId]; return next; });
+  }, []);
 
   // Drop a chosen talent into the Market widget for an entry — mirrors exactly
   // what the auto-pick does so a manual override behaves identically. Then, if a
@@ -971,6 +950,23 @@ export function CanvasGrid({
   // the newly-chosen talent (the auto-pick does this on generate; a manual swap
   // must do it too, or the caption keeps naming the old person).
   const applyTalent = useCallback((entryId: string, t: Talent) => {
+    // Second (rotating) person: just drop it into slot 2 + seed its overrides.
+    // No caption rewrite — the post caption's CTA paragraph names the PRIMARY
+    // person, which slot 2 doesn't change.
+    if (personPickerSlot === 2) {
+      setMarketMap2(prev => ({ ...prev, [entryId]: t }));
+      setMarketOverrideMap2(prev => ({
+        ...prev,
+        [entryId]: {
+          name: t.name, industry: t.industry ?? '',
+          photo_url: t.photo_url,
+          priceUsd: t.price.usd?.toFixed(2) ?? '',
+          lifetimeChangePct: syntheticPctForTicker(t.ticker).toFixed(1),
+        },
+      }));
+      setPersonPickerEntryId(null);
+      return;
+    }
     setMarketMap(prev => ({ ...prev, [entryId]: t }));
     setSparklineMap(prev => ({ ...prev, [entryId]: prev[entryId] ?? generateFallbackSparkline(t.ticker) }));
     fetchSparkline(entryId, t.ticker);
@@ -1013,7 +1009,7 @@ export function CanvasGrid({
         .finally(() => setSocialCaptionMap(prev => (prev[entryId] ? { ...prev, [entryId]: { ...prev[entryId]!, loading: false } } : prev)));
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [fetchSparkline, socialCaptionMap, brand.displayName, brand.handle]);
+  }, [fetchSparkline, socialCaptionMap, brand.displayName, brand.handle, personPickerSlot]);
 
   // "Clear" (top-right) — wipe every per-entry working state and reset the rows
   // to a single fresh entry, dropping the user back to the empty insert form
@@ -1028,9 +1024,12 @@ export function CanvasGrid({
     setBlockTopPctMap({});
     setSocialCaptionMap({});
     setMarketMap({});
+    setMarketMap2({});
     setMarketSizeMap({});
     setMarketDownMap({});
+    setMarketDownMap2({});
     setMarketOverrideMap({});
+    setMarketOverrideMap2({});
     setSparklineMap({});
     // NOTE: marketCardCollapsedMap, postCaptionCollapsedMap, AND
     // marketWidgetVisible intentionally NOT reset — those are UI / global
@@ -1040,38 +1039,17 @@ export function CanvasGrid({
     onClearAll();
   }, [onClearAll]);
 
-  // Build a MarketData object merging the selected talent with any user overrides
-  const getMarketData = useCallback((entryId: string): MarketData | null => {
-    // Respect the global visibility toggle — hiding the widget keeps the
-    // selected talent + overrides intact for an easy re-enable.
-    if (!marketWidgetVisible) return null;
-    const sizePref = marketSizeMap[entryId] ?? 'small';
-    // Bio CTA needs no talent — it's just the "pauv.com to trade" line under the
-    // video — so return a minimal record (no name / price / sparkline).
-    //
-    // ctaCategory derives from the display name first, not the brand.category
-    // toggle: each machine's brand kit ("Pauv Athletes" / "Pauv Artists" / etc.)
-    // should drive the wording the bio renders. The toggle is the fallback for
-    // display names that don't mention either word (e.g. just "Pauv").
-    const bioCategory: 'artists' | 'athletes' =
-      /athletes/i.test(brand.displayName) ? 'athletes' :
-      /artists/i.test(brand.displayName)  ? 'artists'  :
-      brand.category;
-    if (sizePref === 'bio') {
-      return { name: '', ticker: '', photo_url: null, industry: null, subcategory: null, sparkline: null, size: 'bio', ctaCategory: bioCategory, price: { usd: null, lifetimeChangePct: null } };
-    }
-    const sel = marketMap[entryId];
-    if (!sel) return null;
-    const ov = marketOverrideMap[entryId];
-    // MARKETING: always use the synthetic ticker-seeded fallback so every
-    // market gets a healthy-looking upward green curve. Real API data is
-    // unreliable for our purpose — some markets return a single point or all
-    // identical values, which renders as a flat line and undercuts the buy
-    // signal we want the post to send.
+  // Merge a selected talent with its (optional) user overrides into a MarketData.
+  // Shared by the primary CTA and the second rotating one. MARKETING: always use
+  // the synthetic ticker-seeded sparkline + % so every market shows a healthy
+  // upward green curve — real API data is unreliable (single points / flat lines)
+  // and undercuts the buy signal.
+  function buildMarketData(
+    sel: Talent, ov: MarketOverride | undefined,
+    size: 'large' | 'small' | 'bio', down: boolean,
+  ): MarketData {
     const spark = generateFallbackSparkline(sel.ticker);
     const syntheticPct = syntheticPctForTicker(sel.ticker);
-    const size = marketSizeMap[entryId] ?? 'small';
-    const down = marketDownMap[entryId] ?? false;
     if (!ov) {
       return {
         ...(sel as unknown as MarketData),
@@ -1097,7 +1075,48 @@ export function CanvasGrid({
         lifetimeChangePct: !isNaN(pctNum ?? NaN) ? pctNum  : syntheticPct,
       },
     };
+  }
+
+  // Build a MarketData object merging the selected talent with any user overrides
+  const getMarketData = useCallback((entryId: string): MarketData | null => {
+    // Respect the global visibility toggle — hiding the widget keeps the
+    // selected talent + overrides intact for an easy re-enable.
+    if (!marketWidgetVisible) return null;
+    const sizePref = marketSizeMap[entryId] ?? 'small';
+    // Bio CTA needs no talent — it's just the "pauv.com to trade" line under the
+    // video — so return a minimal record (no name / price / sparkline).
+    //
+    // ctaCategory derives from the display name first, not the brand.category
+    // toggle: each machine's brand kit ("Pauv Athletes" / "Pauv Artists" / etc.)
+    // should drive the wording the bio renders. The toggle is the fallback for
+    // display names that don't mention either word (e.g. just "Pauv").
+    const bioCategory: 'artists' | 'athletes' =
+      /athletes/i.test(brand.displayName) ? 'athletes' :
+      /artists/i.test(brand.displayName)  ? 'artists'  :
+      brand.category;
+    if (sizePref === 'bio') {
+      return { name: '', ticker: '', photo_url: null, industry: null, subcategory: null, sparkline: null, size: 'bio', ctaCategory: bioCategory, price: { usd: null, lifetimeChangePct: null } };
+    }
+    const sel = marketMap[entryId];
+    if (!sel) return null;
+    const size = sizePref;
+    const down = marketDownMap[entryId] ?? false;
+    return buildMarketData(sel, marketOverrideMap[entryId], size, down);
   }, [marketMap, marketOverrideMap, sparklineMap, marketSizeMap, marketDownMap, marketWidgetVisible, brand.category, brand.displayName]);
+
+  // The OPTIONAL second CTA person — non-null only when the user has added a
+  // second person (and the primary exists, and size isn't 'bio', which has no
+  // person card to rotate). Drives the cube rotation in TikTokCanvas.
+  const getMarketDataAlt = useCallback((entryId: string): MarketData | null => {
+    if (!marketWidgetVisible) return null;
+    const sizePref = marketSizeMap[entryId] ?? 'small';
+    if (sizePref === 'bio') return null;            // bio has no card to rotate
+    if (!marketMap[entryId]) return null;           // need a primary to rotate from
+    const sel2 = marketMap2[entryId];
+    if (!sel2) return null;
+    const down = marketDownMap2[entryId] ?? false;
+    return buildMarketData(sel2, marketOverrideMap2[entryId], sizePref, down);
+  }, [marketMap, marketMap2, marketOverrideMap2, marketSizeMap, marketDownMap2, marketWidgetVisible]);
 
 
   const generateSocialCaption = useCallback(async (entry: VideoEntry): Promise<string | undefined> => {
@@ -1106,6 +1125,13 @@ export function CanvasGrid({
       [entry.id]: { text: prev[entry.id]?.text ?? '', loading: true, error: null, copied: false },
     }));
     try {
+      // Industry the caption should pull trending news from — derived from the
+      // brand the same way the bio CTA category is (displayName wins, else the
+      // brand's own category). Maps to the AI-Prompts athlete/artist tagging.
+      const promptCategory: 'athlete' | 'artist' =
+        /athletes/i.test(brand.displayName) ? 'athlete' :
+        /artists/i.test(brand.displayName)  ? 'artist'  :
+        brand.category === 'athletes'       ? 'athlete' : 'artist';
       const r = await fetch('/api/ai/social-caption', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -1115,6 +1141,7 @@ export function CanvasGrid({
           context:    entry.context || undefined,
           videoTitle: entry.data?.title || undefined,
           author:     entry.data?.author?.nickname || undefined,
+          category:   promptCategory,
         }),
       });
       if (!r.ok) throw new Error(await r.text());
@@ -1130,7 +1157,7 @@ export function CanvasGrid({
         [entry.id]: { text: generated, loading: true, error: null, copied: false },
       }));
 
-      let finalText = generated;
+      const finalText = generated;
       try {
         const cr = await fetch('/api/ai/pick-cta', {
           method: 'POST',
@@ -1148,7 +1175,7 @@ export function CanvasGrid({
           }),
         });
         if (cr.ok) {
-          const cta = await cr.json() as { talent?: Talent; ctaParagraph?: string; matchType?: string; error?: string };
+          const cta = await cr.json() as { talent?: Talent; talent2?: Talent | null; ctaParagraph?: string; matchType?: string; error?: string };
           if (cta.talent && !cta.error) {
             const t = cta.talent;
             // If the user hit Clear on this entry's market while we were
@@ -1175,15 +1202,25 @@ export function CanvasGrid({
                   lifetimeChangePct: syntheticPctForTicker(t.ticker).toFixed(1),
                 },
               }));
-            }
-            // Swap the caption's closing paragraph for the CTA naming this talent.
-            if (cta.ctaParagraph) {
-              const paras = generated.split(/\n\s*\n/);
-              if (paras.length > 0) {
-                paras[paras.length - 1] = cta.ctaParagraph;
-                finalText = paras.join('\n\n');
+              // Second (rotating) person — the CTA always features two. Drop it
+              // into slot 2 + seed its overrides exactly like a manual slot-2 pick.
+              const t2 = cta.talent2;
+              if (t2) {
+                setMarketMap2(prev => ({ ...prev, [entry.id]: t2 }));
+                setMarketOverrideMap2(prev => ({
+                  ...prev,
+                  [entry.id]: {
+                    name: t2.name, industry: t2.industry ?? '',
+                    photo_url: t2.photo_url,
+                    priceUsd: t2.price.usd?.toFixed(2) ?? '',
+                    lifetimeChangePct: syntheticPctForTicker(t2.ticker).toFixed(1),
+                  },
+                }));
               }
             }
+            // NOTE: we intentionally do NOT swap in cta.ctaParagraph anymore —
+            // the caption is now a pure industry/news write-up with no Pauv CTA.
+            // pick-cta is still called only to auto-fill the Market widget talent.
           }
         }
       } catch { /* CTA pick is best-effort — keep the caption as written */ }
@@ -1700,6 +1737,7 @@ export function CanvasGrid({
                           overlayVerified={true}
                           overlayCaption={entry.caption}
                           marketData={entry.mode === 'twitter' ? getMarketData(entry.id) : null}
+                          marketDataAlt={entry.mode === 'twitter' ? getMarketDataAlt(entry.id) : null}
                           onRecordingStateChange={state =>
                             setRecordingStateMap(prev => ({ ...prev, [entry.id]: state }))
                           }
@@ -1772,21 +1810,7 @@ export function CanvasGrid({
                               <span className="text-[11px] font-semibold text-zinc-300 uppercase tracking-wider">Market</span>
                             </div>
                             <div className="flex items-center gap-2">
-                              {/* "Down" toggle — flips the change to a loss: red text,
-                                  down arrow, declining sparkline (default is green/up). */}
-                              {(() => {
-                                const isDown = marketDownMap[entry.id] ?? false;
-                                return (
-                                  <button
-                                    onClick={() => setMarketDownMap(prev => ({ ...prev, [entry.id]: !(prev[entry.id] ?? false) }))}
-                                    title={isDown ? 'Showing a loss — red, down arrow, declining chart. Click for a gain.' : 'Show this as a loss — red, down arrow, declining chart'}
-                                    className={`px-2 py-0.5 rounded-md border text-[10px] font-medium transition-colors ${isDown ? 'border-[#FF4B4B] text-[#FF4B4B] bg-[#FF4B4B]/10' : 'border-zinc-800 text-zinc-500 hover:text-zinc-300 hover:border-zinc-600'}`}
-                                  >
-                                    Down
-                                  </button>
-                                );
-                              })()}
-                              {/* CTA size toggle — Large (full row) vs Small (one line). */}
+                              {/* CTA size toggle — Large (full row) vs Small (one line) vs Bio (link only). */}
                               <div className="flex items-center rounded-md border border-zinc-800 overflow-hidden">
                                 {(['large', 'small', 'bio'] as const).map(sz => {
                                   const active = (marketSizeMap[entry.id] ?? 'small') === sz;
@@ -1802,15 +1826,6 @@ export function CanvasGrid({
                                   );
                                 })}
                               </div>
-                              {/* Change person — manually override the auto-picked talent. */}
-                              <button
-                                onClick={() => openPersonPicker(entry.id)}
-                                title="Pick a different person from the Pauv roster"
-                                className="flex items-center gap-1 px-2 py-0.5 rounded-md border border-zinc-800 text-[10px] font-medium text-zinc-400 hover:text-zinc-100 hover:border-zinc-600 transition-colors"
-                              >
-                                <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="m22 8-3 3-1.5-1.5"/></svg>
-                                Change
-                              </button>
                               {/* Visibility toggle — global preference. Hides the market widget
                                   from the canvas/export across ALL videos, persists through
                                   Clear + refresh. Picked talent + overrides stay intact for
@@ -1824,133 +1839,94 @@ export function CanvasGrid({
                               </button>
                             </div>
                           </div>
-                          {!collapsed && (marketSizeMap[entry.id] ?? 'small') !== 'bio' && (selected ? (() => {
-                            const ov = marketOverrideMap[entry.id] ?? {
-                              name: selected.name, industry: selected.industry ?? '',
-                              photo_url: selected.photo_url,
-                              priceUsd: selected.price.usd?.toFixed(2) ?? '',
-                              lifetimeChangePct: selected.price.lifetimeChangePct?.toFixed(2) ?? '',
-                            };
-                            const setOv = (patch: Partial<typeof ov>) =>
-                              setMarketOverrideMap(prev => ({ ...prev, [entry.id]: { ...ov, ...patch } }));
-                            const displayPhoto = ov.photo_url;
-                            const pctVal = parseFloat(ov.lifetimeChangePct);
-                            // Bullish (green/up) by default; the "Down" toggle flips it to a
-                            // loss (red text, down arrow, declining chart).
-                            const isDown = marketDownMap[entry.id] ?? false;
-                            const isPos = !isDown;
-                            const changeColor = isDown ? '#FF4B4B' : '#04df9d';
-                            return (
-                              <div>
-                                {/* Preview row (ArtistRow style, read from overrides) */}
-                                <div className="flex items-center" style={(marketSizeMap[entry.id] ?? 'small') === 'large'
-                                  ? { gap: 7, padding: '9px 12px', border: '1px solid rgba(255,255,255,0.28)', borderRadius: 10, margin: '8px 12px' }
-                                  : { gap: 12, padding: '10px 12px', borderBottom: '1px solid #1a1a1a' }}>
-                                  {/* Avatar — click to open photo picker */}
+                          {!collapsed && ((marketSizeMap[entry.id] ?? 'small') === 'bio' ? (
+                            <div className="px-3 py-4 text-center">
+                              <p className="text-[11px] text-zinc-600">Bio CTA — just the <span className="text-zinc-400 font-medium">pauv.com to trade</span> line. No person needed.</p>
+                            </div>
+                          ) : (() => {
+                            const selected2 = marketMap2[entry.id] ?? null;
+                            // One compact row per person — name + Down toggle + Change
+                            // (and Remove on the second). The on-canvas render IS the
+                            // preview, so there's no mock row / edit fields here.
+                            const renderPersonRow = (
+                              slot: 1 | 2,
+                              talent: Talent | null,
+                              displayName: string | undefined,
+                              isDown: boolean,
+                              onToggleDown: () => void,
+                              removable: boolean,
+                            ) => (
+                              <div className="flex items-center justify-between gap-2 px-2.5 py-1.5 rounded-md bg-zinc-900 border border-zinc-800">
+                                <div className="flex items-center gap-2 min-w-0">
+                                  <span className="text-[9px] font-semibold text-zinc-600 uppercase tracking-wider shrink-0">{slot === 1 ? 'P1' : 'P2'}</span>
+                                  {talent
+                                    ? <span className="text-xs text-zinc-200 truncate">{displayName || talent.name}</span>
+                                    : <span className="text-xs text-zinc-600 italic truncate">No one picked yet</span>}
+                                </div>
+                                <div className="flex items-center gap-1.5 shrink-0">
+                                  {talent && (
+                                    <button
+                                      onClick={onToggleDown}
+                                      title={isDown ? 'Showing a loss — red, down arrow, declining chart. Click for a gain.' : 'Show this person as a loss — red, down arrow, declining chart'}
+                                      className={`px-2 py-0.5 rounded-md border text-[10px] font-medium transition-colors ${isDown ? 'border-[#FF4B4B] text-[#FF4B4B] bg-[#FF4B4B]/10' : 'border-zinc-800 text-zinc-500 hover:text-zinc-300 hover:border-zinc-600'}`}
+                                    >
+                                      Down
+                                    </button>
+                                  )}
                                   <button
-                                    onClick={() => openPhotoPicker(entry.id, ov.name || selected.name)}
-                                    title="Change photo"
-                                    className="relative shrink-0 flex items-center justify-center rounded-full overflow-hidden group"
-                                    style={{ width: 28, height: 28, background: '#1e1e1e', border: '1px solid #2a2a2a' }}
+                                    onClick={() => openPersonPicker(entry.id, slot)}
+                                    title="Pick a person from the Pauv roster"
+                                    className="flex items-center gap-1 px-2 py-0.5 rounded-md border border-zinc-800 text-[10px] font-medium text-zinc-400 hover:text-zinc-100 hover:border-zinc-600 transition-colors"
                                   >
-                                    <span style={{ fontSize: 10, color: '#52525b', fontWeight: 600 }}>
-                                      {(ov.name || selected.name).split(' ').map((w: string) => w[0]).filter(Boolean).slice(0, 2).join('').toUpperCase()}
-                                    </span>
-                                    {displayPhoto && (
-                                      // eslint-disable-next-line @next/next/no-img-element
-                                      <img src={displayPhoto} alt="" className="absolute inset-0 w-full h-full object-cover" />
-                                    )}
-                                    <div className="absolute inset-0 bg-black/50 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center">
-                                      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="2" strokeLinecap="round"><path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z"/><circle cx="12" cy="13" r="4"/></svg>
-                                    </div>
+                                    <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="m22 8-3 3-1.5-1.5"/></svg>
+                                    Change
                                   </button>
-                                  {/* Name + Industry — left-aligned, stacked tight on top of each other */}
-                                  <div className="flex-1 min-w-0 flex flex-col" style={{ gap: 7 }}>
-                                    <span style={{ fontSize: 10, fontWeight: 600, color: '#fff', letterSpacing: '-0.015em', lineHeight: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{ov.name || '—'}</span>
-                                    <span style={{ fontSize: 8, color: '#71717a', lineHeight: 1 }}>{ov.industry || '—'}</span>
-                                  </div>
-                                  {/* Sparkline — left of price+change */}
-                                  {(() => {
-                                    const rawSpark = generateFallbackSparkline(selected.ticker);
-                                    // When "Down", reverse the net-rising series so it declines.
-                                    const spark = isDown ? [...rawSpark].reverse() : rawSpark;
-                                    const sparkColor = changeColor;
-                                    const W = 96, H = 32, pad = 2;
-                                    const paddedSpark = spark.length === 1 ? [spark[0]!, spark[0]!] : spark;
-                                    const vals = paddedSpark.map(p => p.value);
-                                    const vMin = Math.min(...vals), vMax = Math.max(...vals);
-                                    const vRange = vMax - vMin;
-                                    const pts = paddedSpark.map((p, i) => ({
-                                      x: (i / (paddedSpark.length - 1)) * W,
-                                      y: vRange === 0 ? H / 2 : pad + (1 - (p.value - vMin) / vRange) * (H - pad * 2),
-                                    }));
-                                    let d = `M${pts[0]!.x.toFixed(1)},${pts[0]!.y.toFixed(1)}`;
-                                    for (let i = 1; i < pts.length - 1; i++) {
-                                      const mx = ((pts[i]!.x + pts[i+1]!.x) / 2).toFixed(1);
-                                      const my = ((pts[i]!.y + pts[i+1]!.y) / 2).toFixed(1);
-                                      d += ` Q${pts[i]!.x.toFixed(1)},${pts[i]!.y.toFixed(1)} ${mx},${my}`;
-                                    }
-                                    d += ` L${pts[pts.length-1]!.x.toFixed(1)},${pts[pts.length-1]!.y.toFixed(1)}`;
-                                    return (
-                                      <div style={{ width: 80, height: 30, flexShrink: 0, marginRight: 9 }}>
-                                        <svg viewBox={`0 0 ${W} ${H}`} preserveAspectRatio="none" width="100%" height="100%" style={{ display: 'block', overflow: 'visible' }}>
-                                          <path d={d} fill="none" stroke={sparkColor} strokeWidth="1.5" strokeLinecap="square" strokeLinejoin="miter" vectorEffect="non-scaling-stroke" />
-                                        </svg>
-                                      </div>
-                                    );
-                                  })()}
-                                  {/* Price + Change — far right */}
-                                  <div className="flex flex-col items-end shrink-0" style={{ gap: 8 }}>
-                                    <span style={{ fontFamily: 'var(--font-geist-mono)', fontSize: 11, fontWeight: 600, color: '#fff', lineHeight: 1 }}>
-                                      {ov.priceUsd !== '' && !isNaN(parseFloat(ov.priceUsd))
-                                        ? parseFloat(ov.priceUsd).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
-                                        : '—'}
-                                    </span>
-                                    <div className="flex items-center" style={{ gap: 3, lineHeight: 1 }}>
-                                      {ov.lifetimeChangePct !== '' && !isNaN(pctVal) && (
-                                        <>
-                                          <svg viewBox="0 0 24 18" width="8" height="8" style={{ color: changeColor, flexShrink: 0, transform: `rotate(${isPos ? '0' : '180'}deg)`, marginTop: 1 }}>
-                                            <path fill="currentColor" d="m12 0 10.392 14.25H1.608z" />
-                                          </svg>
-                                          <span style={{ fontFamily: 'var(--font-geist-mono)', fontSize: 8, fontWeight: 500, color: changeColor, lineHeight: 1 }}>
-                                            {Math.abs(pctVal).toFixed(1)}%
-                                          </span>
-                                        </>
-                                      )}
-                                    </div>
-                                  </div>
-                                </div>
-                                {/* "link in bio to trade" — light grey, centered under the CTA */}
-                                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 4, color: 'rgba(255,255,255,0.5)', fontSize: 10, paddingBottom: 8, marginTop: -4 }}>
-                                  {/* eslint-disable-next-line @next/next/no-img-element */}
-                                  <img src="/pauvlogo.png" alt="" style={{ height: 10, width: 'auto', marginTop: 2.5, marginRight: -4 }} />
-                                  <span style={{ fontFamily: 'Inter, sans-serif', fontWeight: 600, color: '#fff', fontSize: 10 }}>.com</span>
-                                  <span style={{ fontFamily: 'Inter, sans-serif', fontWeight: 400, color: 'rgba(255,255,255,0.5)', fontSize: 10 }}>to trade</span>
-                                </div>
-                                {/* Edit fields */}
-                                <div className="px-3 py-2.5 flex flex-col gap-2">
-                                  <div className="flex gap-2">
-                                    <input value={ov.name} onChange={e => setOv({ name: e.target.value })}
-                                      placeholder="Name" className="flex-1 min-w-0 bg-zinc-900 border border-zinc-800 rounded px-2 py-1 text-xs text-zinc-200 placeholder-zinc-600 outline-none focus:border-zinc-600" />
-                                    <input value={ov.industry} onChange={e => setOv({ industry: e.target.value })}
-                                      placeholder="Industry" className="flex-1 min-w-0 bg-zinc-900 border border-zinc-800 rounded px-2 py-1 text-xs text-zinc-200 placeholder-zinc-600 outline-none focus:border-zinc-600" />
-                                  </div>
-                                  <div className="flex gap-2">
-                                    <input value={ov.priceUsd} onChange={e => setOv({ priceUsd: e.target.value })}
-                                      placeholder="Price (USD)" type="number" step="0.01"
-                                      className="flex-1 min-w-0 bg-zinc-900 border border-zinc-800 rounded px-2 py-1 text-xs text-zinc-200 placeholder-zinc-600 outline-none focus:border-zinc-600 font-mono" />
-                                    <input value={ov.lifetimeChangePct} onChange={e => setOv({ lifetimeChangePct: e.target.value })}
-                                      placeholder="Change %" type="number" step="0.01"
-                                      className="flex-1 min-w-0 bg-zinc-900 border border-zinc-800 rounded px-2 py-1 text-xs text-zinc-200 placeholder-zinc-600 outline-none focus:border-zinc-600 font-mono" />
-                                  </div>
+                                  {removable && (
+                                    <button
+                                      onClick={() => removeSecondPerson(entry.id)}
+                                      title="Remove the second person (back to a single CTA)"
+                                      className="flex items-center justify-center w-6 h-6 rounded-md border border-zinc-800 text-zinc-500 hover:text-[#FF4B4B] hover:border-[#FF4B4B]/60 transition-colors"
+                                    >
+                                      <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+                                    </button>
+                                  )}
                                 </div>
                               </div>
                             );
-                          })() : (
-                            <div className="px-3 py-6 text-center">
-                              <p className="text-[11px] text-zinc-600">No market picked yet — use <span className="text-zinc-400 font-medium">Change</span> to choose one.</p>
-                            </div>
-                          ))}
+                            return (
+                              <div className="px-3 py-2.5 flex flex-col gap-2">
+                                {renderPersonRow(
+                                  1, selected, marketOverrideMap[entry.id]?.name,
+                                  marketDownMap[entry.id] ?? false,
+                                  () => setMarketDownMap(prev => ({ ...prev, [entry.id]: !(prev[entry.id] ?? false) })),
+                                  false,
+                                )}
+                                {selected2
+                                  ? renderPersonRow(
+                                      2, selected2, marketOverrideMap2[entry.id]?.name,
+                                      marketDownMap2[entry.id] ?? false,
+                                      () => setMarketDownMap2(prev => ({ ...prev, [entry.id]: !(prev[entry.id] ?? false) })),
+                                      true,
+                                    )
+                                  : selected && (
+                                      <button
+                                        onClick={() => openPersonPicker(entry.id, 2)}
+                                        title="Add a second person — the CTA card cube-rotates between the two every 8 seconds"
+                                        className="flex items-center justify-center gap-1.5 px-2 py-1.5 rounded-md border border-dashed border-zinc-700 text-[11px] font-medium text-zinc-500 hover:text-zinc-200 hover:border-zinc-500 transition-colors"
+                                      >
+                                        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+                                        Add another person
+                                      </button>
+                                    )}
+                                {selected2 && (
+                                  <p className="text-[10px] text-zinc-600 text-center">Cube-rotating between both every 8s.</p>
+                                )}
+                                {!selected && (
+                                  <p className="text-[10px] text-zinc-600 text-center">No one picked yet — use <span className="text-zinc-400 font-medium">Change</span> to choose, or let the caption generator auto-pick.</p>
+                                )}
+                              </div>
+                            );
+                          })())}
                         </div>
                       );
                     })()}
@@ -2086,77 +2062,6 @@ export function CanvasGrid({
           onExport={(fileName) => { if (selectedEntry) onEntryExported?.(selectedEntry.id, fileName); }}
         />
       </div>
-
-      {/* ── Photo picker modal — opens when user clicks an avatar in the market selector ── */}
-      {photoPickerEntryId && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70" onClick={() => setPhotoPickerEntryId(null)}>
-          <div className="bg-zinc-900 border border-zinc-700 rounded-xl w-[520px] max-h-[80vh] flex flex-col shadow-2xl" onClick={e => e.stopPropagation()}>
-            {/* Header */}
-            <div className="flex items-center justify-between px-4 py-3 border-b border-zinc-800 shrink-0">
-              <span className="text-sm font-semibold text-zinc-100">Pick a photo</span>
-              <button onClick={() => setPhotoPickerEntryId(null)} className="text-zinc-500 hover:text-zinc-200 transition-colors">
-                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
-              </button>
-            </div>
-            {/* Search */}
-            <div className="flex gap-2 px-4 py-3 border-b border-zinc-800 shrink-0">
-              <input
-                value={photoPickerQuery}
-                onChange={e => setPhotoPickerQuery(e.target.value)}
-                onKeyDown={e => { if (e.key === 'Enter') searchPickerPhotos(photoPickerQuery, 0, false); }}
-                placeholder="Search photos…"
-                className="flex-1 bg-zinc-800 border border-zinc-700 rounded-md px-3 py-1.5 text-sm text-zinc-200 placeholder-zinc-500 outline-none focus:border-zinc-500"
-              />
-              <button
-                onClick={() => searchPickerPhotos(photoPickerQuery, 0, false)}
-                disabled={!photoPickerQuery.trim() || photoPickerLoading}
-                className="px-3 py-1.5 rounded-md bg-zinc-800 border border-zinc-700 text-zinc-300 hover:text-white hover:border-zinc-500 disabled:opacity-40 text-sm transition-colors"
-              >Search</button>
-            </div>
-            {/* Grid */}
-            <div className="overflow-y-auto flex-1 p-4">
-              {photoPickerLoading && (
-                <div className="flex flex-wrap gap-3">
-                  {[1,2,3,4,5,6].map(i => <div key={i} className="rounded-lg bg-zinc-800 animate-pulse" style={{ width: 140, height: 140 }} />)}
-                </div>
-              )}
-              {!photoPickerLoading && photoPickerPhotos.length === 0 && (
-                <p className="text-sm text-zinc-600 text-center py-8">Search for a photo above.</p>
-              )}
-              {!photoPickerLoading && photoPickerPhotos.length > 0 && (
-                <div className="flex flex-wrap gap-3">
-                  {photoPickerPhotos.map(p => (
-                    <button
-                      key={p.url}
-                      onClick={() => {
-                        setMarketOverrideMap(prev => ({
-                          ...prev,
-                          [photoPickerEntryId!]: { ...(prev[photoPickerEntryId!] ?? { name: '', industry: '', photo_url: null, priceUsd: '', lifetimeChangePct: '' }), photo_url: p.url },
-                        }));
-                        setPhotoPickerEntryId(null);
-                      }}
-                      className="rounded-lg overflow-hidden border-2 border-transparent hover:border-white transition-colors"
-                      style={{ width: 140, height: 140 }}
-                    >
-                      {/* eslint-disable-next-line @next/next/no-img-element */}
-                      <img src={p.thumbnail} alt={p.title ?? ''} className="w-full h-full object-cover" onError={e => { (e.currentTarget as HTMLImageElement).style.display = 'none'; }} />
-                    </button>
-                  ))}
-                  <button
-                    onClick={() => { setPhotoPickerMore(true); searchPickerPhotos(photoPickerQuery, photoPickerOffset, true).finally(() => setPhotoPickerMore(false)); }}
-                    disabled={photoPickerMore}
-                    className="flex flex-col items-center justify-center gap-1 rounded-lg border-2 border-dashed border-zinc-700 hover:border-zinc-500 hover:bg-zinc-800 disabled:opacity-40 transition-colors text-zinc-600 hover:text-zinc-300"
-                    style={{ width: 140, height: 140 }}
-                  >
-                    <span className="text-2xl leading-none">+</span>
-                    <span className="text-xs">More</span>
-                  </button>
-                </div>
-              )}
-            </div>
-          </div>
-        </div>
-      )}
 
       {/* Person picker — manually choose which Pauv talent the CTA features. */}
       {personPickerEntryId && (() => {

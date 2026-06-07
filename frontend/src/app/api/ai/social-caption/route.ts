@@ -1,10 +1,109 @@
-// Generate a long-form social media caption for a video, in the
-// conversational two-paragraph style the user posts in. Pulls signal from the
-// fetched video's title/author plus the user's typed caption and context.
+// Generate a long-form social caption for a sports/music page, driven by what's
+// trending in the industry RIGHT NOW rather than by the specific video.
+//
+// Flow:
+//   1. Know the industry — athlete (sports) or artist (music) — from `category`.
+//   2. From the AI Prompts topics for that industry (the ones that have a
+//      generated "recent news" overview), pick the single topic that best fits
+//      this video's caption + context.
+//   3. Take that topic's recent-news brief + the video context and write the
+//      caption around the news, only lightly touching the video itself.
+//
+// Hard rules: never mention Pauv (or trading / tickers / CTAs), and never exceed
+// 2000 characters.
 
 import { NextRequest, NextResponse } from 'next/server';
 import { z } from 'zod';
-import { deepseekChat } from '@/lib/deepseek';
+import { deepseekChat, parseJson, type ChatMessage } from '@/lib/deepseek';
+import { listPrompts, type AiPromptRow, type PromptCategory } from '@/lib/ai-prompts-db';
+
+export const runtime = 'nodejs';
+
+const MAX_CHARS = 2000;
+const MIN_CHARS = 1750;
+
+// Force the caption into exactly two paragraphs. If the model emits more, the
+// first stays the lead and the rest merge into the second; one paragraph is left
+// as-is (nothing sensible to split on).
+function normalizeToTwoParagraphs(s: string): string {
+  const paras = s.split(/\n\s*\n/).map((p) => p.trim()).filter(Boolean);
+  if (paras.length <= 1) return paras[0] ?? s.trim();
+  if (paras.length === 2) return paras.join('\n\n');
+  return [paras[0], paras.slice(1).join(' ')].join('\n\n');
+}
+
+// Trim an over-long caption to <= max, preferring the last sentence end that's
+// still at or above `min` (so we stay inside the band), then a word boundary,
+// so we never ship a half-word or drop below the floor unnecessarily.
+function clampRange(s: string, min: number, max: number): string {
+  if (s.length <= max) return s;
+  const cut = s.slice(0, max);
+  let bestStop = -1;
+  for (const st of ['. ', '! ', '? ', '\n']) {
+    const i = cut.lastIndexOf(st);
+    if (i >= 0 && i + 1 >= min && i + 1 > bestStop) bestStop = i + 1;
+  }
+  if (bestStop >= min) return cut.slice(0, bestStop).trim();
+  const lastSpace = cut.lastIndexOf(' ');
+  return (lastSpace >= min ? cut.slice(0, lastSpace) : cut).trim();
+}
+
+function cleanText(raw: string): string {
+  return (raw ?? '')
+    .trim()
+    .replace(/^["']|["']$/g, '')
+    // Model is told "no markdown" but sometimes emits **bold** / *italics*.
+    .replace(/\*\*(.+?)\*\*/g, '$1')
+    .replace(/\*(.+?)\*/g, '$1')
+    .replace(/\*/g, '')
+    // Safety net for em-dashes the model is told to avoid.
+    .replace(/\s*—\s*/g, ', ')
+    .replace(/, ,/g, ',')
+    .trim();
+}
+
+// Ask the model which single topic best fits the video. Returns an index into
+// `candidates`; defaults to 0 on any ambiguity so we always have a topic.
+async function pickTopicIndex(
+  candidates: AiPromptRow[],
+  video: { caption?: string; context?: string; videoTitle?: string },
+): Promise<number> {
+  if (candidates.length === 1) return 0;
+  const list = candidates
+    .map((c, i) => `${i}. ${c.topic}: ${c.overview}`)
+    .join('\n');
+  const raw = await deepseekChat(
+    [
+      {
+        role: 'system',
+        content:
+          'You match a video to the SINGLE most relevant topic from a numbered list. ' +
+          'Judge by which topic\'s subject best fits the video. If none fit well, pick the closest. ' +
+          'Return only JSON: {"index": <number>}.',
+      },
+      {
+        role: 'user',
+        content:
+          [
+            video.caption ? `Video caption: ${video.caption}` : '',
+            video.context ? `Context: ${video.context}` : '',
+            video.videoTitle ? `Video title: ${video.videoTitle}` : '',
+            '',
+            'Topics:',
+            list,
+            '',
+            'Return {"index": N} for the best-matching topic.',
+          ].filter(Boolean).join('\n'),
+      },
+    ],
+    { json: true, temperature: 0.2 },
+  );
+  try {
+    const idx = Number(parseJson<{ index?: number }>(raw).index);
+    if (Number.isInteger(idx) && idx >= 0 && idx < candidates.length) return idx;
+  } catch { /* fall through to default */ }
+  return 0;
+}
 
 export async function POST(req: NextRequest) {
   try {
@@ -14,65 +113,98 @@ export async function POST(req: NextRequest) {
       context:    z.string().optional(),  // user's free-form context
       videoTitle: z.string().optional(),  // pulled from VideoData.title
       author:     z.string().optional(),  // pulled from VideoData.author.nickname
+      category:   z.enum(['athlete', 'artist']).optional(),  // industry, from the brand
     });
     const parsed = Schema.safeParse(await req.json().catch(() => ({})));
     if (!parsed.success) return NextResponse.json({ error: 'invalid body' }, { status: 400 });
-    const { url, caption, context, videoTitle, author } = parsed.data;
+    const { caption, context, videoTitle, author, category } = parsed.data;
 
     if (!caption?.trim() && !context?.trim() && !videoTitle?.trim()) {
       return NextResponse.json({ error: 'need at least caption, context, or fetched video title' }, { status: 400 });
     }
 
-    const raw = await deepseekChat(
-      [
-        {
-          role: 'system',
-          content:
-            'You write long-form social media captions for Pauv\'s entertainment / sports / music posts on Instagram + TikTok.\n\n' +
-            'About Pauv (this is the brand, used in the closing CTA):\n' +
-            'Pauv is a marketplace for trading on public sentiment, where human potential becomes an asset class. Every athlete, artist, creator, and cultural figure has a "ticker" that moves with how people actually feel about them right now: the wins, the controversies, the viral moments, the comebacks. Buying = a real position on whether their cultural value rises. It\'s not fantasy, not a poll, not stan voting, it\'s a real market priced by real conviction. The bridge: every post we publish is itself a live read on sentiment, which is exactly what users trade on at Pauv.\n\n' +
-            'HARD BANS (these override everything else, no exceptions):\n' +
-            '- NEVER use the words "stock", "stock market", "invest", "investing", "investor", or "investment" anywhere in the caption, especially when describing or talking about Pauv. Use "trade", "trading", "take a position", "ticker", "sentiment", "cultural value", "conviction", or "marketplace" instead.\n' +
-            '- NEVER use em-dashes (the "—" character). Use a comma, a period, or the word "and" instead.\n\n' +
-            'Style rules, match these EXACTLY:\n' +
-            '- THREE paragraphs total. First two are the caption (~250-350 words combined). Third is a CTA (~50-80 words).\n' +
-            '- Conversational, in-the-know voice. Like a fan who actually pays attention, not a brand account.\n' +
-            '- Open with a vivid scene-setter or a moment-in-time hook (e.g. "Kanye really disappeared, let the noise build up…", "That pose battle with Kai Cenat, Kevin Hart, and Druski was pure chaos…").\n' +
-            '- Pack in real proper nouns, dates, album/song titles, places, references, whatever specifics belong here. These work as SEO keywords.\n' +
-            '- Build out context naturally: what happened, why it matters, why it hit, what made it land. No bullet points, no headers.\n' +
-            '- Second paragraph should pull back and add the bigger-picture take. Why it went viral, what it represents, what the cultural moment is.\n' +
-            '- THIRD paragraph = the CTA. Bridge naturally from the moment in the post, to why sentiment is what actually moves cultural value, to Pauv letting you trade on exactly that. Reference the specific person/category from the post (e.g. "this is the kind of moment that moves [Name]\'s ticker", "athletes like this", "artists in their comeback arc"). End with a concrete next step: "link in bio to trade on [Name]" or "check the link in bio to take a position on athletes / artists / creators on the rise." Vary the phrasing, don\'t reuse the same exact closing line every time.\n' +
-            '- The CTA should feel earned, like the natural conclusion of the caption, not an ad bolted on. Lean on the framing of sentiment-as-asset and conviction-as-position. People buying a ticker = they\'re right about the moment before everyone else catches on.\n' +
-            '- No hashtags. No emojis. No "follow for more."\n' +
-            '- Don\'t invent facts. If something is uncertain, write around it rather than fabricate dates/numbers.\n' +
-            '- Plain text. No markdown. Separate paragraphs with a single blank line.\n\n' +
-            'Return ONLY the caption text (all three paragraphs), no preamble, no quotes around it, no labels like "Paragraph 1".',
-        },
-        {
-          role: 'user',
-          content: [
-            videoTitle ? `Video title from source: ${videoTitle}` : '',
-            author     ? `Source creator: ${author}` : '',
-            url        ? `Source URL: ${url}` : '',
-            caption    ? `On-card caption (the line embedded in the video itself): ${caption}` : '',
-            context    ? `Additional context from the editor: ${context}` : '',
-            '',
-            'Write the caption now.',
-          ].filter(Boolean).join('\n'),
-        },
-      ],
-      { temperature: 0.8 },
+    // ── 1 + 2. Candidate topics for this industry that actually have news ──────
+    let prompts: AiPromptRow[] = [];
+    try {
+      prompts = await listPrompts();
+    } catch (e) {
+      // If the prompts store is unreachable, we can still write from context — just
+      // without a trending-news backbone.
+      console.error('[social-caption] listPrompts failed', e);
+    }
+    const cat: PromptCategory | undefined = category;
+    const candidates = prompts.filter(
+      (p) => p.topic.trim() && p.overview.trim() && (!cat || p.category === cat),
     );
 
-    const text = (raw ?? '')
-      .trim()
-      .replace(/^["']|["']$/g, '')
-      // Safety net: model is told never to use em-dashes, but strip any that
-      // slip through. " — " becomes ", "; a bare "—" becomes ", " too.
-      .replace(/\s*—\s*/g, ', ')
-      .replace(/, ,/g, ',');
+    let chosen: AiPromptRow | null = null;
+    if (candidates.length > 0) {
+      const idx = await pickTopicIndex(candidates, { caption, context, videoTitle });
+      chosen = candidates[idx] ?? candidates[0];
+    }
+
+    // ── 3. Write the caption around the news brief ────────────────────────────
+    const industry = category === 'artist' ? 'music / artists' : category === 'athlete' ? 'sports / athletes' : '';
+
+    const sys =
+      'You write a long-form social caption for a sports OR music page on Instagram and TikTok. ' +
+      'The caption is about the wider INDUSTRY and what is trending in the news RIGHT NOW, not a play-by-play of the specific video.\n\n' +
+      'You may be given the industry, a TOPIC plus a short brief of the most recent / most talked-about news for that topic, and some light context about a video being posted.\n\n' +
+      'Write the caption so it:\n' +
+      '- Leads with and centers on the recent NEWS / trend in the brief, the biggest current story in that corner of the industry.\n' +
+      '- Uses the real names, teams, events, dates and specifics from the brief (these double as SEO keywords). Do not invent facts beyond the brief and the context.\n' +
+      '- Treats the video as a small hook at most. Spend the bulk of the caption on the industry storyline, why it matters, and the bigger picture, NOT on describing the video.\n' +
+      '- Sounds like an in-the-know fan who follows the space, not a brand account.\n\n' +
+      'HARD RULES (these override everything else):\n' +
+      '- STRUCTURE: EXACTLY two paragraphs, separated by a single blank line. Not one, not three.\n' +
+      `- LENGTH: the entire caption must be between ${MIN_CHARS} and ${MAX_CHARS} characters. Aim for about 1900. Never go below ${MIN_CHARS} and never exceed ${MAX_CHARS}. Add more depth on the news and the bigger picture to reach the length, do not pad with filler.\n` +
+      '- NEVER mention Pauv, trading, tickers, markets, stocks, buying, investing, "take a position", "link in bio", or any call to action. This is purely a news / industry caption.\n' +
+      '- No hashtags, no emojis, no markdown, no em-dashes (use commas or periods), no labels, no preamble.\n' +
+      '- Plain text only.\n' +
+      'Return ONLY the caption text.';
+
+    const user = [
+      industry ? `Industry: ${industry}` : '',
+      chosen ? `Topic: ${chosen.topic}` : '',
+      chosen ? `Recent trending news brief: ${chosen.overview}` : 'No specific news brief is available; write a current, industry-flavored caption from the context below.',
+      videoTitle ? `Video title (light background only): ${videoTitle}` : '',
+      author     ? `Source creator (light background only): ${author}` : '',
+      caption    ? `On-card caption (light background only): ${caption}` : '',
+      context    ? `Editor context (light background only): ${context}` : '',
+      '',
+      `Write the caption now, centered on the industry news above. EXACTLY two paragraphs, between ${MIN_CHARS} and ${MAX_CHARS} characters.`,
+    ].filter(Boolean).join('\n');
+
+    // Generate, then nudge once if it lands short — the model tends to under-run
+    // the floor more than it over-runs the ceiling. Over-runs get clamped; the
+    // best in-or-near-band candidate wins. Keep attempts small to stay snappy.
+    const messages: ChatMessage[] = [
+      { role: 'system', content: sys },
+      { role: 'user', content: user },
+    ];
+    let best = '';
+    for (let attempt = 0; attempt < 3; attempt++) {
+      const raw = await deepseekChat(messages, { temperature: 0.7 });
+      let candidate = normalizeToTwoParagraphs(cleanText(raw));
+      if (candidate.length > MAX_CHARS) candidate = normalizeToTwoParagraphs(clampRange(candidate, MIN_CHARS, MAX_CHARS));
+      if (candidate.length >= MIN_CHARS && candidate.length <= MAX_CHARS) { best = candidate; break; }
+      // Hold onto the longest candidate that still fits under the ceiling.
+      if (candidate.length <= MAX_CHARS && candidate.length > best.length) best = candidate;
+      // Too short — ask it to expand, keeping structure and rules.
+      messages.push({ role: 'assistant' as const, content: candidate });
+      messages.push({
+        role: 'user' as const,
+        content:
+          `That draft was ${candidate.length} characters, under the ${MIN_CHARS} minimum. ` +
+          `Expand it to between ${MIN_CHARS} and ${MAX_CHARS} characters, keeping EXACTLY two paragraphs and every rule. ` +
+          'Add more substance on the news and the bigger-picture industry angle, no filler. Return ONLY the caption.',
+      });
+    }
+
+    const text = best;
     if (!text) return NextResponse.json({ error: 'empty response' }, { status: 502 });
-    return NextResponse.json({ caption: text });
+    // `topic` is returned for visibility/debugging; the client only needs caption.
+    return NextResponse.json({ caption: text, topic: chosen?.topic ?? null });
   } catch (err) {
     return NextResponse.json({ error: String(err) }, { status: 500 });
   }

@@ -12,6 +12,7 @@ import {
 } from '../constants';
 import { drawHeaderOnContext } from '../drawing/drawHeader';
 import { drawMarketRow } from '../drawing/drawMarketRow';
+import { drawRotatingCTA } from '../drawing/drawRotatingCTA';
 import { countCaptionLines, countPauvCaptionLines, CAPTION_EMOJI_SIZE } from '../drawing/countCaptionLines';
 import { wrapRichText, drawRichLine, preloadEmojiImages } from '@/lib/emoji';
 import type { Box, MarketData } from '../types';
@@ -57,8 +58,11 @@ export interface UseRecordingConfig {
   overlayHandle: string;
   overlayVerified: boolean;
   marketData?: MarketData | null;
+  marketDataAlt?: MarketData | null;
   marketAvatarImgRef?: MutableRefObject<HTMLImageElement | null>;
   marketAvatarUrlRef?: MutableRefObject<string | null>;
+  marketAvatarImgRef2?: MutableRefObject<HTMLImageElement | null>;
+  marketAvatarUrlRef2?: MutableRefObject<string | null>;
   pauvLogoImgRef?: MutableRefObject<HTMLImageElement | null>;
 }
 
@@ -86,7 +90,8 @@ export function useRecording(config: UseRecordingConfig) {
       trimStartRef, trimEndRef, includeEditRef,
       logoImgRef, verifiedImgRef,
       overlayCaption, overlayLogoSrc, overlayDisplayName, overlayHandle, overlayVerified,
-      marketData, marketAvatarImgRef, marketAvatarUrlRef, pauvLogoImgRef,
+      marketData, marketDataAlt, marketAvatarImgRef, marketAvatarUrlRef,
+      marketAvatarImgRef2, marketAvatarUrlRef2, pauvLogoImgRef,
     } = configRef.current;
 
     const canvas = canvasRef.current;
@@ -417,6 +422,17 @@ export function useRecording(config: UseRecordingConfig) {
         });
       }
 
+      // Second CTA person's avatar (rotation only) — same CORS pre-load.
+      if (marketDataAlt?.photo_url && marketAvatarImgRef2) {
+        await new Promise<void>((resolve) => {
+          const img = new Image();
+          img.crossOrigin = 'anonymous';
+          img.onload = () => { marketAvatarImgRef2.current = img; resolve(); };
+          img.onerror = () => resolve();
+          img.src = marketDataAlt.photo_url!;
+        });
+      }
+
       // Pre-load Pauv logo for the "link in bio" line.
       if (pauvLogoImgRef) {
         await new Promise<void>((resolve) => {
@@ -557,7 +573,10 @@ export function useRecording(config: UseRecordingConfig) {
         const headerY = Math.max(0, cropBoxFrozen.y - headerHeight + 4);
         // @ts-ignore
         drawHeaderOnContext({ ctx: spriteCtx as any, cx: 0, cy: headerY, cw: CANVAS_W, ...headerDrawOpts });
-        if (marketData && marketAvatarImgRef && marketAvatarUrlRef) {
+        // A single CTA is static, so bake it into the sprite (only the arrow
+        // animates, drawn per-frame below). With a SECOND person the card
+        // cube-rotates, so it can't be baked — drawn fresh each frame instead.
+        if (marketData && !marketDataAlt && marketAvatarImgRef && marketAvatarUrlRef) {
           drawMarketRow({
             ctx: spriteCtx as any,
             cx: 0,
@@ -661,28 +680,43 @@ export function useRecording(config: UseRecordingConfig) {
           // ordering bit-for-bit.
           offCtx.drawImage(overlaySprite, 0, 0);
 
-          // Per-frame CTA animation: numbers flip every few seconds + triangle pulses.
-          if (!isClean && marketData && marketAvatarImgRef && marketAvatarUrlRef) {
+          // Per-frame CTA animation.
+          if (!isClean && marketData) {
             const pulse = 0.2 + 0.8 * (0.5 + 0.5 * Math.sin(2 * Math.PI * targetTs * 0.75));
-            drawMarketRow({
-              ctx: offCtx as any,
-              cx: 0,
-              videoBottomY: cropBoxFrozen.y + cropBoxFrozen.h,
-              cw: CANVAS_W,
-              name: marketData.name,
-              subtitle: marketData.industry ?? marketData.subcategory ?? '—',
-              photo_url: marketData.photo_url,
-              priceUsd: marketData.price.usd,
-              lifetimeChangePct: marketData.price.lifetimeChangePct,
-              sparkline: marketData.sparkline,
-              size: marketData.size ?? 'large',
-              ctaCategory: marketData.ctaCategory,
-              down: marketData.down,
-              avatarImgRef: marketAvatarImgRef,
-              lastPhotoUrlRef: marketAvatarUrlRef,
-              triangleOnly: true,
-              arrowOpacity: pulse,
-            });
+            if (marketDataAlt && marketAvatarImgRef && marketAvatarUrlRef && marketAvatarImgRef2 && marketAvatarUrlRef2) {
+              // Two people — cube-rotate the whole card per-frame (nothing baked).
+              drawRotatingCTA({
+                ctx: offCtx as any,
+                cx: 0, cw: CANVAS_W,
+                videoBottomY: cropBoxFrozen.y + cropBoxFrozen.h,
+                t: targetTs, arrowOpacity: pulse,
+                primary: marketData, alt: marketDataAlt,
+                primaryRefs: { img: marketAvatarImgRef, url: marketAvatarUrlRef },
+                altRefs: { img: marketAvatarImgRef2, url: marketAvatarUrlRef2 },
+                pauvLogoImgRef,
+              });
+            } else if (marketAvatarImgRef && marketAvatarUrlRef) {
+              // Single CTA — card is baked; just pulse the arrow triangle.
+              drawMarketRow({
+                ctx: offCtx as any,
+                cx: 0,
+                videoBottomY: cropBoxFrozen.y + cropBoxFrozen.h,
+                cw: CANVAS_W,
+                name: marketData.name,
+                subtitle: marketData.industry ?? marketData.subcategory ?? '—',
+                photo_url: marketData.photo_url,
+                priceUsd: marketData.price.usd,
+                lifetimeChangePct: marketData.price.lifetimeChangePct,
+                sparkline: marketData.sparkline,
+                size: marketData.size ?? 'large',
+                ctaCategory: marketData.ctaCategory,
+                down: marketData.down,
+                avatarImgRef: marketAvatarImgRef,
+                lastPhotoUrlRef: marketAvatarUrlRef,
+                triangleOnly: true,
+                arrowOpacity: pulse,
+              });
+            }
           }
 
           const sample = new VideoSample(offscreen, { timestamp: targetTs, duration: EXPORT_FRAME_DURATION });

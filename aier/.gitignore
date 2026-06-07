@@ -1,0 +1,17 @@
+# secrets
+.env
+env
+
+# deps
+node_modules/
+client/node_modules/
+
+# build
+client/dist/
+
+# runtime data (downloaded videos, frames, generated clips, refs, outputs)
+storage/
+
+# misc
+*.log
+.DS_Store

@@ -15,6 +15,7 @@ export const SECTION_PATHS: Record<AppSection, string> = {
   board: '/board',
   schedule: '/schedule',
   ai: '/ai-cards', // '/ai' is taken by the standalone legacy page
+  prompts: '/ai-prompts',
 };
 
 export function pathForSection(s: AppSection): string {

@@ -8,3 +8,6 @@ next-env.d.ts
 .env.*.local
 next-env.d.ts
 tsconfig.tsbuildinfo
+
+# AI-maker (Aier) runtime storage — downloaded videos, frames, generated clips, refs, outputs
+aier-storage/

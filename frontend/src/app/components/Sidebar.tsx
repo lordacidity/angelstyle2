@@ -61,30 +61,6 @@ const NAV: { id: AppSection; label: string; icon: React.ReactNode }[] = [
     ),
   },
   {
-    id: 'trending',
-    label: 'Trending',
-    // Six-spoke asterisk / spark — matches the icon Phonedeck's sidebar uses.
-    icon: (
-      <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
-        <line x1="12" y1="3" x2="12" y2="21"/>
-        <line x1="4.5" y1="7.5" x2="19.5" y2="16.5"/>
-        <line x1="4.5" y1="16.5" x2="19.5" y2="7.5"/>
-      </svg>
-    ),
-  },
-  {
-    id: 'images',
-    label: 'Images',
-    // Camera body + lens — matches Phonedeck's sidebar icon.
-    icon: (
-      <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
-        <rect x="2" y="7" width="20" height="14" rx="2"/>
-        <path d="M8 7l1.5-3h5L16 7"/>
-        <circle cx="12" cy="14" r="3.5"/>
-      </svg>
-    ),
-  },
-  {
     id: 'board',
     label: 'Board',
     // 2×2 grid — a shared spreadsheet of links/info.
@@ -96,23 +72,39 @@ const NAV: { id: AppSection; label: string; icon: React.ReactNode }[] = [
     ),
   },
   {
-    id: 'schedule',
-    label: 'Schedule',
+    id: 'prompts',
+    label: 'AI Prompts',
+    // Lightbulb — saved topics you turn into fresh trending-news overviews.
     icon: (
       <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
-        <rect x="3" y="4" width="18" height="18" rx="2"/>
-        <line x1="16" y1="2" x2="16" y2="6"/>
-        <line x1="8" y1="2" x2="8" y2="6"/>
-        <line x1="3" y1="10" x2="21" y2="10"/>
+        <path d="M9 18h6"/>
+        <path d="M10 22h4"/>
+        <path d="M15.09 14c.18-.98.65-1.74 1.41-2.5A4.65 4.65 0 0 0 18 8 6 6 0 0 0 6 8c0 1 .23 2.23 1.5 3.5.76.76 1.23 1.52 1.41 2.5"/>
       </svg>
     ),
   },
 ];
 
+// Pinned to the bottom of the nav (below the main sections). Routes to the AI-maker (Aier),
+// now merged into Studio as the in-app /ai-maker page.
+const AI_NAV: { id: AppSection; label: string; icon: React.ReactNode } = {
+  id: 'ai',
+  label: 'AI',
+  // Four-point sparkle + a small companion spark — the conventional AI glyph.
+  icon: (
+    <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+      <path d="M12 2l2.2 5.8L20 10l-5.8 2.2L12 18l-2.2-5.8L4 10l5.8-2.2z"/>
+      <path d="M19 3l.7 1.9L21.6 5.6l-1.9.7L19 8.2l-.7-1.9L16.4 5.6l1.9-.7z"/>
+    </svg>
+  ),
+};
+
 export function Sidebar({
   googleToken, onConnectGoogle, onOpenSheetsModal, onDisconnectGoogle, onResetAll,
 }: SidebarProps) {
-  const active: AppSection = sectionFromPath(usePathname());
+  const pathname = usePathname();
+  const active: AppSection = sectionFromPath(pathname);
+
   return (
     <aside className="fixed top-0 left-0 h-screen w-[72px] bg-zinc-950 border-r border-zinc-800 flex flex-col z-30">
       {/* Nav — real links so each section has its own URL (prefetch + open in new tab) */}
@@ -134,6 +126,18 @@ export function Sidebar({
             </Link>
           );
         })}
+
+        {/* AI — pinned to the bottom (mt-auto). Routes to the in-app AI-maker page. */}
+        <Link
+          href="/ai-maker"
+          title="AI maker"
+          className={`mt-auto w-full flex flex-col items-center gap-2 py-2.5 px-1 rounded-lg transition-colors ${
+            pathname.startsWith('/ai-maker') ? 'text-white' : 'text-zinc-700 hover:text-zinc-200'
+          }`}
+        >
+          {AI_NAV.icon}
+          <span className="text-[9px] font-medium leading-none">{AI_NAV.label}</span>
+        </Link>
       </nav>
 
       {/* Bottom */}

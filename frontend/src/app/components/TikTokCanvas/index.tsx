@@ -10,6 +10,7 @@ import {
 import type { Box, TikTokCanvasProps, TikTokCanvasRef } from './types';
 import { drawHeaderOnContext } from './drawing/drawHeader';
 import { drawMarketRow, MARKET_ROW_H, MARKET_ROW_H_SMALL, CTA_TOP_GAP, CTA_TOP_GAP_SMALL, CTA_TOP_GAP_BIO, CTA_LINK_AREA_H, CTA_LINK_AREA_H_BIO } from './drawing/drawMarketRow';
+import { drawRotatingCTA } from './drawing/drawRotatingCTA';
 import { countCaptionLines, countPauvCaptionLines, CAPTION_EMOJI_SIZE } from './drawing/countCaptionLines';
 import { wrapRichText, drawRichLine } from '@/lib/emoji';
 import { VideoOverlays } from './ui/VideoOverlays';
@@ -39,6 +40,7 @@ export const TikTokCanvas = forwardRef<TikTokCanvasRef, TikTokCanvasProps>(funct
   overlayVerified = true,
   overlayCaption = '',
   marketData = null,
+  marketDataAlt = null,
   onRecordingStateChange,
 }: TikTokCanvasProps, ref) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
@@ -49,6 +51,9 @@ export const TikTokCanvas = forwardRef<TikTokCanvasRef, TikTokCanvasProps>(funct
   const logoImgRef = useRef<HTMLImageElement | null>(null);
   const marketAvatarImgRef = useRef<HTMLImageElement | null>(null);
   const marketAvatarUrlRef = useRef<string | null>(null);
+  // Second CTA person's avatar (used only when marketDataAlt is set).
+  const marketAvatarImgRef2 = useRef<HTMLImageElement | null>(null);
+  const marketAvatarUrlRef2 = useRef<string | null>(null);
   const pauvLogoImgRef = useRef<HTMLImageElement | null>(null);
 
   const videoOffsetRef = useRef<{ x: number; y: number }>({ x: 0, y: 0 });
@@ -94,7 +99,8 @@ export const TikTokCanvas = forwardRef<TikTokCanvasRef, TikTokCanvasProps>(funct
     trimStartRef, trimEndRef, includeEditRef,
     logoImgRef, verifiedImgRef,
     overlayCaption, overlayLogoSrc, overlayDisplayName, overlayHandle, overlayVerified,
-    marketData, marketAvatarImgRef, marketAvatarUrlRef, pauvLogoImgRef,
+    marketData, marketDataAlt, marketAvatarImgRef, marketAvatarUrlRef,
+    marketAvatarImgRef2, marketAvatarUrlRef2, pauvLogoImgRef,
   });
 
   useImperativeHandle(ref, () => ({
@@ -286,23 +292,36 @@ export const TikTokCanvas = forwardRef<TikTokCanvasRef, TikTokCanvasProps>(funct
         ctx.restore();
 
         if (marketData) {
-          const arrowPulse = 0.2 + 0.8 * (0.5 + 0.5 * Math.sin(2 * Math.PI * performance.now() / 1000 * 0.75));
-          drawMarketRow({
-            ctx, cx: 0, videoBottomY: y + h, cw: CANVAS_W,
-            name: marketData.name,
-            subtitle: marketData.industry ?? marketData.subcategory ?? '—',
-            photo_url: marketData.photo_url,
-            priceUsd: marketData.price.usd,
-            lifetimeChangePct: marketData.price.lifetimeChangePct,
-            sparkline: marketData.sparkline,
-            size: marketData.size ?? 'large',
-            ctaCategory: marketData.ctaCategory,
-            down: marketData.down,
-            avatarImgRef: marketAvatarImgRef,
-            lastPhotoUrlRef: marketAvatarUrlRef,
-            pauvLogoImgRef,
-            arrowOpacity: arrowPulse,
-          });
+          const nowSec = performance.now() / 1000;
+          const arrowPulse = 0.2 + 0.8 * (0.5 + 0.5 * Math.sin(2 * Math.PI * nowSec * 0.75));
+          if (marketDataAlt) {
+            // Two people — cube-rotate the card between them every few seconds.
+            drawRotatingCTA({
+              ctx, cx: 0, cw: CANVAS_W, videoBottomY: y + h,
+              t: nowSec, arrowOpacity: arrowPulse,
+              primary: marketData, alt: marketDataAlt,
+              primaryRefs: { img: marketAvatarImgRef, url: marketAvatarUrlRef },
+              altRefs: { img: marketAvatarImgRef2, url: marketAvatarUrlRef2 },
+              pauvLogoImgRef,
+            });
+          } else {
+            drawMarketRow({
+              ctx, cx: 0, videoBottomY: y + h, cw: CANVAS_W,
+              name: marketData.name,
+              subtitle: marketData.industry ?? marketData.subcategory ?? '—',
+              photo_url: marketData.photo_url,
+              priceUsd: marketData.price.usd,
+              lifetimeChangePct: marketData.price.lifetimeChangePct,
+              sparkline: marketData.sparkline,
+              size: marketData.size ?? 'large',
+              ctaCategory: marketData.ctaCategory,
+              down: marketData.down,
+              avatarImgRef: marketAvatarImgRef,
+              lastPhotoUrlRef: marketAvatarUrlRef,
+              pauvLogoImgRef,
+              arrowOpacity: arrowPulse,
+            });
+          }
         }
       }
     }
@@ -312,7 +331,7 @@ export const TikTokCanvas = forwardRef<TikTokCanvasRef, TikTokCanvasProps>(funct
   // videoScale intentionally omitted: the draw loop reads videoScaleRef.current directly,
   // so including it would restart the RAF loop on every zoom step causing a visible frame drop.
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [videoSrc, overlayDisplayName, overlayHandle, overlayVerified, overlayCaption, brand, overlayLogoSrc, marketData]);
+  }, [videoSrc, overlayDisplayName, overlayHandle, overlayVerified, overlayCaption, brand, overlayLogoSrc, marketData, marketDataAlt]);
 
   // ── Interaction handlers ──────────────────────────────────────────────────────
 
