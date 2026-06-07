@@ -6,6 +6,7 @@ export interface ChatMessage {
 interface ChatOpts {
   json?: boolean;
   temperature?: number;
+  maxTokens?: number;
 }
 
 export async function deepseekChat(messages: ChatMessage[], opts: ChatOpts = {}): Promise<string> {
@@ -19,6 +20,7 @@ export async function deepseekChat(messages: ChatMessage[], opts: ChatOpts = {})
       messages,
       temperature: opts.temperature ?? 0.2,
       ...(opts.json && { response_format: { type: 'json_object' } }),
+      ...(opts.maxTokens && { max_tokens: opts.maxTokens }),
     }),
   });
   if (!res.ok) throw new Error(`deepseek ${res.status}: ${await res.text()}`);
@@ -28,5 +30,21 @@ export async function deepseekChat(messages: ChatMessage[], opts: ChatOpts = {})
 
 export function parseJson<T>(text: string): T {
   const stripped = text.replace(/^```(?:json)?\s*/i, '').replace(/```\s*$/i, '').trim();
-  return JSON.parse(stripped) as T;
+  try {
+    return JSON.parse(stripped) as T;
+  } catch {
+    // DeepSeek sometimes truncates mid-array. Try to salvage by cutting back to the
+    // last complete object (last `}` before the closing `]`) and closing the structure.
+    const lastBrace = stripped.lastIndexOf('}');
+    if (lastBrace !== -1) {
+      const arrayStart = stripped.indexOf('[');
+      const objStart   = stripped.indexOf('{');
+      if (arrayStart !== -1 && arrayStart < objStart) {
+        // Looks like { "key": [ ... } — close the array and outer object
+        const salvaged = stripped.slice(0, lastBrace + 1) + ']}';
+        try { return JSON.parse(salvaged) as T; } catch { /* fall through */ }
+      }
+    }
+    throw new SyntaxError(`Failed to parse DeepSeek response: ${stripped.slice(0, 120)}`);
+  }
 }

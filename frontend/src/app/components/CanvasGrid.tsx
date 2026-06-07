@@ -871,7 +871,11 @@ export function CanvasGrid({
   const [aiGroupsError,     setAiGroupsError]     = useState<string | null>(null);
   const [showAiGroupsPanel, setShowAiGroupsPanel] = useState(false);
   const [aiGroupsEntryId,   setAiGroupsEntryId]   = useState<string | null>(null);
-  const aiGroupsFetchedRef = useRef(false);
+  const [aiGroupsIndustry,  setAiGroupsIndustry]  = useState<string>('');
+  const aiGroupsFetchedRef  = useRef(false);
+  const allTalentsRef       = useRef<Talent[] | null>(null);
+  const talentsLoadingRef   = useRef(false);
+  const loadTalentsRef      = useRef<(() => void) | null>(null);
 
   // Deterministic pseudo-random sparkline (LCG seeded on ticker). MARKETING:
   // a wandering line that has genuine ups AND downs but trends upward and ends
@@ -957,15 +961,14 @@ export function CanvasGrid({
     finally { setLoading(false); }
   }, []);
 
-  const openAiGroupsPanel = useCallback(async (entryId: string) => {
-    setAiGroupsEntryId(entryId);
-    setShowAiGroupsPanel(true);
+  const fetchAiGroups = useCallback(async (industry?: string) => {
     if (aiGroupsFetchedRef.current) return;
     aiGroupsFetchedRef.current = true;
     setAiGroupsLoading(true);
     setAiGroupsError(null);
     try {
-      const res = await fetch('/api/ai/charts-groups');
+      const qs = industry ? `?industry=${encodeURIComponent(industry)}` : '';
+      const res = await fetch(`/api/ai/charts-groups${qs}`);
       const data = await res.json() as { groups?: Array<{ a: ChartsMarket; b: ChartsMarket; reason: string }>; error?: string };
       if (!res.ok || data.error) throw new Error(data.error || `HTTP ${res.status}`);
       setAiGroups(data.groups ?? []);
@@ -975,6 +978,12 @@ export function CanvasGrid({
     } finally {
       setAiGroupsLoading(false);
     }
+  }, []);
+
+  const openAiGroupsPanel = useCallback((entryId: string) => {
+    setAiGroupsEntryId(entryId);
+    setShowAiGroupsPanel(true);
+    if (!allTalentsRef.current && !talentsLoadingRef.current) loadTalentsRef.current?.();
   }, []);
 
   const fetchSparkline = useCallback(async (entryId: string, ticker: string) => {
@@ -1091,6 +1100,8 @@ export function CanvasGrid({
   const [allTalents,          setAllTalents]          = useState<Talent[] | null>(null);
   const [talentsLoading,      setTalentsLoading]      = useState(false);
   const [talentsError,        setTalentsError]        = useState<string | null>(null);
+  allTalentsRef.current     = allTalents;
+  talentsLoadingRef.current = talentsLoading;
 
   // Fetch the roster once and cache it. Kept out of any setState updater (side
   // effects in updaters fire twice under Strict Mode) and surfaces failures so
@@ -1109,6 +1120,7 @@ export function CanvasGrid({
       .catch((e: unknown) => setTalentsError(e instanceof Error ? e.message : String(e)))
       .finally(() => setTalentsLoading(false));
   }, []);
+  loadTalentsRef.current = loadTalents;
 
   const openPersonPicker = useCallback((entryId: string, slot: 1 | 2 = 1) => {
     setPersonPickerEntryId(entryId);
@@ -2610,9 +2622,9 @@ export function CanvasGrid({
                   aiGroupsFetchedRef.current = false;
                   setAiGroups([]);
                   setAiGroupsError(null);
-                  openAiGroupsPanel(aiGroupsEntryId ?? '');
+                  fetchAiGroups(aiGroupsIndustry || undefined);
                 }}
-                disabled={aiGroupsLoading}
+                disabled={aiGroupsLoading || !aiGroupsIndustry}
                 title="Refresh AI suggestions"
                 className="w-6 h-6 flex items-center justify-center text-zinc-500 hover:text-zinc-200 disabled:opacity-30 transition-colors"
               >
@@ -2632,6 +2644,33 @@ export function CanvasGrid({
             </div>
           </div>
 
+          {/* Industry filter */}
+          {(() => {
+            const industries = [...new Set((allTalents ?? []).map(t => t.industry).filter(Boolean) as string[])].sort();
+            return (
+              <div className="px-3 py-2 border-b border-zinc-800 shrink-0">
+                <select
+                  value={aiGroupsIndustry}
+                  onChange={e => {
+                    const val = e.target.value;
+                    setAiGroupsIndustry(val);
+                    aiGroupsFetchedRef.current = false;
+                    setAiGroups([]);
+                    setAiGroupsError(null);
+                    if (val) fetchAiGroups(val);
+                  }}
+                  disabled={aiGroupsLoading || talentsLoading}
+                  className="w-full bg-zinc-900 border border-zinc-700 rounded-md px-2 py-1.5 text-[12px] text-zinc-200 focus:outline-none focus:border-zinc-500 disabled:opacity-40"
+                >
+                  <option value="">{talentsLoading ? 'Loading…' : '— Select an industry —'}</option>
+                  {industries.map(ind => (
+                    <option key={ind} value={ind}>{ind}</option>
+                  ))}
+                </select>
+              </div>
+            );
+          })()}
+
           <div className="flex-1 overflow-y-auto">
             {aiGroupsLoading && aiGroups.length === 0 ? (
               <div className="flex flex-col items-center justify-center h-32 gap-2">
@@ -2644,7 +2683,7 @@ export function CanvasGrid({
               </div>
             ) : aiGroups.length === 0 ? (
               <div className="flex items-center justify-center h-32">
-                <span className="text-[11px] text-zinc-600">No pairs found</span>
+                <span className="text-[11px] text-zinc-600">{aiGroupsIndustry ? 'No pairs found' : 'Select an industry above'}</span>
               </div>
             ) : (
               <div className="p-2 flex flex-col gap-0.5">

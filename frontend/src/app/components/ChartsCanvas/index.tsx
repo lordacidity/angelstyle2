@@ -629,8 +629,7 @@ function drawProfiles(
 
     // ── Animated price + pts + % change — all on one row ────────────────
     if (price != null) {
-      const priceStr  = Math.max(0.01, price).toFixed(2);
-      const ptsFontSz = 32;
+      const priceStr  = `$${Math.max(0.01, price).toFixed(2)}`;
       const pctFontSz = Math.round(PCT_FONT_SIZE * 0.65);
       const gap       = 14;
       const triW      = 18;
@@ -639,12 +638,10 @@ function drawProfiles(
       // Pre-measure all segments
       ctx.font = `600 ${PRICE_FONT_SIZE}px "JetBrains Mono", "Courier New", monospace`;
       const priceW = ctx.measureText(priceStr).width;
-      ctx.font = `400 ${ptsFontSz}px Inter, -apple-system, sans-serif`;
-      const ptsW = ctx.measureText('pts').width;
 
       const hasPct   = pct != null;
       const isUp     = (pct ?? 0) >= 0;
-      const pctStr   = hasPct ? (Math.abs(pct!).toFixed(2) + '%') : '';
+      const pctStr   = hasPct ? (Math.round(Math.abs(pct!)).toLocaleString('en-US') + '%') : '';
       const pctColor = isUp ? '#04df9d' : '#ef4444';
       let pctW = 0;
       if (hasPct) {
@@ -653,23 +650,17 @@ function drawProfiles(
       }
 
       const pctSection = hasPct ? gap + triW + 8 + pctW : 0;
-      const totalW     = priceW + gap + ptsW + pctSection;
+      const totalW     = priceW + pctSection;
       let   x          = cx - totalW / 2;
 
       ctx.textBaseline = 'top';
       ctx.textAlign    = 'left';
 
-      // Price
+      // Price with $ prefix
       ctx.font      = `600 ${PRICE_FONT_SIZE}px "JetBrains Mono", "Courier New", monospace`;
       ctx.fillStyle = '#ffffff';
       ctx.fillText(priceStr, x, priceBaseY);
       x += priceW + gap;
-
-      // pts
-      ctx.font      = `400 ${ptsFontSz}px Inter, -apple-system, sans-serif`;
-      ctx.fillStyle = '#ffffff';
-      ctx.fillText('pts', x, priceBaseY + (PRICE_FONT_SIZE - ptsFontSz) / 2);
-      x += ptsW + gap;
 
       // Triangle + % change
       if (hasPct) {

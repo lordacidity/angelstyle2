@@ -17,14 +17,19 @@ type ProfileRow = {
   industry: string | null;
 };
 
-export async function GET() {
+export async function GET(req: Request) {
   try {
+    const { searchParams } = new URL(req.url);
+    const industry = searchParams.get('industry')?.trim() || null;
+
     const sb = getClient();
-    const { data: profiles, error } = await sb
+    let query = sb
       .from('profiles')
       .select('id,ticker,name,photo_url,industry')
       .is('delisted_at', null)
       .order('name');
+    if (industry) query = query.eq('industry', industry);
+    const { data: profiles, error } = await query;
 
     if (error) throw new Error(error.message);
     if (!profiles?.length) return NextResponse.json({ groups: [] });
@@ -52,7 +57,7 @@ Return ONLY valid JSON, no explanation:
 
     const raw = await deepseekChat(
       [{ role: 'user', content: prompt }],
-      { json: true, temperature: 0.4 },
+      { json: true, temperature: 0.4, maxTokens: 4000 },
     );
 
     const parsed = parseJson<{ groups: Array<{ a_id: string; b_id: string; reason: string }> }>(raw);
