@@ -37,7 +37,12 @@ export async function GET(req: NextRequest) {
   } catch (err: unknown) {
     const msg = err instanceof Error ? err.message : String(err);
     console.error(`[trends] ${term}:`, msg.slice(0, 300));
-    if (msg.includes('429') || msg.includes('Too Many') || msg.includes('captcha') || msg.includes('CAPTCHA') || msg.includes('status code 429')) {
+    // Google returns an HTML block page when rate-limiting — JSON.parse throws on the "<html" token
+    const isRateLimited =
+      msg.includes('429') || msg.includes('Too Many') ||
+      msg.includes('captcha') || msg.includes('CAPTCHA') ||
+      msg.includes('<html') || msg.includes('Unexpected token');
+    if (isRateLimited) {
       return NextResponse.json({ error: 'rate_limited' }, { status: 429 });
     }
     return NextResponse.json({ error: msg.slice(0, 200) }, { status: 500 });

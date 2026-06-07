@@ -317,6 +317,7 @@ interface ChartsInputCardProps {
   onUpdateOverrideName: (idx: 0 | 1, name: string) => void;
   anyLoading: boolean;
   trendsLoaded: [boolean, boolean];
+  trendsError: string | null;
   onStart: () => void;
   onOpenPhotoPicker: (idx: 0 | 1, query: string) => void;
   onSuggestPairs?: () => void;
@@ -341,6 +342,7 @@ export function ChartsInputCard({
   onUpdateOverrideName,
   anyLoading,
   trendsLoaded,
+  trendsError,
   onStart,
   onOpenPhotoPicker,
   onSuggestPairs,
@@ -575,6 +577,9 @@ export function ChartsInputCard({
               )}
               {anyLoading ? 'Loading…' : (trendsLoaded[0] || trendsLoaded[1]) ? 'Refresh' : 'Start'}
             </button>
+            {trendsError && (
+              <p className="mt-1.5 text-[11px] text-red-400 text-center leading-snug">{trendsError}</p>
+            )}
           </div>
         )}
       </div>

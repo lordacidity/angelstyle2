@@ -855,6 +855,7 @@ export function CanvasGrid({
   // Per-slot Google Trends fetch state
   const [chartsTrendsLoadingMap,  setChartsTrendsLoadingMap]  = useState<Record<string, [boolean, boolean]>>({});
   const [chartsTrendsLoadedMap,   setChartsTrendsLoadedMap]   = useState<Record<string, [boolean, boolean]>>({});
+  const [chartsTrendsErrorMap,    setChartsTrendsErrorMap]    = useState<Record<string, string | null>>({});
 
   // Charts recording state
   const [chartsRecordingStateMap, setChartsRecordingStateMap] = useState<Record<string, { isRecording: boolean; recProgress: number; recStatus: string }>>({});
@@ -926,9 +927,17 @@ export function CanvasGrid({
         return { ...prev, [entryId]: cur };
       });
     setLoading(true);
+    setChartsTrendsErrorMap(prev => ({ ...prev, [entryId]: null }));
     try {
       const r = await fetch(`/api/charts/trends?term=${encodeURIComponent(term)}`);
-      if (!r.ok) return;
+      if (!r.ok) {
+        const body = await r.json().catch(() => ({})) as { error?: string };
+        const msg = r.status === 429 || body.error === 'rate_limited'
+          ? 'Google Trends is rate-limiting — wait a moment and try again'
+          : `Failed to load trends (${r.status})`;
+        setChartsTrendsErrorMap(prev => ({ ...prev, [entryId]: msg }));
+        return;
+      }
       const points = await r.json() as Array<{ timestamp: number; value: number }>;
       if (!Array.isArray(points) || !points.length) return;
       setChartsMarketsMap(prev => {
@@ -1877,7 +1886,9 @@ export function CanvasGrid({
                     })}
                     anyLoading={(chartsTrendsLoadingMap[entry.id] ?? [false, false]).some(Boolean)}
                     trendsLoaded={chartsTrendsLoadedMap[entry.id] ?? [false, false]}
+                    trendsError={chartsTrendsErrorMap[entry.id] ?? null}
                     onStart={() => {
+                      setChartsTrendsErrorMap(prev => ({ ...prev, [entry.id]: null }));
                       const mks   = chartsMarketsMap[entry.id] ?? [null, null];
                       const names = chartsNameOverrideMap[entry.id] ?? ['', ''];
                       // Clear existing sparklines so canvas waits for fresh data
