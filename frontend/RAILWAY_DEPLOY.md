@@ -40,8 +40,23 @@ The repo already contains the build config:
   instance is correct for this workload; horizontal scaling would split the job map.
 - **Volume is the source of truth.** With `STORAGE_ROOT=/data`, the settings live in Postgres
   (durable) and media lives on the volume (durable). Don't remove the volume.
-- **Vercel can stay** for the rest of the site. If you want the AI-maker reachable under your
-  Vercel domain, add Vercel rewrites for `/ai-maker` and `/api/aier/:path*` pointing at the
-  Railway service URL. Otherwise just use the Railway URL for the studio.
+- **Vercel can stay** for the rest of the site, with `/ai-maker` still reachable under your
+  Vercel domain. [`next.config.ts`](./next.config.ts) proxies the studio backend to Railway via
+  `rewrites()` when **`AIER_RAILWAY_URL`** is set — so on the **Vercel** project set
+  `AIER_RAILWAY_URL=https://<your-service>.up.railway.app` (needed at *build* time → redeploy
+  after adding it). The `/ai-maker` page stays on Vercel (static client JS); only `/api/aier/*`
+  is proxied. The stateless `/api/aier/youtube/grab` downloader is deliberately *not* proxied —
+  it runs on Vercel directly. **Leave `AIER_RAILWAY_URL` UNSET on Railway** (and locally) or the
+  backend would proxy to itself.
+  - **Gotcha:** the proxy forwards the browser's `site_auth` cookie to Railway, where the same
+    middleware re-checks it. So **`AUTH_SECRET` (and `ACCESS_TOKEN`) must be identical on Vercel
+    and Railway**, or proxied API calls 401. No CORS setup is needed (the browser only ever talks
+    to Vercel; the hop to Railway is server-side).
+  - **Caveat:** large uploads (the admin audio library) travel browser → Vercel proxy → Railway
+    and can hit Vercel's request-body limit. If that bites, do admin uploads on the Railway URL
+    directly. The YouTube-download step (a small JSON POST; media streams back as a *response*)
+    is unaffected.
+- Prefer not to touch Vercel? Just open `/ai-maker` on the Railway URL — relative API calls then
+  hit Railway directly and no rewrite/`AIER_RAILWAY_URL` is needed.
 - **python3** is only needed because `youtube-dl-exec` ships the Python build of yt-dlp; ffmpeg
   is the bundled `ffmpeg-static` binary, no apt package required.
