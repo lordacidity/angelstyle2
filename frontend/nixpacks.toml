@@ -1,0 +1,15 @@
+# Railway (Nixpacks) build config for the Next app.
+#
+# The Aier studio shells out to yt-dlp — a Python zipapp shipped by youtube-dl-exec whose
+# shebang is `#!/usr/bin/env python3`. Without Python in the image it exits 127
+# ("env: 'python3': No such file or directory"), which is exactly the failure seen on Vercel.
+# Installing python3 here fixes the YouTube download step.
+#
+# ffmpeg / ffprobe come from the ffmpeg-static / ffprobe-static npm packages (bundled binaries
+# resolved by src/lib/aier/exec.js), so no system ffmpeg is required.
+[phases.setup]
+aptPkgs = ["python3"]
+
+# Next reads PORT from the environment, which Railway injects; `next start` binds 0.0.0.0:$PORT.
+[start]
+cmd = "npm run start"
