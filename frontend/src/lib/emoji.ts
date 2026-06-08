@@ -20,14 +20,17 @@ export interface EmojiDef {
 }
 
 // Curated set. Pinned: 😂 🔥 🤣 (the sideways/rolling laugh, reachable via @cry).
-// All are single-codepoint emoji so the filename is just the unified hex — no
-// variation selectors.
+// Most are single-codepoint emoji, so the filename is just the unified hex — no
+// variation selectors. The World Cup flags are the exception: they're two
+// regional-indicator codepoints joined with a dash (e.g. 1f1e7-1f1f7.png), which
+// matches the emoji-datasource-apple filename. The tokenizer sorts EMOJI_CHARS
+// longest-first, so these multi-codepoint chars match before any prefix.
 export const EMOJIS: EmojiDef[] = [
-  { char: '😂', unified: '1f602', name: 'Face with Tears of Joy', keywords: ['laugh', 'lol', 'haha', 'crying laughing', 'funny'], pinned: true },
+  { char: '😂', unified: '1f602', name: 'Face with Tears of Joy', keywords: ['laugh', 'haha', 'crying laughing', 'funny'], pinned: true },
   { char: '🔥', unified: '1f525', name: 'Fire', keywords: ['lit', 'hot', 'flame', 'fire'], pinned: true },
   // Sideways laughing — reachable by typing "@cry" (per request) as well as the
   // usual rofl/lmao terms. Pinned to the front of the picker.
-  { char: '🤣', unified: '1f923', name: 'Rolling on the Floor Laughing', keywords: ['cry', 'rofl', 'lmao', 'laugh', 'funny', 'sideways'], pinned: true },
+  { char: '🤣', unified: '1f923', name: 'Rolling on the Floor Laughing', keywords: ['lol', 'cry', 'rofl', 'lmao', 'laugh', 'funny', 'sideways'], pinned: true },
   { char: '😀', unified: '1f600', name: 'Grinning Face', keywords: ['smile', 'happy', 'grin'] },
   { char: '😊', unified: '1f60a', name: 'Smiling Face with Smiling Eyes', keywords: ['smile', 'happy', 'blush', 'warm'] },
   { char: '😅', unified: '1f605', name: 'Grinning Face with Sweat', keywords: ['nervous', 'sweat', 'phew', 'laugh'] },
@@ -80,6 +83,18 @@ export const EMOJIS: EmojiDef[] = [
   { char: '🍆', unified: '1f346', name: 'Eggplant', keywords: ['eggplant', 'aubergine', 'veggie'] },
   { char: '💦', unified: '1f4a6', name: 'Sweat Droplets', keywords: ['squirt', 'splash', 'water', 'sweat', 'wet'] },
   { char: '⚡', unified: '26a1', name: 'High Voltage', keywords: ['lightning', 'energy', 'fast', 'power'] },
+  { char: '🎤', unified: '1f3a4', name: 'Microphone', keywords: ['mic', 'sing', 'karaoke', 'podcast', 'announce'] },
+  // World Cup — big footballing nations.
+  { char: '🇧🇷', unified: '1f1e7-1f1f7', name: 'Brazil', keywords: ['brazil', 'brasil', 'flag', 'world cup'] },
+  { char: '🇦🇷', unified: '1f1e6-1f1f7', name: 'Argentina', keywords: ['argentina', 'flag', 'world cup'] },
+  { char: '🇫🇷', unified: '1f1eb-1f1f7', name: 'France', keywords: ['france', 'french', 'flag', 'world cup'] },
+  { char: '🇩🇪', unified: '1f1e9-1f1ea', name: 'Germany', keywords: ['germany', 'german', 'deutschland', 'flag', 'world cup'] },
+  { char: '🇪🇸', unified: '1f1ea-1f1f8', name: 'Spain', keywords: ['spain', 'spanish', 'espana', 'flag', 'world cup'] },
+  { char: '🇵🇹', unified: '1f1f5-1f1f9', name: 'Portugal', keywords: ['portugal', 'portuguese', 'flag', 'world cup'] },
+  { char: '🇳🇱', unified: '1f1f3-1f1f1', name: 'Netherlands', keywords: ['netherlands', 'holland', 'dutch', 'flag', 'world cup'] },
+  { char: '🇮🇹', unified: '1f1ee-1f1f9', name: 'Italy', keywords: ['italy', 'italian', 'italia', 'flag', 'world cup'] },
+  { char: '🇺🇸', unified: '1f1fa-1f1f8', name: 'United States', keywords: ['usa', 'united states', 'america', 'flag', 'world cup'] },
+  { char: '🇲🇽', unified: '1f1f2-1f1fd', name: 'Mexico', keywords: ['mexico', 'mexican', 'flag', 'world cup'] },
 ];
 
 export const emojiSrc = (unified: string) => `/emoji/${unified}.png`;

@@ -8,7 +8,9 @@ import { verifyToken, COOKIE_NAME, SITE_SCOPE } from '@/lib/auth';
 // Fail-open if SITE_PASSWORD is unset, so a missing env var can't lock you out of your own
 // site. On Vercel (the public deploy) the env vars are always present, so the gate is live.
 
-const PUBLIC_PREFIXES = ['/unlock', '/api/unlock'];
+// /api/aier/health is exempt so platform healthchecks (Railway) can reach it without the
+// site_auth cookie — it returns only boolean status, nothing sensitive.
+const PUBLIC_PREFIXES = ['/unlock', '/api/unlock', '/api/aier/health'];
 
 export async function middleware(req: NextRequest) {
   const password = process.env.ACCESS_TOKEN;
