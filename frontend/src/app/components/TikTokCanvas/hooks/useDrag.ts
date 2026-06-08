@@ -35,7 +35,10 @@ export function useDrag({ boxRef, setBox, videoOffsetRef, onResizeEnd }: UseDrag
       let nx = sb.x, ny = sb.y, nw = sb.w, nh = sb.h;
 
       if (h === 'move') {
-        videoOffsetRef.current = { x: videoOffsetStart.x + dx, y: videoOffsetStart.y + dy };
+        // Reframe pans vertically only — the clip is fit to the frame width, so
+        // dragging left/right would just slide it off into empty bars. Lock x to
+        // where it started and apply the vertical delta only.
+        videoOffsetRef.current = { x: videoOffsetStart.x, y: videoOffsetStart.y + dy };
         return;
       }
 

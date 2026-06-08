@@ -1,8 +1,7 @@
 'use client';
 
-import type { MutableRefObject, Dispatch, SetStateAction, RefObject } from 'react';
+import type { MutableRefObject, Dispatch, SetStateAction } from 'react';
 import { useState, useRef, useEffect, useMemo, useCallback, memo } from 'react';
-import { createPortal } from 'react-dom';
 import { TikTokCanvas } from './TikTokCanvas';
 import type { TikTokCanvasRef, MarketData, SparkPoint } from './TikTokCanvas';
 import { ChartsCanvas } from './ChartsCanvas';
@@ -19,7 +18,8 @@ import type { RecordingState } from './TikTokCanvas/types';
 import { VideoControlsBar } from './VideoControlsBar';
 import { EditablePct } from './EditablePct';
 import { bestVideoUrl } from '@/lib/utils';
-import { EMOJIS, emojiSrc, emojiSrcForChar, splitEmojiTokens, preloadEmojiImages } from '@/lib/emoji';
+import { emojiSrcForChar, splitEmojiTokens, preloadEmojiImages } from '@/lib/emoji';
+import { EmojiPicker } from './EmojiPicker';
 import { BTN_ICON, BTN_TEXT } from '@/lib/ui-constants';
 import {
   UploadIcon, ArrowRightIcon, SpinnerIcon,
@@ -270,101 +270,6 @@ function ImagePlaceholderIcon() {
     <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" className="shrink-0">
       <rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="8.5" cy="8.5" r="1.5"/><polyline points="21 15 16 10 5 21"/>
     </svg>
-  );
-}
-
-// ── Emoji picker (Apple glyphs) ────────────────────────────────────────────────
-// Opens under the caption box when the user types "@". Pinned emoji (😂 🔥) sort
-// to the front; a search box at the top filters by name/keyword. Picking inserts
-// the unicode char back into the caption (replacing the "@query").
-
-function EmojiPicker({
-  anchorRef,
-  query,
-  onQueryChange,
-  onPick,
-  onClose,
-}: {
-  anchorRef: RefObject<HTMLTextAreaElement | null>;
-  query: string;
-  onQueryChange: (q: string) => void;
-  onPick: (char: string) => void;
-  onClose: () => void;
-}) {
-  const ref = useRef<HTMLDivElement>(null);
-  // Track the caption box position so the portal can sit just under it. Recompute
-  // on scroll/resize so it stays anchored.
-  const [rect, setRect] = useState<DOMRect | null>(null);
-  useEffect(() => {
-    const el = anchorRef.current;
-    if (!el) return;
-    const update = () => setRect(el.getBoundingClientRect());
-    update();
-    window.addEventListener('scroll', update, true);
-    window.addEventListener('resize', update);
-    return () => {
-      window.removeEventListener('scroll', update, true);
-      window.removeEventListener('resize', update);
-    };
-  }, [anchorRef]);
-
-  useEffect(() => {
-    function onDocMouseDown(e: MouseEvent) {
-      const t = e.target as Node;
-      if (ref.current && !ref.current.contains(t) && anchorRef.current && !anchorRef.current.contains(t)) onClose();
-    }
-    document.addEventListener('mousedown', onDocMouseDown);
-    return () => document.removeEventListener('mousedown', onDocMouseDown);
-  }, [onClose, anchorRef]);
-
-  if (!rect || typeof document === 'undefined') return null;
-
-  const q = query.trim().toLowerCase();
-  const results = EMOJIS
-    .filter(e => !q || e.name.toLowerCase().includes(q) || e.keywords.some(k => k.includes(q)))
-    .sort((a, b) => (b.pinned ? 1 : 0) - (a.pinned ? 1 : 0));
-
-  // Rendered in a portal on document.body so no ancestor's `overflow-hidden`
-  // clips it — it floats on top of everything.
-  return createPortal(
-    <div
-      ref={ref}
-      className="fixed z-[1000] rounded-lg bg-zinc-900 border border-zinc-700 shadow-2xl overflow-hidden"
-      style={{ left: rect.left, top: rect.bottom + 4, width: Math.max(rect.width, 300) }}
-    >
-      <div className="p-2 border-b border-zinc-800">
-        <input
-          value={query}
-          onChange={e => onQueryChange(e.target.value)}
-          placeholder="Search emoji…"
-          className="w-full bg-zinc-800 border border-zinc-700 rounded-md px-2.5 py-1.5 text-xs text-zinc-200 placeholder-zinc-500 outline-none focus:border-zinc-500"
-        />
-      </div>
-      <div className="p-2 max-h-[220px] overflow-y-auto">
-        {results.length === 0 ? (
-          <p className="text-xs text-zinc-600 text-center py-4">No emoji found.</p>
-        ) : (
-          <div className="grid grid-cols-8 gap-1">
-            {results.map(e => (
-              <button
-                key={e.unified}
-                type="button"
-                title={e.name}
-                onMouseDown={ev => ev.preventDefault()}
-                onClick={() => onPick(e.char)}
-                className="relative flex items-center justify-center rounded-md hover:bg-zinc-800 transition-colors"
-                style={{ width: 34, height: 34 }}
-              >
-                {e.pinned && <span className="absolute top-0.5 right-0.5 w-1 h-1 rounded-full bg-amber-400" />}
-                {/* eslint-disable-next-line @next/next/no-img-element */}
-                <img src={emojiSrc(e.unified)} alt={e.name} width={24} height={24} draggable={false} />
-              </button>
-            ))}
-          </div>
-        )}
-      </div>
-    </div>,
-    document.body,
   );
 }
 

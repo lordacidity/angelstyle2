@@ -12,6 +12,7 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { type UseBoardReturn, type TextField, TEXT_FIELDS } from '../hooks/useBoard';
 import { BoardTabs } from './BoardTabs';
+import { useEmojiField } from './EmojiPicker';
 
 // Left-of-context "watch the clip and draft the context" button. Gemini reads
 // the linked video (motion + speech) and fills the Context cell, so it doesn't
@@ -53,7 +54,7 @@ const CELL_BASE =
   'w-full bg-transparent px-2 py-1.5 text-[13px] leading-snug text-zinc-200 outline-none placeholder:text-zinc-700 focus:bg-zinc-900/60';
 
 // Single-line cell — stays one line and truncates with an ellipsis when not
-// focused (url / notes).
+// focused. Used for the URL column (no emoji picker — it's a link).
 function CellInput({
   value, onChange, onCommit, onKeyDown, inputRef,
 }: {
@@ -77,7 +78,37 @@ function CellInput({
   );
 }
 
+// Single-line free-text cell with the "@" emoji picker (Notes). Same look as
+// CellInput; the picker floats under the cell — see useEmojiField / EmojiPicker.
+function EmojiCellInput({
+  value, onChange, onCommit,
+}: {
+  value: string;
+  onChange: (v: string) => void;
+  onCommit?: () => void;
+}) {
+  const ref = useRef<HTMLInputElement>(null);
+  const { detect, picker } = useEmojiField(ref, onChange);
+  return (
+    <>
+      <input
+        ref={ref}
+        type="text"
+        value={value}
+        onChange={(e) => { onChange(e.target.value); detect(); }}
+        onKeyUp={detect}
+        onClick={detect}
+        onBlur={onCommit}
+        spellCheck={false}
+        className={`${CELL_BASE} truncate`}
+      />
+      {picker}
+    </>
+  );
+}
+
 // Auto-growing multi-line cell — expands to fit wrapped text (caption / context).
+// Both are free text, so it carries the "@" emoji picker too.
 function CellTextarea({
   value, onChange, onCommit,
 }: {
@@ -86,6 +117,7 @@ function CellTextarea({
   onCommit?: () => void;
 }) {
   const ref = useRef<HTMLTextAreaElement>(null);
+  const { detect, picker } = useEmojiField(ref, onChange);
 
   const resize = useCallback(() => {
     const el = ref.current;
@@ -97,15 +129,20 @@ function CellTextarea({
   useEffect(() => { resize(); }, [value, resize]);
 
   return (
-    <textarea
-      ref={ref}
-      rows={1}
-      value={value}
-      onChange={(e) => { onChange(e.target.value); resize(); }}
-      onBlur={onCommit}
-      spellCheck={false}
-      className={`${CELL_BASE} resize-none`}
-    />
+    <>
+      <textarea
+        ref={ref}
+        rows={1}
+        value={value}
+        onChange={(e) => { onChange(e.target.value); resize(); detect(); }}
+        onKeyUp={detect}
+        onClick={detect}
+        onBlur={onCommit}
+        spellCheck={false}
+        className={`${CELL_BASE} resize-none`}
+      />
+      {picker}
+    </>
   );
 }
 
@@ -124,22 +161,29 @@ export function BoardGrid({ board }: { board: UseBoardReturn }) {
     onCommit?: () => void,
     isDraftUrl = false,
   ) {
+    // Caption / Context — multiline free text, emoji-enabled.
     if (multiline) {
       return <CellTextarea value={value} onChange={onChange} onCommit={onCommit} />;
     }
-    return (
-      <CellInput
-        value={value}
-        onChange={onChange}
-        onCommit={onCommit}
-        inputRef={isDraftUrl ? urlInputRef : undefined}
-        onKeyDown={
-          isDraftUrl
-            ? (e) => { if (e.key === 'Enter') { e.preventDefault(); void postDraft(); } }
-            : undefined
-        }
-      />
-    );
+    // URL — a link, so no emoji picker. The draft's URL gets the focus ref +
+    // Enter-to-post; existing rows' URL is a plain inline-edit.
+    if (key === 'url') {
+      return (
+        <CellInput
+          value={value}
+          onChange={onChange}
+          onCommit={onCommit}
+          inputRef={isDraftUrl ? urlInputRef : undefined}
+          onKeyDown={
+            isDraftUrl
+              ? (e) => { if (e.key === 'Enter') { e.preventDefault(); void postDraft(); } }
+              : undefined
+          }
+        />
+      );
+    }
+    // Notes — single-line free text, emoji-enabled.
+    return <EmojiCellInput value={value} onChange={onChange} onCommit={onCommit} />;
   }
 
   return (

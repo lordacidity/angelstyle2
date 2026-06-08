@@ -84,6 +84,10 @@ export const EMOJIS: EmojiDef[] = [
   { char: '💦', unified: '1f4a6', name: 'Sweat Droplets', keywords: ['squirt', 'splash', 'water', 'sweat', 'wet'] },
   { char: '⚡', unified: '26a1', name: 'High Voltage', keywords: ['lightning', 'energy', 'fast', 'power'] },
   { char: '🎤', unified: '1f3a4', name: 'Microphone', keywords: ['mic', 'sing', 'karaoke', 'podcast', 'announce'] },
+  // Speaking head — reachable by typing "@speak" (and "@yap"). Multi-codepoint
+  // (head + FE0F variation selector), so the filename carries the dash, like the
+  // flags above; the longest-first tokenizer matches it before any prefix.
+  { char: '🗣️', unified: '1f5e3-fe0f', name: 'Speaking Head', keywords: ['speak', 'speaking', 'talk', 'talking', 'yap', 'yapping', 'announce', 'rant', 'loud'] },
   // World Cup — big footballing nations.
   { char: '🇧🇷', unified: '1f1e7-1f1f7', name: 'Brazil', keywords: ['brazil', 'brasil', 'flag', 'world cup'] },
   { char: '🇦🇷', unified: '1f1e6-1f1f7', name: 'Argentina', keywords: ['argentina', 'flag', 'world cup'] },
