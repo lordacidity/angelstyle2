@@ -1,14 +1,16 @@
 // Auto-pick the CTA talent(s) for a post. Instead of the user manually searching
-// the Market selector, DeepSeek reads the on-card caption + the generated
-// long-form caption, figures out who the post is actually about, and chooses
-// TWO Pauv talents to feature in the buy-CTA — the CTA card rotates between them.
+// the Market selector, DeepSeek reads ONLY the human signals about the actual
+// video — the editor's on-card caption + context, plus the source video's title
+// and author — figures out who the post is really about, and chooses TWO Pauv
+// talents to feature in the buy-CTA — the CTA card rotates between them. It does
+// NOT read the AI-generated long-form caption: that's a news/industry write-up
+// that name-drops other big figures and would skew the pick away from the video's
+// true subject.
 // For EACH person independently the match is either:
 //   - 'listed':   the person appears in / is a subject of the post AND is on Pauv.
 //   - 'industry': the biggest same-industry talent on Pauv.
 // person1 is the strongest pick (the actual subject if listed, else the biggest
-// same-industry talent) and shows first; person2 is the next best. It also
-// rewrites the caption's closing CTA paragraph so the words name the PRIMARY
-// talent the Market widget shows — text + widget stay in sync.
+// same-industry talent) and shows first; person2 is the next best.
 
 import { NextRequest, NextResponse } from 'next/server';
 import { z } from 'zod';
@@ -60,8 +62,7 @@ function buildTalents(profiles: ProfileRow[], markets: MarketRow[]) {
 export async function POST(req: NextRequest) {
   try {
     const Schema = z.object({
-      caption:          z.string().optional(),  // on-card caption
-      generatedCaption: z.string().optional(),  // the long-form caption we just wrote
+      caption:          z.string().optional(),  // on-card caption (editor-written)
       videoTitle:       z.string().optional(),
       author:           z.string().optional(),
       context:          z.string().optional(),
@@ -71,10 +72,10 @@ export async function POST(req: NextRequest) {
     });
     const parsed = Schema.safeParse(await req.json().catch(() => ({})));
     if (!parsed.success) return NextResponse.json({ error: 'invalid body' }, { status: 400 });
-    const { caption, generatedCaption, videoTitle, author, context, brand } = parsed.data;
+    const { caption, videoTitle, author, context, brand } = parsed.data;
 
-    if (!caption?.trim() && !generatedCaption?.trim() && !videoTitle?.trim()) {
-      return NextResponse.json({ error: 'need caption, generatedCaption, or videoTitle' }, { status: 400 });
+    if (!caption?.trim() && !context?.trim() && !videoTitle?.trim()) {
+      return NextResponse.json({ error: 'need caption, context, or videoTitle' }, { status: 400 });
     }
 
     // ── Load the Pauv roster ───────────────────────────────────────────────────
@@ -114,14 +115,16 @@ export async function POST(req: NextRequest) {
 
     const sys =
       'You choose which TWO Pauv talents should be featured in the buy-CTA of a social post — the CTA ' +
-      'card rotates between them — and you rewrite the post\'s closing CTA paragraph to name the primary one.\n\n' +
+      'card rotates between them.\n\n' +
       'Pauv is a marketplace for trading on public sentiment — every athlete, artist, creator, ' +
       'and cultural figure has a "ticker" that moves with how people feel about them. The CTA tells ' +
       'viewers to take a position on someone.\n\n' +
       brandLine +
-      'You are given: the post\'s on-card caption, the generated long-form caption, the posting brand ' +
-      'account, the list of INDUSTRIES on Pauv, and ROSTER_BY_INDUSTRY — the talents listed on Pauv ' +
-      'grouped under each industry (ticker, name, subcategory).\n\n' +
+      'You are given: the post\'s on-card caption (written by the editor), the editor\'s context notes, ' +
+      'the source video\'s title and author, the posting brand account, the list of INDUSTRIES on Pauv, ' +
+      'and ROSTER_BY_INDUSTRY — the talents listed on Pauv grouped under each industry (ticker, name, ' +
+      'subcategory). Base your decision ONLY on these inputs; there is no long-form caption to read, so ' +
+      'judge who the post is about purely from the on-card caption, context, and video title/author.\n\n' +
       'Steps — follow them in order and do NOT skip the industry step:\n' +
       '1. Identify the main person/subject the post is about (subjectName). Also note any OTHER notable ' +
       'people who actually appear in or are central to the post.\n' +
@@ -140,19 +143,13 @@ export async function POST(req: NextRequest) {
       '4. person1 is the BEST, most relevant pick — the actual subject if they are listed, otherwise the ' +
       'single biggest talent in the subjectIndustry bucket. person2 is the next best — another person ' +
       'from the post if one is listed, otherwise the next most prominent talent in the subjectIndustry ' +
-      'bucket. person1 and person2 MUST be different tickers.\n' +
-      '5. Rewrite ONLY the final CTA paragraph so it bridges naturally from the post to taking a ' +
-      'position on person1 (the PRIMARY talent) BY NAME, ending with a concrete step like "link in bio ' +
-      'to trade on <Name>". ~50-80 words. Conversational, no hashtags, no emojis, plain text. Do NOT ' +
-      'return the first two paragraphs — only the rewritten final paragraph.\n\n' +
+      'bucket. person1 and person2 MUST be different tickers.\n\n' +
       'Every ticker you return MUST be one of the exact ticker strings from ROSTER_BY_INDUSTRY.\n' +
       'Return JSON: { "subjectName": string, "subjectIndustry": string, "ticker": string, "ticker2": string, ' +
-      '"matchType": "listed" | "industry", "matchType2": "listed" | "industry", "reason": string, ' +
-      '"ctaParagraph": string }.';
+      '"matchType": "listed" | "industry", "matchType2": "listed" | "industry", "reason": string }.';
 
     const user = JSON.stringify({
       onCardCaption: caption ?? '',
-      generatedCaption: generatedCaption ?? '',
       videoTitle: videoTitle ?? '',
       author: author ?? '',
       context: context ?? '',
@@ -170,7 +167,7 @@ export async function POST(req: NextRequest) {
       subjectName?: string; subjectIndustry?: string;
       ticker?: string; ticker2?: string;
       matchType?: string; matchType2?: string;
-      reason?: string; ctaParagraph?: string;
+      reason?: string;
     }>(rawAi);
     const pickedTicker = (result.ticker ?? '').trim();
     if (!pickedTicker) return NextResponse.json({ error: 'no ticker returned' }, { status: 502 });
@@ -245,7 +242,6 @@ export async function POST(req: NextRequest) {
       subjectName: result.subjectName ?? '',
       subjectIndustry,
       reason,
-      ctaParagraph: (result.ctaParagraph ?? '').trim(),
     });
   } catch (err) {
     return NextResponse.json({ error: String(err) }, { status: 500 });

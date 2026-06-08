@@ -1325,6 +1325,70 @@ export function CanvasGrid({
         /athletes/i.test(brand.displayName) ? 'athlete' :
         /artists/i.test(brand.displayName)  ? 'artist'  :
         brand.category === 'athletes'       ? 'athlete' : 'artist';
+
+      // Auto-pick the CTA talent IN PARALLEL with the long-form caption — it does
+      // NOT depend on (and must not read) the generated caption, only the human
+      // signals about this video (on-card caption, context, fetched title/author).
+      // Kicked off first so it overlaps the caption write instead of waiting on it.
+      const ctaTask = (async () => {
+        try {
+          const cr = await fetch('/api/ai/pick-cta', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              caption:    entry.caption || undefined,
+              videoTitle: entry.data?.title || undefined,
+              author:     entry.data?.author?.nickname || undefined,
+              context:    entry.context || undefined,
+              brand: {
+                displayName: brand.displayName || 'Pauv',
+                handle:      brand.handle || '@Pauv',
+              },
+            }),
+          });
+          if (!cr.ok) return;
+          const cta = await cr.json() as { talent?: Talent; talent2?: Talent | null; matchType?: string; error?: string };
+          if (!cta.talent || cta.error) return;
+          const t = cta.talent;
+          // If the user hit Clear on this entry's market while we were awaiting
+          // the AI's pick, respect that — don't silently re-apply. `null` is the
+          // explicit "cleared" marker; `undefined` (never had a market) is still
+          // fair game for auto-fill.
+          let userCleared = false;
+          setMarketMap(prev => {
+            if (prev[entry.id] === null) { userCleared = true; return prev; }
+            return { ...prev, [entry.id]: t };
+          });
+          if (userCleared) return;  // skip sparkline + override writes — pointless without a market
+          setSparklineMap(prev => ({ ...prev, [entry.id]: prev[entry.id] ?? generateFallbackSparkline(t.ticker) }));
+          fetchSparkline(entry.id, t.ticker);
+          setMarketOverrideMap(prev => ({
+            ...prev,
+            [entry.id]: {
+              name: t.name, industry: t.industry ?? '',
+              photo_url: t.photo_url,
+              priceUsd: t.price.usd?.toFixed(2) ?? '',
+              lifetimeChangePct: syntheticPctForTicker(t.ticker).toFixed(1),
+            },
+          }));
+          // Second (rotating) person — the CTA always features two. Drop it into
+          // slot 2 + seed its overrides exactly like a manual slot-2 pick.
+          const t2 = cta.talent2;
+          if (t2) {
+            setMarketMap2(prev => ({ ...prev, [entry.id]: t2 }));
+            setMarketOverrideMap2(prev => ({
+              ...prev,
+              [entry.id]: {
+                name: t2.name, industry: t2.industry ?? '',
+                photo_url: t2.photo_url,
+                priceUsd: t2.price.usd?.toFixed(2) ?? '',
+                lifetimeChangePct: syntheticPctForTicker(t2.ticker).toFixed(1),
+              },
+            }));
+          }
+        } catch { /* CTA pick is best-effort — keep the caption as written */ }
+      })();
+
       const r = await fetch('/api/ai/social-caption', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -1341,82 +1405,16 @@ export function CanvasGrid({
       const data = await r.json() as { caption?: string; error?: string };
       if (data.error || !data.caption) throw new Error(data.error ?? 'no caption returned');
       const generated = data.caption;
+      const finalText = generated;
 
-      // Show the caption right away, but keep the spinner up while DeepSeek
-      // auto-picks the CTA talent (it reads this caption) and we sync the
-      // Market widget + closing paragraph to whoever it chooses.
+      // Show the caption right away, but keep the spinner up until the parallel
+      // CTA pick has also settled and synced the Market widget.
       setSocialCaptionMap(prev => ({
         ...prev,
         [entry.id]: { text: generated, loading: true, error: null, copied: false },
       }));
 
-      const finalText = generated;
-      try {
-        const cr = await fetch('/api/ai/pick-cta', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            caption:          entry.caption || undefined,
-            generatedCaption: generated,
-            videoTitle:       entry.data?.title || undefined,
-            author:           entry.data?.author?.nickname || undefined,
-            context:          entry.context || undefined,
-            brand: {
-              displayName: brand.displayName || 'Pauv',
-              handle:      brand.handle || '@Pauv',
-            },
-          }),
-        });
-        if (cr.ok) {
-          const cta = await cr.json() as { talent?: Talent; talent2?: Talent | null; ctaParagraph?: string; matchType?: string; error?: string };
-          if (cta.talent && !cta.error) {
-            const t = cta.talent;
-            // If the user hit Clear on this entry's market while we were
-            // awaiting the AI's pick, respect that — don't silently re-apply.
-            // `null` is the explicit "cleared" marker; `undefined` (never had a
-            // market) is still fair game for auto-fill.
-            let userCleared = false;
-            setMarketMap(prev => {
-              if (prev[entry.id] === null) { userCleared = true; return prev; }
-              return { ...prev, [entry.id]: t };
-            });
-            if (userCleared) {
-              // Skip sparkline + override writes too — pointless without a market.
-              // CTA paragraph swap below still runs since that's purely the caption.
-            } else {
-              setSparklineMap(prev => ({ ...prev, [entry.id]: prev[entry.id] ?? generateFallbackSparkline(t.ticker) }));
-              fetchSparkline(entry.id, t.ticker);
-              setMarketOverrideMap(prev => ({
-                ...prev,
-                [entry.id]: {
-                  name: t.name, industry: t.industry ?? '',
-                  photo_url: t.photo_url,
-                  priceUsd: t.price.usd?.toFixed(2) ?? '',
-                  lifetimeChangePct: syntheticPctForTicker(t.ticker).toFixed(1),
-                },
-              }));
-              // Second (rotating) person — the CTA always features two. Drop it
-              // into slot 2 + seed its overrides exactly like a manual slot-2 pick.
-              const t2 = cta.talent2;
-              if (t2) {
-                setMarketMap2(prev => ({ ...prev, [entry.id]: t2 }));
-                setMarketOverrideMap2(prev => ({
-                  ...prev,
-                  [entry.id]: {
-                    name: t2.name, industry: t2.industry ?? '',
-                    photo_url: t2.photo_url,
-                    priceUsd: t2.price.usd?.toFixed(2) ?? '',
-                    lifetimeChangePct: syntheticPctForTicker(t2.ticker).toFixed(1),
-                  },
-                }));
-              }
-            }
-            // NOTE: we intentionally do NOT swap in cta.ctaParagraph anymore —
-            // the caption is now a pure industry/news write-up with no Pauv CTA.
-            // pick-cta is still called only to auto-fill the Market widget talent.
-          }
-        }
-      } catch { /* CTA pick is best-effort — keep the caption as written */ }
+      await ctaTask;
 
       setSocialCaptionMap(prev => ({
         ...prev,
