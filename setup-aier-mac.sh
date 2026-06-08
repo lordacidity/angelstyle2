@@ -4,7 +4,10 @@
 # FRESH MAC (the /ai-maker "First time?" dropdown shows this on macOS): open
 # Terminal, paste this one line, press return —
 #
-#   curl -fsSL https://raw.githubusercontent.com/lordacidity/angelstyle2/main/setup-aier-mac.sh | bash
+#   bash -c "$(curl -fsSL https://raw.githubusercontent.com/lordacidity/angelstyle2/main/setup-aier-mac.sh)"
+#
+# (Use `bash -c "$(curl ...)"`, NOT `curl ... | bash` — the former keeps your keyboard
+#  connected so Homebrew can ask for your Mac password; the pipe form can't.)
 #
 # It installs Homebrew + Git + Node + python3 if missing, clones the repo, installs the app
 # (backend + client -> the yt-dlp + ffmpeg binaries), registers the aier:// "Launch Aier
@@ -34,9 +37,12 @@ add_brew_path() {
 add_brew_path
 
 # ── Homebrew (the macOS package manager) ──────────────────────────────────────
+# Run the official installer INTERACTIVELY (no NONINTERACTIVE) so it can prompt for the Mac
+# password — it needs sudo once to create its prefix. This is why the one-paste uses
+# `bash -c "$(curl ...)"` instead of `curl | bash`: stdin stays the keyboard.
 if ! have brew; then
-  echo "Installing Homebrew (you may be asked for your Mac login password) ..."
-  NONINTERACTIVE=1 /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"
+  echo "Installing Homebrew — it will ask for your Mac login password (type it; it stays hidden) ..."
+  /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"
   add_brew_path
 fi
 if ! have brew; then

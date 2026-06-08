@@ -72,7 +72,7 @@ const LOCAL = (process.env.NEXT_PUBLIC_AIER_LOCAL_URL || 'http://localhost:3010'
 const IS_MAC = typeof navigator !== 'undefined' && /Mac|iPhone|iPad/i.test(navigator.platform || navigator.userAgent || '');
 const SETUP_SHELL = IS_MAC ? 'Terminal' : 'Windows PowerShell';
 const SETUP_COMMAND = IS_MAC
-  ? 'curl -fsSL https://raw.githubusercontent.com/lordacidity/angelstyle2/main/setup-aier-mac.sh | bash'
+  ? 'bash -c "$(curl -fsSL https://raw.githubusercontent.com/lordacidity/angelstyle2/main/setup-aier-mac.sh)"'
   : 'irm https://raw.githubusercontent.com/lordacidity/angelstyle2/main/setup-aier.ps1 | iex';
 
 // Floating bottom-right "Launch Aier server" control, mirroring Phonedeck's launch button.

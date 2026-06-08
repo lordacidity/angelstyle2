@@ -69,8 +69,9 @@ host/port; it defaults to `http://localhost:3010`.
 one-paste in the "First time?" dropdown):
 
 ```bash
-# First time — paste in Terminal (installs Homebrew/Node/python3, clones, starts the studio):
-curl -fsSL https://raw.githubusercontent.com/lordacidity/angelstyle2/main/setup-aier-mac.sh | bash
+# First time — paste in Terminal (installs Homebrew/Node/python3, clones, starts the studio).
+# Use bash -c "$(curl ...)", NOT curl | bash, so Homebrew can prompt for your Mac password.
+bash -c "$(curl -fsSL https://raw.githubusercontent.com/lordacidity/angelstyle2/main/setup-aier-mac.sh)"
 ```
 
 Each time after: the same **"Launch Aier server"** button (an `aier://` launcher app made by
