@@ -28,7 +28,7 @@ export async function GET(_req: Request, { params }: { params: Promise<{ project
   await addClip('Real footage', project.sourcePath);
   await addClip('AI clip (Kling)', project.klingPath);
 
-  const audioLibrary = (getSettings().audio || []).map((a: Record<string, unknown>) => ({
+  const audioLibrary = ((await getSettings()).audio || []).map((a: Record<string, unknown>) => ({
     id: a.id, label: a.label, src: a.url, duration: a.duration || null,
   }));
 

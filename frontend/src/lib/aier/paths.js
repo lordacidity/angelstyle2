@@ -1,4 +1,5 @@
 import fs from 'node:fs';
+import os from 'node:os';
 import path from 'node:path';
 
 // Persistence root for the AI-maker (Aier) feature. Defaults to <frontend>/aier-storage in
@@ -6,7 +7,15 @@ import path from 'node:path';
 // path (e.g. /data on Railway) in production so projects/refs/audio/settings survive
 // redeploys. Every path below derives from this, so this one line redirects ALL writes.
 export const ROOT = process.cwd();
-export const STORAGE = process.env.STORAGE_ROOT || path.join(ROOT, 'aier-storage');
+// On Vercel the deployment filesystem (process.cwd()) is READ-ONLY — only /tmp is writable —
+// so any mkdir/write under ROOT throws EROFS and crashes the whole module at import. Fall back
+// to the OS temp dir there. It's ephemeral (wiped between invocations), which is acceptable
+// for settings (defaults rebuild) but means uploads/projects don't persist on Vercel — set
+// STORAGE_ROOT to a real volume (or deploy on Railway) for durable storage.
+const DEFAULT_STORAGE = process.env.VERCEL
+  ? path.join(os.tmpdir(), 'aier-storage')
+  : path.join(ROOT, 'aier-storage');
+export const STORAGE = process.env.STORAGE_ROOT || DEFAULT_STORAGE;
 export const PROJECTS_DIR = path.join(STORAGE, 'projects');
 export const REFS_DIR = path.join(STORAGE, 'refs');
 export const AUDIO_DIR = path.join(STORAGE, 'audio'); // admin sound library (music/sfx/voice)
@@ -14,7 +23,9 @@ export const SETTINGS_FILE = path.join(STORAGE, 'settings.json');
 
 export function ensureDirs() {
   for (const d of [STORAGE, PROJECTS_DIR, REFS_DIR, AUDIO_DIR]) {
-    fs.mkdirSync(d, { recursive: true });
+    // Best-effort: a read-only FS (e.g. a misconfigured STORAGE_ROOT) must not crash the
+    // module at import — reads still return defaults; only writes/uploads will fail later.
+    try { fs.mkdirSync(d, { recursive: true }); } catch { /* read-only FS */ }
   }
 }
 

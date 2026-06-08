@@ -18,7 +18,7 @@ export async function POST(req: Request) {
   let duration: number | null = null;
   try { duration = (await probe(dest)).duration || null; } catch { /* unknown */ }
 
-  const settings = getSettings();
+  const settings = await getSettings();
   const clip = {
     id: randomUUID(),
     label: label || path.parse(file.name).name || `Audio ${(settings.audio?.length || 0) + 1}`,
@@ -26,6 +26,6 @@ export async function POST(req: Request) {
     url: toMediaUrl(dest),
     duration,
   };
-  saveSettings({ audio: [...(settings.audio || []), clip] });
-  return Response.json(publicState());
+  await saveSettings({ audio: [...(settings.audio || []), clip] });
+  return Response.json(await publicState());
 }

@@ -14,13 +14,13 @@ export async function POST(req: Request) {
   const dest = path.join(REFS_DIR, `${randomUUID()}${ext}`);
   fs.writeFileSync(dest, Buffer.from(await file.arrayBuffer()));
 
-  const settings = getSettings();
+  const settings = await getSettings();
   const ref = {
     id: randomUUID(),
     label: label || `Reference ${(settings.refs?.length || 0) + 1}`,
     file: dest,
     url: toMediaUrl(dest),
   };
-  saveSettings({ refs: [...(settings.refs || []), ref] });
-  return Response.json(publicState());
+  await saveSettings({ refs: [...(settings.refs || []), ref] });
+  return Response.json(await publicState());
 }

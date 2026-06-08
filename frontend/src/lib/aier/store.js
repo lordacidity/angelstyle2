@@ -1,6 +1,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
-import { SETTINGS_FILE, projectDir, ensureDirs } from './paths.js';
+import { projectDir, ensureDirs } from './paths.js';
+import { loadStoredSettings, saveStoredSettings } from './settings-db.js';
 
 // The Express app called ensureDirs() at boot; Next has no single boot, so we ensure the
 // storage tree exists when this (widely-imported) module first loads in the server process.
@@ -51,28 +52,29 @@ const DEFAULT_SETTINGS = {
 
 export const KLING_MODELS = { testing: TESTING_MODEL, prod: PROD_MODEL };
 
-export function getSettings() {
-  let saved = null;
-  try { saved = JSON.parse(fs.readFileSync(SETTINGS_FILE, 'utf8')); } catch { /* none yet */ }
+export async function getSettings() {
+  // Saved blob lives in the app's Railway Postgres (durable across Vercel invocations),
+  // with a transparent file fallback for local dev — see settings-db.js.
+  const saved = await loadStoredSettings();
   const settings = { ...DEFAULT_SETTINGS, ...(saved || {}) };
   // The hard-coded default reference images are always present unless the user has added
-  // their own — so a fresh Railway deploy (or a stale/empty settings.json) still has them.
+  // their own — so a fresh Railway deploy (or a stale/empty settings blob) still has them.
   if (!Array.isArray(settings.refs) || settings.refs.length === 0) {
     settings.refs = DEFAULT_SETTINGS.refs;
   }
   return settings;
 }
 
-export function saveSettings(patch) {
-  const next = { ...getSettings(), ...patch };
-  fs.writeFileSync(SETTINGS_FILE, JSON.stringify(next, null, 2));
+export async function saveSettings(patch) {
+  const next = { ...(await getSettings()), ...patch };
+  await saveStoredSettings(next);
   return next;
 }
 
 // The shape the Admin UI consumes (settings + which API keys are present + model choices).
-export function publicState() {
+export async function publicState() {
   return {
-    settings: getSettings(),
+    settings: await getSettings(),
     env: {
       fal: !!process.env.FAL_KEY,
       gemini: !!process.env.GEMINI_API_KEY,

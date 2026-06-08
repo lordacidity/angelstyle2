@@ -11,7 +11,7 @@ export async function POST(req: Request) {
     if (!project.framePath) {
       return Response.json({ error: 'Pick a freeze frame first.' }, { status: 400 });
     }
-    const settings = getSettings();
+    const settings = await getSettings();
     // Show Gemini the same reference photos that become @Element1.
     const refPaths = (settings.refs || []).map(resolveStoragePath).filter(Boolean);
     const prompt = await draftPrompt({

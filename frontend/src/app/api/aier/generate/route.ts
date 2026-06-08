@@ -26,7 +26,7 @@ export async function POST(req: Request) {
     return Response.json({ error: 'Daily generation limit reached. Please try again tomorrow.' }, { status: 429 });
   }
 
-  const settings = getSettings();
+  const settings = await getSettings();
   const jobId = createJob('generate');
 
   runJob(jobId, async (update: (patch: Record<string, unknown>) => void) => {
