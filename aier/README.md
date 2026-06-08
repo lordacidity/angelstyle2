@@ -65,6 +65,20 @@ allow a local-network connection; click Allow. (Don't also run `npm run dev` by 
 instance owns port 3010.) Set `NEXT_PUBLIC_AIER_LOCAL_URL` to point the page at a different
 host/port; it defaults to `http://localhost:3010`.
 
+**On a Mac** it's the same idea, different scripts (the page detects the OS and shows the right
+one-paste in the "First time?" dropdown):
+
+```bash
+# First time — paste in Terminal (installs Homebrew/Node/python3, clones, starts the studio):
+curl -fsSL https://raw.githubusercontent.com/lordacidity/angelstyle2/main/setup-aier-mac.sh | bash
+```
+
+Each time after: the same **"Launch Aier server"** button (an `aier://` launcher app made by
+`setup-aier-mac.sh` → `register-aier-mac.sh`), **or** double-click **`Launch Aier.command`** on
+the Desktop. `python3` is required on macOS because `youtube-dl-exec` ships yt-dlp as a Python
+zipapp there (Windows gets a self-contained `yt-dlp.exe`). The server must run on the Mac itself
+— an iPhone/iPad can't host it.
+
 ## The 5 steps (Studio)
 
 1. **Paste & Trim** — paste a YouTube URL; it downloads locally, then trim start/end.

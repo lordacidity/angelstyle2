@@ -66,9 +66,14 @@ function StudioSlots() {
 // Where the local Aier studio server lives (the full app on port 3010). Override at build
 // time with NEXT_PUBLIC_AIER_LOCAL_URL. Must match api.js's LOCAL.
 const LOCAL = (process.env.NEXT_PUBLIC_AIER_LOCAL_URL || 'http://localhost:3010').replace(/\/+$/, '');
-// First-time, run-once command. Installs Git/Node if missing, clones, installs deps, registers
-// the aier:// launch protocol, and starts the downloader — see setup-aier.ps1.
-const SETUP_COMMAND = 'irm https://raw.githubusercontent.com/lordacidity/angelstyle2/main/setup-aier.ps1 | iex';
+// First-time, run-once command — OS-aware. Installs Git/Node (+python3 on Mac) if missing,
+// clones, installs deps, registers the aier:// launch handler, and starts the studio. See
+// setup-aier.ps1 (Windows) / setup-aier-mac.sh (macOS).
+const IS_MAC = typeof navigator !== 'undefined' && /Mac|iPhone|iPad/i.test(navigator.platform || navigator.userAgent || '');
+const SETUP_SHELL = IS_MAC ? 'Terminal' : 'Windows PowerShell';
+const SETUP_COMMAND = IS_MAC
+  ? 'curl -fsSL https://raw.githubusercontent.com/lordacidity/angelstyle2/main/setup-aier-mac.sh | bash'
+  : 'irm https://raw.githubusercontent.com/lordacidity/angelstyle2/main/setup-aier.ps1 | iex';
 
 // Floating bottom-right "Launch Aier server" control, mirroring Phonedeck's launch button.
 // The Vercel page can't spawn a process, so the main button is an aier:// deep-link
@@ -115,7 +120,7 @@ function LaunchAierButton() {
               style={{ background: 'none', border: 'none', color: '#71717a', cursor: 'pointer', fontSize: 13 }}>✕</button>
           </div>
           <p style={{ fontSize: 11.5, lineHeight: 1.55, color: '#a1a1aa', margin: '0 0 8px' }}>
-            Open <span style={{ color: '#e4e4e7' }}>Windows PowerShell</span> and paste this once — it installs
+            Open <span style={{ color: '#e4e4e7' }}>{SETUP_SHELL}</span> and paste this once — it installs
             everything needed (Node, the Aier app) and registers the launch button:
           </p>
           <div style={{ display: 'flex', gap: 6 }}>

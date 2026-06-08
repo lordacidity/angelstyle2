@@ -1,0 +1,5 @@
+# Shell scripts MUST stay LF — macOS/Linux bash fails with "bad interpreter: ^M"
+# if these get CRLF line endings (this repo is edited on Windows where autocrlf
+# would otherwise convert them).
+*.sh        text eol=lf
+*.command   text eol=lf
