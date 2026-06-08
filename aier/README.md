@@ -37,6 +37,30 @@ npm run dev        # one process: UI + API on http://localhost:3010
 Open **http://localhost:3010**. First stop: **/admin** → upload your face (first = `@Element1` frontal)
 and full-body reference, pick Testing/Production model.
 
+## Video downloader (local, driven from the cloud)
+
+The **Video downloader** tab on the Vercel-hosted `/ai-maker` page does NOT download in the cloud —
+YouTube bot-blocks datacenter IPs (Vercel/Railway), and progressive cloud grabs cap at ~720p.
+Instead it talks to a tiny local server, `downloader.js` (port **3011**), so downloads run from your
+**residential IP** at up to **1080p** (yt-dlp + ffmpeg merge). It's separate from the studio app on
+3010 and needs no API keys.
+
+**First time on a PC** — paste one line into Windows PowerShell (this is what the floating
+button's "First time?" dropdown shows). It installs Git + Node if missing, clones the repo,
+installs the downloader's deps, registers the `aier://` launch button, and starts it:
+
+```powershell
+irm https://raw.githubusercontent.com/lordacidity/angelstyle2/main/setup-aier.ps1 | iex
+```
+
+(Already have the repo cloned? Run it as a file instead and it sets up THIS clone:
+`powershell -ExecutionPolicy Bypass -File .\setup-aier.ps1`.)
+
+**Every time after** — press the floating **"Launch Aier server"** button (bottom-right on
+`/ai-maker`), an `aier://launch` deep-link → `launch-aier.bat` → `node downloader.js`. Exactly
+like Phonedeck's "Launch server". The first connection may prompt to allow a local-network
+request; click Allow. The studio/AI pipeline is unchanged — it still runs on Railway.
+
 ## The 5 steps (Studio)
 
 1. **Paste & Trim** — paste a YouTube URL; it downloads locally, then trim start/end.
