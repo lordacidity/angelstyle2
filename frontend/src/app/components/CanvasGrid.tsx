@@ -1478,7 +1478,18 @@ export function CanvasGrid({
   // "Next" in the media tab: fetch the video, then — for video posts — auto-run
   // the caption generator (which itself chains the CTA pick). One action instead
   // of three. If the fetch fails, the error is already surfaced on the entry.
+  //
+  // Wipe the previous caption for this entry up front. Without this, a failed or
+  // stalled regenerate leaves the OLD post caption visible next to the NEW video
+  // (the generateSocialCaption error handler preserves prev text), and the user
+  // sees a caption that doesn't match the clip they just loaded.
   const handleFetchThenGenerate = useCallback(async (entry: VideoEntry) => {
+    setSocialCaptionMap(prev => {
+      if (!prev[entry.id]) return prev;
+      const next = { ...prev };
+      delete next[entry.id];
+      return next;
+    });
     const data = await onFetchVideo(entry.id);
     if (!data) return;
     await generateSocialCaption({ ...entry, data });
