@@ -1,14 +1,14 @@
 import { useState } from 'react';
 import { Banner } from '../components/ui.jsx';
 
-// YouTube → MP4 downloader. Runs against the LOCAL Aier server (aier/downloader.js), started
-// with the floating "Launch Aier server" button (bottom-right). Downloading locally (vs the
-// cloud) means a residential IP — YouTube bot-blocks datacenter IPs like Vercel/Railway — and
-// a real yt-dlp + ffmpeg merge, so up to 1080p instead of the cloud grab's ~720p progressive
-// cap. The studio/AI pipeline is unaffected; it still runs on Railway.
+// YouTube → MP4 downloader. Hits GET /api/aier/youtube/grab on the LOCAL Aier server (port
+// 3010, started with the floating "Launch Aier server" button). Downloading locally means a
+// residential IP — YouTube bot-blocks datacenter IPs like Vercel/Railway — and a real yt-dlp +
+// ffmpeg merge, so up to 1080p instead of the cloud grab's ~720p progressive cap.
 
-// Where the local server lives. Override at build time with NEXT_PUBLIC_AIER_DOWNLOADER_URL.
-const LOCAL = (process.env.NEXT_PUBLIC_AIER_DOWNLOADER_URL || 'http://localhost:3011').replace(/\/+$/, '');
+// The local Aier studio server (full app, port 3010). Override with NEXT_PUBLIC_AIER_LOCAL_URL.
+const BASE = (process.env.NEXT_PUBLIC_AIER_LOCAL_URL || 'http://localhost:3010').replace(/\/+$/, '');
+const LOCAL = `${BASE}/api/aier/youtube/grab`;
 
 export default function Downloader() {
   const [url, setUrl] = useState('');
@@ -22,7 +22,7 @@ export default function Downloader() {
     try {
       // Probe first: validate + grab the title, and confirm the local server is up before we
       // hand the browser a download URL.
-      const grab = `${LOCAL}/grab?url=${encodeURIComponent(url)}`;
+      const grab = `${LOCAL}?url=${encodeURIComponent(url)}`;
       let res;
       try {
         res = await fetch(`${grab}&probe=1`);
@@ -67,7 +67,7 @@ export default function Downloader() {
           <div style={{ marginTop: 18 }}>
             <Banner kind="ok">
               Downloading “{info.title}” — check your browser's downloads.{' '}
-              <button className="btn ghost" onClick={() => { window.location.href = `${LOCAL}/grab?url=${encodeURIComponent(url)}`; }}>
+              <button className="btn ghost" onClick={() => { window.location.href = `${LOCAL}?url=${encodeURIComponent(url)}`; }}>
                 Download again
               </button>
             </Banner>

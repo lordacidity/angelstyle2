@@ -12,10 +12,13 @@ stitch real + AI into one 1080p MP4. Gemini 2.5 Flash drafts the Kling prompt fr
   to fail. To verify backend behavior, use a one-off Node script that imports the libs directly
   (does NOT bind the app port), or ask the user to run it and report back.
 - **Don't touch the user's other apps.** Ports **3000/3001** belong to a separate Next.js
-  project of theirs — leave them alone. This app uses **port 3010**; the standalone local
-  YouTube downloader (`downloader.js`, launched by the user via the `/ai-maker` "Launch Aier
-  server" button → `aier://` → `launch-aier.bat`) uses **port 3011**. Same rule: the USER
-  starts it, never Claude.
+  project of theirs — leave them alone. This app uses **port 3010 only**.
+- **The Vercel `/ai-maker` page drives THIS local server.** Its SPA (in the main `frontend/`
+  app) calls `http://localhost:3010` cross-origin for the whole studio backend — it's launched
+  by the user via the `/ai-maker` "Launch Aier server" button (`aier://` → `launch-aier.bat` →
+  `npm run dev` with `AIER_UNGATED=1`). `server/index.js` accepts the SPA's `/api/aier/*` paths
+  (strips the `aier` segment), adds CORS + `Access-Control-Allow-Private-Network`, and `api.js`
+  absolutizes `/media/...` URLs to `localhost:3010`. The USER starts it, never Claude.
 
 ## Architecture
 - **Single Express process** serves BOTH the UI and the API on **http://localhost:3010**

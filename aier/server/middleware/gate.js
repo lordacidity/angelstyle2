@@ -112,7 +112,9 @@ export function gate() {
   const SECRET = process.env.AUTH_SECRET || '';
   const isProd = process.env.NODE_ENV === 'production';
   // Disabled unless BOTH are set — fail-open so a partial misconfig can't lock you out.
-  const disabled = !PASSWORD || !SECRET;
+  // AIER_UNGATED=1 force-disables it for the LOCAL launch (the server is localhost-only and
+  // the Vercel SPA can't send the SameSite=Lax auth cookie cross-origin, so it'd 401).
+  const disabled = process.env.AIER_UNGATED === '1' || !PASSWORD || !SECRET;
 
   if (disabled) {
     console.warn('  ⚠ SITE_PASSWORD/AUTH_SECRET not both set — Aier is UNGATED (anyone can reach the API).');

@@ -63,9 +63,9 @@ function StudioSlots() {
   );
 }
 
-// Where the local downloader server lives (aier/downloader.js). Override at build time with
-// NEXT_PUBLIC_AIER_DOWNLOADER_URL.
-const DL_BASE = (process.env.NEXT_PUBLIC_AIER_DOWNLOADER_URL || 'http://localhost:3011').replace(/\/+$/, '');
+// Where the local Aier studio server lives (the full app on port 3010). Override at build
+// time with NEXT_PUBLIC_AIER_LOCAL_URL. Must match api.js's LOCAL.
+const LOCAL = (process.env.NEXT_PUBLIC_AIER_LOCAL_URL || 'http://localhost:3010').replace(/\/+$/, '');
 // First-time, run-once command. Installs Git/Node if missing, clones, installs deps, registers
 // the aier:// launch protocol, and starts the downloader — see setup-aier.ps1.
 const SETUP_COMMAND = 'irm https://raw.githubusercontent.com/lordacidity/angelstyle2/main/setup-aier.ps1 | iex';
@@ -82,7 +82,7 @@ function LaunchAierButton() {
   const [up, setUp] = useState(false); // is the local downloader reachable?
 
   const recheck = useCallback(() => {
-    fetch(`${DL_BASE}/health`, { cache: 'no-store' }).then((r) => setUp(r.ok)).catch(() => setUp(false));
+    fetch(`${LOCAL}/api/aier/health`, { cache: 'no-store' }).then((r) => setUp(r.ok)).catch(() => setUp(false));
   }, []);
 
   useEffect(() => {
@@ -116,7 +116,7 @@ function LaunchAierButton() {
           </div>
           <p style={{ fontSize: 11.5, lineHeight: 1.55, color: '#a1a1aa', margin: '0 0 8px' }}>
             Open <span style={{ color: '#e4e4e7' }}>Windows PowerShell</span> and paste this once — it installs
-            everything needed (Node, the downloader) and registers the launch button:
+            everything needed (Node, the Aier app) and registers the launch button:
           </p>
           <div style={{ display: 'flex', gap: 6 }}>
             <code style={{
@@ -131,7 +131,8 @@ function LaunchAierButton() {
           </div>
           <p style={{ fontSize: 10, lineHeight: 1.55, color: '#71717a', margin: '8px 0 0' }}>
             Done once. After that just press <span style={{ color: '#d4d4d8' }}>Launch Aier server</span> each
-            time — it opens a terminal running the downloader, then the Video downloader works locally.
+            time — it opens a terminal running the local Aier studio, then the whole studio (download,
+            freeze, generate, render) works locally.
           </p>
         </div>
       )}

@@ -1,13 +1,48 @@
-// Tiny API client. Same-origin: Vite proxies /api + /media to the backend.
+// Tiny API client. The Aier STUDIO backend runs on the user's LOCAL machine (the full Aier
+// app, launched via the "Launch Aier server" button), NOT the Vercel domain — that's how the
+// YouTube download avoids datacenter bot-blocks/python3 and how render/export reach the local
+// disk. So every call is absolute to LOCAL, and every media URL the server returns (a
+// "/media/..." path that would otherwise resolve against the Vercel origin) is rewritten to
+// LOCAL too, so <video>/<img> load from the local server. The local server accepts these same
+// /api/aier/* paths (it strips the "aier" segment) so it's a drop-in for the old cloud backend.
+const LOCAL = (process.env.NEXT_PUBLIC_AIER_LOCAL_URL || 'http://localhost:3010').replace(/\/+$/, '');
 
-async function jsonFetch(url, opts = {}) {
-  const res = await fetch(url, {
+function absMedia(u) {
+  if (typeof u !== 'string') return u;
+  if (u.startsWith('/media/')) return LOCAL + u;
+  if (u.startsWith('/api/aier/media/')) return LOCAL + u.slice('/api/aier'.length);
+  return u;
+}
+// Walk a parsed response and absolutize any media path so it points at the local server.
+// Server-relative "/media/..." stays canonical in the EDL the editor sends back — the
+// renderer's resolveMediaPath() tolerates these absolute URLs.
+function absolutize(v) {
+  if (typeof v === 'string') return absMedia(v);
+  if (Array.isArray(v)) return v.map(absolutize);
+  if (v && typeof v === 'object') {
+    const out = {};
+    for (const k in v) out[k] = absolutize(v[k]);
+    return out;
+  }
+  return v;
+}
+
+async function jsonFetch(path, opts = {}) {
+  const res = await fetch(LOCAL + path, {
     headers: { 'Content-Type': 'application/json' },
     ...opts,
   });
   const data = await res.json().catch(() => ({}));
   if (!res.ok) throw new Error(data.error || `Request failed (${res.status})`);
-  return data;
+  return absolutize(data);
+}
+
+// Same as jsonFetch but for FormData uploads (no JSON content-type, no body stringify).
+async function formFetch(path, fd) {
+  const res = await fetch(LOCAL + path, { method: 'POST', body: fd });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(data.error || `Upload failed (${res.status})`);
+  return absolutize(data);
 }
 
 export const api = {
@@ -17,15 +52,12 @@ export const api = {
   download: (url) => jsonFetch('/api/aier/youtube/download', { method: 'POST', body: JSON.stringify({ url }) }),
   frame: (projectId, time) => jsonFetch('/api/aier/frame', { method: 'POST', body: JSON.stringify({ projectId, time }) }),
   // Save a browser-decoded frame (canvas grab) as the seed — pixel-matches the <video>.
-  saveFrame: async (projectId, time, blob) => {
+  saveFrame: (projectId, time, blob) => {
     const fd = new FormData();
     fd.append('image', blob, 'frame.png');
     fd.append('projectId', projectId);
     fd.append('time', String(time));
-    const res = await fetch('/api/aier/frame/save', { method: 'POST', body: fd });
-    const data = await res.json().catch(() => ({}));
-    if (!res.ok) throw new Error(data.error || 'Failed to save frame');
-    return data;
+    return formFetch('/api/aier/frame/save', fd);
   },
   // Gemini drafts the Kling prompt from the Admin instruction + the freeze frame.
   draftPrompt: (projectId) =>
@@ -50,24 +82,18 @@ export const api = {
   saveSettings: (patch) => jsonFetch('/api/aier/admin/settings', { method: 'PUT', body: JSON.stringify(patch) }),
   deleteRef: (id) => jsonFetch(`/api/aier/admin/refs/${id}`, { method: 'DELETE' }),
   deleteAudio: (id) => jsonFetch(`/api/aier/admin/audio/${id}`, { method: 'DELETE' }),
-  uploadAudio: async (file, label) => {
+  uploadAudio: (file, label) => {
     const fd = new FormData();
     fd.append('audio', file);
     fd.append('label', label || '');
-    const res = await fetch('/api/aier/admin/audio', { method: 'POST', body: fd });
-    const data = await res.json().catch(() => ({}));
-    if (!res.ok) throw new Error(data.error || 'Upload failed');
-    return data;
+    return formFetch('/api/aier/admin/audio', fd);
   },
   reorderRefs: (ids) => jsonFetch('/api/aier/admin/refs/reorder', { method: 'POST', body: JSON.stringify({ ids }) }),
-  uploadRef: async (file, label) => {
+  uploadRef: (file, label) => {
     const fd = new FormData();
     fd.append('image', file);
     fd.append('label', label || '');
-    const res = await fetch('/api/aier/admin/refs', { method: 'POST', body: fd });
-    const data = await res.json().catch(() => ({}));
-    if (!res.ok) throw new Error(data.error || 'Upload failed');
-    return data;
+    return formFetch('/api/aier/admin/refs', fd);
   },
 };
 

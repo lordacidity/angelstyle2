@@ -8,7 +8,7 @@
 #   powershell -ExecutionPolicy Bypass -File .\register-aier-protocol.ps1
 #
 # Afterwards, clicking "Launch Aier server" (or visiting aier://launch in the address bar)
-# runs launch-aier.bat, which opens a terminal and starts the downloader on port 3011.
+# runs launch-aier.bat, which opens a terminal and starts the full Aier studio on port 3010.
 # To undo:  Remove-Item HKCU:\Software\Classes\aier -Recurse
 
 $ErrorActionPreference = 'Stop'

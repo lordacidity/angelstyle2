@@ -425,7 +425,10 @@ export default function Wizard({ slot = 0, onStatus } = {}) {
           <h2>2 · Pick the freeze frame</h2>
           <p className="sub">Scrub to the exact moment the AI should take over. This frame seeds the Kling clip — captured straight from the player, so it matches the movie pixel-for-pixel.</p>
           <div className="cropwrap">
-            <video ref={scrubRef} src={project.sourceUrl} preload="auto" playsInline
+            {/* crossOrigin: the source now streams from the LOCAL server (a different origin
+                than this Vercel page), so request it with CORS — otherwise canvas capture in
+                handleCapture taints and falls back to the server-side ffmpeg frame. */}
+            <video ref={scrubRef} src={project.sourceUrl} preload="auto" playsInline crossOrigin="anonymous"
               onLoadedMetadata={(e) => { e.target.currentTime = frameTime; }} />
             <CropShade crop={crop} />
             <CropBox crop={crop} setCrop={setCrop} />

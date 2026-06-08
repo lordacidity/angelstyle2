@@ -27,6 +27,13 @@ function clampSpeed(v) {
 // refusing anything that escapes storage/ (path-traversal guard) or doesn't exist.
 export function resolveMediaPath(src) {
   let rel = String(src || '').trim();
+  // Tolerate absolute media URLs. The Vercel-hosted /ai-maker SPA talks to this server
+  // cross-origin, so the EDL it sends back carries http://localhost:PORT/media/... — reduce
+  // any absolute URL to its /media/ path before resolving under storage.
+  if (/^https?:\/\//i.test(rel)) {
+    const i = rel.indexOf('/media/');
+    if (i >= 0) rel = rel.slice(i);
+  }
   if (rel.startsWith('/media/')) rel = rel.slice('/media/'.length);
   rel = rel.replace(/^[\\/]+/, '');
   const root = path.resolve(STORAGE);

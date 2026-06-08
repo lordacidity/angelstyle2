@@ -1,10 +1,12 @@
 @echo off
-REM Aier downloader launcher — invoked by the aier:// URL protocol that the Vercel-hosted
-REM /ai-maker "Launch Aier server" button opens. Starts ONLY the small local YouTube→MP4
-REM download server (aier\downloader.js, port 3011) in a visible terminal, so downloads run
-REM from this PC's residential IP at up to 1080p. It is NOT the studio app (port 3010) and
-REM does NOT touch it — the AI pipeline still runs on Railway.
+REM Aier server launcher — invoked by the aier:// URL protocol that the Vercel-hosted
+REM /ai-maker "Launch Aier server" button opens. Starts the FULL local Aier studio (port 3010)
+REM so the whole flow — YouTube download, freeze frame, Kling generate, render/export, and the
+REM Video downloader tab — runs on THIS PC (residential IP, bundled yt-dlp.exe + ffmpeg) instead
+REM of Railway. The Vercel page is just static client JS that calls this local server.
 REM
-REM Windows hands the full aier://... URL to this script as %1; it is unused — we just fire
-REM up the server. Registered once by register-aier-protocol.ps1 (run setup-aier.ps1 first).
-start "aier-downloader" cmd /k "cd /d %~dp0aier && node downloader.js"
+REM AIER_UNGATED=1: the server is localhost-only, and the browser can't send its SameSite=Lax
+REM auth cookie cross-origin, so we run it open (no password gate). Windows hands the full
+REM aier://... URL as %1; it is unused. Registered once by register-aier-protocol.ps1.
+set AIER_UNGATED=1
+start "aier-server" cmd /k "cd /d %~dp0aier && npm run dev"

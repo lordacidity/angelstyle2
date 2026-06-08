@@ -37,17 +37,19 @@ npm run dev        # one process: UI + API on http://localhost:3010
 Open **http://localhost:3010**. First stop: **/admin** → upload your face (first = `@Element1` frontal)
 and full-body reference, pick Testing/Production model.
 
-## Video downloader (local, driven from the cloud)
+## Run /ai-maker against THIS local server (Launch Aier server button)
 
-The **Video downloader** tab on the Vercel-hosted `/ai-maker` page does NOT download in the cloud —
-YouTube bot-blocks datacenter IPs (Vercel/Railway), and progressive cloud grabs cap at ~720p.
-Instead it talks to a tiny local server, `downloader.js` (port **3011**), so downloads run from your
-**residential IP** at up to **1080p** (yt-dlp + ffmpeg merge). It's separate from the studio app on
-3010 and needs no API keys.
+The Vercel-hosted `/ai-maker` page is just static client JS — its whole studio backend (YouTube
+download, freeze frame, Kling, render/export, Video downloader tab) runs on **this local app on
+port 3010**, launched on demand. That's why download works at all: YouTube bot-blocks datacenter
+IPs (Vercel/Railway → "Sign in to confirm you're not a bot" / `yt-dlp exited 127: python3 not
+found`), whereas locally it uses your residential IP and the bundled `yt-dlp.exe` (no python3) for
+true 1080p. The browser talks to `http://localhost:3010` cross-origin (CORS + Private-Network
+headers in `server/index.js`); the server accepts the SPA's `/api/aier/*` paths as a drop-in.
 
-**First time on a PC** — paste one line into Windows PowerShell (this is what the floating
-button's "First time?" dropdown shows). It installs Git + Node if missing, clones the repo,
-installs the downloader's deps, registers the `aier://` launch button, and starts it:
+**First time on a PC** — paste one line into Windows PowerShell (this is what the floating button's
+"First time?" dropdown shows). It installs Git + Node if missing, clones the repo, installs the app
+(backend + client → pulls yt-dlp + ffmpeg), registers the `aier://` launch button, and starts it:
 
 ```powershell
 irm https://raw.githubusercontent.com/lordacidity/angelstyle2/main/setup-aier.ps1 | iex
@@ -57,9 +59,11 @@ irm https://raw.githubusercontent.com/lordacidity/angelstyle2/main/setup-aier.ps
 `powershell -ExecutionPolicy Bypass -File .\setup-aier.ps1`.)
 
 **Every time after** — press the floating **"Launch Aier server"** button (bottom-right on
-`/ai-maker`), an `aier://launch` deep-link → `launch-aier.bat` → `node downloader.js`. Exactly
-like Phonedeck's "Launch server". The first connection may prompt to allow a local-network
-request; click Allow. The studio/AI pipeline is unchanged — it still runs on Railway.
+`/ai-maker`), an `aier://launch` deep-link → `launch-aier.bat` → `npm run dev` (with
+`AIER_UNGATED=1`). Exactly like Phonedeck's "Launch server". The first connection may prompt to
+allow a local-network connection; click Allow. (Don't also run `npm run dev` by hand — one
+instance owns port 3010.) Set `NEXT_PUBLIC_AIER_LOCAL_URL` to point the page at a different
+host/port; it defaults to `http://localhost:3010`.
 
 ## The 5 steps (Studio)
 

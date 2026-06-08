@@ -24,8 +24,18 @@ ensureDirs();
 
 const app = express();
 
-// CORS: Aier serves its own client same-origin, so this is mostly moot; restrict to an
-// allowlist in prod (ALLOWED_ORIGINS, comma-separated), permissive if unset (dev).
+// Chrome's Private Network Access: when launched locally and driven by the Vercel-hosted
+// /ai-maker page, requests go from a PUBLIC origin (https://…vercel.app) to this PRIVATE
+// localhost server. Chrome blocks that unless the preflight gets this header. Set it first
+// for every request (incl. /media subresources like <video>).
+app.use((_req, res, next) => {
+  res.setHeader('Access-Control-Allow-Private-Network', 'true');
+  next();
+});
+
+// CORS: Aier serves its own client same-origin in standalone use, but the Vercel SPA reaches
+// it cross-origin — reflect the origin (allowlist via ALLOWED_ORIGINS if set, permissive
+// otherwise) and expose range headers so a cross-origin <video> can canvas-capture frames.
 const ALLOWED = (process.env.ALLOWED_ORIGINS || '').split(',').map((s) => s.trim()).filter(Boolean);
 app.use(cors({
   origin(origin, cb) {
@@ -33,8 +43,19 @@ app.use(cors({
     return cb(null, ALLOWED.includes(origin));
   },
   credentials: true,
+  exposedHeaders: ['Content-Length', 'Content-Range', 'Accept-Ranges'],
 }));
 app.use(express.json({ limit: '4mb' }));
+
+// The Vercel /ai-maker SPA calls this server with the SAME /api/aier/* paths it used against
+// the cloud backend (so it's a drop-in for Railway). Strip the extra "aier" segment back to
+// this server's own /api/* (and /media) routes before anything else looks at the path.
+app.use((req, _res, next) => {
+  if (req.url.startsWith('/api/aier/media/')) req.url = '/media/' + req.url.slice('/api/aier/media/'.length);
+  else if (req.url.startsWith('/api/aier/')) req.url = '/api/' + req.url.slice('/api/aier/'.length);
+  else if (req.url === '/api/aier') req.url = '/api';
+  next();
+});
 
 // Site password gate — must run before media + routes so a locked visitor (or a bot hitting
 // the API directly) can't reach anything that spends money. See middleware/gate.js.

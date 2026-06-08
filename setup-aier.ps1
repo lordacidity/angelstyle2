@@ -7,8 +7,9 @@
 #   irm https://raw.githubusercontent.com/lordacidity/angelstyle2/main/setup-aier.ps1 | iex
 #
 # It then, with no further input: installs Git + Node.js if missing, clones the repo,
-# installs the downloader's deps (the yt-dlp + ffmpeg binaries), registers the aier://
-# "Launch Aier server" button, and starts the downloader in its own terminal.
+# installs the Aier app's deps (backend + client; pulls the yt-dlp + ffmpeg binaries),
+# registers the aier:// "Launch Aier server" button, and starts the full studio in its
+# own terminal.
 #
 # ALREADY HAVE THE REPO: run it as a file from the repo root and it sets up THIS clone:
 #   powershell -ExecutionPolicy Bypass -File .\setup-aier.ps1
@@ -85,26 +86,29 @@ if (-not (Have node)) {
   }
 }
 
-# ── Install the downloader's deps (downloads the yt-dlp + ffmpeg binaries) ──────
-# youtube-dl-exec's installer has an overzealous Python check; the binary it pulls bundles
-# Python, so we skip the check (mirrors aier/README.md).
-Write-Host 'Installing the downloader dependencies (yt-dlp + ffmpeg) ...' -ForegroundColor Cyan
+# ── Install the Aier app deps (backend + client; pulls the yt-dlp + ffmpeg binaries) ──
+# `npm run setup` = npm install && npm --prefix client install. The client is needed because
+# the launch runs the app in dev mode (Vite middleware). youtube-dl-exec's installer has an
+# overzealous Python check; the binary it pulls bundles Python, so we skip it (per README).
+Write-Host 'Installing the Aier app dependencies (this can take a minute) ...' -ForegroundColor Cyan
 $env:YOUTUBE_DL_SKIP_PYTHON_CHECK = '1'
 Push-Location (Join-Path $repoRoot 'aier')
-npm install
+npm run setup
 Pop-Location
 
 # ── Register the aier:// launch protocol ───────────────────────────────────────
 & (Join-Path $repoRoot 'register-aier-protocol.ps1')
 
-# ── Start the downloader now, so the first time works without a second click ────
+# ── Start the full studio now, so the first time works without a second click ───
+# AIER_UNGATED=1 keeps the localhost-only server open to the cross-origin Vercel page.
 $aierDir = Join-Path $repoRoot 'aier'
-Write-Host 'Starting the Aier downloader ...' -ForegroundColor Green
-Start-Process cmd -ArgumentList '/k', "cd /d `"$aierDir`" && node downloader.js"
+Write-Host 'Starting the Aier studio (port 3010) ...' -ForegroundColor Green
+$env:AIER_UNGATED = '1'
+Start-Process cmd -ArgumentList '/k', "set AIER_UNGATED=1&& cd /d `"$aierDir`" && npm run dev"
 
 Write-Host ''
 Write-Host '======================================================================' -ForegroundColor Green
-Write-Host ' All set! A terminal is starting the local downloader (port 3011).' -ForegroundColor Green
+Write-Host ' All set! A terminal is starting the local Aier studio (port 3010).' -ForegroundColor Green
 Write-Host ' From now on just press "Launch Aier server" (bottom-right on /ai-maker).'
 Write-Host ' Your first download may prompt to allow a local-network connection — click Allow.'
 Write-Host '======================================================================' -ForegroundColor Green
