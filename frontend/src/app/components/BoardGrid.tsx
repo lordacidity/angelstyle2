@@ -9,10 +9,112 @@
 // Renders a fragment (tabs / error / scrollable table) meant to drop into a
 // flex-column parent that owns the header above it.
 
-import React, { useCallback, useEffect, useRef, useState } from 'react';
-import { type UseBoardReturn, type TextField, TEXT_FIELDS } from '../hooks/useBoard';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { type UseBoardReturn, type BoardRow, type TextField, TEXT_FIELDS } from '../hooks/useBoard';
 import { BoardTabs } from './BoardTabs';
 import { useEmojiField } from './EmojiPicker';
+
+// Bulk auto-context generator — lives in the CONTEXT column header. The little
+// green ring is always-on: at rest it shows what fraction of eligible rows
+// (not posted, not unusable) already have a context filled in; mid-run it
+// flips to tracking just the current batch as each row completes. Clicking the
+// sparkle kicks off serial generation for every eligible row whose context is
+// empty; click again to cancel. Runs serially (one row at a time) so we don't
+// flood the auto-context endpoint, which scrapes + summarizes per call.
+function BulkAutoContextButton({
+  rows, autoContext,
+}: {
+  rows: BoardRow[];
+  autoContext: (row: BoardRow) => Promise<void>;
+}) {
+  const [running, setRunning] = useState(false);
+  const [batchDone, setBatchDone] = useState(0);
+  const [batchTotal, setBatchTotal] = useState(0);
+  const cancelRef = useRef(false);
+
+  const { eligible, withContext, toDo } = useMemo(() => {
+    const elig = rows.filter((r) => !r.posted && !r.unusable);
+    const filled = elig.filter((r) => r.context.trim().length > 0);
+    const empty = elig.filter((r) => r.context.trim().length === 0);
+    return { eligible: elig, withContext: filled, toDo: empty };
+  }, [rows]);
+
+  // While running we show batchDone/batchTotal; otherwise the static
+  // "already-have-context" coverage. Both feed the same ring.
+  const num = running ? batchDone : withContext.length;
+  const den = running ? batchTotal : eligible.length;
+  const pct = den > 0 ? num / den : 0;
+
+  // Ring geometry — small enough to sit comfortably next to the "CONTEXT" label.
+  const R = 6;
+  const C = 2 * Math.PI * R;
+  const dashOffset = C * (1 - pct);
+
+  async function handleClick() {
+    if (running) { cancelRef.current = true; return; }
+    if (toDo.length === 0) return;
+    cancelRef.current = false;
+    setRunning(true);
+    setBatchDone(0);
+    setBatchTotal(toDo.length);
+    for (const row of toDo) {
+      if (cancelRef.current) break;
+      try { await autoContext(row); } catch { /* swallow per-row; keep going */ }
+      setBatchDone((d) => d + 1);
+    }
+    setRunning(false);
+  }
+
+  const idleEmpty = !running && toDo.length === 0;
+  const title = running
+    ? `Generating context — ${batchDone} / ${batchTotal} done. Click to cancel.`
+    : toDo.length > 0
+      ? `Auto-write context for ${toDo.length} remaining row${toDo.length === 1 ? '' : 's'} (${withContext.length} / ${eligible.length} already filled)`
+      : `All ${eligible.length} eligible row${eligible.length === 1 ? ' has' : 's have'} context filled in`;
+
+  return (
+    <button
+      type="button"
+      onClick={handleClick}
+      disabled={idleEmpty}
+      title={title}
+      className={`flex h-6 items-center gap-1.5 rounded-md border border-zinc-800 bg-zinc-900/40 px-1.5 transition-colors ${
+        idleEmpty
+          ? 'text-zinc-600'
+          : running
+            ? 'text-emerald-400 hover:bg-zinc-800'
+            : 'text-zinc-400 hover:bg-zinc-800 hover:text-violet-300'
+      }`}
+    >
+      {running ? (
+        <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" style={{ animation: 'spin 1s linear infinite' }}>
+          <path d="M21 12a9 9 0 1 1-6.219-8.56" />
+        </svg>
+      ) : (
+        <svg width="11" height="11" viewBox="0 0 24 24" fill="currentColor" aria-hidden>
+          <path d="M12 2.5l1.6 4.3a4 4 0 0 0 2.4 2.4l4.3 1.6-4.3 1.6a4 4 0 0 0-2.4 2.4L12 19.5l-1.6-4.3a4 4 0 0 0-2.4-2.4L3.7 11.2l4.3-1.6a4 4 0 0 0 2.4-2.4z" />
+        </svg>
+      )}
+      <svg width="14" height="14" viewBox="0 0 14 14" aria-hidden>
+        <circle cx="7" cy="7" r={R} fill="none" stroke="rgba(255,255,255,0.08)" strokeWidth="1.5" />
+        <circle
+          cx="7" cy="7" r={R}
+          fill="none"
+          stroke="#10b981"
+          strokeWidth="1.5"
+          strokeDasharray={C}
+          strokeDashoffset={dashOffset}
+          strokeLinecap="round"
+          transform="rotate(-90 7 7)"
+          style={{ transition: 'stroke-dashoffset 220ms ease-out' }}
+        />
+      </svg>
+      <span className="tabular-nums text-[10px] font-medium normal-case tracking-normal text-zinc-400">
+        {num}/{den}
+      </span>
+    </button>
+  );
+}
 
 // Left-of-context "watch the clip and draft the context" button. Gemini reads
 // the linked video (motion + speech) and fills the Context cell, so it doesn't
@@ -216,7 +318,19 @@ export function BoardGrid({ board }: { board: UseBoardReturn }) {
               <th className="border border-zinc-800 px-1 py-2 text-center font-medium" title="Posted">Posted</th>
               <th className="border border-zinc-800 px-1 py-2 text-center font-medium" title="Unusable">Unusable</th>
               {TEXT_FIELDS.map((f) => (
-                <th key={f.key} className="border border-zinc-800 px-2 py-2 font-medium">{f.label}</th>
+                <th key={f.key} className="border border-zinc-800 px-2 py-2 font-medium">
+                  {f.key === 'context' ? (
+                    // Bulk auto-context button + green progress ring sits in
+                    // the header so it scopes to the active tab's column and
+                    // stays visible while the user works through rows.
+                    <div className="flex items-center justify-between gap-2">
+                      <span>{f.label}</span>
+                      <BulkAutoContextButton rows={rows} autoContext={autoContext} />
+                    </div>
+                  ) : (
+                    f.label
+                  )}
+                </th>
               ))}
               <th className="border border-zinc-800" />
             </tr>
