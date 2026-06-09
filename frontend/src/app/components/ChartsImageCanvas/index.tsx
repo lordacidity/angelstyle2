@@ -35,6 +35,14 @@ function generateFallbackSparkline(ticker: string): SparkPoint[] {
   return vals.map((x, i) => ({ value: 0.1 + ((x - lo) / range) * 0.8, timestamp: i }));
 }
 
+// Deterministic, believable change% in [5, 15] seeded by ticker. Must be stable
+// across redraws (the canvas repaints every animation frame) — no Math.random().
+function seededChangePct(ticker: string): number {
+  let seed = ticker.split('').reduce((a, c) => (a * 31 + c.charCodeAt(0)) | 0, 7) >>> 0;
+  seed = (seed * 1664525 + 1013904223) >>> 0;
+  return 5 + (seed / 0xffffffff) * 10; // 5.0 – 15.0
+}
+
 function sparkToSeries(spark: SparkPoint[] | null | undefined): { t: number; price: number }[] {
   if (!spark?.length) return [];
   // Real Google Trends timestamps are ms-since-epoch (> year 2000 = 9.46e11).
@@ -212,32 +220,49 @@ function drawHeader(
   const displayName = overrideName || market.name;
   const SANS        = '-apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif';
 
-  // ── Sparkline data ────────────────────────────────────────────────────────
-  const series    = sparkToSeries(
+  // ── Sparkline shape (Google Trends or synthetic fallback) ─────────────────
+  const rawSeries = sparkToSeries(
     market.sparkline?.length ? market.sparkline : generateFallbackSparkline(market.ticker),
   );
-  const lastPrice = series[series.length - 1]?.price ?? 0;
+  const lastSpark = rawSeries[rawSeries.length - 1]?.price ?? 0;
 
-  // Use the same 5-year cut that drawStepChart applies so % change reflects the displayed range
-  const cutStartT   = (series[series.length - 1]?.t ?? 0) - 5 * 365.25 * 24 * 60 * 60 * 1000;
-  const cutSeries   = series.filter(p => p.t >= cutStartT);
-  const baseSeries  = cutSeries.length >= 2 ? cutSeries : series;
-  const firstPrice  = baseSeries[0]?.price ?? 0;
+  // 5-year cut (matches drawStepChart) used only to read the trend direction
+  const cutStartT  = (rawSeries[rawSeries.length - 1]?.t ?? 0) - 5 * 365.25 * 24 * 60 * 60 * 1000;
+  const cutSeries  = rawSeries.filter(p => p.t >= cutStartT);
+  const baseSeries = cutSeries.length >= 2 ? cutSeries : rawSeries;
+  const firstSpark = baseSeries[0]?.price ?? 0;
 
-  const rawChange  = lastPrice - firstPrice;
-  const isPositive = lastPrice >= firstPrice;
-  const pct        = firstPrice > 0 ? ((rawChange) / firstPrice) * 100 : 0;
+  // Headline price = the talent's real NPSI/sentiment price (falls back to the
+  // last sparkline value only when no price is available).
+  const realPrice    = market.price?.usd ?? null;
+  const lastPrice    = realPrice != null && realPrice > 0 ? realPrice : Math.max(0.01, lastSpark);
+
+  // Scale the sparkline so its final point equals the headline price, keeping the
+  // chart's Y-axis labels in the same range as the displayed price.
+  const scale  = lastSpark > 0 ? lastPrice / lastSpark : 1;
+  const series = rawSeries.map(p => ({ t: p.t, price: p.price * scale }));
+
+  // Believable change: magnitude clamped to a 5–15% range (deterministic per
+  // person), sign following the chart's visual direction.
+  const isPositive = lastSpark >= firstSpark;
+  const pct        = seededChangePct(market.ticker);
+  const signedPct  = isPositive ? pct : -pct;
+  const startPrice = lastPrice / (1 + signedPct / 100);
+  const rawChange  = lastPrice - startPrice;
   const color      = isPositive ? '#04df9d' : '#FF4B4B';
 
   // ── Shared left margin — all rows left-aligned ───────────────────────────
   const LEFT = PAD;
 
-  // ── Row 1: avatar (small) + name ─────────────────────────────────────────
-  const nameText        = `${displayName}'s NPSI`;
+  // ── Row 1: avatar (small) + name (+ industry under name) ─────────────────
+  const nameText        = `${displayName}'s Sentiment`;
   const NAME_FONT       = `400 44px "Inter", ${SANS}`;
+  const INDUSTRY_FONT   = `400 26px "Inter", ${SANS}`;
   const AVATAR_NAME_GAP = 28;
   const avatarCX = LEFT + AVATAR_R;
   const avatarCY = TOP_PAD + AVATAR_R;
+  const nameX    = LEFT + AVATAR_R * 2 + AVATAR_NAME_GAP;
+  const industry = (market.industry ?? '').trim();
 
   ctx.save();
   ctx.beginPath();
@@ -256,14 +281,23 @@ function drawHeader(
   }
   ctx.restore();
 
-  ctx.font         = NAME_FONT;
-  ctx.fillStyle    = '#ffffff';
-  ctx.textAlign    = 'left';
-  ctx.textBaseline = 'middle';
-  ctx.fillText(nameText, LEFT + AVATAR_R * 2 + AVATAR_NAME_GAP, avatarCY);
+  ctx.font      = NAME_FONT;
+  ctx.fillStyle = '#ffffff';
+  ctx.textAlign = 'left';
+  if (industry) {
+    // Stack name + industry, centred as a block on the avatar.
+    ctx.textBaseline = 'alphabetic';
+    ctx.fillText(nameText, nameX, avatarCY - 4);
+    ctx.font      = INDUSTRY_FONT;
+    ctx.fillStyle = '#71717a';
+    ctx.fillText(industry, nameX, avatarCY + 32);
+  } else {
+    ctx.textBaseline = 'middle';
+    ctx.fillText(nameText, nameX, avatarCY);
+  }
 
   // ── Row 2: price + "points" ───────────────────────────────────────────────
-  const priceStr         = `${Math.max(0.01, lastPrice).toFixed(1)}`;
+  const priceStr         = `${Math.max(0.01, lastPrice).toFixed(2)}`;
   const PRICE_FONT       = `600 56px "JetBrains Mono", "Courier New", monospace`;
   const POINTS_FONT      = `400 44px "Inter", ${SANS}`;
   const PRICE_POINTS_GAP = 16;
@@ -324,18 +358,18 @@ function drawHeader(
 
 // ── drawBottomBar ─────────────────────────────────────────────────────────────
 
-const PERIODS = ['1H', '1D', '1W', '1M', 'ALL'] as const;
+const PERIODS = ['1H', '1D', '7D', '1M', 'ALL'] as const;
 
 function drawBottomBar(ctx: CanvasRenderingContext2D, logo: HTMLImageElement | null) {
   const BAR_CY = CANVAS_H - 160;
 
-  // Time frames (left) — ALL is highlighted as the canvas shows all data
+  // Time frames (left) — 7D is the highlighted default
   ctx.font         = `400 30px "Inter", -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif`;
   ctx.textBaseline = 'middle';
   ctx.textAlign    = 'left';
   let px = PAD;
   for (const p of PERIODS) {
-    ctx.fillStyle = p === 'ALL' ? '#ffffff' : '#52525b';
+    ctx.fillStyle = p === '7D' ? '#ffffff' : '#52525b';
     ctx.fillText(p, px, BAR_CY);
     px += ctx.measureText(p).width + 40;
   }
@@ -471,7 +505,7 @@ export const ChartsImageCanvas = forwardRef<ChartsImageCanvasRef, ChartsImageCan
           const url = URL.createObjectURL(blob);
           const a   = document.createElement('a');
           a.href     = url;
-          a.download = `${mk?.name ?? 'chart'}-npsi.png`;
+          a.download = `${mk?.name ?? 'chart'}-sentiment.png`;
           a.click();
           setTimeout(() => URL.revokeObjectURL(url), 5000);
         }, 'image/png');

@@ -12,7 +12,45 @@ import type { RefObject } from 'react';
 import type { ReactNode } from 'react';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
-import { EMOJIS, emojiSrc } from '@/lib/emoji';
+import { EMOJIS, emojiSrc, emojiByUnified, type EmojiDef } from '@/lib/emoji';
+import { useEmojiPrefs, aliasOf, isPinned, pinnedUnifieds, type EmojiPrefMap } from '@/lib/emoji-prefs-store';
+
+// How many matches to render at once. The full set is ~1900 glyphs, so an
+// unfiltered grid would be a huge DOM — typing narrows it, and an empty query
+// just shows the pinned strip.
+const MAX_RESULTS = 80;
+
+// Resolve which emoji to show for the current query, honouring the user's custom
+// "@" aliases and pins from Railway. Empty query → the pinned strip (falling back
+// to a small default slice if nothing is pinned yet).
+function resolveResults(prefs: EmojiPrefMap, query: string): EmojiDef[] {
+  const q = query.trim().toLowerCase();
+  const pins = pinnedUnifieds(prefs);
+
+  if (!q) {
+    const pinned = pins.map((u) => emojiByUnified(u)).filter(Boolean) as EmojiDef[];
+    return pinned.length ? pinned : EMOJIS.slice(0, 40);
+  }
+
+  const pinSet = new Set(pins);
+  const matches = EMOJIS.filter((e) => {
+    const alias = aliasOf(prefs, e.unified);
+    return e.name.toLowerCase().includes(q)
+      || e.keywords.some((k) => k.includes(q))
+      || (!!alias && alias.includes(q));
+  });
+
+  // Rank: exact custom alias first, then pinned, then alias / name prefixes.
+  const score = (e: EmojiDef): number => {
+    const alias = aliasOf(prefs, e.unified);
+    if (alias && alias === q) return 0;
+    if (pinSet.has(e.unified)) return 1;
+    if (alias && alias.startsWith(q)) return 2;
+    if (e.name.toLowerCase().startsWith(q)) return 3;
+    return 4;
+  };
+  return matches.sort((a, b) => score(a) - score(b)).slice(0, MAX_RESULTS);
+}
 
 // Generic over the anchor element so a textarea ref (caption) OR an
 // input-or-textarea ref (board cells) both fit — RefObject is invariant in
@@ -31,6 +69,7 @@ export function EmojiPicker<T extends HTMLElement = HTMLElement>({
   onClose: () => void;
 }) {
   const ref = useRef<HTMLDivElement>(null);
+  const { prefs } = useEmojiPrefs();
   // Track the anchor's position so the portal can sit just under it. Recompute
   // on scroll/resize so it stays anchored.
   const [rect, setRect] = useState<DOMRect | null>(null);
@@ -58,10 +97,7 @@ export function EmojiPicker<T extends HTMLElement = HTMLElement>({
 
   if (!rect || typeof document === 'undefined') return null;
 
-  const q = query.trim().toLowerCase();
-  const results = EMOJIS
-    .filter(e => !q || e.name.toLowerCase().includes(q) || e.keywords.some(k => k.includes(q)))
-    .sort((a, b) => (b.pinned ? 1 : 0) - (a.pinned ? 1 : 0));
+  const results = resolveResults(prefs, query);
 
   // Rendered in a portal on document.body so no ancestor's `overflow-hidden`
   // clips it — it floats on top of everything.
@@ -94,7 +130,7 @@ export function EmojiPicker<T extends HTMLElement = HTMLElement>({
                 className="relative flex items-center justify-center rounded-md hover:bg-zinc-800 transition-colors"
                 style={{ width: 34, height: 34 }}
               >
-                {e.pinned && <span className="absolute top-0.5 right-0.5 w-1 h-1 rounded-full bg-amber-400" />}
+                {isPinned(prefs, e.unified) && <span className="absolute top-0.5 right-0.5 w-1 h-1 rounded-full bg-amber-400" />}
                 {/* eslint-disable-next-line @next/next/no-img-element */}
                 <img src={emojiSrc(e.unified)} alt={e.name} width={24} height={24} draggable={false} />
               </button>

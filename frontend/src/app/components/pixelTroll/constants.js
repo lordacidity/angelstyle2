@@ -62,7 +62,9 @@ export const RARES = ['smitten', 'bloodDeath', 'ufo', 'dog', 'stomp', 'friend'];
 // 'police' and 'lovefest' are scripted like the rares (uninterruptible) but never
 // random — they fire off the mood extremes: 'police' when he's pushed to −100,
 // 'lovefest' when he's won all the way to +100 (see planVisit / the mood latches).
-export const SPECIALS = new Set([...RARES, 'police', 'lovefest']);
+// 'gunraid' is the ULTRA-rare rampage — never random / mood-driven either: it's on a
+// ~8-hour timer (or Shift+G on demand), storms in, shoots the screen to bits, bolts.
+export const SPECIALS = new Set([...RARES, 'police', 'lovefest', 'gunraid']);
 
 // Drag-and-drop set: while he's grabbed or mid-drop he rides OVER the floating
 // widgets (canvas lifted above them) and isn't pokeable/flickable. 'shot' is the

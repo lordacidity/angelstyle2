@@ -19,6 +19,7 @@ export interface ChartsMarket {
   ticker: string;
   photo_url: string | null;
   industry: string | null;
+  price?: { usd: number | null; lifetimeChangePct?: number | null } | null;
   sparkline?: SparkPoint[];
 }
 

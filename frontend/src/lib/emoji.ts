@@ -15,104 +15,59 @@ export interface EmojiDef {
   name: string;
   /** Extra search terms. */
   keywords: string[];
-  /** Pinned emojis sort to the very front of the picker. */
+  /** Unicode group ("Smileys & Emotion", "Flags", …) — used to section the
+   *  emoji manager. */
+  category: string;
+  /** Pinned emojis sort to the front of the picker. NOTE: pinning is no longer a
+   *  static property — it's a user preference stored in Railway (see
+   *  emoji-prefs-db / emoji-prefs-store). Kept optional only for back-compat. */
   pinned?: boolean;
 }
 
-// Curated set. Pinned: 😂 🔥 🤣 (the sideways/rolling laugh, reachable via @cry).
-// Most are single-codepoint emoji, so the filename is just the unified hex — no
-// variation selectors. The World Cup flags are the exception: they're two
-// regional-indicator codepoints joined with a dash (e.g. 1f1e7-1f1f7.png), which
-// matches the emoji-datasource-apple filename. The tokenizer sorts EMOJI_CHARS
-// longest-first, so these multi-codepoint chars match before any prefix.
-export const EMOJIS: EmojiDef[] = [
-  { char: '😂', unified: '1f602', name: 'Face with Tears of Joy', keywords: ['laugh', 'haha', 'crying laughing', 'funny'], pinned: true },
-  { char: '🔥', unified: '1f525', name: 'Fire', keywords: ['lit', 'hot', 'flame', 'fire'], pinned: true },
-  // Sideways laughing — reachable by typing "@cry" (per request) as well as the
-  // usual rofl/lmao terms. Pinned to the front of the picker.
-  { char: '🤣', unified: '1f923', name: 'Rolling on the Floor Laughing', keywords: ['lol', 'cry', 'rofl', 'lmao', 'laugh', 'funny', 'sideways'], pinned: true },
-  { char: '😀', unified: '1f600', name: 'Grinning Face', keywords: ['smile', 'happy', 'grin'] },
-  { char: '😊', unified: '1f60a', name: 'Smiling Face with Smiling Eyes', keywords: ['smile', 'happy', 'blush', 'warm'] },
-  { char: '😅', unified: '1f605', name: 'Grinning Face with Sweat', keywords: ['nervous', 'sweat', 'phew', 'laugh'] },
-  { char: '😉', unified: '1f609', name: 'Winking Face', keywords: ['wink', 'flirt', 'joke'] },
-  { char: '😏', unified: '1f60f', name: 'Smirking Face', keywords: ['smirk', 'smug', 'sly'] },
-  { char: '😍', unified: '1f60d', name: 'Smiling Face with Heart-Eyes', keywords: ['love', 'heart', 'crush', 'adore'] },
-  { char: '🤩', unified: '1f929', name: 'Star-Struck', keywords: ['starstruck', 'amazed', 'wow', 'excited'] },
-  { char: '😎', unified: '1f60e', name: 'Smiling Face with Sunglasses', keywords: ['cool', 'sunglasses', 'chill'] },
-  { char: '🥳', unified: '1f973', name: 'Partying Face', keywords: ['party', 'celebrate', 'birthday'] },
-  { char: '🥺', unified: '1f97a', name: 'Pleading Face', keywords: ['plead', 'puppy', 'please', 'beg', 'cute'] },
-  { char: '😭', unified: '1f62d', name: 'Loudly Crying Face', keywords: ['cry', 'sob', 'sad', 'tears'] },
-  { char: '😤', unified: '1f624', name: 'Face with Steam From Nose', keywords: ['triumph', 'steam', 'mad', 'determined'] },
-  { char: '🙄', unified: '1f644', name: 'Face with Rolling Eyes', keywords: ['eyeroll', 'whatever', 'annoyed', 'ugh'] },
-  { char: '😱', unified: '1f631', name: 'Face Screaming in Fear', keywords: ['scream', 'shock', 'omg', 'scared'] },
-  { char: '🤯', unified: '1f92f', name: 'Exploding Head', keywords: ['mind blown', 'shocked', 'wow', 'omg'] },
-  { char: '😲', unified: '1f632', name: 'Astonished Face', keywords: ['shocked', 'shock', 'astonished', 'gasp', 'surprised', 'wow'] },
-  { char: '🫤', unified: '1fae4', name: 'Face with Diagonal Mouth', keywords: ['side eye', 'side eyes', 'skeptical', 'unamused', 'meh', 'unsure'] },
-  { char: '😔', unified: '1f614', name: 'Pensive Face', keywords: ['disappointed', 'looking down', 'sad', 'dejected', 'down', 'pensive'] },
-  { char: '😩', unified: '1f629', name: 'Weary Face', keywords: ['moan', 'moaning', 'open mouth', 'weary', 'ugh', 'frustrated'] },
-  { char: '🤔', unified: '1f914', name: 'Thinking Face', keywords: ['think', 'hmm', 'consider'] },
-  { char: '🤡', unified: '1f921', name: 'Clown Face', keywords: ['clown', 'joke', 'fool', 'silly'] },
-  { char: '💀', unified: '1f480', name: 'Skull', keywords: ['dead', 'dying', 'lol', 'skull'] },
-  { char: '👀', unified: '1f440', name: 'Eyes', keywords: ['look', 'watching', 'eyes', 'shifty'] },
-  { char: '🙏', unified: '1f64f', name: 'Folded Hands', keywords: ['pray', 'thanks', 'please', 'hope'] },
-  { char: '💪', unified: '1f4aa', name: 'Flexed Biceps', keywords: ['strong', 'muscle', 'flex', 'gym'] },
-  { char: '👏', unified: '1f44f', name: 'Clapping Hands', keywords: ['clap', 'applause', 'bravo'] },
-  { char: '🙌', unified: '1f64c', name: 'Raising Hands', keywords: ['praise', 'celebrate', 'hooray'] },
-  { char: '👍', unified: '1f44d', name: 'Thumbs Up', keywords: ['yes', 'like', 'approve', 'good'] },
-  { char: '👎', unified: '1f44e', name: 'Thumbs Down', keywords: ['no', 'dislike', 'bad', 'nope'] },
-  { char: '🫡', unified: '1fae1', name: 'Saluting Face', keywords: ['salute', 'respect', 'yes sir', 'o7'] },
-  { char: '🤝', unified: '1f91d', name: 'Handshake', keywords: ['deal', 'agree', 'partner', 'shake'] },
-  { char: '🎉', unified: '1f389', name: 'Party Popper', keywords: ['party', 'celebrate', 'tada', 'congrats'] },
-  { char: '🎯', unified: '1f3af', name: 'Direct Hit', keywords: ['target', 'bullseye', 'goal', 'accurate'] },
-  { char: '💯', unified: '1f4af', name: 'Hundred Points', keywords: ['100', 'perfect', 'agree', 'facts'] },
-  { char: '✅', unified: '2705', name: 'Check Mark Button', keywords: ['check', 'yes', 'done', 'correct'] },
-  { char: '❌', unified: '274c', name: 'Cross Mark', keywords: ['x', 'no', 'wrong', 'cancel'] },
-  { char: '⭐', unified: '2b50', name: 'Star', keywords: ['star', 'favorite', 'rating'] },
-  { char: '🚀', unified: '1f680', name: 'Rocket', keywords: ['moon', 'launch', 'fast', 'rocket'] },
-  { char: '📈', unified: '1f4c8', name: 'Chart Increasing', keywords: ['up', 'stocks', 'growth', 'gains', 'trade'] },
-  { char: '📉', unified: '1f4c9', name: 'Chart Decreasing', keywords: ['down', 'loss', 'drop', 'dip', 'crash'] },
-  { char: '💰', unified: '1f4b0', name: 'Money Bag', keywords: ['money', 'cash', 'rich', 'profit'] },
-  { char: '💸', unified: '1f4b8', name: 'Money with Wings', keywords: ['money', 'spend', 'loss', 'cash', 'fly'] },
-  { char: '🤑', unified: '1f911', name: 'Money-Mouth Face', keywords: ['money', 'rich', 'profit', 'greedy'] },
-  { char: '💎', unified: '1f48e', name: 'Gem Stone', keywords: ['diamond', 'hands', 'hold', 'gem', 'value'] },
-  { char: '🐂', unified: '1f402', name: 'Ox', keywords: ['bull', 'bullish', 'market', 'up'] },
-  { char: '🐻', unified: '1f43b', name: 'Bear', keywords: ['bear', 'bearish', 'market', 'down'] },
-  { char: '🗽', unified: '1f5fd', name: 'Statue of Liberty', keywords: ['statue of liberty', 'nyc', 'new york', 'america', 'usa', 'liberty'] },
-  { char: '🍎', unified: '1f34e', name: 'Red Apple', keywords: ['apple', 'fruit', 'red'] },
-  { char: '🧊', unified: '1f9ca', name: 'Ice', keywords: ['ice', 'ice cube', 'icecube', 'cold', 'frozen'] },
-  { char: '🍆', unified: '1f346', name: 'Eggplant', keywords: ['eggplant', 'aubergine', 'veggie'] },
-  { char: '💦', unified: '1f4a6', name: 'Sweat Droplets', keywords: ['squirt', 'splash', 'water', 'sweat', 'wet'] },
-  { char: '⚡', unified: '26a1', name: 'High Voltage', keywords: ['lightning', 'energy', 'fast', 'power'] },
-  { char: '🎤', unified: '1f3a4', name: 'Microphone', keywords: ['mic', 'sing', 'karaoke', 'podcast', 'announce'] },
-  // Speaking head — reachable by typing "@speak" (and "@yap"). Multi-codepoint
-  // (head + FE0F variation selector), so the filename carries the dash, like the
-  // flags above; the longest-first tokenizer matches it before any prefix.
-  { char: '🗣️', unified: '1f5e3-fe0f', name: 'Speaking Head', keywords: ['speak', 'speaking', 'talk', 'talking', 'yap', 'yapping', 'announce', 'rant', 'loud'] },
-  // World Cup — big footballing nations.
-  { char: '🇧🇷', unified: '1f1e7-1f1f7', name: 'Brazil', keywords: ['brazil', 'brasil', 'flag', 'world cup'] },
-  { char: '🇦🇷', unified: '1f1e6-1f1f7', name: 'Argentina', keywords: ['argentina', 'flag', 'world cup'] },
-  { char: '🇫🇷', unified: '1f1eb-1f1f7', name: 'France', keywords: ['france', 'french', 'flag', 'world cup'] },
-  { char: '🇩🇪', unified: '1f1e9-1f1ea', name: 'Germany', keywords: ['germany', 'german', 'deutschland', 'flag', 'world cup'] },
-  { char: '🇪🇸', unified: '1f1ea-1f1f8', name: 'Spain', keywords: ['spain', 'spanish', 'espana', 'flag', 'world cup'] },
-  { char: '🇵🇹', unified: '1f1f5-1f1f9', name: 'Portugal', keywords: ['portugal', 'portuguese', 'flag', 'world cup'] },
-  { char: '🇳🇱', unified: '1f1f3-1f1f1', name: 'Netherlands', keywords: ['netherlands', 'holland', 'dutch', 'flag', 'world cup'] },
-  { char: '🇮🇹', unified: '1f1ee-1f1f9', name: 'Italy', keywords: ['italy', 'italian', 'italia', 'flag', 'world cup'] },
-  { char: '🇺🇸', unified: '1f1fa-1f1f8', name: 'United States', keywords: ['usa', 'united states', 'america', 'flag', 'world cup'] },
-  { char: '🇲🇽', unified: '1f1f2-1f1fd', name: 'Mexico', keywords: ['mexico', 'mexican', 'flag', 'world cup'] },
-];
+// The full Apple emoji set (~1900 glyphs), generated from emoji-datasource-apple
+// by scripts/gen-emoji.mjs into emoji-data.json. Each entry's PNG lives at
+// /public/emoji/{unified}.png. Re-run the script to refresh the set.
+//
+// Pinning and per-emoji "@" aliases used to be hand-tuned here; they're now
+// user-customizable and persisted to Railway, so the data file is pure glyph
+// metadata. The tokenizer below buckets these chars by their first code unit so
+// matching stays fast even at this size.
+import EMOJI_DATA from './emoji-data.json';
+
+export const EMOJIS: EmojiDef[] = EMOJI_DATA as EmojiDef[];
 
 export const emojiSrc = (unified: string) => `/emoji/${unified}.png`;
 
 const CHAR_TO_UNIFIED = new Map(EMOJIS.map(e => [e.char, e.unified]));
+const UNIFIED_TO_EMOJI = new Map(EMOJIS.map(e => [e.unified, e]));
 
 /** Apple PNG url for a literal emoji char, or null if it's not in the set. */
 export function emojiSrcForChar(char: string): string | null {
   const u = CHAR_TO_UNIFIED.get(char);
   return u ? emojiSrc(u) : null;
 }
-// Longest-first so multi-codepoint chars (none today, but future-proof) match
-// before any prefix.
-const EMOJI_CHARS = EMOJIS.map(e => e.char).sort((a, b) => b.length - a.length);
+
+/** Look up an emoji definition by its unified codepoint key. */
+export function emojiByUnified(unified: string): EmojiDef | undefined {
+  return UNIFIED_TO_EMOJI.get(unified);
+}
+
+// Tokenizer index: bucket every emoji char by its first UTF-16 code unit, each
+// bucket sorted longest-first. With ~1900 glyphs a flat longest-first scan per
+// caption character would be O(chars × 1900); bucketing cuts each lookup to the
+// handful of emoji that share a leading code unit while preserving the
+// longest-first match (so ZWJ sequences / flags win over their prefixes).
+const EMOJI_BY_FIRST: Map<string, string[]> = (() => {
+  const m = new Map<string, string[]>();
+  for (const e of EMOJIS) {
+    const k = e.char[0];
+    let arr = m.get(k);
+    if (!arr) { arr = []; m.set(k, arr); }
+    arr.push(e.char);
+  }
+  for (const arr of m.values()) arr.sort((a, b) => b.length - a.length);
+  return m;
+})();
 
 // ── Image cache (browser only) ────────────────────────────────────────────────
 const imgCache = new Map<string, HTMLImageElement>();
@@ -131,17 +86,25 @@ export function getEmojiImage(char: string): HTMLImageElement | null {
   return img;
 }
 
-/** Kick off loading every curated emoji image. Returns a promise that resolves
- *  once they're all settled — await it before an export so frames aren't drawn
- *  with missing emoji. */
-export function preloadEmojiImages(): Promise<void> {
+function settleImages(chars: Iterable<string>): Promise<void> {
   if (typeof Image === 'undefined') return Promise.resolve();
-  return Promise.all(EMOJIS.map(e => new Promise<void>(resolve => {
-    const img = getEmojiImage(e.char);
+  return Promise.all([...chars].map(c => new Promise<void>(resolve => {
+    const img = getEmojiImage(c);
     if (!img || (img.complete && img.naturalWidth > 0)) return resolve();
     img.addEventListener('load', () => resolve(), { once: true });
     img.addEventListener('error', () => resolve(), { once: true });
   }))).then(() => undefined);
+}
+
+/** Preload just the emoji glyphs that actually appear in `text`. Await this
+ *  before an export so those frames aren't drawn with a missing image (the full
+ *  set is ~1900 PNGs, so preloading everything would be wasteful — captions only
+ *  ever use a handful). */
+export function preloadEmojiImagesForText(text: string): Promise<void> {
+  if (!text) return Promise.resolve();
+  const chars = new Set<string>();
+  for (const tok of tokenize(text)) if (tok.t === 'e') chars.add(tok.v);
+  return chars.size ? settleImages(chars) : Promise.resolve();
 }
 
 // ── Rich text (text + emoji) layout ────────────────────────────────────────────
@@ -157,8 +120,11 @@ function tokenize(str: string): Token[] {
   let buf = '';
   while (i < str.length) {
     let matched: string | null = null;
-    for (const ch of EMOJI_CHARS) {
-      if (str.startsWith(ch, i)) { matched = ch; break; }
+    const candidates = EMOJI_BY_FIRST.get(str[i]);
+    if (candidates) {
+      for (const ch of candidates) {
+        if (str.startsWith(ch, i)) { matched = ch; break; }
+      }
     }
     if (matched) {
       if (buf) { tokens.push({ t: 's', v: buf }); buf = ''; }

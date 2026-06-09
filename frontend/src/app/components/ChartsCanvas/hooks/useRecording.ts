@@ -13,7 +13,7 @@ import {
 import { drawHeaderOnContext } from '../drawing/drawHeader';
 import { drawMarketRow } from '../drawing/drawMarketRow';
 import { countCaptionLines, countPauvCaptionLines, CAPTION_EMOJI_SIZE } from '../drawing/countCaptionLines';
-import { wrapRichText, drawRichLine, preloadEmojiImages } from '@/lib/emoji';
+import { wrapRichText, drawRichLine, preloadEmojiImagesForText } from '@/lib/emoji';
 import type { Box, MarketData } from '../types';
 
 // Phonedeck server runs on the user's OWN machine (default localhost:8080).
@@ -103,7 +103,7 @@ export function useRecording(config: UseRecordingConfig) {
 
     // Ensure Apple emoji images are decoded before any frame is drawn, so a
     // caption with emoji never exports with a missing/native glyph.
-    if (overlayCaption) await preloadEmojiImages();
+    if (overlayCaption) await preloadEmojiImagesForText(overlayCaption);
 
     const isClean = brand === 'clean';
 

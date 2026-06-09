@@ -2,6 +2,7 @@
 
 import type { MutableRefObject, Dispatch, SetStateAction } from 'react';
 import { useState, useRef, useEffect, useMemo, useCallback, memo } from 'react';
+import { createPortal } from 'react-dom';
 import { TikTokCanvas } from './TikTokCanvas';
 import type { TikTokCanvasRef, MarketData, SparkPoint } from './TikTokCanvas';
 import { ChartsCanvas } from './ChartsCanvas';
@@ -20,7 +21,7 @@ import type { RecordingState } from './TikTokCanvas/types';
 import { VideoControlsBar } from './VideoControlsBar';
 import { EditablePct } from './EditablePct';
 import { bestVideoUrl } from '@/lib/utils';
-import { emojiSrcForChar, splitEmojiTokens, preloadEmojiImages } from '@/lib/emoji';
+import { emojiSrcForChar, splitEmojiTokens } from '@/lib/emoji';
 import { EmojiPicker } from './EmojiPicker';
 import { BTN_ICON, BTN_TEXT } from '@/lib/ui-constants';
 import {
@@ -297,8 +298,6 @@ function VideoInputCard({
   // When set, the picker is open: `start` is the index of the triggering "@",
   // `query` is the text typed after it (used as the search term).
   const [emojiTrigger, setEmojiTrigger] = useState<{ start: number; query: string } | null>(null);
-
-  useEffect(() => { preloadEmojiImages(); }, []);
 
   // Detect an active "@word" being typed right before the caret. The "@" must be
   // at the start of the caption or follow whitespace, so emails/handles inside a
@@ -1983,7 +1982,7 @@ export function CanvasGrid({
                         onUpdateEntry(entry.id, 'caption', `${n0} vs ${n1}'s dollar-dominated sentiment on Pauv:`);
                       }
                     }}
-                    allMarkets={(allTalents ?? []).map(t => ({ id: t.id, name: t.name, ticker: t.ticker, photo_url: t.photo_url, industry: t.industry }))}
+                    allMarkets={(allTalents ?? []).map(t => ({ id: t.id, name: t.name, ticker: t.ticker, photo_url: t.photo_url, industry: t.industry, price: t.price }))}
                     marketsLoading={talentsLoading}
                     onEnsureMarkets={() => {
                       if (!allTalents && !talentsLoading) {
@@ -2042,7 +2041,7 @@ export function CanvasGrid({
                     entry={entry}
                     market={chartsImageMarketMap[entry.id] ?? null}
                     overrideName={chartsImageNameOverrideMap[entry.id] ?? ''}
-                    allMarkets={(allTalents ?? []).map(t => ({ id: t.id, name: t.name, ticker: t.ticker, photo_url: t.photo_url, industry: t.industry }))}
+                    allMarkets={(allTalents ?? []).map(t => ({ id: t.id, name: t.name, ticker: t.ticker, photo_url: t.photo_url, industry: t.industry, price: t.price }))}
                     marketsLoading={talentsLoading}
                     onEnsureMarkets={() => {
                       if (!allTalents && !talentsLoading) {

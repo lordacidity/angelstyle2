@@ -5,99 +5,11 @@ import { createPortal } from 'react-dom';
 import type { VideoEntry } from '../types';
 import { CAROUSEL_PREVIEW_W } from './CarouselCanvas';
 import type { ChartsMarket } from './ChartsCanvas';
-import { EMOJIS, emojiSrc, emojiSrcForChar, splitEmojiTokens, preloadEmojiImages } from '@/lib/emoji';
+import { emojiSrcForChar, splitEmojiTokens } from '@/lib/emoji';
+import { EmojiPicker } from './EmojiPicker';
 import { CloseIcon } from '@/lib/icons';
 
 const CARD_W = CAROUSEL_PREVIEW_W;
-
-// ── Emoji picker ──────────────────────────────────────────────────────────────
-
-function EmojiPicker({
-  anchorRef,
-  query,
-  onQueryChange,
-  onPick,
-  onClose,
-}: {
-  anchorRef: React.RefObject<HTMLTextAreaElement | null>;
-  query: string;
-  onQueryChange: (q: string) => void;
-  onPick: (char: string) => void;
-  onClose: () => void;
-}) {
-  const ref = useRef<HTMLDivElement>(null);
-  const [rect, setRect] = useState<DOMRect | null>(null);
-
-  useEffect(() => {
-    const el = anchorRef.current;
-    if (!el) return;
-    const update = () => setRect(el.getBoundingClientRect());
-    update();
-    window.addEventListener('scroll', update, true);
-    window.addEventListener('resize', update);
-    return () => {
-      window.removeEventListener('scroll', update, true);
-      window.removeEventListener('resize', update);
-    };
-  }, [anchorRef]);
-
-  useEffect(() => {
-    function onDocMouseDown(e: MouseEvent) {
-      const t = e.target as Node;
-      if (ref.current && !ref.current.contains(t) && anchorRef.current && !anchorRef.current.contains(t)) onClose();
-    }
-    document.addEventListener('mousedown', onDocMouseDown);
-    return () => document.removeEventListener('mousedown', onDocMouseDown);
-  }, [onClose, anchorRef]);
-
-  if (!rect || typeof document === 'undefined') return null;
-
-  const q = query.trim().toLowerCase();
-  const results = EMOJIS
-    .filter(e => !q || e.name.toLowerCase().includes(q) || e.keywords.some(k => k.includes(q)))
-    .sort((a, b) => (b.pinned ? 1 : 0) - (a.pinned ? 1 : 0));
-
-  return createPortal(
-    <div
-      ref={ref}
-      className="fixed z-[1000] rounded-lg bg-zinc-900 border border-zinc-700 shadow-2xl overflow-hidden"
-      style={{ left: rect.left, top: rect.bottom + 4, width: Math.max(rect.width, 300) }}
-    >
-      <div className="p-2 border-b border-zinc-800">
-        <input
-          value={query}
-          onChange={e => onQueryChange(e.target.value)}
-          placeholder="Search emoji…"
-          className="w-full bg-zinc-800 border border-zinc-700 rounded-md px-2.5 py-1.5 text-xs text-zinc-200 placeholder-zinc-500 outline-none focus:border-zinc-500"
-        />
-      </div>
-      <div className="p-2 max-h-[220px] overflow-y-auto">
-        {results.length === 0 ? (
-          <p className="text-xs text-zinc-600 text-center py-4">No emoji found.</p>
-        ) : (
-          <div className="grid grid-cols-8 gap-1">
-            {results.map(e => (
-              <button
-                key={e.unified}
-                type="button"
-                title={e.name}
-                onMouseDown={ev => ev.preventDefault()}
-                onClick={() => onPick(e.char)}
-                className="relative flex items-center justify-center rounded-md hover:bg-zinc-800 transition-colors"
-                style={{ width: 34, height: 34 }}
-              >
-                {e.pinned && <span className="absolute top-0.5 right-0.5 w-1 h-1 rounded-full bg-amber-400" />}
-                {/* eslint-disable-next-line @next/next/no-img-element */}
-                <img src={emojiSrc(e.unified)} alt={e.name} width={24} height={24} draggable={false} />
-              </button>
-            ))}
-          </div>
-        )}
-      </div>
-    </div>,
-    document.body,
-  );
-}
 
 // ── MarketSlot ────────────────────────────────────────────────────────────────
 
@@ -426,8 +338,6 @@ export function ChartsInputCard({
       setAddLoading(false);
     }
   }, [addUrl, preloadedAudios.length, onAddAudio]);
-
-  useEffect(() => { preloadEmojiImages(); }, []);
 
   function detectEmojiTrigger() {
     const ta = captionRef.current;

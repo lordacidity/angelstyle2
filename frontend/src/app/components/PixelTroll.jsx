@@ -87,10 +87,21 @@ import { SPEECH, POLICE_TROLL, POLICE_COP, SPEECH_FED, SPEECH_GRABBED, SPEECH_PO
  * with pockets of forest (grass, bushes, vine-draped trees, rocks, butterfly
  * clouds) with the odd rabbit or deer crossing through. (Debug: Shift+M summons the
  * monster now; Shift+K drops him now; Shift+D jumps to just after he's sunk;
- * Shift+G fast-forwards the garden.)
+ * Shift+G, while the garden's up, fast-forwards the spread.)
+ *
+ * And — ULTRA rare, roughly once every eight hours — he goes on a RAMPAGE: he storms
+ * in from the edge shouldering a full-size AR, plants his feet, and empties the mag into
+ * the screen. Each shot flashes the muzzle, jolts the whole display, and punches a bullet
+ * hole with a web of fractures spidering out of it; a magazine later the screen is a
+ * shattered, dimmed mess that swallows your clicks — you genuinely can't work — and he
+ * bolts. He is UNSTOPPABLE while the gun's out: you can't shoot or kill him, no matter
+ * where you click — he only leaves when he's good and done. The cracks and holes he
+ * leaves hang there and fade away over ~30 seconds; nothing to do but wait it out. (Press
+ * Shift+G — "G" for gun — to set him off on demand.)
  *
  * Pure canvas, one green color (red when riled) — the only exceptions are the meat
- * (a few food hues), the policeman's blue uniform, and the speech bubbles. No images.
+ * (a few food hues), the policeman's blue uniform, the speech bubbles, and the
+ * gunmetal gun (with its bullet-hole cracks) on the rampage. No images.
  */
 
 export default function PixelTroll({ hidden = false, floorSelector = '', obstacleSelector = '', zIndex = 30 }) {
@@ -104,6 +115,7 @@ export default function PixelTroll({ hidden = false, floorSelector = '', obstacl
     const ctx = canvas.getContext('2d');
 
     const STAND_H = STAND.length * PIXEL;
+    const GUN_LEN = 66;   // muzzle distance from his hands — a full AR-sized rifle (gunraid rampage)
     const resize = () => {
       canvas.width = window.innerWidth;
       // Full-viewport height: he may stand well above the bottom (atop the trim
@@ -142,6 +154,11 @@ export default function PixelTroll({ hidden = false, floorSelector = '', obstacl
       // latched when he's won all the way to +100 → his next free beat is a big
       // heart-pouring love celebration (mirror of policePending at the bottom).
       lovePending: false,
+      // ULTRA-rare rampage: about once every ~8 hours he storms in with a gun and
+      // shoots the screen to pieces. `gun` is the live scene; `cracks` are the
+      // bullet holes + fractures he leaves behind, which linger and fade over 30s
+      // (so they outlive the scene — he's long gone while the screen's still wrecked).
+      gun: null, cracks: [], nextGunRaid: performance.now() + rand(7, 9) * 3600 * 1000,
       nextVisit: performance.now() + rand(5000, 9000),
       floorY: canvas.height, // current floor, eased toward the trim bar / screen bottom
     };
@@ -405,6 +422,50 @@ export default function PixelTroll({ hidden = false, floorSelector = '', obstacl
       }
     }
 
+    // ── Gun rampage (ultra-rare) ─────────────────────────────────────────────
+    // Where his outstretched gun-hand sits in canvas space — the pivot the arm +
+    // barrel are drawn from, and the point his shots fly from.
+    function gunPivot() {
+      return { x: T.x, y: groundY() + T.yOffset - STAND_H * 0.5 };
+    }
+    // One shot: pick a spot anywhere on the screen, aim the gun at it, flash the
+    // muzzle, kick the recoil + a screen jolt, and crack the glass right there.
+    function fireShot() {
+      const G = T.gun; if (!G) return;
+      const tx = rand(W() * 0.04, W() * 0.96);
+      const ty = rand(canvas.height * 0.05, canvas.height * 0.88);
+      const p = gunPivot();
+      G.aimAng = Math.atan2(ty - p.y, tx - p.x);
+      T.dir = tx >= p.x ? 1 : -1; T.mirror = T.dir < 0;   // turn to face wherever he's firing
+      G.flash = 70; G.recoil = 1; G.shake = 12; G.tracer = { x: tx, y: ty };
+      spawnCrack(tx, ty);
+    }
+    // A bullet hole + a web of jagged fractures radiating from it, generated ONCE
+    // (so it doesn't shimmer frame-to-frame) and then drawn fading out over ~30s.
+    function spawnCrack(x, y) {
+      if (T.cracks.length > 48) return;                   // safety cap
+      const radials = Math.round(rand(6, 10)), segs = [];
+      for (let i = 0; i < radials; i++) {
+        const len = rand(70, 330);                         // some short, some clear across a chunk of screen
+        let a = (i / radials) * Math.PI * 2 + rand(-0.32, 0.32), cx = 0, cy = 0;
+        const steps = Math.max(2, Math.round(len / rand(18, 30))), step = len / steps;
+        const pts = [{ x: 0, y: 0 }];
+        for (let s = 0; s < steps; s++) {
+          a += rand(-0.34, 0.34);
+          cx += Math.cos(a) * step; cy += Math.sin(a) * step;
+          pts.push({ x: cx, y: cy });
+          if (s > 0 && Math.random() < 0.26) {             // a little splinter branching off
+            const ba = a + rand(-1.1, 1.1), bl = rand(14, 62);
+            segs.push([{ x: cx, y: cy }, { x: cx + Math.cos(ba) * bl, y: cy + Math.sin(ba) * bl }]);
+          }
+        }
+        segs.push(pts);
+      }
+      const rings = [];
+      for (let i = 0, n = Math.round(rand(1, 3)); i < n; i++) rings.push(rand(9, 38));
+      T.cracks.push({ x, y, t: 0, life: 30000, fade: 6000, segs, rings, holeR: rand(4, 8) });
+    }
+
     // ── Food (shift+click = small cut, shift+right-click = BIG cut) ──────────
     // The nearest hunk of meat still on the board — what he'll lope toward next.
     function nearestMeat() {
@@ -465,6 +526,7 @@ export default function PixelTroll({ hidden = false, floorSelector = '', obstacl
       T.leaving = false; // only exits / flee re-assert this below
       T.lady = null; T.pool = null; T.ufo = null; T.dog = null; T.boot = null; T.flick = null; T.friend = null; // clear any lingering cameo props
       T.feast = null; // (the meal sets this up again in its own case)
+      if (name !== 'gunraid') T.gun = null; // the rampage sets up its own gun rig (cracks persist independently)
       if (name !== 'police') { T.cop = null; T.copSpeech = null; } // the police scene sets these up itself
       switch (name) {
         case 'walkIn':
@@ -718,6 +780,19 @@ export default function PixelTroll({ hidden = false, floorSelector = '', obstacl
           const exitDist = (dir === 1 ? (W() - T.policeStopX) : T.policeStopX) + off + 110;
           T.cop = { x: T.x - dir * 80, dir, yOff: 0, legT: 0, legFlip: false, writeT: 0, writing: false, mirror: dir < 0, exitSpeed: Math.max(170, exitDist / 3.0) };
           T.copSpeech = null; T.speech = null; T.poseT = 0; T.policeKill = null;
+          break;
+        }
+
+        case 'gunraid': {                               // ULTRA-rare: storms in gun-first, unloads into the screen, bolts
+          T.dur = 30000; T.leaving = true;              // hard cap; really ends once he's off-screen (out phase)
+          T.dir = Math.random() < 0.5 ? 1 : -1;
+          T.x = T.dir === 1 ? -off : W() + off;         // always makes an entrance from an edge
+          T.gun = {
+            phase: 'in', stopX: rand(W() * 0.32, W() * 0.68),
+            shots: Math.round(rand(9, 14)), fired: 0, shotT: 0, nextShot: rand(260, 460),
+            aimAng: T.dir === 1 ? 0 : Math.PI, recoil: 0, flash: 0, shake: 0, holdT: 0, tracer: null,
+          };
+          T.speed = rand(150, 210); T.pose = 'walkA'; T.poseT = 0; T.speech = null;
           break;
         }
 
@@ -2137,6 +2212,47 @@ export default function PixelTroll({ hidden = false, floorSelector = '', obstacl
         T.shakeX = blink > 0.9 ? rand(-10, 10) * k : 0;
         return T.t >= T.dur;
       }
+      if (a === 'gunraid') {                            // strides in, empties the clip into the screen, then bolts
+        const G = T.gun;
+        if (!G) return true;
+        G.flash = Math.max(0, G.flash - dt);            // muzzle flash + recoil + screen jolt all decay out
+        G.recoil *= Math.pow(0.82, dt / 16);
+        G.shake *= Math.pow(0.80, dt / 16);
+        if (T.t >= T.dur && G.phase !== 'out') {        // safety: never hang on a stuck phase
+          G.phase = 'out'; T.leaving = true; T.dir = T.x < W() / 2 ? -1 : 1; T.speed = 600;
+        }
+        if (G.phase === 'in') {                         // march in, gun out ahead of him
+          T.mirror = T.dir < 0; T.yOffset = 0;
+          const reached = T.dir === 1 ? T.x >= G.stopX : T.x <= G.stopX;
+          if (!reached) { T.x += T.dir * T.speed * dt / 1000; animLegs(dt, 'walkA', 'walkB', 110); }
+          else { T.pose = 'stand'; G.phase = 'aim'; G.holdT = 0; }
+          return false;
+        }
+        if (G.phase === 'aim') {                         // a beat to level the gun, then the first round
+          T.pose = 'stand'; G.holdT += dt;
+          if (G.holdT > 340) { G.phase = 'fire'; G.shotT = G.nextShot; }
+          return false;
+        }
+        if (G.phase === 'fire') {                        // unload, one round at a time, all over the screen
+          T.pose = 'stand';
+          T.shakeX = G.shake > 0.4 ? rand(-1, 1) * G.shake * 0.6 : 0;
+          T.yOffset = -G.recoil * 2;                     // a little kick on his frame each shot
+          G.shotT += dt;
+          if (G.shotT >= G.nextShot && G.fired < G.shots) {
+            G.shotT = 0; G.nextShot = rand(190, 420); fireShot(); G.fired++;
+          }
+          if (G.fired >= G.shots) {                      // clip empty → bolt for the nearest edge
+            G.phase = 'out'; T.leaving = true; T.dir = T.x < W() / 2 ? -1 : 1; T.speed = rand(460, 640);
+          }
+          return false;
+        }
+        // phase 'out' — sprints off, leaving the wrecked screen behind to fade on its own
+        T.mirror = T.dir < 0; T.x += T.dir * T.speed * dt / 1000;
+        animLegs(dt, 'walkA', 'walkB', 52); T.yOffset = 0; T.shakeX = 0;
+        const done = T.x < -off || T.x > W() + off || T.t >= T.dur;
+        if (done) T.gun = null;                          // gun leaves with him; the cracks stay
+        return done;
+      }
       return true;
     }
 
@@ -2304,6 +2420,102 @@ export default function PixelTroll({ hidden = false, floorSelector = '', obstacl
       ctx.fillStyle = T.color;
     }
 
+    // The AR he shoulders during the rampage — drawn OVER his body (which the main
+    // loop blits first): stock, receiver, pistol grip, banana mag, handguard, a long
+    // barrel and sights, plus a muzzle flash + tracer line on the frames he fires. It's
+    // drawn pointing +x (forward), grip + mag hanging +y (down), then mirrored/tilted
+    // to his aim so it always reads right-side-up whichever way he's spraying.
+    function drawGun() {
+      const G = T.gun; if (!G) return;
+      const p = gunPivot();
+      const ang = G.aimAng;
+      const muzzleX = p.x + Math.cos(ang) * GUN_LEN;
+      const muzzleY = p.y + Math.sin(ang) * GUN_LEN;
+      if (G.flash > 0 && G.tracer) {                    // a quick streak from muzzle to where it struck
+        ctx.strokeStyle = `rgba(255,238,170,${(0.6 * G.flash / 70).toFixed(3)})`;
+        ctx.lineWidth = 2.5;
+        ctx.beginPath(); ctx.moveTo(muzzleX, muzzleY); ctx.lineTo(G.tracer.x, G.tracer.y); ctx.stroke();
+      }
+      const dirSign = Math.cos(ang) >= 0 ? 1 : -1;      // mirror to face his shot, so the rig stays right-side-up
+      const tilt = Math.atan2(Math.sin(ang), Math.abs(Math.cos(ang)));   // just the up/down lean of the aim
+      const kick = G.recoil * 9;                        // recoil shoves the whole rifle back along the aim
+      ctx.save();
+      ctx.translate(p.x - Math.cos(ang) * kick, p.y - Math.sin(ang) * kick);
+      ctx.scale(dirSign, 1);
+      ctx.rotate(tilt);
+      ctx.strokeStyle = GREEN; ctx.lineCap = 'round'; ctx.lineWidth = PIXEL * 1.6;   // his support arm, out on the handguard
+      ctx.beginPath(); ctx.moveTo(-8, 4); ctx.lineTo(42, 1); ctx.stroke();
+      ctx.fillStyle = '#26282b';                        // darkest: stock, grip, magazine
+      ctx.fillRect(-22, -5, 22, 8);                     // buttstock against his shoulder
+      ctx.fillRect(-3, 2, 7, 13);                       // pistol grip
+      ctx.fillRect(13, 2, 9, 9); ctx.fillRect(15, 10, 9, 9);  // curved banana mag
+      ctx.fillStyle = '#3a3d42';                        // gunmetal: receiver, handguard, barrel
+      ctx.fillRect(-3, -7, 36, 10);                     // upper + lower receiver
+      ctx.fillRect(33, -5, 22, 7);                      // handguard
+      ctx.fillRect(55, -3, GUN_LEN - 60, 4);            // barrel
+      ctx.fillRect(GUN_LEN - 6, -5, 7, 7);              // muzzle / flash hider
+      ctx.fillStyle = '#565b61';                        // lighter: top rail + sights
+      ctx.fillRect(-1, -9, 32, 2);                      // flat-top rail
+      ctx.fillRect(3, -12, 3, 4);                       // rear sight
+      ctx.fillRect(50, -12, 3, 6);                      // front sight post
+      if (G.flash > 0) {                                // muzzle flash — a bright spiky burst at the tip
+        const f = G.flash / 70;
+        ctx.save(); ctx.translate(GUN_LEN, -1); ctx.globalAlpha = f;
+        ctx.fillStyle = '#fff1a8';
+        for (let i = 0; i < 6; i++) { ctx.rotate(Math.PI / 3); ctx.fillRect(0, -2.5, (8 + f * 14) * (0.6 + (i % 2) * 0.7), 5); }
+        ctx.fillStyle = '#ffd24a';
+        ctx.beginPath(); ctx.arc(0, 0, 5 + f * 5, 0, Math.PI * 2); ctx.fill();
+        ctx.globalAlpha = 1; ctx.restore();
+      }
+      ctx.restore();
+      ctx.lineCap = 'butt'; ctx.fillStyle = GREEN;
+    }
+
+    // The wrecked screen he leaves behind: a faint darkening, then every bullet hole
+    // and its fracture web, all fading out over ~30s. Drawn dead last so it sits over
+    // everything (the whole UI, the troll, the gore) — you can't work until it clears.
+    function strokeSegs(segs) {
+      ctx.beginPath();
+      for (const seg of segs) {
+        ctx.moveTo(seg[0].x, seg[0].y);
+        for (let i = 1; i < seg.length; i++) ctx.lineTo(seg[i].x, seg[i].y);
+      }
+      ctx.stroke();
+    }
+    function drawCracks(dt) {
+      if (!T.cracks.length) return;
+      let maxA = 0;
+      for (let i = T.cracks.length - 1; i >= 0; i--) {
+        const c = T.cracks[i]; c.t += dt;
+        if (c.t >= c.life) { T.cracks.splice(i, 1); continue; }
+        const left = c.life - c.t;
+        const a = left < c.fade ? Math.max(0, left / c.fade) : 1;
+        if (a > maxA) maxA = a;
+      }
+      if (!T.cracks.length) return;
+      ctx.fillStyle = `rgba(8,10,14,${(0.22 * maxA).toFixed(3)})`;   // the screen reads as smashed / dimmed
+      ctx.fillRect(0, 0, canvas.width, canvas.height);
+      ctx.lineCap = 'round'; ctx.lineJoin = 'round';
+      for (const c of T.cracks) {
+        const left = c.life - c.t;
+        const a = left < c.fade ? Math.max(0, left / c.fade) : 1;
+        ctx.save();
+        ctx.translate(c.x, c.y);
+        ctx.strokeStyle = `rgba(8,10,14,${(0.5 * a).toFixed(3)})`; ctx.lineWidth = 3;   // dark under-stroke for depth
+        strokeSegs(c.segs);
+        ctx.strokeStyle = `rgba(233,241,255,${(0.85 * a).toFixed(3)})`; ctx.lineWidth = 1.3;  // glassy highlight
+        strokeSegs(c.segs);
+        ctx.strokeStyle = `rgba(205,222,245,${(0.45 * a).toFixed(3)})`; ctx.lineWidth = 1;     // concentric fracture rings
+        for (const rr of c.rings) { ctx.beginPath(); ctx.arc(0, 0, rr, 0, Math.PI * 2); ctx.stroke(); }
+        ctx.fillStyle = `rgba(6,7,10,${(0.92 * a).toFixed(3)})`;                          // the bullet hole itself
+        ctx.beginPath(); ctx.arc(0, 0, c.holeR, 0, Math.PI * 2); ctx.fill();
+        ctx.strokeStyle = `rgba(175,195,220,${(0.4 * a).toFixed(3)})`; ctx.lineWidth = 1.5; // bright punched rim
+        ctx.beginPath(); ctx.arc(0, 0, c.holeR + 2, 0, Math.PI * 2); ctx.stroke();
+        ctx.restore();
+      }
+      ctx.lineCap = 'butt'; ctx.lineJoin = 'miter'; ctx.fillStyle = GREEN;
+    }
+
     function drawEntities(dt) {
       ctx.fillStyle = GREEN;
 
@@ -2447,6 +2659,9 @@ export default function PixelTroll({ hidden = false, floorSelector = '', obstacl
         blit(BOOT, T.x, T.boot.y, 2.6, false, 0);
       }
 
+      // the gun in his hands (rampage) — over his body, under the cracks he's making
+      if (T.gun) drawGun();
+
       // little parachute (drop cameo) — canopy + strings above him as he floats down
       if (T.drop && T.drop.kind === 'dropChute' && !T.drop.landed) {
         const cx = T.x, feetY = groundY() + T.yOffset, headY = feetY - STAND_H;
@@ -2483,6 +2698,7 @@ export default function PixelTroll({ hidden = false, floorSelector = '', obstacl
       ctx.globalAlpha = 1;
 
       drawSpeech(dt);            // his little white speech bubble, on top of everything
+      drawCracks(dt);           // ...and the shattered screen over even that, fading on its own clock
     }
 
     // A rounded-rect path (manual, so it works without ctx.roundRect support).
@@ -3421,8 +3637,17 @@ export default function PixelTroll({ hidden = false, floorSelector = '', obstacl
       // whole canvas above the floating widgets (z-40) so he/the gore ride OVER
       // them; otherwise sit back at the normal layer behind them.
       const onLedge = T.action === 'napWidget' && T.widget && T.widget.up;   // up on a panel → ride over it
-      const zWant = String((DRAG_ACTIONS.has(T.action) && T.mode === 'active') || T.splats.length || onLedge ? 60 : zIndex);
+      // The rampage (and the smashed screen it leaves) also rides over everything —
+      // AND swallows clicks, so you genuinely can't work until the cracks clear.
+      const wreck = !!T.gun || T.cracks.length > 0;
+      const zWant = String((DRAG_ACTIONS.has(T.action) && T.mode === 'active') || T.splats.length || onLedge || wreck ? 60 : zIndex);
       if (canvas.style.zIndex !== zWant) canvas.style.zIndex = zWant;
+      const peWant = wreck ? 'auto' : 'none';
+      if (canvas.style.pointerEvents !== peWant) canvas.style.pointerEvents = peWant;
+      // Each gunshot jolts the whole overlay (cracks + troll together) for impact.
+      const gShake = T.gun ? T.gun.shake : 0;
+      if (gShake > 0.4) canvas.style.translate = `${Math.round(rand(-gShake, gShake))}px ${Math.round(rand(-gShake, gShake))}px`;
+      else if (canvas.style.translate) canvas.style.translate = '';
 
       // Food on the floor lures him over: it interrupts his idle wandering and
       // even calls him in from off-screen, but never breaks a scripted cameo, a
@@ -3503,6 +3728,16 @@ export default function PixelTroll({ hidden = false, floorSelector = '', obstacl
           spawnGift(pick(LOVE_GIFTS), T.x + rand(-20, 20), true);
           if (!T.speech && Math.random() < 0.6) say(pick(['for you!', 'a little something', 'here!', 'i found this!']), '#159a52');
         }
+      }
+
+      // ULTRA-rare: about once every ~8 hours he goes on a rampage — storms in with a
+      // gun and shoots the screen to bits. Fires whether he's away (he summons himself
+      // in) or already out (only when he's free — never mid-cameo/drag/poke/exit). Not
+      // persisted, so the clock restarts on reload; Shift+G triggers it on demand.
+      if (now >= T.nextGunRaid && !T.gun && !T.cracks.length
+          && (T.mode === 'away' || (T.mode === 'active' && calm && !T.leaving))) {
+        T.nextGunRaid = now + rand(7, 9) * 3600 * 1000;
+        startAction('gunraid', now);
       }
 
       if (T.mode === 'away') {
@@ -3745,6 +3980,12 @@ export default function PixelTroll({ hidden = false, floorSelector = '', obstacl
         spawnMeat(e.clientX, e.clientY, true);
         return;
       }
+      // The ultra-rare rampage: he is UNSTOPPABLE while the gun's out — you cannot
+      // shoot or kill him, no matter where you click. He only goes when he's done and
+      // bolts on his own. The wrecked screen he leaves just rides out its ~30s fade;
+      // there's nothing to do but wait it out (which is the whole point — you can't
+      // work). We swallow the right-click so the browser menu can't pop either.
+      if (T.action === 'gunraid' || T.gun || T.cracks.length) { e.preventDefault(); return; }
       if (T.mode === 'away') return;
       if (T.action === 'shot') return;
       if (T.action === 'police') {                       // the climax: pick off the troll or the cop — the other bolts
@@ -3807,11 +4048,12 @@ export default function PixelTroll({ hidden = false, floorSelector = '', obstacl
     }
     window.addEventListener('mousedown', onFeed);
 
-    // Shift+A toggles the mood meter; Shift+M / Shift+K are debug triggers for the
-    // monster (summon / drop). Shift+D jumps straight to the moment the skeleton has
-    // just sunk (the bare flower cluster) and Shift+G fast-forwards the garden's
-    // 15-min spread. Ignored while you're typing in a field (and on key auto-repeat)
-    // so they don't fight real input or flicker.
+    // Shift+G (gun) sends him on the ultra-rare rampage on demand — unless the garden
+    // death-scene is up, in which case it keeps its old debug job of fast-forwarding the
+    // 15-min spread. Shift+A toggles the mood meter; Shift+M / Shift+K are debug triggers
+    // for the monster (summon / drop); Shift+D jumps straight to the moment the skeleton
+    // has just sunk (the bare flower cluster). Ignored while you're typing in a field (and
+    // on key auto-repeat) so they don't fight real input or flicker.
     function onKeyDown(e) {
       if (e.repeat || !e.shiftKey) return;
       const el = e.target;
@@ -3846,12 +4088,17 @@ export default function PixelTroll({ hidden = false, floorSelector = '', obstacl
         T.death = D;
         return;
       }
-      if (code === 'KeyG' || key === 'G' || key === 'g') {       // debug: fast-forward the meadow→forest spread
+      if (code === 'KeyG' || key === 'G' || key === 'g') {       // Shift+G (gun): the rampage on demand
         const D = T.death;
-        if (D) {
+        if (D) {                                                 // garden's up → keep the old debug: fast-forward it
           if (D.phase === 'fall' || D.phase === 'corpse') { D.phase = 'sink'; D.t = 0; D.decomp = 1; }
           D.gardenOn = true; D.gardenT = Math.min(GARDEN_SPREAD_MS, D.gardenT + 150000); // jump ~2.5 min on
           for (let i = 0; i < 26; i++) { D.patchT = 9999; growGarden(D, 16); }            // and sprout a fresh wave at once
+          return;
+        }
+        if (!T.banished && !T.monster && !T.gun) {               // otherwise: storm in and shoot up the screen
+          T.nextGunRaid = performance.now() + rand(7, 9) * 3600 * 1000;
+          startAction('gunraid', performance.now());
         }
         return;
       }
@@ -3872,6 +4119,7 @@ export default function PixelTroll({ hidden = false, floorSelector = '', obstacl
     return () => {
       saveMood();                                        // keep his latest feelings across reloads
       shovedEls.forEach((el) => { try { el.style.translate = ''; el.style.rotate = ''; } catch { /* gone */ } });
+      try { canvas.style.pointerEvents = 'none'; canvas.style.translate = ''; } catch { /* gone */ }  // don't leave the screen blocked / shaken
       cancelAnimationFrame(raf);
       window.removeEventListener('resize', resize);
       window.removeEventListener('click', onClick);

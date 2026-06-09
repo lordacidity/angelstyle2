@@ -1,9 +1,11 @@
 'use client';
 
+import { useState } from 'react';
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import type { AppSection } from '../types';
 import { sectionFromPath, pathForSection } from '@/lib/sections';
+import { EmojiManager } from './EmojiManager';
 
 interface SidebarProps {
   googleToken: { accessToken: string } | null;
@@ -72,6 +74,17 @@ const NAV: { id: AppSection; label: string; icon: React.ReactNode }[] = [
     ),
   },
   {
+    id: 'pricer',
+    label: 'Pricer',
+    // Price tag — paste names + prices, generate tickers, attach cropped photos.
+    icon: (
+      <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+        <path d="M20.59 13.41 13.42 20.6a2 2 0 0 1-2.83 0L3 13V3h10l7.59 7.59a2 2 0 0 1 0 2.82z"/>
+        <circle cx="7.5" cy="7.5" r="1.5"/>
+      </svg>
+    ),
+  },
+  {
     id: 'prompts',
     label: 'AI Prompts',
     // Lightbulb — saved topics you turn into fresh trending-news overviews.
@@ -104,8 +117,12 @@ export function Sidebar({
 }: SidebarProps) {
   const pathname = usePathname();
   const active: AppSection = sectionFromPath(pathname);
+  // The Emojis drawer toggles open from its sidebar button; it's not a route, so
+  // it lives in local state rather than the pathname.
+  const [emojiOpen, setEmojiOpen] = useState(false);
 
   return (
+    <>
     <aside className="fixed top-0 left-0 h-screen w-[72px] bg-zinc-950 border-r border-zinc-800 flex flex-col z-30">
       {/* Nav — real links so each section has its own URL (prefetch + open in new tab) */}
       <nav className="flex-1 px-2 py-4 flex flex-col gap-1">
@@ -126,6 +143,24 @@ export function Sidebar({
             </Link>
           );
         })}
+
+        {/* Emojis — opens the customization drawer (pin favorites + set @ shortcuts).
+            A toggle button, not a route, so it tints active while the drawer is open. */}
+        <button
+          onClick={() => setEmojiOpen((o) => !o)}
+          title="Emojis — pin & set @ shortcuts"
+          className={`w-full flex flex-col items-center gap-2 py-2.5 px-1 rounded-lg transition-colors ${
+            emojiOpen ? 'text-white' : 'text-zinc-700 hover:text-zinc-200'
+          }`}
+        >
+          <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+            <circle cx="12" cy="12" r="10"/>
+            <path d="M8 14s1.5 2 4 2 4-2 4-2"/>
+            <line x1="9" y1="9.5" x2="9.01" y2="9.5"/>
+            <line x1="15" y1="9.5" x2="15.01" y2="9.5"/>
+          </svg>
+          <span className="text-[9px] font-medium leading-none">Emojis</span>
+        </button>
 
         {/* AI — pinned to the bottom (mt-auto). Routes to the in-app AI-maker page. */}
         <Link
@@ -197,5 +232,8 @@ export function Sidebar({
         </button>
       </div>
     </aside>
+
+    <EmojiManager open={emojiOpen} onClose={() => setEmojiOpen(false)} />
+    </>
   );
 }

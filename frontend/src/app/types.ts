@@ -1,5 +1,5 @@
 /** Navigation sections in the sidebar */
-export type AppSection = 'deck' | 'brandkit' | 'media' | 'builder' | 'trending' | 'images' | 'board' | 'schedule' | 'ai' | 'prompts';
+export type AppSection = 'deck' | 'brandkit' | 'media' | 'builder' | 'trending' | 'images' | 'board' | 'schedule' | 'ai' | 'prompts' | 'pricer';
 
 export type SlideType = 'main' | 'supporting_1' | 'supporting_2';
 

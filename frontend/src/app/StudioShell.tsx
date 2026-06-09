@@ -43,6 +43,10 @@ const AiPromptsSection = lazy(() =>
   import('./components/AiPromptsSection').then(m => ({ default: m.AiPromptsSection }))
 );
 
+const PricerSection = lazy(() =>
+  import('./components/PricerSection').then(m => ({ default: m.PricerSection }))
+);
+
 function SectionLoader() {
   return (
     <div className="flex items-center justify-center h-full min-h-[200px]">
@@ -217,6 +221,12 @@ export function StudioShell() {
   // arrow. Without this, AiCardsSection unmounts and resets to step 1.
   const [aiEverVisited, setAiEverVisited] = useState(false);
   useEffect(() => { if (activeSection === 'ai') setAiEverVisited(true); }, [activeSection]);
+
+  // Same keep-mounted trick for Pricer: once visited, stay mounted (hidden) so the
+  // in-memory full-res photos a batch is cropping aren't lost on tab switch (only
+  // text + thumbnails round-trip through localStorage).
+  const [pricerEverVisited, setPricerEverVisited] = useState(false);
+  useEffect(() => { if (activeSection === 'pricer') setPricerEverVisited(true); }, [activeSection]);
 
   useEffect(() => {
     const raw = sessionStorage.getItem('ai-card-seed');
@@ -417,6 +427,16 @@ export function StudioShell() {
               </Suspense>
             </GridSection>
           </ErrorBoundary>
+        )}
+
+        {pricerEverVisited && (
+          <div style={{ display: activeSection === 'pricer' ? undefined : 'none' }}>
+            <ErrorBoundary>
+              <Suspense fallback={<SectionLoader />}>
+                <PricerSection />
+              </Suspense>
+            </ErrorBoundary>
+          </div>
         )}
 
         {activeSection === 'schedule' && (
