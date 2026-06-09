@@ -368,7 +368,7 @@ export function PricerSection() {
   const [genIds, setGenIds] = useState<Set<string>>(new Set()); // rows mid-generate
   // What was last copied + where, to flash the right thing: a whole-row copy tints
   // the row; a single-cell copy (price / ticker) flashes just that cell.
-  const [copied, setCopied] = useState<{ id: string; scope: 'row' | 'price' | 'ticker' } | null>(null);
+  const [copied, setCopied] = useState<{ id: string; scope: 'row' | 'name' | 'price' | 'ticker' } | null>(null);
   const [downloading, setDownloading] = useState(false);
   const [crop, setCrop] = useState<{ rowId: string; src: string; nW: number; nH: number; crop: Crop } | null>(null);
 
@@ -521,7 +521,7 @@ export function PricerSection() {
     } catch { /* clipboard fully blocked — nothing more to do */ }
   }
 
-  function flashCopy(id: string, scope: 'row' | 'price' | 'ticker') {
+  function flashCopy(id: string, scope: 'row' | 'name' | 'price' | 'ticker') {
     setCopied({ id, scope });
     setTimeout(() => setCopied((c) => (c && c.id === id && c.scope === scope ? null : c)), 900);
   }
@@ -533,8 +533,8 @@ export function PricerSection() {
     flashCopy(row.id, 'row');
   }
 
-  // Single-cell copy — clicking the Price or Ticker cell copies just that value.
-  async function copyCell(rowId: string, scope: 'price' | 'ticker', text: string) {
+  // Single-cell copy — clicking the Name, Price or Ticker cell copies just that value.
+  async function copyCell(rowId: string, scope: 'name' | 'price' | 'ticker', text: string) {
     await writeClipboard(text);
     flashCopy(rowId, scope);
   }
@@ -715,7 +715,13 @@ export function PricerSection() {
                     : i + 1}
                 </span>
 
-                <EditableCell value={row.name} placeholder="name" onCommit={(v) => patchRow(row.id, { name: v })} />
+                <EditableCell
+                  value={row.name}
+                  placeholder="name"
+                  flash={copied?.id === row.id && copied.scope === 'name'}
+                  onCellClick={() => copyCell(row.id, 'name', row.name)}
+                  onCommit={(v) => patchRow(row.id, { name: v })}
+                />
                 <EditableCell
                   value={row.price}
                   placeholder="price"
