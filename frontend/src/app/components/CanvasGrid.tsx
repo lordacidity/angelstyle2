@@ -6,6 +6,8 @@ import { TikTokCanvas } from './TikTokCanvas';
 import type { TikTokCanvasRef, MarketData, SparkPoint } from './TikTokCanvas';
 import { ChartsCanvas } from './ChartsCanvas';
 import type { ChartsCanvasRef, ChartsMarket } from './ChartsCanvas';
+import { ChartsImageCanvas } from './ChartsImageCanvas';
+import type { ChartsImageCanvasRef, ChartsImageMarket } from './ChartsImageCanvas';
 import { ChartsInputCard } from './ChartsInputCard';
 import type { PreloadedAudio } from './ChartsInputCard';
 import CarouselCanvas, { CAROUSEL_PREVIEW_W } from './CarouselCanvas';
@@ -470,6 +472,213 @@ function VideoInputCard({
   );
 }
 
+// ── ChartsImage input card (single-market picker) ─────────────────────────────
+
+function ChartsImageInputCard({
+  market,
+  overrideName,
+  allMarkets,
+  marketsLoading,
+  onEnsureMarkets,
+  onUpdateMarket,
+  onUpdateOverrideName,
+  anyLoading,
+  trendsLoaded,
+  trendsError,
+  onStart,
+  onRemove,
+}: {
+  entry: VideoEntry;
+  market: ChartsMarket | null;
+  overrideName: string;
+  allMarkets: ChartsMarket[];
+  marketsLoading: boolean;
+  onEnsureMarkets: () => void;
+  onUpdateMarket: (market: ChartsMarket | null) => void;
+  onUpdateOverrideName: (name: string) => void;
+  anyLoading: boolean;
+  trendsLoaded: boolean;
+  trendsError: string | null;
+  onStart: () => void;
+  onRemove: () => void;
+}) {
+  const [query,   setQuery]   = useState('');
+  const [open,    setOpen]    = useState(false);
+  const [rect,    setRect]    = useState<DOMRect | null>(null);
+  const anchorRef = useRef<HTMLButtonElement>(null);
+  const inputRef  = useRef<HTMLInputElement>(null);
+  const dropRef   = useRef<HTMLDivElement>(null);
+
+  const filtered = allMarkets
+    .filter(m => {
+      const q = query.trim().toLowerCase();
+      return !q || m.name.toLowerCase().includes(q) || (m.industry ?? '').toLowerCase().includes(q);
+    })
+    .slice(0, 50);
+
+  const handleOpen = () => {
+    onEnsureMarkets();
+    const r = anchorRef.current?.getBoundingClientRect() ?? null;
+    setRect(r);
+    setOpen(true);
+    setQuery('');
+    setTimeout(() => inputRef.current?.focus(), 0);
+  };
+
+  useEffect(() => {
+    if (!open) return;
+    const update = () => setRect(anchorRef.current?.getBoundingClientRect() ?? null);
+    window.addEventListener('scroll', update, true);
+    window.addEventListener('resize', update);
+    return () => {
+      window.removeEventListener('scroll', update, true);
+      window.removeEventListener('resize', update);
+    };
+  }, [open]);
+
+  useEffect(() => {
+    if (!open) return;
+    function onDown(e: MouseEvent) {
+      const t = e.target as Node;
+      if (!dropRef.current?.contains(t) && !anchorRef.current?.contains(t)) setOpen(false);
+    }
+    document.addEventListener('mousedown', onDown);
+    return () => document.removeEventListener('mousedown', onDown);
+  }, [open]);
+
+  return (
+    <div className="flex flex-col gap-2" style={{ width: CARD_W }}>
+      <div className="rounded-lg bg-zinc-950 border border-zinc-800 overflow-hidden">
+        <div className="px-3 py-2 border-b border-zinc-800 flex items-center justify-between">
+          <span className="text-[10px] font-semibold text-zinc-400 uppercase tracking-wider">Market</span>
+          <div className="flex items-center gap-2">
+            <span className="text-[10px] text-zinc-600">Select · edit name · Start</span>
+            <button
+              type="button"
+              onClick={onRemove}
+              className="text-zinc-700 hover:text-red-400 transition-colors"
+              title="Remove"
+            >
+              <CloseIcon size={11} />
+            </button>
+          </div>
+        </div>
+
+        <div className="p-2 flex flex-col gap-2">
+          {/* Market picker */}
+          {market ? (
+            <div className="flex items-center gap-2.5 px-3 py-2.5 rounded-lg bg-zinc-900 border border-zinc-800">
+              {market.photo_url ? (
+                // eslint-disable-next-line @next/next/no-img-element
+                <img src={market.photo_url} alt={market.name} className="w-8 h-8 rounded-full object-cover shrink-0" />
+              ) : (
+                <div className="w-8 h-8 rounded-full bg-zinc-700 flex items-center justify-center text-xs font-bold text-zinc-300 shrink-0">
+                  {market.name.charAt(0).toUpperCase()}
+                </div>
+              )}
+              <input
+                value={overrideName}
+                onChange={e => onUpdateOverrideName(e.target.value)}
+                placeholder={market.name}
+                className="flex-1 min-w-0 bg-transparent text-sm text-white placeholder-zinc-600 outline-none"
+              />
+              {trendsLoaded && (
+                <span className="shrink-0 text-[10px] font-semibold text-emerald-400 tracking-wider">LIVE</span>
+              )}
+              <button
+                type="button"
+                onClick={() => onUpdateMarket(null)}
+                className="shrink-0 text-zinc-600 hover:text-zinc-300 transition-colors"
+              >
+                <CloseIcon size={12} />
+              </button>
+            </div>
+          ) : (
+            <>
+              <button
+                ref={anchorRef}
+                type="button"
+                onClick={handleOpen}
+                className="w-full flex items-center gap-2 px-3 py-2.5 rounded-lg bg-zinc-900 border border-zinc-700 hover:border-zinc-500 transition-colors text-left"
+              >
+                <span className="text-sm text-zinc-500">Search market…</span>
+              </button>
+              {open && rect && typeof document !== 'undefined' && createPortal(
+                <div
+                  ref={dropRef}
+                  className="fixed z-[1000] rounded-lg bg-zinc-900 border border-zinc-700 shadow-2xl overflow-hidden"
+                  style={{ left: rect.left, top: rect.bottom + 4, width: rect.width }}
+                >
+                  <div className="p-2 border-b border-zinc-800">
+                    <input
+                      ref={inputRef}
+                      value={query}
+                      onChange={e => setQuery(e.target.value)}
+                      placeholder="Name, ticker or industry…"
+                      className="w-full bg-zinc-800 border border-zinc-700 rounded-md px-2.5 py-1.5 text-xs text-zinc-200 placeholder-zinc-500 outline-none focus:border-zinc-500"
+                    />
+                  </div>
+                  <div className="max-h-48 overflow-y-auto">
+                    {marketsLoading && !allMarkets.length ? (
+                      <p className="text-xs text-zinc-600 text-center py-4">Loading…</p>
+                    ) : filtered.length === 0 ? (
+                      <p className="text-xs text-zinc-600 text-center py-4">No results.</p>
+                    ) : (
+                      filtered.map(m => (
+                        <button
+                          key={m.id}
+                          type="button"
+                          onMouseDown={ev => ev.preventDefault()}
+                          onClick={() => { onUpdateMarket(m); setOpen(false); }}
+                          className="w-full flex items-center gap-2.5 px-3 py-2 hover:bg-zinc-800 transition-colors text-left"
+                        >
+                          {m.photo_url ? (
+                            // eslint-disable-next-line @next/next/no-img-element
+                            <img src={m.photo_url} alt={m.name} className="w-6 h-6 rounded-full object-cover shrink-0" />
+                          ) : (
+                            <div className="w-6 h-6 rounded-full bg-zinc-700 flex items-center justify-center shrink-0 text-[10px] font-bold text-zinc-300">
+                              {m.name.charAt(0).toUpperCase()}
+                            </div>
+                          )}
+                          <span className="flex-1 min-w-0 text-sm text-zinc-200 truncate">{m.name}</span>
+                        </button>
+                      ))
+                    )}
+                  </div>
+                </div>,
+                document.body,
+              )}
+            </>
+          )}
+
+          {/* Start button */}
+          {market && (
+            <div className="px-0 pb-0">
+              <button
+                type="button"
+                onClick={onStart}
+                disabled={anyLoading || trendsLoaded}
+                className="w-full flex items-center justify-center gap-2 py-2 rounded-lg text-[12px] font-semibold bg-white/10 border border-white/20 text-white hover:bg-white/20 disabled:opacity-40 transition-colors"
+              >
+                {anyLoading && (
+                  <svg className="animate-spin w-3 h-3" viewBox="0 0 24 24" fill="none">
+                    <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"/>
+                    <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"/>
+                  </svg>
+                )}
+                {anyLoading ? 'Loading…' : trendsLoaded ? 'Loaded' : 'Start'}
+              </button>
+              {trendsError && (
+                <p className="mt-1.5 text-[11px] text-red-400 text-center leading-snug">{trendsError}</p>
+              )}
+            </div>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
 // ── Carousel BG controls ──────────────────────────────────────────────────────
 
 function CarouselBgControls({
@@ -767,6 +976,13 @@ export function CanvasGrid({
 
   // Charts audio track per entry
   const [chartsAudioMap,    setChartsAudioMap]    = useState<Record<string, { label: string; url: string; durationMs: number } | null>>({});
+
+  // Charts Image mode — own state, independent from Charts (single market per entry)
+  const [chartsImageMarketMap,       setChartsImageMarketMap]       = useState<Record<string, ChartsMarket | null>>({});
+  const [chartsImageNameOverrideMap, setChartsImageNameOverrideMap] = useState<Record<string, string>>({});
+  const [chartsImageTrendsLoadingMap,setChartsImageTrendsLoadingMap]= useState<Record<string, boolean>>({});
+  const [chartsImageTrendsLoadedMap, setChartsImageTrendsLoadedMap] = useState<Record<string, boolean>>({});
+  const [chartsImageTrendsErrorMap,  setChartsImageTrendsErrorMap]  = useState<Record<string, string | null>>({});
   // Shared library of available audio tracks (loaded once from disk)
   const [preloadedAudios,   setPreloadedAudios]   = useState<PreloadedAudio[]>([]);
 
@@ -1470,6 +1686,9 @@ export function CanvasGrid({
   const chartsRefsMap         = useRef(new Map<string, ChartsCanvasRef>());
   const chartsRefRegistered   = useRef(new Set<string>());
   const [chartsRefVersion,    setChartsRefVersion]    = useState(0);
+  const chartsImageRefsMap      = useRef(new Map<string, ChartsImageCanvasRef>());
+  const chartsImageRefRegistered = useRef(new Set<string>());
+  const [chartsImageRefVersion, setChartsImageRefVersion] = useState(0);
 
   // Scroll selected card into view (vertical)
   useEffect(() => {
@@ -1526,8 +1745,9 @@ export function CanvasGrid({
   }, [canvasRefsMap]);
 
   const selectedEntry      = entries.find(e => e.id === selectedId) ?? entries[0];
-  const isSelectedCarousel = selectedEntry?.mode === 'carousel';
-  const isSelectedCharts   = selectedEntry?.mode === 'charts';
+  const isSelectedCarousel    = selectedEntry?.mode === 'carousel';
+  const isSelectedCharts      = selectedEntry?.mode === 'charts';
+  const isSelectedChartsImage = selectedEntry?.mode === 'chartsimage';
 
   const isSelectedVideo = !isSelectedCarousel && !isSelectedCharts && selectedEntry && (
     !!selectedEntry.localVideoSrc || (!!selectedEntry.data && !selectedEntry.loading)
@@ -1595,7 +1815,7 @@ export function CanvasGrid({
               row (and future rows inherit it). */}
           {onSetFormat && (
             <div className="flex items-center gap-0.5 ml-2 rounded-lg bg-zinc-900 border border-zinc-800 p-0.5">
-              {([['twitter', 'Twitter'], ['caption', 'Caption'], ['charts', 'Charts'], ['carousel', 'Carousel']] as const).map(([m, label]) => (
+              {([['twitter', 'Twitter'], ['caption', 'Caption'], ['charts', 'Charts'], ['chartsimage', 'Charts Image'], ['carousel', 'Carousel']] as const).map(([m, label]) => (
                 <button
                   key={m}
                   onClick={() => onSetFormat(m)}
@@ -1645,6 +1865,15 @@ export function CanvasGrid({
               </button>
             );
           })()}
+          {isSelectedChartsImage && selectedEntry && (
+            <button
+              onClick={() => chartsImageRefsMap.current.get(selectedEntry.id)?.exportPng()}
+              className="flex items-center gap-1.5 rounded-full bg-white px-2 py-1.5 text-xs font-medium text-black hover:bg-zinc-100 transition-colors"
+            >
+              <DownloadIcon size={11} stroke="currentColor" />
+              PNG
+            </button>
+          )}
           {/* Download All moved into the export bar (bottom-right) — appears after Export is pressed. */}
           {/* Clear — reset everything back to the empty insert form. */}
           <button
@@ -1682,20 +1911,21 @@ export function CanvasGrid({
           <div className="flex flex-col items-center gap-8 pt-2 pb-6 px-4" style={{ zoom: viewScale }}>
 
           {entries.map((entry, index) => {
-            const isSelected      = entry.id === (selectedEntry?.id ?? '');
-            const isEntryCarousel = entry.mode === 'carousel';
-            const isEntryCharts   = entry.mode === 'charts';
+            const isSelected           = entry.id === (selectedEntry?.id ?? '');
+            const isEntryCarousel      = entry.mode === 'carousel';
+            const isEntryCharts        = entry.mode === 'charts';
+            const isEntryChartsImage   = entry.mode === 'chartsimage';
 
             const isCarouselVideo   = isEntryCarousel && entry.carouselSubMode === 'video';
             const hasCarouselRender = isEntryCarousel && (
               (!isCarouselVideo && (!!entry.imageSrc || !!entry.headline || !!entry.subheadline)) ||
               (isCarouselVideo && (!!entry.localVideoSrc || (!!entry.data && !entry.loading)))
             );
-            const hasVideoRender = !isEntryCarousel && !isEntryCharts && !entry.loading && (
+            const hasVideoRender = !isEntryCarousel && !isEntryCharts && !isEntryChartsImage && !entry.loading && (
               !!entry.localVideoSrc
               || (!!entry.data && !(entry.data.images && entry.data.images.length > 0))
             );
-            const hasRender = hasCarouselRender || hasVideoRender || isEntryCharts;
+            const hasRender = hasCarouselRender || hasVideoRender || isEntryCharts || isEntryChartsImage;
             const scale     = scaleMap[entry.id] ?? 1;
 
             return (
@@ -1807,6 +2037,67 @@ export function CanvasGrid({
                     onDeleteAudio={handleDeleteAudio}
                     onRenameAudio={handleRenameAudio}
                   />
+                ) : isEntryChartsImage ? (
+                  <ChartsImageInputCard
+                    entry={entry}
+                    market={chartsImageMarketMap[entry.id] ?? null}
+                    overrideName={chartsImageNameOverrideMap[entry.id] ?? ''}
+                    allMarkets={(allTalents ?? []).map(t => ({ id: t.id, name: t.name, ticker: t.ticker, photo_url: t.photo_url, industry: t.industry }))}
+                    marketsLoading={talentsLoading}
+                    onEnsureMarkets={() => {
+                      if (!allTalents && !talentsLoading) {
+                        setTalentsLoading(true);
+                        fetch('/api/ai/talents')
+                          .then(r => r.json())
+                          .then((data: Talent[] | { error?: string }) => { if (Array.isArray(data)) setAllTalents(data); })
+                          .catch(() => {})
+                          .finally(() => setTalentsLoading(false));
+                      }
+                    }}
+                    onUpdateMarket={market => {
+                      setChartsImageMarketMap(prev => ({ ...prev, [entry.id]: market }));
+                      setChartsImageNameOverrideMap(prev => ({ ...prev, [entry.id]: market?.name ?? '' }));
+                      setChartsImageTrendsLoadedMap(prev => ({ ...prev, [entry.id]: false }));
+                    }}
+                    onUpdateOverrideName={name => setChartsImageNameOverrideMap(prev => ({ ...prev, [entry.id]: name }))}
+                    anyLoading={chartsImageTrendsLoadingMap[entry.id] ?? false}
+                    trendsLoaded={chartsImageTrendsLoadedMap[entry.id] ?? false}
+                    trendsError={chartsImageTrendsErrorMap[entry.id] ?? null}
+                    onStart={() => {
+                      const mk = chartsImageMarketMap[entry.id];
+                      if (!mk) return;
+                      const loaded = chartsImageTrendsLoadedMap[entry.id] ?? false;
+                      if (loaded) return;
+                      setChartsImageTrendsErrorMap(prev => ({ ...prev, [entry.id]: null }));
+                      setChartsImageMarketMap(prev => ({ ...prev, [entry.id]: { ...mk, sparkline: undefined } }));
+                      setChartsImageTrendsLoadedMap(prev => ({ ...prev, [entry.id]: false }));
+                      setChartsImageTrendsLoadingMap(prev => ({ ...prev, [entry.id]: true }));
+                      const term = (chartsImageNameOverrideMap[entry.id] || mk.name).trim();
+                      fetch(`/api/charts/trends?term=${encodeURIComponent(term)}`)
+                        .then(async r => {
+                          if (!r.ok) {
+                            const body = await r.json().catch(() => ({})) as { error?: string };
+                            const msg = r.status === 429 || body.error === 'rate_limited'
+                              ? 'Google Trends is rate-limiting — wait a moment and try again'
+                              : `Failed to load trends (${r.status})`;
+                            setChartsImageTrendsErrorMap(prev => ({ ...prev, [entry.id]: msg }));
+                            return null;
+                          }
+                          return r.json() as Promise<Array<{ timestamp: number; value: number }>>;
+                        })
+                        .then(points => {
+                          if (!points || !Array.isArray(points) || !points.length) return;
+                          setChartsImageMarketMap(prev => {
+                            const cur = prev[entry.id];
+                            return cur ? { ...prev, [entry.id]: { ...cur, sparkline: points } } : prev;
+                          });
+                          setChartsImageTrendsLoadedMap(prev => ({ ...prev, [entry.id]: true }));
+                        })
+                        .catch(e => setChartsImageTrendsErrorMap(prev => ({ ...prev, [entry.id]: String(e) })))
+                        .finally(() => setChartsImageTrendsLoadingMap(prev => ({ ...prev, [entry.id]: false })));
+                    }}
+                    onRemove={() => onRemoveRow(entry.id)}
+                  />
                 ) : (
                   <VideoInputCard
                     entry={entry}
@@ -1854,8 +2145,8 @@ export function CanvasGrid({
                       </div>
                     )}
 
-                    {/* Charts — delete button */}
-                    {isEntryCharts && (
+                    {/* Charts / Charts Image — delete button */}
+                    {(isEntryCharts || isEntryChartsImage) && (
                       <div className="flex items-center justify-end px-0.5">
                         <button onClick={() => onRemoveRow(entry.id)} className={BTN_ICON} title="Delete row">
                           <TrashIcon size={15} />
@@ -1966,6 +2257,22 @@ export function CanvasGrid({
                           audioUrl={chartsAudioMap[entry.id]?.url}
                           audioDurationMs={chartsAudioMap[entry.id]?.durationMs}
                         />
+                      ) : isEntryChartsImage ? (
+                        <ChartsImageCanvas
+                          ref={r => {
+                            if (r) {
+                              chartsImageRefsMap.current.set(entry.id, r);
+                              if (!chartsImageRefRegistered.current.has(entry.id)) {
+                                chartsImageRefRegistered.current.add(entry.id);
+                                setChartsImageRefVersion(v => v + 1);
+                              }
+                            } else {
+                              chartsImageRefsMap.current.delete(entry.id);
+                            }
+                          }}
+                          market={(chartsImageMarketMap[entry.id] ?? null) as ChartsImageMarket | null}
+                          overrideName={chartsImageNameOverrideMap[entry.id] ?? ''}
+                        />
                       ) : (
                         <TikTokCanvas
                           ref={r => {
@@ -2002,7 +2309,7 @@ export function CanvasGrid({
                           never stretched) when toggled on below. Carousel has no
                           equivalent so it's video-only. pointer-events-none so it
                           never blocks dragging / resizing the video box. */}
-                      {!isEntryCarousel && !isEntryCharts && (safeZoneMap[entry.id] ?? true) && (
+                      {!isEntryCarousel && !isEntryCharts && !isEntryChartsImage && (safeZoneMap[entry.id] ?? true) && (
                         <img
                           src="/safe-zones.png"
                           alt=""
@@ -2016,7 +2323,7 @@ export function CanvasGrid({
 
                     {/* Safe-zone toggle — slim row under the canvas, styled like the
                         market section's controls. On by default. */}
-                    {!isEntryCarousel && !isEntryCharts && (() => {
+                    {!isEntryCarousel && !isEntryCharts && !isEntryChartsImage && (() => {
                       const on = safeZoneMap[entry.id] ?? true;
                       return (
                         <div className="mt-2 flex items-center justify-between gap-3 px-3 py-1.5 rounded-md bg-zinc-950 border border-zinc-800">
