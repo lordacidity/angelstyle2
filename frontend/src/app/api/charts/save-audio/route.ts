@@ -83,12 +83,6 @@ export async function POST(req: NextRequest) {
     await convertToMp3(tmpMp4, outMp3);
     await unlink(tmpMp4).catch(() => {});
 
-    // Sidecar with duration for list-audio to pick up
-    await writeFile(
-      path.join(audioDir, `track-custom-${ts}.json`),
-      JSON.stringify({ durationMs }),
-    );
-
     return NextResponse.json({ url: `/audio/${filename}`, durationMs });
   } catch (err) {
     console.error('[save-audio]', err);
