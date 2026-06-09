@@ -23,10 +23,11 @@ import { useRecording } from './hooks/useRecording';
 export type { TikTokCanvasRef, MarketData, SparkPoint } from './types';
 
 // Vertical split of the leftover black space around the block: the space ABOVE
-// the block is 1.4 parts to the 2 parts BELOW it (top : bottom = 1.4 : 2).
-const TOP_RATIO = 1.4;
-const BOTTOM_RATIO = 2;
-const TOP_FRAC = TOP_RATIO / (TOP_RATIO + BOTTOM_RATIO); // ≈ 0.4118
+// the block equals the space BELOW it (top : bottom = 1 : 1) — the block is
+// vertically centered in the leftover space.
+const TOP_RATIO = 1;
+const BOTTOM_RATIO = 1;
+const TOP_FRAC = TOP_RATIO / (TOP_RATIO + BOTTOM_RATIO); // = 0.5
 
 export const TikTokCanvas = forwardRef<TikTokCanvasRef, TikTokCanvasProps>(function TikTokCanvas({
   videoSrc,
@@ -373,8 +374,8 @@ export const TikTokCanvas = forwardRef<TikTokCanvasRef, TikTokCanvasProps>(funct
   }
 
   // Auto-size + position the crop box so the whole block (header → video → CTA)
-  // sits with the black space ABOVE it 1.4 parts to the 2 parts below it
-  // (top : bottom = 1.4 : 2). The fixed chrome (header + CTA) is constant, so the
+  // sits with the black space ABOVE it equal to the black space below it
+  // (top : bottom = 1 : 1). The fixed chrome (header + CTA) is constant, so the
   // leftover black space is CANVAS_H - splitChrome - videoHeight; blockTop is
   // TOP_FRAC of that leftover. The "link in bio" line is intentionally left OUT
   // of splitChrome so it reads as part of the bottom black space, not the block.

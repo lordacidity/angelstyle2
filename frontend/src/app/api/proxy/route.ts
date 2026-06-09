@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 
 const ALLOWED_HOSTS = [
   'tikwm.com',
+  'tiktokio.com',
   'tiktokcdn.com',
   'tiktokv.com',
   'tiktokcdn-us.com',

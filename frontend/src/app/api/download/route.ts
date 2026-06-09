@@ -56,6 +56,77 @@ type InstagramDownloader = (url: string) => Promise<{
   error?: string;
 }>;
 
+// Normalized TikTok payload — matches the frontend VideoData shape so callers
+// don't care which extractor produced it.
+interface TikTokData {
+  id: string;
+  title: string;
+  cover: string;
+  author: { uniqueId: string; nickname: string; avatarThumb: string };
+  play: string;
+  wmplay: string;
+  hdplay: string;
+  duration: number;
+  size: number;
+}
+
+// btch-downloader's ttdl returns no author/id, so we recover what we can from
+// the share URL itself.
+function tiktokIdFromUrl(url: string): string {
+  const m = url.match(/\/(?:video|photo)\/(\d+)/);
+  return m ? m[1] : '';
+}
+function tiktokHandleFromUrl(url: string): string {
+  const m = url.match(/tiktok\.com\/@([^/?#]+)/i);
+  return m ? m[1] : '';
+}
+
+// Primary TikTok source: btch-downloader's hosted ttdl API. tikwm.com now sits
+// behind a Cloudflare "Just a moment" JS challenge that 403s every server-side
+// fetch, so it can no longer be the primary source.
+async function fetchTikTokViaBtch(resolvedUrl: string): Promise<TikTokData | null> {
+  const { ttdl } = await import('btch-downloader');
+  const r = await ttdl(resolvedUrl) as {
+    status?: boolean; title?: string; thumbnail?: string; video?: string[];
+  };
+  const video = (r.video ?? []).filter(Boolean);
+  if (video.length === 0) return null;
+  const handle = tiktokHandleFromUrl(resolvedUrl);
+  const best = video[0];
+  return {
+    id: tiktokIdFromUrl(resolvedUrl) || Date.now().toString(),
+    title: r.title ?? '',
+    cover: r.thumbnail ?? '',
+    author: { uniqueId: handle, nickname: handle, avatarThumb: '' },
+    play: best, wmplay: best, hdplay: best,
+    duration: 0, size: 0,
+  };
+}
+
+// Fallback: tikwm.com — kept in case the Cloudflare challenge is later lifted
+// (or the request lands on an un-challenged edge). Returns null on any block.
+async function fetchTikTokViaTikwm(resolvedUrl: string): Promise<TikTokData | null> {
+  const form = new URLSearchParams({ url: resolvedUrl, hd: '1' });
+  const res = await fetchWithTimeout('https://www.tikwm.com/api/', {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/x-www-form-urlencoded',
+      'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+    },
+    body: form.toString(),
+  });
+  if (!res.ok) {
+    console.error('TikWM API error:', res.status, res.statusText);
+    return null;
+  }
+  const json = await res.json().catch(() => null) as { code?: number; msg?: string; data?: TikTokData } | null;
+  if (!json || json.code !== 0 || !json.data) {
+    if (json?.msg) console.error('TikWM error:', json.msg);
+    return null;
+  }
+  return json.data;
+}
+
 export async function POST(request: NextRequest) {
   let url: string;
   const Schema = z.object({ url: z.string() });
@@ -68,36 +139,29 @@ export async function POST(request: NextRequest) {
   try {
     if (isTikTokUrl(trimmedUrl)) {
       const resolvedUrl = await resolveShortUrl(trimmedUrl);
-      const form = new URLSearchParams({ url: resolvedUrl, hd: '1' });
 
-      const res = await fetchWithTimeout('https://www.tikwm.com/api/', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-        body: form.toString(),
-      });
-
-      if (!res.ok) {
-        console.error('TikWM API error:', res.status, res.statusText);
-        return NextResponse.json({ error: 'Upstream service error' }, { status: 502 });
+      let data: TikTokData | null = null;
+      try {
+        data = await fetchTikTokViaBtch(resolvedUrl);
+      } catch (err) {
+        console.error('ttdl error:', err instanceof Error ? err.message : err);
       }
-
-      const json = await res.json() as { code: number; msg?: string; data?: unknown };
-
-      if (json.code !== 0) {
-        console.error('TikWM error:', json.msg);
-        const errorMsg = json.msg || 'Failed to fetch TikTok video';
-        let userMessage = errorMsg;
-        if (errorMsg.includes('not found') || errorMsg.includes('Video not found')) {
-          userMessage = 'Video not found. The link may be private, deleted, or invalid.';
-        } else if (errorMsg.includes('Api rate limit') || errorMsg.includes('rate limit')) {
-          userMessage = 'Too many requests. Please wait a moment and try again.';
-        } else if (errorMsg.includes('Url parsing') || errorMsg.includes('invalid')) {
-          userMessage = 'Invalid TikTok URL. Please check the link and try again.';
+      if (!data) {
+        try {
+          data = await fetchTikTokViaTikwm(resolvedUrl);
+        } catch (err) {
+          console.error('tikwm fallback error:', err instanceof Error ? err.message : err);
         }
-        return NextResponse.json({ error: userMessage }, { status: 400 });
       }
 
-      return NextResponse.json(json.data);
+      if (!data) {
+        return NextResponse.json(
+          { error: 'Could not fetch this TikTok. The link may be private, deleted, or region-locked — try another.' },
+          { status: 502 },
+        );
+      }
+
+      return NextResponse.json(data);
     }
 
     if (isInstagramUrl(trimmedUrl)) {
