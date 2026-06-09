@@ -397,9 +397,15 @@ export function StudioShell() {
 
         {activeSection === 'board' && (
           <ErrorBoundary>
-            <GridSection>
-              <BoardSection />
-            </GridSection>
+            {/* Plain black background instead of GridSection — the dotted grid
+                fights the dense table layout and makes rows hard to read.
+                Keep the h-screen flex container so BoardSection still gets a
+                defined height for its scroll region. */}
+            <div className="flex flex-col h-screen">
+              <div className="flex-1 min-h-0">
+                <BoardSection />
+              </div>
+            </div>
           </ErrorBoundary>
         )}
 
