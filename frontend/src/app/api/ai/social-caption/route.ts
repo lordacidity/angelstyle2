@@ -232,22 +232,25 @@ export async function POST(req: NextRequest) {
         'The caption is NOT a story about an athlete or artist. It is a story about a PREDICTION MARKET (Kalshi, Polymarket, sportsbook line, money line, total, market volume) where that athlete or artist happens to be the subject. ' +
         'Picture yourself as a financial journalist covering market action — except the asset class is a sports / pop-culture market.\n\n' +
         'You will get an industry, a market-flavored context seed, and a list of fresh news headlines that already mention a prediction market.\n\n' +
-        'NON-NEGOTIABLE CONTENT RULES (separate from the hard rules below):\n' +
-        '- The OPENING SENTENCE must name a specific market or platform — "Kalshi", "Polymarket", "the sportsbook line", "the moneyline", "the spread", "the total", or a similarly concrete market term. Not "the team". Not "the game". The market.\n' +
-        '- Every paragraph must contain at least one of: Kalshi, Polymarket, prediction market, betting market, odds, money line, spread, total, over/under, volume, market cap, market price, sportsbook. If a paragraph reads like a generic sports / music story with no market term in it, you have failed and must rewrite it.\n' +
-        '- Cite specific numbers from the headlines whenever they appear (odds, percentages, dollar figures, volume). If a headline says "Knicks now -180 on the Game 3 moneyline", you say "Knicks now -180 on the Game 3 moneyline." If the headlines give you no numbers, describe the direction the market is moving ("market shifted in favor of...", "volume on the series winner has spiked...") — but stay market-vocabulary.\n' +
-        '- Do NOT describe what is happening in the video. Do NOT recap the game / song / event. The video is the SEO hook the post is filed under; the body is market analysis.\n' +
-        '- Sound like an in-the-know markets follower (think action-network analyst, Sharp Football, Unusual Whales), not a sports recap writer.\n\n' +
+        'PARAGRAPH ASSIGNMENTS — each paragraph has a fixed job. Do not deviate:\n' +
+        '- PARAGRAPH 1: The biggest current market storyline from the headlines. Name the platform (Kalshi / Polymarket / a specific sportsbook). Cite specific numbers from the headlines (odds, percentages, dollar volume) wherever they appear. Describe what JUST moved on the market and why it moved.\n' +
+        '- PARAGRAPH 2: Wider market context. Related markets on the same event (series-winner, MVP, player props, derivative contracts), volume trends, what this market move says about broader sentiment in the prediction-market space right now, OR how this market is mispriced relative to fundamentals. Still market-only — do not pivot to an arena atmosphere story, a celebrity sighting, a political angle, a fashion moment, or any non-market sub-story. If a headline is about something off-court / off-stage, IGNORE it: you are filing on the market, not the spectacle.\n\n' +
+        'NON-NEGOTIABLE CONTENT RULES:\n' +
+        '- The OPENING SENTENCE of paragraph 1 must name a specific market or platform — "Kalshi", "Polymarket", "the sportsbook line", "the moneyline", "the spread", "the total", or a similarly concrete market term. Not "the team". Not "the game". The market.\n' +
+        '- Every paragraph must contain MULTIPLE references to: Kalshi, Polymarket, prediction market, betting market, odds, money line, spread, total, over/under, volume, market cap, market price, sportsbook. A paragraph that mentions a market only once and then drifts into generic sports / music recap has failed.\n' +
+        '- Cite specific numbers from the headlines whenever they appear. If a headline gives no numbers, describe direction and pressure ("market shifted in favor of...", "volume on the series winner has spiked...", "implied probability climbed from X to Y") — but stay in market vocabulary.\n' +
+        '- Do NOT describe what is happening in the video. Do NOT recap the game / song / event play-by-play. The video is the SEO hook the post is filed under; the body is market analysis.\n' +
+        '- Sound like an in-the-know markets follower (think Sharp Football, Unusual Whales, action-network analyst), not a sports recap writer.\n\n' +
         'HARD RULES (these override everything else):\n' +
         '- STRUCTURE: EXACTLY two paragraphs, separated by a single blank line.\n' +
-        `- LENGTH: between ${MIN_CHARS} and ${MAX_CHARS} characters. Aim for ~1900. Add depth on the market storyline to reach length, no filler.\n` +
+        `- LENGTH: between ${MIN_CHARS} and ${MAX_CHARS} characters. Aim for ~1900. Add depth on the MARKET storyline (derivative markets, sentiment shifts, volume trends) to reach length, no filler.\n` +
         '- NEVER mention Pauv, "take a position", "link in bio", "place your bet", or any direct CTA. You CAN reference Kalshi / Polymarket / sportsbooks / odds / volume as journalism — that is the entire point — but never as a call to action.\n' +
         '- Do not invent fake odds, fake volume, or fake market activity. If the headlines do not give you a number, talk in directional / qualitative market terms.\n' +
         '- No hashtags, no emojis, no markdown, no em-dashes (use commas or periods), no labels, no preamble.\n' +
         '- Plain text only. Return ONLY the caption text.\n\n' +
-        'Example of the VOICE we want (do not copy facts, just the angle and density of market language):\n' +
-        'Polymarket\'s "Knicks to win the series" contract is trading at 71 cents this morning, up from 49 cents before Game 2, the sharpest one-game move on the platform this postseason. Volume on the series-winner market has cleared $3.2M in the last 48 hours, with the biggest fills coming after the third quarter on Saturday — when the moneyline at major sportsbooks flipped Knicks from a +130 underdog to a -150 favorite in real time. The market reading the Spurs as cooked is no longer a contrarian take, it is the consensus.\n\n' +
-        'The second paragraph keeps going in that same register: more market data, more context on why volume / odds are doing what they are doing, the bigger picture for the prediction-market sports calendar.';
+        'Example of the VOICE + STRUCTURE we want (do not copy facts, copy the density of market language and the strict market focus across BOTH paragraphs):\n\n' +
+        'PARA 1: Polymarket\'s "Knicks to win the series" contract is trading at 71 cents this morning, up from 49 cents before Game 2, the sharpest one-game move on the platform this postseason. Volume on the series-winner market has cleared $3.2M in the last 48 hours, with the biggest fills coming after the third quarter on Saturday, when the moneyline at major sportsbooks flipped Knicks from a +130 underdog to a -150 favorite in real time. The market reading the Spurs as cooked is no longer a contrarian take, it is the consensus.\n\n' +
+        'PARA 2: The derivative markets are telling the same story even louder. Kalshi\'s "Wembanyama Finals MVP" market collapsed from 38 cents to 9 cents since tip-off Tuesday, the steepest one-week MVP-market drop Kalshi has logged this season. Sportsbook player-prop markets have followed, with Wembanyama\'s points total for Game 3 falling from 24.5 to 21.5 and his rebound total ticking down a full board. Open interest across the entire Finals market complex on Polymarket is now north of $11M, with money concentrating on a Knicks sweep rather than a closeout in five — a sentiment shift that the sportsbook series-price markets have not fully caught up to yet, which is why the cross-market spread is the conversation among traders right now.';
 
       user = [
         industry ? `Industry: ${industry}` : '',
@@ -314,36 +317,55 @@ export async function POST(req: NextRequest) {
       { role: 'system', content: sys },
       { role: 'user', content: user },
     ];
-    // Each paragraph in a Flow-A draft must mention at least one market token —
-    // otherwise the model has drifted back into sports-recap mode, which is
-    // exactly the failure mode that prompted Angel's spec.
-    const containsMarketTerm = (s: string) => {
+    // Flow A drafts have to be densely market-flavored, not just sprinkled.
+    // Each paragraph needs at least TWO independent market token mentions —
+    // one is easy for the model to hit and then drift back into a recap.
+    const countMarketHits = (s: string) => {
       const l = s.toLowerCase();
-      return MARKET_TOKENS.some((t) => l.includes(t));
+      let n = 0;
+      for (const t of MARKET_TOKENS) {
+        let idx = 0;
+        while ((idx = l.indexOf(t, idx)) !== -1) { n++; idx += t.length; }
+      }
+      return n;
     };
-    const passesMarketCheck = (s: string) => {
-      if (!useMarketFlow) return true;
+    const MIN_MARKET_HITS_PER_PARA = 2;
+    const failingParagraphs = (s: string): number[] => {
       const paras = s.split(/\n\s*\n/).map((p) => p.trim()).filter(Boolean);
-      return paras.length > 0 && paras.every(containsMarketTerm);
+      const out: number[] = [];
+      paras.forEach((p, i) => { if (countMarketHits(p) < MIN_MARKET_HITS_PER_PARA) out.push(i + 1); });
+      return out;
     };
+    const passesMarketCheck = (s: string) => !useMarketFlow || failingParagraphs(s).length === 0;
 
+    // Lower temperature than the fallback flow — we want the model to LOCK
+    // onto the market angle and stay there rather than creatively diversify
+    // into atmosphere stories. 4 attempts (up from 3) gives the validator
+    // more chances to fire when a generic seed leaks recap headlines.
+    const MAX_ATTEMPTS = 4;
+    const TEMP = useMarketFlow ? 0.5 : 0.7;
     let best = '';
     let bestPassesMarket = false;
-    for (let attempt = 0; attempt < 3; attempt++) {
-      const raw = await deepseekChat(messages, { temperature: 0.7 });
+    for (let attempt = 0; attempt < MAX_ATTEMPTS; attempt++) {
+      const raw = await deepseekChat(messages, { temperature: TEMP });
       let candidate = normalizeToTwoParagraphs(cleanText(raw));
       if (candidate.length > MAX_CHARS) candidate = normalizeToTwoParagraphs(clampRange(candidate, MIN_CHARS, MAX_CHARS));
       const inBand = candidate.length >= MIN_CHARS && candidate.length <= MAX_CHARS;
       const okMarket = passesMarketCheck(candidate);
       if (inBand && okMarket) { best = candidate; bestPassesMarket = true; break; }
-      // Hold onto the best partial: prefer "passes market check" over length.
+      // Best-partial selection: market-pass first, then length within band.
       const promote = (!bestPassesMarket && okMarket) || (bestPassesMarket === okMarket && candidate.length > best.length && candidate.length <= MAX_CHARS);
       if (promote) { best = candidate; bestPassesMarket = okMarket; }
-      // Build the nudge: combine length + market-coverage feedback so a single
-      // retry can correct both issues at once instead of burning attempts.
+      // Specific feedback: name which paragraph(s) failed so the retry knows
+      // exactly what to fix.
       const issues: string[] = [];
       if (candidate.length < MIN_CHARS) issues.push(`it is ${candidate.length} characters, under the ${MIN_CHARS} minimum — expand to between ${MIN_CHARS} and ${MAX_CHARS}`);
-      if (!okMarket && useMarketFlow) issues.push('at least one paragraph has no prediction-market term (Kalshi / Polymarket / "prediction market" / odds / moneyline / spread / volume / sportsbook) — every paragraph must contain one');
+      if (!okMarket && useMarketFlow) {
+        const fails = failingParagraphs(candidate);
+        issues.push(
+          `paragraph${fails.length > 1 ? 's' : ''} ${fails.join(' and ')} lack${fails.length === 1 ? 's' : ''} dense prediction-market language — each paragraph needs AT LEAST ${MIN_MARKET_HITS_PER_PARA} mentions of Kalshi / Polymarket / odds / moneyline / spread / volume / sportsbook / market price. Do NOT pivot to arena vibes, celebrity sightings, political angles, or any non-market story. Rewrite the failing paragraph(s) so they are market analysis from start to finish`,
+        );
+      }
       if (issues.length === 0) issues.push('output did not pass validation, regenerate');
       messages.push({ role: 'assistant' as const, content: candidate });
       messages.push({
