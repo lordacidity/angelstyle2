@@ -1,16 +1,24 @@
-// Auto-pick the CTA talent(s) for a post. Instead of the user manually searching
-// the Market selector, DeepSeek reads ONLY the human signals about the actual
-// video — the editor's on-card caption + context, plus the source video's title
-// and author — figures out who the post is really about, and chooses TWO Pauv
-// talents to feature in the buy-CTA — the CTA card rotates between them. It does
-// NOT read the AI-generated long-form caption: that's a news/industry write-up
-// that name-drops other big figures and would skew the pick away from the video's
-// true subject.
-// For EACH person independently the match is either:
-//   - 'listed':   the person appears in / is a subject of the post AND is on Pauv.
-//   - 'industry': the biggest same-industry talent on Pauv.
-// person1 is the strongest pick (the actual subject if listed, else the biggest
-// same-industry talent) and shows first; person2 is the next best.
+// Auto-pick the CTA talent(s) for a post — the AI "person generator" for the
+// buy-CTA card, which rotates between up to two people.
+//
+// Flow (per Angel's spec):
+//   1. Read ONLY the user-written on-card caption + the editor's context. NEVER
+//      the AI-generated long-form caption (it name-drops other big figures and
+//      would skew the pick away from the video's true subject).
+//   2. Determine the main subject. If that person is directly on Pauv, pull them
+//      as person1 (matchType "listed").
+//   3. Otherwise (and always, to find the 2nd person) determine the subject's
+//      industry + the single best-fitting info_subcategory, mapped to values that
+//      actually exist on the roster.
+//   4. Choose up to TWO DISTINCT people from that info_subcategory, MOST RELEVANT
+//      FIRST. person1 = the listed subject if any, else the most relevant person
+//      in the subcategory; person2 = the next most relevant in the SAME
+//      subcategory. A single-person CTA (talent2 = null) is fine when the
+//      subcategory has no second person.
+//
+// DISPLAY NOTE: only name, industry, price, and photo are real on the CTA card.
+// The change %, sparkline, holders, and volume are fabricated client-side, so
+// this route just needs to return the real identity + price fields.
 
 import { NextRequest, NextResponse } from 'next/server';
 import { z } from 'zod';
@@ -19,15 +27,20 @@ import { deepseekChat, parseJson } from '@/lib/deepseek';
 
 export const runtime = 'nodejs';
 
-const sb = createClient(
-  process.env.NEXT_PUBLIC_SUPABASE_URL!,
-  process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
-);
+// Built lazily — see /api/ai/talents for why module-scope construction breaks the
+// build. Uses the MAIN read-only price-data project.
+function getClient() {
+  return createClient(
+    process.env.NEXT_PUBLIC_SUPABASE_URL!,
+    process.env.SUPABASE_SECRET_KEY || process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
+  );
+}
 
 interface ProfileRow {
   id: string; ticker: string; name: string; bio: string | null;
   photo_url: string | null; industry: string | null;
-  info_subcategory: string | null; info_location: string | null; claim_status: string | null;
+  info_subcategory: string | null; info_location: string | null;
+  claim_status: string | null; view_count: number | null;
 }
 interface MarketRow {
   profile_id: string; latest_price_cents: number | null; p0: number | null;
@@ -35,21 +48,24 @@ interface MarketRow {
   latest_tick_at: string | null; frozen: boolean | null;
 }
 
-// Same shape the /api/ai/talents endpoint returns, so the client can drop the
-// chosen talent straight into the Market widget with no remapping.
+// Same shape /api/ai/talents returns so the client drops a pick straight into the
+// Market widget with no remapping.
 function buildTalents(profiles: ProfileRow[], markets: MarketRow[]) {
-  const byProfile = new Map(markets.map(m => [m.profile_id, m]));
-  return profiles.map(p => {
+  const byProfile = new Map(markets.map((m) => [m.profile_id, m]));
+  return profiles.map((p) => {
     const m = byProfile.get(p.id) ?? null;
     const cents = m?.latest_price_cents ?? null;
     const p0 = m?.p0 ?? null;
     return {
       id: p.id, ticker: p.ticker, name: p.name, bio: p.bio, photo_url: p.photo_url,
       industry: p.industry, subcategory: p.info_subcategory, location: p.info_location,
-      claimStatus: p.claim_status,
+      claimStatus: p.claim_status, viewCount: p.view_count ?? 0,
       price: {
         usd: cents != null ? cents / 100 : null,
-        lifetimeChangePct: cents != null && p0 != null && p0 > 0 ? ((cents - p0) / p0) * 100 : null,
+        // p0 is in dollars, latest_price_cents in cents — normalise both to
+        // dollars before comparing. (Not shown on the CTA: the card fabricates the
+        // % — this is here only for completeness / other consumers.)
+        lifetimeChangePct: cents != null && p0 != null && p0 > 0 ? ((cents / 100 - p0) / p0) * 100 : null,
         holders: m?.holders_count ?? null,
         volumeLifetimeUsd: m?.total_volume_lifetime_cents != null ? m.total_volume_lifetime_cents / 100 : null,
         latestTickAt: m?.latest_tick_at ?? null,
@@ -62,26 +78,22 @@ function buildTalents(profiles: ProfileRow[], markets: MarketRow[]) {
 export async function POST(req: NextRequest) {
   try {
     const Schema = z.object({
-      caption:          z.string().optional(),  // on-card caption (editor-written)
-      videoTitle:       z.string().optional(),
-      author:           z.string().optional(),
-      context:          z.string().optional(),
-      // The posting brand account (e.g. "Pauv" / "@Pauv"). Gives the
-      // model context for who is publishing the CTA and the audience vertical.
-      brand:            z.object({ displayName: z.string().optional(), handle: z.string().optional() }).optional(),
+      caption: z.string().optional(),  // user-written on-card caption
+      context: z.string().optional(),  // editor's context notes
     });
     const parsed = Schema.safeParse(await req.json().catch(() => ({})));
     if (!parsed.success) return NextResponse.json({ error: 'invalid body' }, { status: 400 });
-    const { caption, videoTitle, author, context, brand } = parsed.data;
+    const { caption, context } = parsed.data;
 
-    if (!caption?.trim() && !context?.trim() && !videoTitle?.trim()) {
-      return NextResponse.json({ error: 'need caption, context, or videoTitle' }, { status: 400 });
+    if (!caption?.trim() && !context?.trim()) {
+      return NextResponse.json({ error: 'need a caption or context to pick from' }, { status: 400 });
     }
 
-    // ── Load the Pauv roster ───────────────────────────────────────────────────
+    // ── Load the active Pauv roster ─────────────────────────────────────────────
+    const sb = getClient();
     const [{ data: profiles, error: pErr }, { data: markets, error: mErr }] = await Promise.all([
       sb.from('profiles')
-        .select('id,ticker,name,bio,photo_url,industry,info_subcategory,info_location,claim_status')
+        .select('id,ticker,name,bio,photo_url,industry,info_subcategory,info_location,claim_status,view_count')
         .is('delisted_at', null)
         .order('name'),
       sb.from('markets')
@@ -93,67 +105,46 @@ export async function POST(req: NextRequest) {
     const talents = buildTalents((profiles ?? []) as ProfileRow[], (markets ?? []) as MarketRow[]);
     if (talents.length === 0) return NextResponse.json({ error: 'no talents available' }, { status: 502 });
 
-    // Compact roster for the prompt — the model picks by ticker. We lean on the
-    // model's own knowledge of public prominence for "who's big" because the
-    // platform's holders/volume are still near-zero early on. The roster is
-    // GROUPED BY INDUSTRY so the model can see the candidate pool for each field
-    // at a glance and is far less likely to cross industries (e.g. pick a
-    // musician for a basketball post).
     const norm = (s: string | null | undefined) => (s ?? '').toLowerCase().trim();
-    const byIndustry = new Map<string, { ticker: string; name: string; subcategory: string | null }[]>();
+
+    // Roster grouped industry → subcategory → [{ ticker, name }] so the model can
+    // see the candidate pool for each field at a glance and never crosses fields.
+    const byIndustry = new Map<string, Map<string, { ticker: string; name: string }[]>>();
     for (const t of talents) {
       const ind = t.industry?.trim() || 'Unknown';
-      if (!byIndustry.has(ind)) byIndustry.set(ind, []);
-      byIndustry.get(ind)!.push({ ticker: t.ticker, name: t.name, subcategory: t.subcategory ?? null });
+      const sub = t.subcategory?.trim() || 'Unknown';
+      if (!byIndustry.has(ind)) byIndustry.set(ind, new Map());
+      const subMap = byIndustry.get(ind)!;
+      if (!subMap.has(sub)) subMap.set(sub, []);
+      subMap.get(sub)!.push({ ticker: t.ticker, name: t.name });
     }
-    const rosterByIndustry = Object.fromEntries([...byIndustry.entries()].sort((a, b) => a[0].localeCompare(b[0])));
+    const rosterByIndustry: Record<string, Record<string, { ticker: string; name: string }[]>> = {};
+    for (const [ind, subMap] of [...byIndustry.entries()].sort((a, b) => a[0].localeCompare(b[0]))) {
+      rosterByIndustry[ind] = Object.fromEntries(
+        [...subMap.entries()].sort((a, b) => a[0].localeCompare(b[0])),
+      );
+    }
     const industries = [...byIndustry.keys()].sort();
 
-    const brandLine = brand?.displayName || brand?.handle
-      ? `This CTA is being posted by the brand account "${brand?.displayName ?? ''}" ${brand?.handle ?? ''}`.trim() + '. '
-      : '';
-
     const sys =
-      'You choose which TWO Pauv talents should be featured in the buy-CTA of a social post — the CTA ' +
-      'card rotates between them.\n\n' +
-      'Pauv is a marketplace for trading on public sentiment — every athlete, artist, creator, ' +
-      'and cultural figure has a "ticker" that moves with how people feel about them. The CTA tells ' +
-      'viewers to take a position on someone.\n\n' +
-      brandLine +
-      'You are given: the post\'s on-card caption (written by the editor), the editor\'s context notes, ' +
-      'the source video\'s title and author, the posting brand account, the list of INDUSTRIES on Pauv, ' +
-      'and ROSTER_BY_INDUSTRY — the talents listed on Pauv grouped under each industry (ticker, name, ' +
-      'subcategory). Base your decision ONLY on these inputs; there is no long-form caption to read, so ' +
-      'judge who the post is about purely from the on-card caption, context, and video title/author.\n\n' +
-      'Steps — follow them in order and do NOT skip the industry step:\n' +
-      '1. Identify the main person/subject the post is about (subjectName). Also note any OTHER notable ' +
-      'people who actually appear in or are central to the post.\n' +
-      '2. Determine the subject\'s field/industry and map it to the CLOSEST matching entry in the ' +
-      'INDUSTRIES list (subjectIndustry). A basketball player → the sports/athlete industry, a rapper → ' +
-      'the music industry, a streamer → the creator industry, etc. Pick the single best-fitting industry ' +
-      'bucket that actually exists in the list.\n' +
-      '3. Choose TWO DISTINCT talents from ROSTER_BY_INDUSTRY — person1 and person2. For EACH one ' +
-      'independently the match is either:\n' +
-      '   - "listed": the person actually appears in / is a subject of the post AND is on the roster ' +
-      '(match by name, case-insensitive, allow minor spelling variants), or\n' +
-      '   - "industry": the most prominent / most famous talent in the subjectIndustry bucket (use your ' +
-      'own knowledge of who is biggest). You MUST pick from that industry\'s bucket — never cross into a ' +
-      'different industry. ONLY if the subjectIndustry bucket cannot supply enough people may you use the ' +
-      'closest related industry, and you must say so in "reason".\n' +
-      '4. person1 is the BEST, most relevant pick — the actual subject if they are listed, otherwise the ' +
-      'single biggest talent in the subjectIndustry bucket. person2 is the next best — another person ' +
-      'from the post if one is listed, otherwise the next most prominent talent in the subjectIndustry ' +
-      'bucket. person1 and person2 MUST be different tickers.\n\n' +
-      'Every ticker you return MUST be one of the exact ticker strings from ROSTER_BY_INDUSTRY.\n' +
-      'Return JSON: { "subjectName": string, "subjectIndustry": string, "ticker": string, "ticker2": string, ' +
-      '"matchType": "listed" | "industry", "matchType2": "listed" | "industry", "reason": string }.';
+      'You choose which Pauv talents to feature in the buy-CTA of a social post. The CTA card rotates between up to two people.\n\n' +
+      'Pauv is a marketplace for trading on public sentiment — every athlete, artist, creator, and cultural figure has a "ticker" that moves with how people feel about them.\n\n' +
+      'You are given ONLY the post\'s user-written on-card caption and the editor\'s context notes. There is NO AI-generated caption; judge who the post is about purely from those two inputs. You are also given INDUSTRIES and ROSTER_BY_INDUSTRY: the Pauv talents grouped by industry and then by info_subcategory (each entry is { ticker, name }).\n\n' +
+      'Follow these steps IN ORDER:\n' +
+      '1. Identify the single main subject the post is about (subjectName).\n' +
+      '2. Decide whether subjectName is ON the roster — match by name, case-insensitive, allowing minor spelling variants. If yes, that person is person1 and matchType is "listed".\n' +
+      '3. Determine the subject\'s industry (subjectIndustry) and the single best-fitting info_subcategory (subjectSubcategory). BOTH must map to entries that ACTUALLY EXIST in ROSTER_BY_INDUSTRY (e.g. a soccer player → industry "Athlete", subcategory "Soccer"; a rapper → industry "Artist", subcategory "Rap"). Pick the closest existing buckets.\n' +
+      '4. Choose up to TWO DISTINCT people, MOST RELEVANT FIRST:\n' +
+      '   - person1: the listed subject from step 2 if there is one; otherwise the MOST relevant / most prominent person in subjectSubcategory (use your own knowledge of who is biggest).\n' +
+      '   - person2: the NEXT most relevant person in subjectSubcategory, excluding person1.\n' +
+      '   - BOTH people MUST come from subjectSubcategory. NEVER cross into a different subcategory. If subjectSubcategory has only one person, set ticker2 to null; a single-person CTA is fine.\n' +
+      '5. matchType / matchType2 are "listed" if that exact person is directly referenced in the post, otherwise "subcategory".\n\n' +
+      'Every ticker you return MUST be an exact ticker string from ROSTER_BY_INDUSTRY, and person1 and person2 must be different tickers.\n' +
+      'Return JSON: { "subjectName": string, "subjectIndustry": string, "subjectSubcategory": string, "ticker": string, "ticker2": string | null, "matchType": "listed" | "subcategory", "matchType2": "listed" | "subcategory" | null, "reason": string }.';
 
     const user = JSON.stringify({
       onCardCaption: caption ?? '',
-      videoTitle: videoTitle ?? '',
-      author: author ?? '',
       context: context ?? '',
-      brandAccount: { displayName: brand?.displayName ?? '', handle: brand?.handle ?? '' },
       industries,
       rosterByIndustry,
     });
@@ -164,75 +155,63 @@ export async function POST(req: NextRequest) {
     );
 
     const result = parseJson<{
-      subjectName?: string; subjectIndustry?: string;
-      ticker?: string; ticker2?: string;
-      matchType?: string; matchType2?: string;
-      reason?: string;
+      subjectName?: string; subjectIndustry?: string; subjectSubcategory?: string;
+      ticker?: string; ticker2?: string | null;
+      matchType?: string; matchType2?: string | null; reason?: string;
     }>(rawAi);
-    const pickedTicker = (result.ticker ?? '').trim();
-    if (!pickedTicker) return NextResponse.json({ error: 'no ticker returned' }, { status: 502 });
 
-    // Resolve a ticker against the roster. Be forgiving — exact, then
-    // case-insensitive — so a capitalization slip from the model still lands.
-    const resolveTicker = (tk: string | undefined) => {
+    // Resolve a ticker against the roster — exact, then case-insensitive — so a
+    // capitalization slip from the model still lands.
+    const resolveTicker = (tk: string | null | undefined) => {
       const s = (tk ?? '').trim();
       if (!s) return null;
-      return talents.find(t => t.ticker === s)
-        ?? talents.find(t => t.ticker.toLowerCase() === s.toLowerCase())
+      return talents.find((t) => t.ticker === s)
+        ?? talents.find((t) => t.ticker.toLowerCase() === s.toLowerCase())
         ?? null;
     };
-    // Most prominent talent in `industry`, excluding ids already taken — holders,
-    // then lifetime volume, then price as the proxy for "who's biggest".
+    // Best-effort "most relevant" fallback when the model fumbles a ticker. Real
+    // prominence data is near-zero this early, so this is just a deterministic
+    // tiebreak: holders → lifetime volume → price → views → name.
     const byProminence = (a: typeof talents[number], b: typeof talents[number]) =>
       (b.price.holders ?? 0) - (a.price.holders ?? 0) ||
       (b.price.volumeLifetimeUsd ?? 0) - (a.price.volumeLifetimeUsd ?? 0) ||
-      (b.price.usd ?? 0) - (a.price.usd ?? 0);
-    const biggestInIndustry = (industry: string, exclude: Set<string>) =>
-      talents.filter(t => norm(t.industry) === norm(industry) && !exclude.has(t.id)).sort(byProminence)[0] ?? null;
+      (b.price.usd ?? 0) - (a.price.usd ?? 0) ||
+      (b.viewCount ?? 0) - (a.viewCount ?? 0) ||
+      a.name.localeCompare(b.name);
+    const inSubcategory = (sub: string, exclude: Set<string>) =>
+      talents.filter((t) => norm(t.subcategory) === norm(sub) && !exclude.has(t.id)).sort(byProminence);
 
-    let talent = resolveTicker(pickedTicker);
-    if (!talent) return NextResponse.json({ error: `picked ticker "${pickedTicker}" not in roster` }, { status: 502 });
+    const subjectSubcategory = (result.subjectSubcategory ?? '').trim();
+    const subjectIndustry = (result.subjectIndustry ?? '').trim();
+    const subcatExists = !!subjectSubcategory && talents.some((t) => norm(t.subcategory) === norm(subjectSubcategory));
 
-    const matchType = result.matchType === 'listed' ? 'listed' : 'industry';
+    // ── person1 ──────────────────────────────────────────────────────────────────
+    let talent = resolveTicker(result.ticker);
+    let matchType = result.matchType === 'listed' ? 'listed' : 'subcategory';
     let reason = result.reason ?? '';
 
-    // Guard against cross-industry blunders (the "basketball player → Bad Bunny"
-    // bug): when this is an industry match and the model named a subjectIndustry
-    // that exists on the roster, the pick MUST come from that bucket. If it
-    // didn't but real same-industry candidates exist, override to the most
-    // prominent of them.
-    const subjectIndustry = (result.subjectIndustry ?? '').trim();
-    if (matchType === 'industry' && subjectIndustry) {
-      const sameIndustry = talents.filter(t => norm(t.industry) === norm(subjectIndustry));
-      if (sameIndustry.length > 0 && norm(talent.industry) !== norm(subjectIndustry)) {
-        const biggest = [...sameIndustry].sort(byProminence)[0]!;
-        reason = `Overrode cross-industry pick (${talent.name}, ${talent.industry ?? 'Unknown'}) — ` +
-          `subject's industry is "${subjectIndustry}", so selected ${biggest.name}. ${reason}`.trim();
-        talent = biggest;
+    // Guard: a subcategory pick MUST live in the subject's subcategory. If the
+    // model strayed and that subcategory exists, override to its most prominent.
+    if (talent && matchType === 'subcategory' && subcatExists && norm(talent.subcategory) !== norm(subjectSubcategory)) {
+      const fix = inSubcategory(subjectSubcategory, new Set())[0] ?? null;
+      if (fix) {
+        reason = `Overrode cross-subcategory pick (${talent.name}, ${talent.subcategory ?? 'Unknown'}) -> ${fix.name} in "${subjectSubcategory}". ${reason}`.trim();
+        talent = fix;
       }
     }
+    // Last resort if the model returned an unresolvable ticker.
+    if (!talent && subcatExists) { talent = inSubcategory(subjectSubcategory, new Set())[0] ?? null; matchType = 'subcategory'; }
+    if (!talent) return NextResponse.json({ error: `could not resolve a primary talent (ticker "${result.ticker ?? ''}")` }, { status: 502 });
 
-    // ── Second (rotating) talent ───────────────────────────────────────────────
-    // Always feature two people. Resolve the model's ticker2, then fix it up:
-    // it must be DISTINCT from the primary and (for an industry match) live in the
-    // subject's bucket. If the model fumbled it, fall back to the next most
-    // prominent same-industry talent, then to the biggest talent of any industry.
-    const matchType2 = result.matchType2 === 'listed' ? 'listed' : 'industry';
-    let talent2 = resolveTicker(result.ticker2);
+    // ── person2 (optional) ────────────────────────────────────────────────────────
     const exclude = new Set([talent.id]);
-    if (talent2 && talent2.id === talent.id) talent2 = null;        // duplicate of primary
-    if (talent2 && matchType2 === 'industry' && subjectIndustry
-        && talents.some(t => norm(t.industry) === norm(subjectIndustry))
-        && norm(talent2.industry) !== norm(subjectIndustry)) {
-      talent2 = null;                                               // cross-industry industry-pick
-    }
-    if (!talent2) {
-      talent2 =
-        (subjectIndustry ? biggestInIndustry(subjectIndustry, exclude) : null) ??
-        biggestInIndustry(talent.industry ?? '', exclude) ??
-        talents.filter(t => t.id !== talent.id).sort(byProminence)[0] ??
-        null;                                                       // null only if roster has 1 talent
-    }
+    let matchType2: 'listed' | 'subcategory' | null =
+      result.matchType2 === 'listed' ? 'listed' : result.matchType2 === 'subcategory' ? 'subcategory' : null;
+    let talent2 = resolveTicker(result.ticker2 ?? null);
+    if (talent2 && talent2.id === talent.id) talent2 = null;                                              // duplicate of person1
+    if (talent2 && subcatExists && norm(talent2.subcategory) !== norm(subjectSubcategory)) talent2 = null; // crossed subcategory
+    if (!talent2 && subcatExists) talent2 = inSubcategory(subjectSubcategory, exclude)[0] ?? null;         // fill from same subcategory
+    matchType2 = talent2 ? (matchType2 ?? 'subcategory') : null;
 
     return NextResponse.json({
       talent,
@@ -241,6 +220,7 @@ export async function POST(req: NextRequest) {
       matchType2,
       subjectName: result.subjectName ?? '',
       subjectIndustry,
+      subjectSubcategory,
       reason,
     });
   } catch (err) {

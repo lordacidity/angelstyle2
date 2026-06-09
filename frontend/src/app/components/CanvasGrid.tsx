@@ -72,7 +72,7 @@ interface CanvasGridProps {
   pendingAiSeed?: { imageSrc: string; headline: string; subheadline: string; subheadline2?: string; articleUrl?: string } | null;
   onAiSeedConsumed?: () => void;
   // Set to an entry id by the Board widget's send arrow — that entry is fetched
-  // and advanced through the same "Next" pipeline (fetch → crop → caption/CTA).
+  // and advanced through the same "Next" pipeline (fetch → crop → caption).
   pendingBoardSend?: string | null;
   onBoardSendConsumed?: () => void;
   // Fired when an entry is exported, with the Phonedeck upload filename. The
@@ -447,10 +447,10 @@ function VideoInputCard({
           )}
         </div>
 
-        {/* Optional context fed to the social-caption generator — background,
-            vibe, the angle to take. Smaller + muted so it reads as a hint, not
-            a primary input. Empty string is fine; the generator just uses URL
-            title/caption when this is blank. */}
+        {/* Optional context for caption generation — background, vibe, the angle
+            to take. Smaller + muted so it reads as a hint, not a primary input.
+            Empty string is fine; the caption generator falls back to the on-card
+            caption + fetched title when this is blank. */}
         <div className="px-3 py-2">
           <textarea
             value={entry.context ?? ''}
@@ -667,7 +667,7 @@ export function CanvasGrid({
   const [videoZoomMap,              setVideoZoomMap]              = useState<Record<string, number>>({});
   // Per-entry vertical anchor of the block top, as a whole-number percent (default 15).
   const [blockTopPctMap,            setBlockTopPctMap]            = useState<Record<string, number>>({});
-  // Per-entry social-caption state. Keyed by entry.id. Lives in CanvasGrid
+  // Per-entry post-caption state. Keyed by entry.id. Lives in CanvasGrid
   // (not VideoEntry) because it's purely UI/transient — no need to persist or
   // round-trip through hooks.
   const [socialCaptionMap, setSocialCaptionMap] = useState<Record<string, { text: string; loading: boolean; error: string | null; copied: boolean }>>({});
@@ -700,10 +700,10 @@ export function CanvasGrid({
   // preference alone.
   const [marketCardCollapsedMap,  setMarketCardCollapsedMap]  = useState<Record<string, boolean>>({});
   const [postCaptionCollapsedMap, setPostCaptionCollapsedMap] = useState<Record<string, boolean>>({});
-  // When ON, the generated caption is auto-copied to the clipboard as soon as it
+  // When ON, a generated caption is auto-copied to the clipboard as soon as it
   // finishes generating (no need to press Copy). Toggled from the Post caption
-  // header; persisted like the fold preferences above. The ref lets the
-  // generate callback read the latest value without being a dependency.
+  // header; persisted like the fold preferences above. The ref lets the generate
+  // callback read the latest value without being a dependency.
   const [autoCopyCaption, setAutoCopyCaption] = useState(false);
   const autoCopyCaptionRef = useRef(autoCopyCaption);
   autoCopyCaptionRef.current = autoCopyCaption;
@@ -1042,11 +1042,10 @@ export function CanvasGrid({
     setMarketDownMap2(prev => { const next = { ...prev }; delete next[entryId]; return next; });
   }, []);
 
-  // Drop a chosen talent into the Market widget for an entry — mirrors exactly
-  // what the auto-pick does so a manual override behaves identically. Then, if a
-  // caption has already been generated, rewrite its closing CTA paragraph to name
-  // the newly-chosen talent (the auto-pick does this on generate; a manual swap
-  // must do it too, or the caption keeps naming the old person).
+  // Drop a chosen talent into the Market widget for an entry. The post caption
+  // never names the CTA person (the CTA lives entirely in the widget, and the
+  // caption is forbidden from mentioning Pauv), so a manual swap just updates the
+  // widget — there is no caption paragraph to re-sync.
   const applyTalent = useCallback((entryId: string, t: Talent) => {
     // Second (rotating) person: just drop it into slot 2 + seed its overrides.
     // No caption rewrite — the post caption's CTA paragraph names the PRIMARY
@@ -1078,36 +1077,7 @@ export function CanvasGrid({
       },
     }));
     setPersonPickerEntryId(null);
-
-    // Re-sync the caption's CTA paragraph to the new person (best-effort).
-    const existing = socialCaptionMap[entryId]?.text;
-    if (existing?.trim()) {
-      setSocialCaptionMap(prev => (prev[entryId] ? { ...prev, [entryId]: { ...prev[entryId]!, loading: true, error: null } } : prev));
-      fetch('/api/ai/rewrite-cta', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          generatedCaption: existing,
-          talentName:       t.name,
-          talentIndustry:   t.industry ?? undefined,
-          brand: { displayName: brand.displayName || 'Pauv', handle: brand.handle || '@Pauv' },
-        }),
-      })
-        .then(r => r.ok ? r.json() : Promise.reject(new Error('rewrite failed')))
-        .then((data: { ctaParagraph?: string; error?: string }) => {
-          if (data.error || !data.ctaParagraph) return;
-          const paras = existing.split(/\n\s*\n/);
-          if (paras.length > 0) {
-            paras[paras.length - 1] = data.ctaParagraph;
-            const next = paras.join('\n\n');
-            setSocialCaptionMap(prev => (prev[entryId] ? { ...prev, [entryId]: { ...prev[entryId]!, text: next, copied: false } } : prev));
-          }
-        })
-        .catch(() => { /* best-effort — leave the caption as-is on failure */ })
-        .finally(() => setSocialCaptionMap(prev => (prev[entryId] ? { ...prev, [entryId]: { ...prev[entryId]!, loading: false } } : prev)));
-    }
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [fetchSparkline, socialCaptionMap, brand.displayName, brand.handle, personPickerSlot]);
+  }, [fetchSparkline, personPickerSlot]);
 
   // "Clear" (top-right) — wipe every per-entry working state and reset the rows
   // to a single fresh entry, dropping the user back to the empty insert form
@@ -1217,54 +1187,51 @@ export function CanvasGrid({
   }, [marketMap, marketMap2, marketOverrideMap2, marketSizeMap, marketDownMap2, marketWidgetVisible]);
 
 
-  const generateSocialCaption = useCallback(async (entry: VideoEntry): Promise<string | undefined> => {
+  // Generate the copy-paste post caption for a VIDEO entry AND, in parallel,
+  // auto-pick the two CTA people. The two are independent: the caption picks an
+  // AI-Prompts topic for the brand's category and writes a 3-paragraph caption
+  // (first two sentences about the video, then the topic's recent news, no em
+  // dashes); the CTA pick (POST /api/ai/pick-cta) reads ONLY the user-written
+  // caption + context — never this AI caption — and fills the Market widget with
+  // up to two people from the subject's info_subcategory. Only the person's name,
+  // industry, price, and photo are real; the % and sparkline are fabricated by
+  // the widget.
+  const generateSocialCaption = useCallback(async (entry: VideoEntry): Promise<void> => {
     setSocialCaptionMap(prev => ({
       ...prev,
       [entry.id]: { text: prev[entry.id]?.text ?? '', loading: true, error: null, copied: false },
     }));
     try {
-      // Industry the caption should pull trending news from — derived from the
-      // brand the same way the bio CTA category is (displayName wins, else the
-      // brand's own category). Maps to the AI-Prompts athlete/artist tagging.
-      const promptCategory: 'athlete' | 'artist' =
-        /athletes/i.test(brand.displayName) ? 'athlete' :
-        /artists/i.test(brand.displayName)  ? 'artist'  :
-        brand.category === 'athletes'       ? 'athlete' : 'artist';
+      // Category drives which AI-Prompts topic pool we draw from — taken straight
+      // from the brand kit toggle.
+      const promptCategory: 'athlete' | 'artist' = brand.category === 'athletes' ? 'athlete' : 'artist';
 
-      // Auto-pick the CTA talent IN PARALLEL with the long-form caption — it does
-      // NOT depend on (and must not read) the generated caption, only the human
-      // signals about this video (on-card caption, context, fetched title/author).
-      // Kicked off first so it overlaps the caption write instead of waiting on it.
+      // CTA person pick — kicked off first so it overlaps the caption write. It
+      // depends ONLY on the human signals (on-card caption + context), never the
+      // generated caption.
       const ctaTask = (async () => {
         try {
           const cr = await fetch('/api/ai/pick-cta', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
-              caption:    entry.caption || undefined,
-              videoTitle: entry.data?.title || undefined,
-              author:     entry.data?.author?.nickname || undefined,
-              context:    entry.context || undefined,
-              brand: {
-                displayName: brand.displayName || 'Pauv',
-                handle:      brand.handle || '@Pauv',
-              },
+              caption: entry.caption || undefined,
+              context: entry.context || undefined,
             }),
           });
           if (!cr.ok) return;
-          const cta = await cr.json() as { talent?: Talent; talent2?: Talent | null; matchType?: string; error?: string };
+          const cta = await cr.json() as { talent?: Talent; talent2?: Talent | null; error?: string };
           if (!cta.talent || cta.error) return;
           const t = cta.talent;
-          // If the user hit Clear on this entry's market while we were awaiting
-          // the AI's pick, respect that — don't silently re-apply. `null` is the
-          // explicit "cleared" marker; `undefined` (never had a market) is still
-          // fair game for auto-fill.
+          // If the user hit Clear on this entry's market while we awaited the AI's
+          // pick, respect that — `null` is the explicit "cleared" marker;
+          // `undefined` (never had a market) is still fair game for auto-fill.
           let userCleared = false;
           setMarketMap(prev => {
             if (prev[entry.id] === null) { userCleared = true; return prev; }
             return { ...prev, [entry.id]: t };
           });
-          if (userCleared) return;  // skip sparkline + override writes — pointless without a market
+          if (userCleared) return;
           setSparklineMap(prev => ({ ...prev, [entry.id]: prev[entry.id] ?? generateFallbackSparkline(t.ticker) }));
           fetchSparkline(entry.id, t.ticker);
           setMarketOverrideMap(prev => ({
@@ -1276,8 +1243,7 @@ export function CanvasGrid({
               lifetimeChangePct: syntheticPctForTicker(t.ticker).toFixed(1),
             },
           }));
-          // Second (rotating) person — the CTA always features two. Drop it into
-          // slot 2 + seed its overrides exactly like a manual slot-2 pick.
+          // Second (rotating) person — present only when the subcategory had one.
           const t2 = cta.talent2;
           if (t2) {
             setMarketMap2(prev => ({ ...prev, [entry.id]: t2 }));
@@ -1290,15 +1256,19 @@ export function CanvasGrid({
                 lifetimeChangePct: syntheticPctForTicker(t2.ticker).toFixed(1),
               },
             }));
+          } else {
+            // No second person this time — clear any stale slot-2 from a prior run
+            // so the pair always reflects the latest pick.
+            setMarketMap2(prev => { if (!(entry.id in prev)) return prev; const next = { ...prev }; delete next[entry.id]; return next; });
+            setMarketOverrideMap2(prev => { if (!(entry.id in prev)) return prev; const next = { ...prev }; delete next[entry.id]; return next; });
           }
-        } catch { /* CTA pick is best-effort — keep the caption as written */ }
+        } catch { /* CTA pick is best-effort — keep the caption regardless */ }
       })();
 
       const r = await fetch('/api/ai/social-caption', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          url:        entry.url || undefined,
           caption:    entry.caption || undefined,
           context:    entry.context || undefined,
           videoTitle: entry.data?.title || undefined,
@@ -1306,27 +1276,23 @@ export function CanvasGrid({
           category:   promptCategory,
         }),
       });
-      if (!r.ok) throw new Error(await r.text());
-      const data = await r.json() as { caption?: string; error?: string };
-      if (data.error || !data.caption) throw new Error(data.error ?? 'no caption returned');
-      const generated = data.caption;
-      const finalText = generated;
+      const data = await r.json().catch(() => ({})) as { caption?: string; error?: string };
+      if (!r.ok || data.error || !data.caption) throw new Error(data.error || `caption failed (${r.status})`);
+      const finalText = data.caption;
 
-      // Show the caption right away, but keep the spinner up until the parallel
-      // CTA pick has also settled and synced the Market widget.
+      // Show the caption, but keep the spinner up until the parallel CTA pick has
+      // also settled and synced the Market widget.
       setSocialCaptionMap(prev => ({
         ...prev,
-        [entry.id]: { text: generated, loading: true, error: null, copied: false },
+        [entry.id]: { text: finalText, loading: true, error: null, copied: false },
       }));
-
       await ctaTask;
-
       setSocialCaptionMap(prev => ({
         ...prev,
         [entry.id]: { text: finalText, loading: false, error: null, copied: false },
       }));
-      // Auto-copy: as soon as the caption is done generating, drop it on the
-      // clipboard (when the toggle is on) and flash the Copied state.
+      // Auto-copy: drop the finished caption on the clipboard (when the toggle is
+      // on) and flash the Copied state.
       if (autoCopyCaptionRef.current && finalText) {
         try {
           await navigator.clipboard.writeText(finalText);
@@ -1337,16 +1303,13 @@ export function CanvasGrid({
           }), 1800);
         } catch { /* clipboard blocked — the Copy button still works */ }
       }
-      return finalText;
     } catch (e) {
       setSocialCaptionMap(prev => ({
         ...prev,
         [entry.id]: { text: prev[entry.id]?.text ?? '', loading: false, error: String(e), copied: false },
       }));
-      return undefined;
     }
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [fetchSparkline, brand.displayName, brand.handle]);
+  }, [brand.category, fetchSparkline]);
 
   const generateChartsCaption = useCallback(async (entryId: string) => {
     const mks   = chartsMarketsMap[entryId] ?? [null, null];
@@ -1380,14 +1343,12 @@ export function CanvasGrid({
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [chartsMarketsMap, chartsNameOverrideMap]);
 
-  // "Next" in the media tab: fetch the video, then — for video posts — auto-run
-  // the caption generator (which itself chains the CTA pick). One action instead
-  // of three. If the fetch fails, the error is already surfaced on the entry.
+  // "Next" in the media tab: fetch the video, then auto-run the caption
+  // generator. One action instead of two. If the fetch fails, the error is
+  // already surfaced on the entry.
   //
-  // Wipe the previous caption for this entry up front. Without this, a failed or
-  // stalled regenerate leaves the OLD post caption visible next to the NEW video
-  // (the generateSocialCaption error handler preserves prev text), and the user
-  // sees a caption that doesn't match the clip they just loaded.
+  // Wipe the previous caption for this entry up front so a stale caption from an
+  // earlier clip doesn't linger next to the newly loaded video while it fetches.
   const handleFetchThenGenerate = useCallback(async (entry: VideoEntry) => {
     setSocialCaptionMap(prev => {
       if (!prev[entry.id]) return prev;
@@ -2080,9 +2041,9 @@ export function CanvasGrid({
                       const selected = marketMap[entry.id] ?? null;
                       // Market card is always shown for Twitter posts so the
                       // user can collapse / change / toggle it before a market
-                      // is picked. The body shows a placeholder until a talent
-                      // is auto-picked by the CTA generator or manually chosen
-                      // via Change.
+                      // is picked. The body shows a placeholder until a talent is
+                      // auto-picked by the CTA generator (on caption generate) or
+                      // chosen manually via Change.
                       const collapsed = marketCardCollapsedMap[entry.id] ?? false;
                       return (
                         <div className="rounded-lg bg-zinc-950 border border-zinc-800 overflow-hidden">
@@ -2223,10 +2184,10 @@ export function CanvasGrid({
                       );
                     })()}
 
-                    {/* Social caption generator — only for video-mode posts.
-                        Lives directly below the rendered preview so the user
-                        can generate, edit, and copy a long-form post caption
-                        without leaving the row. */}
+                    {/* Post caption card — shown for video AND charts posts.
+                        Charts mode generates via generateChartsCaption; video
+                        mode via generateSocialCaption. The card, copy button,
+                        and editable text area are shared by both. */}
                     {!isEntryCarousel && (() => {
                       const sc = socialCaptionMap[entry.id];
                       const collapsed = postCaptionCollapsedMap[entry.id] ?? false;

@@ -339,28 +339,48 @@ export function useRecording(config: UseRecordingConfig) {
 
       console.log('[EXPORT] fullDuration:', fullDuration, 'clipStart:', clipStart, 'clipEnd:', clipEnd, 'clipDuration:', clipDuration, 'totalFrames:', totalFrames);
 
-      // ── Extract AVC decoder description from MP4Box ──────────────────────────
-      let description: Uint8Array | undefined;
-      // @ts-ignore
-      if (typeof MP4BoxFile.getSampleDescription === 'function') {
+      // ── Derive the VideoDecoder config from the source itself ────────────────
+      // Configure the decoder with the file's REAL codec string, coded
+      // dimensions, and AVC `description` (the avcC box). Hardcoding
+      // avc1.64001F / 1080×1920 breaks the instant a source ships a different
+      // H.264 profile/level or resolution — Chromium then rejects the first
+      // chunk with "a key frame is required after configure()… fill out the
+      // description field". mediabunny parses all of this correctly (the audio
+      // path already relies on getDecoderConfig), so use it here too, falling
+      // back to the hand-rolled MP4Box extraction only if it fails.
+      let videoDecoderConfig: any = null;
+      try {
+        const vInput = new Input({ source: new BlobSource(new Blob([arrayBuffer], { type: 'video/mp4' })), formats: ALL_FORMATS });
+        const vTrack = await vInput.getPrimaryVideoTrack();
+        if (vTrack) videoDecoderConfig = await vTrack.getDecoderConfig();
+      } catch (cfgErr) { console.warn('[EXPORT] mediabunny video config failed, falling back to MP4Box:', cfgErr); }
+
+      if (!videoDecoderConfig) {
+        let description: Uint8Array | undefined;
         // @ts-ignore
-        const descs = MP4BoxFile.getSampleDescription(videoTrackId);
-        // @ts-ignore
-        if (descs?.[0]) description = descs[0].avcC?.config || descs[0].avcC;
-      }
-      if (!description) {
-        try {
+        if (typeof MP4BoxFile.getSampleDescription === 'function') {
           // @ts-ignore
-          const stsd = MP4BoxFile.getTrackById(videoTrackId)?.mdia?.minf?.stbl?.stsd;
-          const entry = stsd?.entries?.[0];
-          if (entry?.avcC?.config?.length > 0) description = new Uint8Array(entry.avcC.config);
-          else if (typeof entry?.avcC?.subarray === 'function') description = entry.avcC.subarray();
-          else if (typeof entry?.avcC?.start !== 'undefined' && entry?.avcC?.size) description = new Uint8Array(arrayBuffer, entry.avcC.start + 8, entry.avcC.size - 8);
-        } catch (descErr) { console.warn('[EXPORT] description extraction fallback failed:', descErr); }
+          const descs = MP4BoxFile.getSampleDescription(videoTrackId);
+          // @ts-ignore
+          if (descs?.[0]) description = descs[0].avcC?.config || descs[0].avcC;
+        }
+        if (!description) {
+          try {
+            // @ts-ignore
+            const stsd = MP4BoxFile.getTrackById(videoTrackId)?.mdia?.minf?.stbl?.stsd;
+            const entry = stsd?.entries?.[0];
+            if (entry?.avcC?.config?.length > 0) description = new Uint8Array(entry.avcC.config);
+            else if (typeof entry?.avcC?.subarray === 'function') description = entry.avcC.subarray();
+            else if (typeof entry?.avcC?.start !== 'undefined' && entry?.avcC?.size) description = new Uint8Array(arrayBuffer, entry.avcC.start + 8, entry.avcC.size - 8);
+          } catch (descErr) { console.warn('[EXPORT] description extraction fallback failed:', descErr); }
+        }
+        videoDecoderConfig = { codec: 'avc1.64001F', codedWidth: 1080, codedHeight: 1920, description };
       }
-      const hexDesc = description ? Array.from(description.slice(0, Math.min(32, description.length))).map(b => b.toString(16).padStart(2, '0')).join(' ') : '<none>';
-      console.log('[EXPORT] decoder config — codec: avc1.64001F, description length:', description?.byteLength ?? 0, 'first bytes:', hexDesc);
-      if (!description) console.warn('[EXPORT] ⚠️ no AVC description extracted — decoder will likely fail');
+      const descBuf = videoDecoderConfig.description;
+      const dbgDesc = descBuf instanceof Uint8Array ? descBuf : descBuf ? new Uint8Array(descBuf) : undefined;
+      const hexDesc = dbgDesc ? Array.from(dbgDesc.slice(0, Math.min(32, dbgDesc.length))).map((b: number) => b.toString(16).padStart(2, '0')).join(' ') : '<none>';
+      console.log('[EXPORT] decoder config — codec:', videoDecoderConfig.codec, `${videoDecoderConfig.codedWidth}×${videoDecoderConfig.codedHeight}`, 'description length:', dbgDesc?.byteLength ?? 0, 'first bytes:', hexDesc);
+      if (!videoDecoderConfig.description) console.warn('[EXPORT] ⚠️ no AVC description — decoder may fail');
 
       // ── Set up output container + audio BEFORE decoding so we can stream ─────
       setRecStatus('Preparing audio...');
@@ -468,7 +488,7 @@ export function useRecording(config: UseRecordingConfig) {
       });
 
       // @ts-ignore
-      decoder.configure({ codec: 'avc1.64001F', codedWidth: 1080, codedHeight: 1920, description });
+      decoder.configure(videoDecoderConfig);
 
       // Cap how many decoded frames sit in memory before the producer waits.
       // Empirically Chromium's H.264 decoder needs ~4-8 frames in flight for

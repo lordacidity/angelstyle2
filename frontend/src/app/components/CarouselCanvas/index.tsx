@@ -1772,27 +1772,42 @@ const CarouselCanvas = forwardRef<CarouselCanvasRef, CarouselCanvasProps>(
           error: (e: Error) => console.error('[VideoDecoder carousel]', e),
         });
 
-        let description: Uint8Array | undefined;
-        // @ts-ignore
-        if (typeof MP4BoxFile.getSampleDescription === 'function') {
+        // Configure the decoder from the source's REAL codec/dimensions/avcC.
+        // Hardcoding avc1.64001F / 1080×1920 fails on sources with a different
+        // H.264 profile/level or resolution ("a key frame is required after
+        // configure()… fill out the description field"). mediabunny parses it
+        // correctly; fall back to the hand-rolled MP4Box extraction if it fails.
+        let videoDecoderConfig: any = null;
+        try {
+          const vInput = new Input({ source: new BlobSource(new Blob([arrayBuffer], { type: 'video/mp4' })), formats: ALL_FORMATS });
+          const vTrack = await vInput.getPrimaryVideoTrack();
+          if (vTrack) videoDecoderConfig = await vTrack.getDecoderConfig();
+        } catch (cfgErr) { console.warn('[VideoDecoder carousel] mediabunny config failed, falling back to MP4Box:', cfgErr); }
+
+        if (!videoDecoderConfig) {
+          let description: Uint8Array | undefined;
           // @ts-ignore
-          const descs = MP4BoxFile.getSampleDescription(videoTrackId);
-          // @ts-ignore
-          if (descs?.[0]) description = descs[0].avcC?.config || descs[0].avcC;
-        }
-        if (!description) {
-          try {
+          if (typeof MP4BoxFile.getSampleDescription === 'function') {
             // @ts-ignore
-            const stsd = MP4BoxFile.getTrackById(videoTrackId)?.mdia?.minf?.stbl?.stsd;
-            const entry = stsd?.entries?.[0];
-            if (entry?.avcC?.config?.length > 0) description = new Uint8Array(entry.avcC.config);
-            else if (typeof entry?.avcC?.subarray === 'function') description = entry.avcC.subarray();
-            else if (typeof entry?.avcC?.start !== 'undefined' && entry?.avcC?.size) description = new Uint8Array(arrayBuffer, entry.avcC.start + 8, entry.avcC.size - 8);
-          } catch { /* ignore */ }
+            const descs = MP4BoxFile.getSampleDescription(videoTrackId);
+            // @ts-ignore
+            if (descs?.[0]) description = descs[0].avcC?.config || descs[0].avcC;
+          }
+          if (!description) {
+            try {
+              // @ts-ignore
+              const stsd = MP4BoxFile.getTrackById(videoTrackId)?.mdia?.minf?.stbl?.stsd;
+              const entry = stsd?.entries?.[0];
+              if (entry?.avcC?.config?.length > 0) description = new Uint8Array(entry.avcC.config);
+              else if (typeof entry?.avcC?.subarray === 'function') description = entry.avcC.subarray();
+              else if (typeof entry?.avcC?.start !== 'undefined' && entry?.avcC?.size) description = new Uint8Array(arrayBuffer, entry.avcC.start + 8, entry.avcC.size - 8);
+            } catch { /* ignore */ }
+          }
+          videoDecoderConfig = { codec: 'avc1.64001F', codedWidth: 1080, codedHeight: 1920, description };
         }
 
         // @ts-ignore
-        decoder.configure({ codec: 'avc1.64001F', codedWidth: 1080, codedHeight: 1920, description });
+        decoder.configure(videoDecoderConfig);
 
         for (let i = 0; i < videoSamples.length; i++) {
           if (signal.aborted) { decoder.close(); throw new Error('Cancelled'); }

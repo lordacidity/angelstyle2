@@ -53,7 +53,7 @@ export interface VideoEntry {
   loading: boolean;
   error: string;
   videoFailed: boolean;
-  // Free-form notes the user types to feed the social-caption generator —
+  // Free-form notes the user types as context for caption generation —
   // background, context, vibe, anything that shapes the resulting copy.
   context?: string;
   // local video upload (twitter/caption templates)
