@@ -141,15 +141,15 @@ export function BoardWidget({
               </thead>
               <tbody>
                 {rows.map((row) => {
-                  // Active row: recolor every text cell green so the eye lands
-                  // on the row that's loaded in the generator. Borders/bg stay
-                  // unchanged — the colour is enough signal without the heavy
-                  // outline look.
+                  // Active row: match BoardGrid's draft-row treatment — soft
+                  // zinc-900/40 row tint, no text recolouring. The tint is
+                  // strong enough to read as selected while letting the URL
+                  // stay sky-blue and the cell text stay neutral zinc-300, so
+                  // the row still looks like part of the same table.
                   const isActive = row.id === activeRowId;
-                  const urlCls  = isActive ? 'text-emerald-400'    : 'text-sky-400';
-                  const textCls = isActive ? 'text-emerald-400/90' : 'text-zinc-300';
+                  const rowBg = isActive ? 'bg-zinc-900/40' : 'hover:bg-zinc-900/40';
                   return (
-                  <tr key={row.id} className="align-middle hover:bg-zinc-900/40">
+                  <tr key={row.id} className={`align-middle ${rowBg}`}>
                     <td className="border border-zinc-800 text-center">
                       <input
                         type="checkbox"
@@ -175,7 +175,7 @@ export function BoardWidget({
                           target="_blank"
                           rel="noreferrer"
                           title={row.url}
-                          className={`block truncate ${urlCls} hover:underline`}
+                          className="block truncate text-sky-400 hover:underline"
                           onMouseDown={(e) => e.stopPropagation()}
                         >
                           {row.url}
@@ -185,7 +185,7 @@ export function BoardWidget({
                       )}
                     </td>
                     {(['vidCaption', 'context', 'notes'] as const).map((key) => (
-                      <td key={key} className={`border border-zinc-800 px-1.5 py-1 text-[12px] ${textCls}`}>
+                      <td key={key} className="border border-zinc-800 px-1.5 py-1 text-[12px] text-zinc-300">
                         <div className="truncate" title={row[key] || undefined}>{row[key]}</div>
                       </td>
                     ))}
