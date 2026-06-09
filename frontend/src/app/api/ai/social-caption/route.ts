@@ -41,17 +41,27 @@ interface SerpNewsItem {
 }
 interface Headline { title: string; source: string; date: string; snippet: string }
 
-// Live Google News pull for the prediction-market flow. Reuses the same query
-// shape the ai-prompts/generate route uses (tbm=nws + qdr:w + sbd:1) so we get
-// genuinely breaking stories newest-first. We tack prediction-market terms onto
-// whatever the user typed in the board's CONTEXT column so generic seeds like
-// "NBA" land on sports-betting / Kalshi / Polymarket headlines instead of
-// box-score recaps.
+// Live Google News pull for the prediction-market flow.
+//
+// REQUIRES a prediction-market term to appear in each result by wrapping the
+// market tokens in an OR clause: Google then ranks pages that mention Kalshi /
+// Polymarket / "prediction market" higher than generic recaps. We also keep the
+// user's seed as a verbatim phrase ("...") so a noisy seed like "knicks fight
+// spurs prediction market" doesn't get diluted into a broad NBA query that
+// returns box scores. tbs=qdr:w,sbd:1 = past week, newest-first.
+//
+// Returns headlines filtered to those that actually mention one of the market
+// tokens — Google's ranker is generous and will sometimes leak generic sports
+// stories in even with the OR clause. Falling back to the AI-Prompts trending
+// flow when nothing survives is preferable to feeding the model recap noise.
+const MARKET_TOKENS = ['kalshi', 'polymarket', 'prediction market', 'betting market', 'sportsbook', 'money line', 'odds', 'over/under'] as const;
 async function fetchPredictionMarketHeadlines(seed: string): Promise<Headline[]> {
   const key = process.env.SERPAPI_KEY ?? '';
   if (!key) return [];
 
-  const q = `${seed} prediction markets Kalshi Polymarket`;
+  // Wrap seed as a phrase so the dominant tokens stay tied together; require any
+  // one market keyword to also appear via the OR group.
+  const q = `"${seed}" (Kalshi OR Polymarket OR "prediction market" OR "betting market")`;
   const url = new URL('https://serpapi.com/search.json');
   url.searchParams.set('engine', 'google');
   url.searchParams.set('tbm', 'nws');
@@ -72,15 +82,23 @@ async function fetchPredictionMarketHeadlines(seed: string): Promise<Headline[]>
       if (Array.isArray(item.stories) && item.stories.length) flat.push(...item.stories);
       else flat.push(item);
     }
-    return flat
+    const mapped = flat
       .map((s) => ({
         title: (s.title ?? '').trim(),
         source: (typeof s.source === 'string' ? s.source : s.source?.name ?? '').trim(),
         date: (s.date ?? '').trim(),
         snippet: (s.snippet ?? '').trim(),
       }))
-      .filter((h) => h.title)
-      .slice(0, 10);
+      .filter((h) => h.title);
+
+    // Post-filter: only keep stories whose title or snippet actually contains a
+    // market token. If the strict filter strips everything, fall back to the raw
+    // mapped list so the prompt still gets the freshest results we did find.
+    const strict = mapped.filter((h) => {
+      const blob = `${h.title} ${h.snippet}`.toLowerCase();
+      return MARKET_TOKENS.some((t) => blob.includes(t));
+    });
+    return (strict.length > 0 ? strict : mapped).slice(0, 10);
   } catch {
     return [];
   }
@@ -210,31 +228,36 @@ export async function POST(req: NextRequest) {
         .join('\n');
 
       sys =
-        'You write a long-form social caption for a sports OR music page on Instagram and TikTok. ' +
-        'The caption is built around what is happening on PREDICTION MARKETS right now (Kalshi, Polymarket, sports betting markets, market volume on specific games or events), not a play-by-play of the video.\n\n' +
-        'You will get an industry, a market-flavored context seed, and a list of the freshest news headlines that came back when we searched that seed alongside prediction-market terms.\n\n' +
-        'Write the caption so it:\n' +
-        '- Leads with the biggest current PREDICTION-MARKET storyline from the headlines: which event/odds/market is everyone talking about, what just moved, what volume is doing.\n' +
-        '- Uses the real names, teams, events, dates, and specifics from the headlines (they double as SEO + reach for the prediction-market audience). Do not invent facts beyond the headlines.\n' +
-        '- Treats the on-card caption (and the video implicitly behind it) as a hook only. Spend the bulk on the prediction-market angle and why this market matters.\n' +
-        '- Sounds like an in-the-know fan who follows both the sport/music AND the markets around it, not a brand account.\n\n' +
+        'You are a prediction-market reporter writing social captions for an Instagram / TikTok page. ' +
+        'The caption is NOT a story about an athlete or artist. It is a story about a PREDICTION MARKET (Kalshi, Polymarket, sportsbook line, money line, total, market volume) where that athlete or artist happens to be the subject. ' +
+        'Picture yourself as a financial journalist covering market action — except the asset class is a sports / pop-culture market.\n\n' +
+        'You will get an industry, a market-flavored context seed, and a list of fresh news headlines that already mention a prediction market.\n\n' +
+        'NON-NEGOTIABLE CONTENT RULES (separate from the hard rules below):\n' +
+        '- The OPENING SENTENCE must name a specific market or platform — "Kalshi", "Polymarket", "the sportsbook line", "the moneyline", "the spread", "the total", or a similarly concrete market term. Not "the team". Not "the game". The market.\n' +
+        '- Every paragraph must contain at least one of: Kalshi, Polymarket, prediction market, betting market, odds, money line, spread, total, over/under, volume, market cap, market price, sportsbook. If a paragraph reads like a generic sports / music story with no market term in it, you have failed and must rewrite it.\n' +
+        '- Cite specific numbers from the headlines whenever they appear (odds, percentages, dollar figures, volume). If a headline says "Knicks now -180 on the Game 3 moneyline", you say "Knicks now -180 on the Game 3 moneyline." If the headlines give you no numbers, describe the direction the market is moving ("market shifted in favor of...", "volume on the series winner has spiked...") — but stay market-vocabulary.\n' +
+        '- Do NOT describe what is happening in the video. Do NOT recap the game / song / event. The video is the SEO hook the post is filed under; the body is market analysis.\n' +
+        '- Sound like an in-the-know markets follower (think action-network analyst, Sharp Football, Unusual Whales), not a sports recap writer.\n\n' +
         'HARD RULES (these override everything else):\n' +
         '- STRUCTURE: EXACTLY two paragraphs, separated by a single blank line.\n' +
-        `- LENGTH: between ${MIN_CHARS} and ${MAX_CHARS} characters. Aim for ~1900. Add depth on the market storyline to reach the length, no filler.\n` +
-        '- NEVER mention Pauv, "take a position", "link in bio", or any direct CTA. You CAN reference Kalshi, Polymarket, prediction markets, odds, volume, sports betting markets as journalism — that\'s the whole point — but never as a call to action.\n' +
+        `- LENGTH: between ${MIN_CHARS} and ${MAX_CHARS} characters. Aim for ~1900. Add depth on the market storyline to reach length, no filler.\n` +
+        '- NEVER mention Pauv, "take a position", "link in bio", "place your bet", or any direct CTA. You CAN reference Kalshi / Polymarket / sportsbooks / odds / volume as journalism — that is the entire point — but never as a call to action.\n' +
+        '- Do not invent fake odds, fake volume, or fake market activity. If the headlines do not give you a number, talk in directional / qualitative market terms.\n' +
         '- No hashtags, no emojis, no markdown, no em-dashes (use commas or periods), no labels, no preamble.\n' +
-        '- Plain text only.\n' +
-        'Return ONLY the caption text.';
+        '- Plain text only. Return ONLY the caption text.\n\n' +
+        'Example of the VOICE we want (do not copy facts, just the angle and density of market language):\n' +
+        'Polymarket\'s "Knicks to win the series" contract is trading at 71 cents this morning, up from 49 cents before Game 2, the sharpest one-game move on the platform this postseason. Volume on the series-winner market has cleared $3.2M in the last 48 hours, with the biggest fills coming after the third quarter on Saturday — when the moneyline at major sportsbooks flipped Knicks from a +130 underdog to a -150 favorite in real time. The market reading the Spurs as cooked is no longer a contrarian take, it is the consensus.\n\n' +
+        'The second paragraph keeps going in that same register: more market data, more context on why volume / odds are doing what they are doing, the bigger picture for the prediction-market sports calendar.';
 
       user = [
         industry ? `Industry: ${industry}` : '',
-        `Market-flavored context seed (the angle this post is leaning into): ${context!.trim()}`,
-        caption ? `On-card caption (light background only): ${caption}` : '',
+        `Market-flavored context seed: ${context!.trim()}`,
+        caption ? `On-card caption (for SEO context only — DO NOT describe the video): ${caption}` : '',
         '',
-        'Freshest headlines from a Google News search for that seed + prediction-market terms (use these as the trending hook):',
+        'Fresh headlines from a Google News search for the seed + prediction-market terms. These are your sources of truth — quote numbers from them where possible, never invent:',
         headlinesText,
         '',
-        `Write the caption now, centered on the prediction-market storyline above. EXACTLY two paragraphs, between ${MIN_CHARS} and ${MAX_CHARS} characters.`,
+        `Write the caption now. Lead with a specific market name + movement. EXACTLY two paragraphs, between ${MIN_CHARS} and ${MAX_CHARS} characters. Every paragraph must contain a market term.`,
       ].filter(Boolean).join('\n');
     } else {
       // ── Flow B: AI-Prompts trending fallback ────────────────────────────────
@@ -291,22 +314,43 @@ export async function POST(req: NextRequest) {
       { role: 'system', content: sys },
       { role: 'user', content: user },
     ];
+    // Each paragraph in a Flow-A draft must mention at least one market token —
+    // otherwise the model has drifted back into sports-recap mode, which is
+    // exactly the failure mode that prompted Angel's spec.
+    const containsMarketTerm = (s: string) => {
+      const l = s.toLowerCase();
+      return MARKET_TOKENS.some((t) => l.includes(t));
+    };
+    const passesMarketCheck = (s: string) => {
+      if (!useMarketFlow) return true;
+      const paras = s.split(/\n\s*\n/).map((p) => p.trim()).filter(Boolean);
+      return paras.length > 0 && paras.every(containsMarketTerm);
+    };
+
     let best = '';
+    let bestPassesMarket = false;
     for (let attempt = 0; attempt < 3; attempt++) {
       const raw = await deepseekChat(messages, { temperature: 0.7 });
       let candidate = normalizeToTwoParagraphs(cleanText(raw));
       if (candidate.length > MAX_CHARS) candidate = normalizeToTwoParagraphs(clampRange(candidate, MIN_CHARS, MAX_CHARS));
-      if (candidate.length >= MIN_CHARS && candidate.length <= MAX_CHARS) { best = candidate; break; }
-      // Hold onto the longest candidate that still fits under the ceiling.
-      if (candidate.length <= MAX_CHARS && candidate.length > best.length) best = candidate;
-      // Too short — ask it to expand, keeping structure and rules.
+      const inBand = candidate.length >= MIN_CHARS && candidate.length <= MAX_CHARS;
+      const okMarket = passesMarketCheck(candidate);
+      if (inBand && okMarket) { best = candidate; bestPassesMarket = true; break; }
+      // Hold onto the best partial: prefer "passes market check" over length.
+      const promote = (!bestPassesMarket && okMarket) || (bestPassesMarket === okMarket && candidate.length > best.length && candidate.length <= MAX_CHARS);
+      if (promote) { best = candidate; bestPassesMarket = okMarket; }
+      // Build the nudge: combine length + market-coverage feedback so a single
+      // retry can correct both issues at once instead of burning attempts.
+      const issues: string[] = [];
+      if (candidate.length < MIN_CHARS) issues.push(`it is ${candidate.length} characters, under the ${MIN_CHARS} minimum — expand to between ${MIN_CHARS} and ${MAX_CHARS}`);
+      if (!okMarket && useMarketFlow) issues.push('at least one paragraph has no prediction-market term (Kalshi / Polymarket / "prediction market" / odds / moneyline / spread / volume / sportsbook) — every paragraph must contain one');
+      if (issues.length === 0) issues.push('output did not pass validation, regenerate');
       messages.push({ role: 'assistant' as const, content: candidate });
       messages.push({
         role: 'user' as const,
         content:
-          `That draft was ${candidate.length} characters, under the ${MIN_CHARS} minimum. ` +
-          `Expand it to between ${MIN_CHARS} and ${MAX_CHARS} characters, keeping EXACTLY two paragraphs and every rule. ` +
-          'Add more substance on the news and the bigger-picture industry angle, no filler. Return ONLY the caption.',
+          `That draft has problems: ${issues.join('; ')}. ` +
+          'Rewrite keeping EXACTLY two paragraphs and every rule. Return ONLY the caption.',
       });
     }
 
