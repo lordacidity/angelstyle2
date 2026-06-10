@@ -64,7 +64,13 @@ export const CTA_TOP_GAP_SMALL = Math.round(1 * S);
 export const CTA_TOP_GAP_BIO = Math.round(14 * S);
 // "Link in bio" line centered under the CTA box.
 const LINK_SIZE = Math.round(10 * S);
-const LINK_GAP  = Math.round(2 * S);
+// Sized so the visible gap from the CTA's bottom edge up to the top of "pauv.com"
+// matches CTA_TOP_GAP (the gap above the CTA). Formula:
+//   visible bottom gap = LINK_GAP + (LINK_SIZE - capHeight) ≈ LINK_GAP + 0.3 * LINK_SIZE
+//   solving for LINK_GAP = CTA_TOP_GAP - 0.3 * LINK_SIZE = 7*S - 3*S = 4*S
+// gives symmetric breathing room above and below the CTA — was 2*S which left
+// the bottom looking ~5 canvas px tighter than the top.
+const LINK_GAP  = Math.round(4 * S);
 const COLOR_LINK = 'rgba(255,255,255,0.5)'; // light grey
 export const CTA_LINK_AREA_H = LINK_GAP + LINK_SIZE + Math.round(8 * S);
 // Bio CTA: no market row at all — just the link, a little bigger, right under the video.
