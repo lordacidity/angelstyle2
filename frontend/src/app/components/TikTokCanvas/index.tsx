@@ -372,13 +372,8 @@ export const TikTokCanvas = forwardRef<TikTokCanvasRef, TikTokCanvasProps>(funct
   }
 
   // Auto-size + position the crop box so the whole block (header → video → CTA)
-<<<<<<< HEAD
-  // sits with the black space ABOVE it equal to the black space below it
-  // (top : bottom = 1 : 1). The fixed chrome (header + CTA) is constant, so the
-=======
   // sits with the black space ABOVE it 1.26 parts to the 2 parts below it
   // (top : bottom = 1.26 : 2 = 63%). The fixed chrome (header + CTA) is constant, so the
->>>>>>> 81545cf (Header gets closer to the top: top/bottom ratio 70% -> 63%)
   // leftover black space is CANVAS_H - splitChrome - videoHeight; blockTop is
   // TOP_FRAC of that leftover. The "link in bio" line is intentionally left OUT
   // of splitChrome so it reads as part of the bottom black space, not the block.
