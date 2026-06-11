@@ -54,3 +54,4 @@ Env vars on the server process:
 2. Enable USB debugging.
 3. Plug in via USB, accept the "Allow USB debugging" RSA prompt.
 4. `adb devices` should list the phone as `device` (not `unauthorized`).
+
