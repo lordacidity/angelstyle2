@@ -123,7 +123,10 @@ export const TikTokCanvas = forwardRef<TikTokCanvasRef, TikTokCanvasProps>(funct
     centerBox: anchorBlockTop,
     setBlockTopPct: (pct: number) => {
       blockTopPctRef.current = Math.max(0, Math.min(1, pct));
-      anchorBlockTop();
+      // repositionBlock only touches y, so a manual resize survives the
+      // adjustment — using anchorBlockTop here would re-fit the box to the
+      // video's natural height and undo the user's resize on every keypress.
+      repositionBlock();
     },
     setIncludeEdit: (v: boolean) => { setIncludeEdit(v); includeEditRef.current = v; },
     getVideoElement: () => videoRef.current,
