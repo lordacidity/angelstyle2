@@ -9,11 +9,12 @@ export const DISPLAY_SCALE = 0.38; // 1080×1920 → ~410×730 on screen
 export const MIN_DIM = 40;
 export const H_SIZE = 10; // handle square side length
 
-// Vertical placement: the DEFAULT fraction of the canvas height that the top of
-// the whole block (logo/header → video → CTA) sits down from the top, instead of
-// being vertically centered. This is just the starting value — it's editable per
-// video via the "Top %" field in the controls bar.
-export const BLOCK_TOP_PCT = 0.15;
+// Default split of the LEFTOVER black space (CANVAS_H minus the chrome the
+// block reserves) that sits ABOVE the block — the rest sits below it. The
+// "Top %" field in the controls bar overrides this per video; lower values
+// push the block toward the top of the frame, higher values push it down.
+// 0.3865 ≈ a 1.26 : 2 top-vs-bottom split (about 63%).
+export const BLOCK_TOP_PCT = 0.3865;
 
 // Minimum breathing room reserved below the block (under the CTA, or under the
 // video when there's no CTA) when auto-sizing the video to fit the frame.

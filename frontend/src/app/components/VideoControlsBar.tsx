@@ -192,7 +192,7 @@ export function VideoControlsBar({ entryId, activeRef, recordingState, videoSrc,
     const ref = activeRefRef.current;
     if (!ref) return;
     const state = ref.getTrimState();
-    setTopPct(Math.round((state.blockTopPct ?? 0.15) * 100));
+    setTopPct(Math.round((state.blockTopPct ?? 0.3865) * 100));
     setFrames([]); setTimelineZoom(1.0); timelineZoomRef.current = 1.0;
     setSelection(null);
     setSegments([]); segmentsRef.current = [];

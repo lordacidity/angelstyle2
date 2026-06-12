@@ -22,10 +22,10 @@ import { useRecording } from './hooks/useRecording';
 
 export type { TikTokCanvasRef, MarketData, SparkPoint } from './types';
 
-// the block is 1.26 parts to the 2 parts BELOW it (top : bottom = 1.26 : 2 = 63%).
-const TOP_RATIO = 1.26;
-const BOTTOM_RATIO = 2;
-const TOP_FRAC = TOP_RATIO / (TOP_RATIO + BOTTOM_RATIO); // ≈ 0.3865
+// Default split of the leftover black space above vs below the block. Stored
+// as a fraction so the "Top %" input in the controls bar can override it per
+// video by writing into blockTopPctRef. 0.3865 ≈ 1.26 : 2 (the comment says
+// "top : bottom = 1.26 : 2 = 63%"), kept as a documented baseline.
 
 export const TikTokCanvas = forwardRef<TikTokCanvasRef, TikTokCanvasProps>(function TikTokCanvas({
   videoSrc,
@@ -390,8 +390,9 @@ export const TikTokCanvas = forwardRef<TikTokCanvasRef, TikTokCanvasProps>(funct
     // Chrome for the top:bottom split excludes the "link in bio" line.
     const splitChrome = chrome - (marketData ? ((marketData.size ?? 'large') === 'bio' ? CTA_LINK_AREA_H_BIO : CTA_LINK_AREA_H) : 0);
 
+    const topFrac = blockTopPctRef.current;
     if (!video || !video.videoWidth || !video.videoHeight) {
-      const blockTop = Math.max(0, (CANVAS_H - splitChrome) * TOP_FRAC);
+      const blockTop = Math.max(0, (CANVAS_H - splitChrome) * topFrac);
       const b = { ...boxRef.current, y: blockTop + headerHeight - 4 };
       boxRef.current = b;
       setBox({ ...b });
@@ -401,7 +402,7 @@ export const TikTokCanvas = forwardRef<TikTokCanvasRef, TikTokCanvasProps>(funct
     const boxW = brand === 'clean' ? CANVAS_W : VIDEO_TARGET_W;
     const naturalH = video.videoHeight * (boxW / video.videoWidth);
     const boxH = Math.max(MIN_DIM, Math.min(naturalH, CANVAS_H - chrome));
-    const blockTop = Math.max(0, (CANVAS_H - splitChrome - boxH) * TOP_FRAC);
+    const blockTop = Math.max(0, (CANVAS_H - splitChrome - boxH) * topFrac);
     const y = blockTop + headerHeight - 4;
 
     const b = { x: (CANVAS_W - boxW) / 2, y, w: boxW, h: boxH };
@@ -420,7 +421,7 @@ export const TikTokCanvas = forwardRef<TikTokCanvasRef, TikTokCanvasProps>(funct
     // Chrome for the top:bottom split excludes the "link in bio" line.
     const splitChrome = chrome - (marketData ? ((marketData.size ?? 'large') === 'bio' ? CTA_LINK_AREA_H_BIO : CTA_LINK_AREA_H) : 0);
     const boxH = boxRef.current.h;
-    const blockTop = Math.max(0, (CANVAS_H - splitChrome - boxH) * TOP_FRAC);
+    const blockTop = Math.max(0, (CANVAS_H - splitChrome - boxH) * blockTopPctRef.current);
     const b = { ...boxRef.current, y: blockTop + headerHeight - 4 };
     boxRef.current = b;
     setBox({ ...b });
