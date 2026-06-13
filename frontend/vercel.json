@@ -1,0 +1,8 @@
+{
+  "crons": [
+    {
+      "path": "/api/ai-prompts/cron",
+      "schedule": "0 13 * * *"
+    }
+  ]
+}
