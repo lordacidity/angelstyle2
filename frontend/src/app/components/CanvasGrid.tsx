@@ -8,7 +8,7 @@ import type { TikTokCanvasRef, MarketData, SparkPoint } from './TikTokCanvas';
 import { ChartsCanvas } from './ChartsCanvas';
 import type { ChartsCanvasRef, ChartsMarket } from './ChartsCanvas';
 import { ChartsImageCanvas } from './ChartsImageCanvas';
-import type { ChartsImageCanvasRef, ChartsImageMarket } from './ChartsImageCanvas';
+import type { ChartsImageCanvasRef, ChartsImageMarket, CanvasAspectRatio } from './ChartsImageCanvas';
 import { ChartsInputCard } from './ChartsInputCard';
 import type { PreloadedAudio } from './ChartsInputCard';
 import CarouselCanvas, { CAROUSEL_PREVIEW_W } from './CarouselCanvas';
@@ -486,6 +486,13 @@ function ChartsImageInputCard({
   trendsError,
   onStart,
   onRemove,
+  onOpenPhotoPicker,
+  overrideIndustry,
+  overridePct,
+  overrideRaw,
+  onUpdateOverrideIndustry,
+  onUpdateOverridePct,
+  onUpdateOverrideRaw,
 }: {
   entry: VideoEntry;
   market: ChartsMarket | null;
@@ -500,6 +507,13 @@ function ChartsImageInputCard({
   trendsError: string | null;
   onStart: () => void;
   onRemove: () => void;
+  onOpenPhotoPicker: (query: string) => void;
+  overrideIndustry: string;
+  overridePct: string;
+  overrideRaw: string;
+  onUpdateOverrideIndustry: (v: string) => void;
+  onUpdateOverridePct: (v: string) => void;
+  onUpdateOverrideRaw: (v: string) => void;
 }) {
   const [query,   setQuery]   = useState('');
   const [open,    setOpen]    = useState(false);
@@ -567,14 +581,21 @@ function ChartsImageInputCard({
           {/* Market picker */}
           {market ? (
             <div className="flex items-center gap-2.5 px-3 py-2.5 rounded-lg bg-zinc-900 border border-zinc-800">
-              {market.photo_url ? (
-                // eslint-disable-next-line @next/next/no-img-element
-                <img src={market.photo_url} alt={market.name} className="w-8 h-8 rounded-full object-cover shrink-0" />
-              ) : (
-                <div className="w-8 h-8 rounded-full bg-zinc-700 flex items-center justify-center text-xs font-bold text-zinc-300 shrink-0">
-                  {market.name.charAt(0).toUpperCase()}
-                </div>
-              )}
+              <button
+                type="button"
+                onClick={() => onOpenPhotoPicker(market.name)}
+                className="shrink-0 rounded-full ring-2 ring-transparent hover:ring-white transition-all"
+                title="Change photo"
+              >
+                {market.photo_url ? (
+                  // eslint-disable-next-line @next/next/no-img-element
+                  <img src={market.photo_url} alt={market.name} className="w-8 h-8 rounded-full object-cover" />
+                ) : (
+                  <div className="w-8 h-8 rounded-full bg-zinc-700 flex items-center justify-center text-xs font-bold text-zinc-300">
+                    {market.name.charAt(0).toUpperCase()}
+                  </div>
+                )}
+              </button>
               <input
                 value={overrideName}
                 onChange={e => onUpdateOverrideName(e.target.value)}
@@ -648,6 +669,32 @@ function ChartsImageInputCard({
                 document.body,
               )}
             </>
+          )}
+
+          {/* Override inputs: industry, % change, raw change */}
+          {market && (
+            <div className="flex flex-col gap-1.5">
+              <input
+                value={overrideIndustry}
+                onChange={e => onUpdateOverrideIndustry(e.target.value)}
+                placeholder={market.industry ?? 'Industry…'}
+                className="w-full bg-zinc-900 border border-zinc-800 rounded-md px-2.5 py-1.5 text-xs text-zinc-200 placeholder-zinc-600 outline-none focus:border-zinc-600"
+              />
+              <div className="flex gap-1.5">
+                <input
+                  value={overridePct}
+                  onChange={e => onUpdateOverridePct(e.target.value)}
+                  placeholder="% change (e.g. -5.2)"
+                  className="flex-1 min-w-0 bg-zinc-900 border border-zinc-800 rounded-md px-2.5 py-1.5 text-xs text-zinc-200 placeholder-zinc-600 outline-none focus:border-zinc-600"
+                />
+                <input
+                  value={overrideRaw}
+                  onChange={e => onUpdateOverrideRaw(e.target.value)}
+                  placeholder="raw (e.g. -0.32)"
+                  className="flex-1 min-w-0 bg-zinc-900 border border-zinc-800 rounded-md px-2.5 py-1.5 text-xs text-zinc-200 placeholder-zinc-600 outline-none focus:border-zinc-600"
+                />
+              </div>
+            </div>
           )}
 
           {/* Start button */}
@@ -982,6 +1029,10 @@ export function CanvasGrid({
   const [chartsImageTrendsLoadingMap,setChartsImageTrendsLoadingMap]= useState<Record<string, boolean>>({});
   const [chartsImageTrendsLoadedMap, setChartsImageTrendsLoadedMap] = useState<Record<string, boolean>>({});
   const [chartsImageTrendsErrorMap,  setChartsImageTrendsErrorMap]  = useState<Record<string, string | null>>({});
+  const [chartsImageAspectRatioMap,  setChartsImageAspectRatioMap]  = useState<Record<string, CanvasAspectRatio>>({});
+  const [chartsImageIndustryOverrideMap, setChartsImageIndustryOverrideMap] = useState<Record<string, string>>({});
+  const [chartsImagePctOverrideMap,      setChartsImagePctOverrideMap]      = useState<Record<string, string>>({});
+  const [chartsImageRawOverrideMap,      setChartsImageRawOverrideMap]      = useState<Record<string, string>>({});
   // Shared library of available audio tracks (loaded once from disk)
   const [preloadedAudios,   setPreloadedAudios]   = useState<PreloadedAudio[]>([]);
 
@@ -1558,6 +1609,54 @@ export function CanvasGrid({
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [chartsMarketsMap, chartsNameOverrideMap]);
 
+  const generateChartsImageCaption = useCallback(async (entryId: string) => {
+    const mk   = chartsImageMarketMap[entryId];
+    if (!mk) return;
+    const name = (chartsImageNameOverrideMap[entryId] || mk.name).trim();
+
+    // Compute % change from actual normalised chart data (last two points)
+    const sparkline    = mk.sparkline ?? [];
+    const firstNonZero = sparkline.findIndex(p => p.value > 0);
+    const cropped      = firstNonZero > 0 ? sparkline.slice(firstNonZero) : sparkline;
+    const lastSpark    = cropped[cropped.length - 1]?.value ?? 0;
+    const minSpark     = cropped.length ? Math.min(...cropped.map(p => p.value)) : 0;
+    const sparkRange   = lastSpark - minSpark;
+    const realPrice    = mk.price?.usd ?? null;
+    const lastPrice    = realPrice != null && realPrice > 0 ? realPrice : Math.max(0.01, lastSpark);
+    const normalize    = (v: number) => sparkRange > 0
+      ? 0.01 + ((v - minSpark) / sparkRange) * (lastPrice - 0.01)
+      : lastPrice;
+    const lastNorm     = normalize(lastSpark);
+    const prevNorm     = cropped.length >= 2 ? normalize(cropped[cropped.length - 2].value) : lastNorm;
+    const isPositive   = lastNorm >= prevNorm;
+    const seededPct    = prevNorm > 0 ? Math.abs((lastNorm - prevNorm) / prevNorm * 100) : 0;
+
+    setSocialCaptionMap(prev => ({
+      ...prev,
+      [entryId]: { text: prev[entryId]?.text ?? '', loading: true, error: null, copied: false },
+    }));
+    try {
+      const r = await fetch('/api/ai/chartsimage-caption', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ name, pct: seededPct, isPositive }),
+      });
+      if (!r.ok) throw new Error(await r.text());
+      const data = await r.json() as { caption?: string; error?: string };
+      if (data.error || !data.caption) throw new Error(data.error ?? 'no caption returned');
+      setSocialCaptionMap(prev => ({
+        ...prev,
+        [entryId]: { text: data.caption!, loading: false, error: null, copied: false },
+      }));
+    } catch (e) {
+      setSocialCaptionMap(prev => ({
+        ...prev,
+        [entryId]: { text: prev[entryId]?.text ?? '', loading: false, error: String(e), copied: false },
+      }));
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [chartsImageMarketMap, chartsImageNameOverrideMap]);
+
   // "Next" in the media tab: fetch the video, then auto-run the caption
   // generator. One action instead of two. If the fetch fails, the error is
   // already surfaced on the entry.
@@ -2096,6 +2195,13 @@ export function CanvasGrid({
                         .finally(() => setChartsImageTrendsLoadingMap(prev => ({ ...prev, [entry.id]: false })));
                     }}
                     onRemove={() => onRemoveRow(entry.id)}
+                    onOpenPhotoPicker={query => openPhotoPicker(`chartsimage:${entry.id}`, query)}
+                    overrideIndustry={chartsImageIndustryOverrideMap[entry.id] ?? ''}
+                    overridePct={chartsImagePctOverrideMap[entry.id] ?? ''}
+                    overrideRaw={chartsImageRawOverrideMap[entry.id] ?? ''}
+                    onUpdateOverrideIndustry={v => setChartsImageIndustryOverrideMap(prev => ({ ...prev, [entry.id]: v }))}
+                    onUpdateOverridePct={v => setChartsImagePctOverrideMap(prev => ({ ...prev, [entry.id]: v }))}
+                    onUpdateOverrideRaw={v => setChartsImageRawOverrideMap(prev => ({ ...prev, [entry.id]: v }))}
                   />
                 ) : (
                   <VideoInputCard
@@ -2144,9 +2250,27 @@ export function CanvasGrid({
                       </div>
                     )}
 
-                    {/* Charts / Charts Image — delete button */}
+                    {/* Charts / Charts Image — delete button (+ aspect ratio toggle for chartsimage) */}
                     {(isEntryCharts || isEntryChartsImage) && (
-                      <div className="flex items-center justify-end px-0.5">
+                      <div className="flex items-center justify-end gap-2 px-0.5">
+                        {isEntryChartsImage && (() => {
+                          const ar    = chartsImageAspectRatioMap[entry.id] ?? 'portrait';
+                          const isPpt = ar === 'ppt';
+                          return (
+                            <button
+                              onClick={() => setChartsImageAspectRatioMap(prev => ({ ...prev, [entry.id]: isPpt ? 'portrait' : 'ppt' }))}
+                              title={isPpt ? 'Switch to portrait (1080×1350)' : 'Switch to widescreen (1600×1080)'}
+                              className={`${BTN_ICON} gap-1 w-auto px-2 text-[10px] font-medium`}
+                            >
+                              {isPpt ? (
+                                <svg width="9" height="9" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect x="6" y="2" width="12" height="20" rx="2"/></svg>
+                              ) : (
+                                <svg width="9" height="9" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect x="2" y="6" width="20" height="12" rx="2"/></svg>
+                              )}
+                              {isPpt ? '4:5' : '16:9'}
+                            </button>
+                          );
+                        })()}
                         <button onClick={() => onRemoveRow(entry.id)} className={BTN_ICON} title="Delete row">
                           <TrashIcon size={15} />
                         </button>
@@ -2154,7 +2278,7 @@ export function CanvasGrid({
                     )}
 
                     {/* Video canvas zoom + delete (non-carousel, non-charts only) */}
-                    {!isEntryCarousel && !isEntryCharts && (
+                    {!isEntryCarousel && !isEntryCharts && !isEntryChartsImage && (
                       <div className="flex items-center gap-2 px-0.5">
                         <span className="text-[10px] text-zinc-600 select-none shrink-0">Zoom</span>
                         <input
@@ -2205,6 +2329,7 @@ export function CanvasGrid({
                           ? 'ring-2 ring-white ring-offset-2 ring-offset-black'
                           : 'ring-1 ring-zinc-800 hover:ring-zinc-600'
                       }`}
+                      style={isEntryChartsImage ? { width: 'fit-content', margin: '4px auto 0' } : undefined}
                     >
                       {isEntryCarousel ? (
                         <CarouselCanvas
@@ -2271,6 +2396,10 @@ export function CanvasGrid({
                           }}
                           market={(chartsImageMarketMap[entry.id] ?? null) as ChartsImageMarket | null}
                           overrideName={chartsImageNameOverrideMap[entry.id] ?? ''}
+                          overrideIndustry={chartsImageIndustryOverrideMap[entry.id] ?? ''}
+                          overridePct={chartsImagePctOverrideMap[entry.id] ?? ''}
+                          overrideRaw={chartsImageRawOverrideMap[entry.id] ?? ''}
+                          aspectRatio={chartsImageAspectRatioMap[entry.id] ?? 'portrait'}
                         />
                       ) : (
                         <TikTokCanvas
@@ -2549,7 +2678,7 @@ export function CanvasGrid({
                                 </button>
                               )}
                               <button
-                                onClick={() => isEntryCharts ? generateChartsCaption(entry.id) : generateSocialCaption(entry)}
+                                onClick={() => isEntryCharts ? generateChartsCaption(entry.id) : isEntryChartsImage ? generateChartsImageCaption(entry.id) : generateSocialCaption(entry)}
                                 disabled={sc?.loading}
                                 className="flex items-center gap-1.5 h-7 px-2.5 rounded-md bg-white text-black hover:bg-zinc-100 disabled:opacity-40 disabled:cursor-not-allowed transition-colors text-[10px] font-semibold"
                                 title="Generate caption with AI"
@@ -2675,6 +2804,13 @@ export function CanvasGrid({
                             const next: [ChartsMarket | null, ChartsMarket | null] = [cur[0], cur[1]];
                             next[slotIdx] = { ...slot, photo_url: p.url };
                             return { ...prev, [entryId]: next };
+                          });
+                        } else if (photoPickerEntryId!.startsWith('chartsimage:')) {
+                          const entryId = photoPickerEntryId!.slice('chartsimage:'.length);
+                          setChartsImageMarketMap(prev => {
+                            const cur = prev[entryId];
+                            if (!cur) return prev;
+                            return { ...prev, [entryId]: { ...cur, photo_url: p.url } };
                           });
                         } else {
                           setMarketOverrideMap(prev => ({
