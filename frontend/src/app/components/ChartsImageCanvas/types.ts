@@ -12,12 +12,19 @@ export interface ChartsImageMarket {
 
 export type CanvasAspectRatio = 'portrait' | 'ppt';
 
+// Direction of the headline change. 'up' = green / positive, 'down' = red / negative.
+// The magnitude is a seeded random 5–15% per ticker; the raw $ change is derived from it.
+export type ChartsImageDirection = 'up' | 'down';
+
+// How much synthetic volatility to add to the chart line. 'none' = clean (default).
+export type ChartsImageNoiseLevel = 'none' | 'small' | 'med' | 'large';
+
 export interface ChartsImageCanvasProps {
   market: ChartsImageMarket | null;
   overrideName?: string;
   overrideIndustry?: string;
-  overridePct?: string;    // signed number string e.g. "-5.2" or "3.1"; empty = use calculated
-  overrideRaw?: string;    // signed number string e.g. "-0.32" or "0.15"; empty = use calculated
+  direction?: ChartsImageDirection;
+  noiseLevel?: ChartsImageNoiseLevel;
   aspectRatio?: CanvasAspectRatio;
 }
 

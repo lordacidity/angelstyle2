@@ -7,8 +7,8 @@ import { TikTokCanvas } from './TikTokCanvas';
 import type { TikTokCanvasRef, MarketData, SparkPoint } from './TikTokCanvas';
 import { ChartsCanvas } from './ChartsCanvas';
 import type { ChartsCanvasRef, ChartsMarket } from './ChartsCanvas';
-import { ChartsImageCanvas } from './ChartsImageCanvas';
-import type { ChartsImageCanvasRef, ChartsImageMarket, CanvasAspectRatio } from './ChartsImageCanvas';
+import { ChartsImageCanvas, seededChangePct } from './ChartsImageCanvas';
+import type { ChartsImageCanvasRef, ChartsImageMarket, CanvasAspectRatio, ChartsImageDirection, ChartsImageNoiseLevel } from './ChartsImageCanvas';
 import { ChartsInputCard } from './ChartsInputCard';
 import type { PreloadedAudio } from './ChartsInputCard';
 import CarouselCanvas, { CAROUSEL_PREVIEW_W } from './CarouselCanvas';
@@ -488,11 +488,11 @@ function ChartsImageInputCard({
   onRemove,
   onOpenPhotoPicker,
   overrideIndustry,
-  overridePct,
-  overrideRaw,
+  direction,
+  noiseLevel,
   onUpdateOverrideIndustry,
-  onUpdateOverridePct,
-  onUpdateOverrideRaw,
+  onUpdateDirection,
+  onUpdateNoiseLevel,
 }: {
   entry: VideoEntry;
   market: ChartsMarket | null;
@@ -509,11 +509,11 @@ function ChartsImageInputCard({
   onRemove: () => void;
   onOpenPhotoPicker: (query: string) => void;
   overrideIndustry: string;
-  overridePct: string;
-  overrideRaw: string;
+  direction: ChartsImageDirection;
+  noiseLevel: ChartsImageNoiseLevel;
   onUpdateOverrideIndustry: (v: string) => void;
-  onUpdateOverridePct: (v: string) => void;
-  onUpdateOverrideRaw: (v: string) => void;
+  onUpdateDirection: (v: ChartsImageDirection) => void;
+  onUpdateNoiseLevel: (v: ChartsImageNoiseLevel) => void;
 }) {
   const [query,   setQuery]   = useState('');
   const [open,    setOpen]    = useState(false);
@@ -671,7 +671,9 @@ function ChartsImageInputCard({
             </>
           )}
 
-          {/* Override inputs: industry, % change, raw change */}
+          {/* Industry override + up/down direction toggle. The change % is a seeded
+              random 5–15% and the raw $ is derived from it; this toggle only flips the
+              sign (and colour) of both. */}
           {market && (
             <div className="flex flex-col gap-1.5">
               <input
@@ -680,19 +682,36 @@ function ChartsImageInputCard({
                 placeholder={market.industry ?? 'Industry…'}
                 className="w-full bg-zinc-900 border border-zinc-800 rounded-md px-2.5 py-1.5 text-xs text-zinc-200 placeholder-zinc-600 outline-none focus:border-zinc-600"
               />
-              <div className="flex gap-1.5">
-                <input
-                  value={overridePct}
-                  onChange={e => onUpdateOverridePct(e.target.value)}
-                  placeholder="% change (e.g. -5.2)"
-                  className="flex-1 min-w-0 bg-zinc-900 border border-zinc-800 rounded-md px-2.5 py-1.5 text-xs text-zinc-200 placeholder-zinc-600 outline-none focus:border-zinc-600"
-                />
-                <input
-                  value={overrideRaw}
-                  onChange={e => onUpdateOverrideRaw(e.target.value)}
-                  placeholder="raw (e.g. -0.32)"
-                  className="flex-1 min-w-0 bg-zinc-900 border border-zinc-800 rounded-md px-2.5 py-1.5 text-xs text-zinc-200 placeholder-zinc-600 outline-none focus:border-zinc-600"
-                />
+              <button
+                type="button"
+                onClick={() => onUpdateDirection(direction === 'up' ? 'down' : 'up')}
+                title="Toggle the sentiment direction up or down"
+                className={`w-full flex items-center justify-center gap-1.5 rounded-md px-2.5 py-1.5 text-xs font-semibold border transition-colors ${
+                  direction === 'down'
+                    ? 'bg-[#FF4B4B]/10 border-[#FF4B4B]/40 text-[#FF4B4B]'
+                    : 'bg-[#0CDF9D]/10 border-[#0CDF9D]/40 text-[#0CDF9D]'
+                }`}
+              >
+                {direction === 'down' ? '▼ Down' : '▲ Up'}
+              </button>
+              {/* Noise level — how much synthetic volatility to add to the line */}
+              <div className="flex items-center gap-1">
+                <span className="text-[10px] text-zinc-500 select-none shrink-0 mr-1">Noise</span>
+                {(['none', 'small', 'med', 'large'] as const).map(lvl => (
+                  <button
+                    key={lvl}
+                    type="button"
+                    onClick={() => onUpdateNoiseLevel(lvl)}
+                    title={`${lvl[0].toUpperCase()}${lvl.slice(1)} chart noise`}
+                    className={`flex-1 min-w-0 rounded-md px-1.5 py-1.5 text-[11px] font-medium border capitalize transition-colors ${
+                      noiseLevel === lvl
+                        ? 'bg-zinc-700 border-zinc-500 text-zinc-100'
+                        : 'bg-zinc-900 border-zinc-800 text-zinc-400 hover:border-zinc-600'
+                    }`}
+                  >
+                    {lvl}
+                  </button>
+                ))}
               </div>
             </div>
           )}
@@ -1031,8 +1050,8 @@ export function CanvasGrid({
   const [chartsImageTrendsErrorMap,  setChartsImageTrendsErrorMap]  = useState<Record<string, string | null>>({});
   const [chartsImageAspectRatioMap,  setChartsImageAspectRatioMap]  = useState<Record<string, CanvasAspectRatio>>({});
   const [chartsImageIndustryOverrideMap, setChartsImageIndustryOverrideMap] = useState<Record<string, string>>({});
-  const [chartsImagePctOverrideMap,      setChartsImagePctOverrideMap]      = useState<Record<string, string>>({});
-  const [chartsImageRawOverrideMap,      setChartsImageRawOverrideMap]      = useState<Record<string, string>>({});
+  const [chartsImageDirectionMap,        setChartsImageDirectionMap]        = useState<Record<string, ChartsImageDirection>>({});
+  const [chartsImageNoiseLevelMap,       setChartsImageNoiseLevelMap]       = useState<Record<string, ChartsImageNoiseLevel>>({});
   // Shared library of available audio tracks (loaded once from disk)
   const [preloadedAudios,   setPreloadedAudios]   = useState<PreloadedAudio[]>([]);
 
@@ -1614,22 +1633,9 @@ export function CanvasGrid({
     if (!mk) return;
     const name = (chartsImageNameOverrideMap[entryId] || mk.name).trim();
 
-    // Compute % change from actual normalised chart data (last two points)
-    const sparkline    = mk.sparkline ?? [];
-    const firstNonZero = sparkline.findIndex(p => p.value > 0);
-    const cropped      = firstNonZero > 0 ? sparkline.slice(firstNonZero) : sparkline;
-    const lastSpark    = cropped[cropped.length - 1]?.value ?? 0;
-    const minSpark     = cropped.length ? Math.min(...cropped.map(p => p.value)) : 0;
-    const sparkRange   = lastSpark - minSpark;
-    const realPrice    = mk.price?.usd ?? null;
-    const lastPrice    = realPrice != null && realPrice > 0 ? realPrice : Math.max(0.01, lastSpark);
-    const normalize    = (v: number) => sparkRange > 0
-      ? 0.01 + ((v - minSpark) / sparkRange) * (lastPrice - 0.01)
-      : lastPrice;
-    const lastNorm     = normalize(lastSpark);
-    const prevNorm     = cropped.length >= 2 ? normalize(cropped[cropped.length - 2].value) : lastNorm;
-    const isPositive   = lastNorm >= prevNorm;
-    const seededPct    = prevNorm > 0 ? Math.abs((lastNorm - prevNorm) / prevNorm * 100) : 0;
+    // Match the rendered card: seeded 5–15% magnitude, direction from the up/down toggle.
+    const seededPct  = seededChangePct(mk.ticker);
+    const isPositive = (chartsImageDirectionMap[entryId] ?? 'up') !== 'down';
 
     setSocialCaptionMap(prev => ({
       ...prev,
@@ -1655,7 +1661,7 @@ export function CanvasGrid({
       }));
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [chartsImageMarketMap, chartsImageNameOverrideMap]);
+  }, [chartsImageMarketMap, chartsImageNameOverrideMap, chartsImageDirectionMap]);
 
   // "Next" in the media tab: fetch the video, then auto-run the caption
   // generator. One action instead of two. If the fetch fails, the error is
@@ -2197,11 +2203,11 @@ export function CanvasGrid({
                     onRemove={() => onRemoveRow(entry.id)}
                     onOpenPhotoPicker={query => openPhotoPicker(`chartsimage:${entry.id}`, query)}
                     overrideIndustry={chartsImageIndustryOverrideMap[entry.id] ?? ''}
-                    overridePct={chartsImagePctOverrideMap[entry.id] ?? ''}
-                    overrideRaw={chartsImageRawOverrideMap[entry.id] ?? ''}
+                    direction={chartsImageDirectionMap[entry.id] ?? 'up'}
+                    noiseLevel={chartsImageNoiseLevelMap[entry.id] ?? 'none'}
                     onUpdateOverrideIndustry={v => setChartsImageIndustryOverrideMap(prev => ({ ...prev, [entry.id]: v }))}
-                    onUpdateOverridePct={v => setChartsImagePctOverrideMap(prev => ({ ...prev, [entry.id]: v }))}
-                    onUpdateOverrideRaw={v => setChartsImageRawOverrideMap(prev => ({ ...prev, [entry.id]: v }))}
+                    onUpdateDirection={v => setChartsImageDirectionMap(prev => ({ ...prev, [entry.id]: v }))}
+                    onUpdateNoiseLevel={v => setChartsImageNoiseLevelMap(prev => ({ ...prev, [entry.id]: v }))}
                   />
                 ) : (
                   <VideoInputCard
@@ -2397,8 +2403,8 @@ export function CanvasGrid({
                           market={(chartsImageMarketMap[entry.id] ?? null) as ChartsImageMarket | null}
                           overrideName={chartsImageNameOverrideMap[entry.id] ?? ''}
                           overrideIndustry={chartsImageIndustryOverrideMap[entry.id] ?? ''}
-                          overridePct={chartsImagePctOverrideMap[entry.id] ?? ''}
-                          overrideRaw={chartsImageRawOverrideMap[entry.id] ?? ''}
+                          direction={chartsImageDirectionMap[entry.id] ?? 'up'}
+                          noiseLevel={chartsImageNoiseLevelMap[entry.id] ?? 'none'}
                           aspectRatio={chartsImageAspectRatioMap[entry.id] ?? 'portrait'}
                         />
                       ) : (

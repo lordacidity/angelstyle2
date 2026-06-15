@@ -2,9 +2,17 @@
 
 import { useRef, useEffect, useCallback, forwardRef, useImperativeHandle } from 'react';
 import { CANVAS_W, CANVAS_H, DISPLAY_SCALE, PPT_W, PPT_H, PPT_DISPLAY_SCALE } from './constants';
-import type { ChartsImageCanvasProps, ChartsImageCanvasRef, ChartsImageMarket, SparkPoint } from './types';
+import type { ChartsImageCanvasProps, ChartsImageCanvasRef, ChartsImageMarket, ChartsImageDirection, ChartsImageNoiseLevel, SparkPoint } from './types';
 
-export type { ChartsImageCanvasRef, ChartsImageMarket, CanvasAspectRatio } from './types';
+export type { ChartsImageCanvasRef, ChartsImageMarket, CanvasAspectRatio, ChartsImageDirection, ChartsImageNoiseLevel } from './types';
+
+// Noise amplitude per level, as a fraction of the chart's plot height. 0 = off.
+const NOISE_SCALE: Record<ChartsImageNoiseLevel, number> = { none: 0, small: 0.035, med: 0.075, large: 0.13 };
+
+// Stable per-ticker seed so each market's noise shape is consistent across redraws.
+function tickerSeed(ticker: string): number {
+  return (ticker.split('').reduce((a, c) => (a * 31 + c.charCodeAt(0)) | 0, 9) >>> 0) || 1;
+}
 
 // ── Constants ─────────────────────────────────────────────────────────────────
 
@@ -20,27 +28,10 @@ const POINT_INTERVAL_MS = 45 * 24 * 60 * 60 * 1000;
 
 // ── Helpers copied verbatim from ChartsCanvas/index.tsx ───────────────────────
 
-function generateFallbackSparkline(ticker: string): SparkPoint[] {
-  let seed = ticker.split('').reduce((a, c) => (a * 31 + c.charCodeAt(0)) | 0, 0x1234) >>> 0;
-  const rand = () => { seed = (seed * 1664525 + 1013904223) >>> 0; return seed / 0xffffffff; };
-  const N      = 13 + Math.floor(rand() * 9);
-  const wiggle = 0.34 + rand() * 0.18;
-  const vals: number[] = [];
-  for (let i = 0; i < N; i++) {
-    const t     = N === 1 ? 0 : i / (N - 1);
-    const taper = Math.sin(Math.PI * t);
-    let   j     = (rand() - 0.5) * wiggle;
-    if (rand() < 0.22) j += (rand() - 0.5) * wiggle * 1.8;
-    vals.push(t + j * taper);
-  }
-  const lo    = Math.min(...vals);
-  const range = Math.max(1e-6, Math.max(...vals) - lo);
-  return vals.map((x, i) => ({ value: 0.1 + ((x - lo) / range) * 0.8, timestamp: i }));
-}
-
 // Deterministic, believable change% in [5, 15] seeded by ticker. Must be stable
 // across redraws (the canvas repaints every animation frame) — no Math.random().
-function seededChangePct(ticker: string): number {
+// Exported so the caption generator shows the same magnitude as the rendered card.
+export function seededChangePct(ticker: string): number {
   let seed = ticker.split('').reduce((a, c) => (a * 31 + c.charCodeAt(0)) | 0, 7) >>> 0;
   seed = (seed * 1664525 + 1013904223) >>> 0;
   return 5 + (seed / 0xffffffff) * 10; // 5.0 – 15.0
@@ -89,6 +80,8 @@ function drawStepChart(
   rx: number, ry: number, rw: number, rh: number,
   color:     string,
   maxLabels: number = 20,
+  noiseSeed:  number = 0,
+  noiseScale: number = 0,
 ) {
   if (series.length < 2) return;
 
@@ -145,6 +138,22 @@ function drawStepChart(
   // ── Step-line path ────────────────────────────────────────────────────────
   const rawPts = s.map(p => ({ x: toX(p.t), y: toY(p.price) }));
 
+  // Optional noise: nudge each interior point vertically by a seeded amount so the
+  // line reads as more volatile. noiseScale === 0 (level 'none') → no extra noise.
+  // Amplitude scales with the chosen level; first/last points stay anchored (last
+  // keeps the head dot on the real price).
+  if (noiseScale > 0 && rawPts.length > 2) {
+    let rng = (noiseSeed >>> 0) || 1;
+    const nextRand  = () => { rng = (rng * 1664525 + 1013904223) >>> 0; return rng / 0xffffffff; };
+    const NOISE_AMP = chartAreaH * noiseScale;
+    const yTop = ry + V_PAD_T;
+    const yBot = ry + V_PAD_T + chartAreaH;
+    for (let i = 1; i < rawPts.length - 1; i++) {
+      const n = (nextRand() - 0.5) * 2 * NOISE_AMP;
+      rawPts[i].y = Math.max(yTop, Math.min(yBot, rawPts[i].y + n));
+    }
+  }
+
   // Insert seeded micro-jitter sub-points between each pair for organic fluctuations.
   const JITTER   = 10; // canvas-px amplitude
   const SUB_PTS  = 1;  // extra points per segment
@@ -155,7 +164,7 @@ function drawStepChart(
       const t  = j / (SUB_PTS + 1);
       const x  = rawPts[i].x + (rawPts[i + 1].x - rawPts[i].x) * t;
       const y  = rawPts[i].y + (rawPts[i + 1].y - rawPts[i].y) * t;
-      const h  = Math.sin(i * 127.1 + j * 311.7 + x * 0.3) * 43758.5453;
+      const h  = Math.sin(i * 127.1 + j * 311.7 + x * 0.3 + noiseSeed * 0.001) * 43758.5453;
       const n  = (h - Math.floor(h) - 0.5) * 2 * JITTER;
       pts.push({ x, y: y + n });
     }
@@ -231,8 +240,7 @@ function drawHeader(
   overrideName:    string,
   cH:              number,
   overrideIndustry?: string,
-  overridePct?:      string,
-  overrideRaw?:      string,
+  direction:       ChartsImageDirection = 'up',
 ): HeaderResult {
   const displayName = overrideName || market.name;
   const SANS        = '-apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif';
@@ -262,19 +270,14 @@ function drawHeader(
       : lastPrice,
   }));
 
-  // % change and raw change from last two normalised points (most recent period)
-  const lastNorm  = series[series.length - 1]?.price ?? lastPrice;
-  const prevNorm  = series[series.length - 2]?.price ?? lastNorm;
-  const calcIsPositive = lastNorm >= prevNorm;
-  const calcRawChange  = lastNorm - prevNorm;
-  const calcPct        = prevNorm > 0 ? Math.abs(calcRawChange / prevNorm * 100) : 0;
-
-  // Apply overrides (empty string = use calculated)
-  const pctOverrideVal = overridePct?.trim() ? parseFloat(overridePct) : null;
-  const rawOverrideVal = overrideRaw?.trim() ? parseFloat(overrideRaw) : null;
-  const isPositive = pctOverrideVal !== null ? pctOverrideVal >= 0 : calcIsPositive;
-  const pct        = pctOverrideVal !== null ? Math.abs(pctOverrideVal) : calcPct;
-  const rawChange  = rawOverrideVal !== null ? rawOverrideVal : calcRawChange;
+  // Headline change: magnitude is a seeded random 5–15% per ticker (stable across
+  // redraws), sign comes from the up/down toggle. Raw $ change is derived from the
+  // pct applied to the displayed price, so the two always agree.
+  const isPositive = direction !== 'down';
+  const pct        = seededChangePct(market.ticker);
+  const signedPct  = isPositive ? pct : -pct;
+  const startPrice = lastPrice / (1 + signedPct / 100);
+  const rawChange  = lastPrice - startPrice; // +ve when up, −ve when down
   const color      = isPositive ? '#0CDF9D' : '#FF4B4B';
 
   // ── Shared left margin — all rows left-aligned ───────────────────────────
@@ -453,7 +456,7 @@ function drawBottomBar(ctx: CanvasRenderingContext2D, logo: HTMLImageElement | n
 // ── Component ─────────────────────────────────────────────────────────────────
 
 export const ChartsImageCanvas = forwardRef<ChartsImageCanvasRef, ChartsImageCanvasProps>(
-  function ChartsImageCanvas({ market, overrideName = '', overrideIndustry = '', overridePct = '', overrideRaw = '', aspectRatio = 'portrait' }, ref) {
+  function ChartsImageCanvas({ market, overrideName = '', overrideIndustry = '', direction = 'up', noiseLevel = 'none', aspectRatio = 'portrait' }, ref) {
     const cW     = aspectRatio === 'ppt' ? PPT_W     : CANVAS_W;
     const cH     = aspectRatio === 'ppt' ? PPT_H     : CANVAS_H;
     const dScale = aspectRatio === 'ppt' ? PPT_DISPLAY_SCALE : DISPLAY_SCALE;
@@ -465,15 +468,15 @@ export const ChartsImageCanvas = forwardRef<ChartsImageCanvasRef, ChartsImageCan
     const marketRef          = useRef(market);
     const overrideNameRef    = useRef(overrideName);
     const overrideIndustryRef = useRef(overrideIndustry);
-    const overridePctRef     = useRef(overridePct);
-    const overrideRawRef     = useRef(overrideRaw);
+    const directionRef       = useRef(direction);
+    const noiseLevelRef      = useRef(noiseLevel);
     const dimensionsRef      = useRef({ cW, cH });
 
     useEffect(() => { marketRef.current          = market;          }, [market]);
     useEffect(() => { overrideNameRef.current    = overrideName;    }, [overrideName]);
     useEffect(() => { overrideIndustryRef.current = overrideIndustry; }, [overrideIndustry]);
-    useEffect(() => { overridePctRef.current     = overridePct;     }, [overridePct]);
-    useEffect(() => { overrideRawRef.current     = overrideRaw;     }, [overrideRaw]);
+    useEffect(() => { directionRef.current       = direction;       }, [direction]);
+    useEffect(() => { noiseLevelRef.current      = noiseLevel;      }, [noiseLevel]);
     useEffect(() => { dimensionsRef.current      = { cW, cH };     }, [cW, cH]);
 
     // ── Load pauv logo ──────────────────────────────────────────────────────
@@ -520,7 +523,7 @@ export const ChartsImageCanvas = forwardRef<ChartsImageCanvasRef, ChartsImageCan
 
       const { series, color, changeBaseY } = drawHeader(
         ctx, mk, imgRef.current, overrideNameRef.current, h,
-        overrideIndustryRef.current, overridePctRef.current, overrideRawRef.current,
+        overrideIndustryRef.current, directionRef.current,
       );
 
       const CHART_TOP  = changeBaseY + 56;
@@ -530,7 +533,8 @@ export const ChartsImageCanvas = forwardRef<ChartsImageCanvasRef, ChartsImageCan
       const CHART_W    = w - PAD * 2;
 
       if (CHART_H_PX > 60) {
-        drawStepChart(ctx, series, CHART_L, CHART_TOP, CHART_W, CHART_H_PX, color, h > 1100 ? 4 : 7);
+        drawStepChart(ctx, series, CHART_L, CHART_TOP, CHART_W, CHART_H_PX, color, h > 1100 ? 4 : 7,
+          tickerSeed(mk.ticker), NOISE_SCALE[noiseLevelRef.current] ?? 0);
       }
 
       drawBottomBar(ctx, pauvLogoRef.current, w, h);
@@ -571,12 +575,13 @@ export const ChartsImageCanvas = forwardRef<ChartsImageCanvasRef, ChartsImageCan
         if (mk) {
           const { series, color, changeBaseY } = drawHeader(
             ctx, mk, imgRef.current, overrideNameRef.current, h,
-            overrideIndustryRef.current, overridePctRef.current, overrideRawRef.current,
+            overrideIndustryRef.current, directionRef.current,
           );
           const CHART_TOP  = changeBaseY + 56;
           const CHART_H_PX = chartBotFor(h) - CHART_TOP;
           if (CHART_H_PX > 60) {
-            drawStepChart(ctx, series, PAD, CHART_TOP, w - PAD * 2, CHART_H_PX, color, h > 1100 ? 4 : 7);
+            drawStepChart(ctx, series, PAD, CHART_TOP, w - PAD * 2, CHART_H_PX, color, h > 1100 ? 4 : 7,
+              tickerSeed(mk.ticker), NOISE_SCALE[noiseLevelRef.current] ?? 0);
           }
           drawBottomBar(ctx, pauvLogoRef.current, w, h);
         }
