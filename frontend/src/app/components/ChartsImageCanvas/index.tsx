@@ -1,16 +1,19 @@
 'use client';
 
 import { useRef, useEffect, useCallback, forwardRef, useImperativeHandle } from 'react';
-import { CANVAS_W, CANVAS_H, DISPLAY_SCALE } from './constants';
+import { CANVAS_W, CANVAS_H, DISPLAY_SCALE, PPT_W, PPT_H, PPT_DISPLAY_SCALE } from './constants';
 import type { ChartsImageCanvasProps, ChartsImageCanvasRef, ChartsImageMarket, SparkPoint } from './types';
 
-export type { ChartsImageCanvasRef, ChartsImageMarket } from './types';
+export type { ChartsImageCanvasRef, ChartsImageMarket, CanvasAspectRatio } from './types';
 
 // ── Constants ─────────────────────────────────────────────────────────────────
 
 const PAD      = 80; // uniform content padding on all four sides
-const TOP_PAD  = PAD + 20;
 const AVATAR_R = 52; // small inline avatar (≈h-9 at 0.38 display scale)
+// Portrait gets extra breathing room; PPT keeps the original tighter values
+const topPadFor    = (cH: number) => cH > 1100 ? PAD + 68 : PAD + 20;
+const chartBotFor  = (cH: number) => cH > 1100 ? cH - 266  : cH - 210;
+const barCyFor     = (cH: number) => cH > 1100 ? cH - 177  : cH - 140;
 
 // Each synthetic sparkline index treated as 45 days → realistic 18-month span
 const POINT_INTERVAL_MS = 45 * 24 * 60 * 60 * 1000;
@@ -81,23 +84,17 @@ function drawImageCover(
 // ── drawStepChart ─────────────────────────────────────────────────────────────
 
 function drawStepChart(
-  ctx:    CanvasRenderingContext2D,
-  series: { t: number; price: number }[],
+  ctx:       CanvasRenderingContext2D,
+  series:    { t: number; price: number }[],
   rx: number, ry: number, rw: number, rh: number,
-  color:  string,
+  color:     string,
+  maxLabels: number = 20,
 ) {
   if (series.length < 2) return;
 
-  const tenYearsAgo = series[series.length - 1].t - 5 * 365.25 * 24 * 60 * 60 * 1000;
-  const trimmed = series.filter(p => p.t >= tenYearsAgo);
-  const src = trimmed.length >= 2 ? trimmed : series;
+  const src = series;
 
-  const MA = 2;
-  const s = src.map((p, i) => {
-    const slice = src.slice(Math.max(0, i - MA + 1), i + 1);
-    const avg = slice.reduce((a, v) => a + v.price, 0) / slice.length;
-    return { t: p.t, price: avg };
-  });
+  const s = src;
 
   const V_PAD_T    = 48;
   const V_PAD_B    = 80;
@@ -112,11 +109,12 @@ function drawStepChart(
   const tEnd   = s[s.length - 1].t;
   const tRange = Math.max(tEnd - tStart, 1);
 
-  // Right gutter for Y-axis labels
-  const RIGHT_GUTTER = 120;
+  // Right gutter for Y-axis labels; inner pad keeps the line/dot off the gutter edge
+  const RIGHT_GUTTER    = 90;
+  const CHART_RIGHT_PAD = 40;
 
   const toX = (t: number) =>
-    rx + ((t - tStart) / tRange) * (rw - RIGHT_GUTTER);
+    rx + ((t - tStart) / tRange) * (rw - RIGHT_GUTTER - CHART_RIGHT_PAD);
 
   const toY = (price: number) =>
     ry + V_PAD_T + (1 - (price - minPrice) / priceRange) * chartAreaH;
@@ -126,7 +124,7 @@ function drawStepChart(
   for (const frac of [0, 0.25, 0.5, 0.75]) {
     const gy = ry + frac * rh;
 
-    ctx.strokeStyle = '#1e1e1e';
+    ctx.strokeStyle = '#484848';
     ctx.lineWidth   = 1.5;
     ctx.setLineDash([4, 10]);
     ctx.beginPath();
@@ -137,21 +135,36 @@ function drawStepChart(
 
     // Y-axis price label
     const labelPrice = minPrice + (1 - (gy - ry - V_PAD_T) / chartAreaH) * priceRange;
-    if (labelPrice > 0) {
-      ctx.font         = `400 20px "JetBrains Mono", "Courier New", monospace`;
-      ctx.fillStyle    = '#52525b';
-      ctx.textAlign    = 'right';
-      ctx.textBaseline = 'middle';
-      ctx.fillText(`$${labelPrice.toFixed(2)}`, rx + rw - 4, gy);
-    }
+    ctx.font         = `400 20px "JetBrains Mono", "Courier New", monospace`;
+    ctx.fillStyle    = '#52525b';
+    ctx.textAlign    = 'right';
+    ctx.textBaseline = 'middle';
+    ctx.fillText(`${labelPrice.toFixed(2)}`, rx + rw, gy);
   }
 
   // ── Step-line path ────────────────────────────────────────────────────────
-  const pts = s.map(p => ({ x: toX(p.t), y: toY(p.price) }));
+  const rawPts = s.map(p => ({ x: toX(p.t), y: toY(p.price) }));
+
+  // Insert seeded micro-jitter sub-points between each pair for organic fluctuations.
+  const JITTER   = 10; // canvas-px amplitude
+  const SUB_PTS  = 1;  // extra points per segment
+  const pts: { x: number; y: number }[] = [];
+  for (let i = 0; i < rawPts.length - 1; i++) {
+    pts.push(rawPts[i]);
+    for (let j = 1; j <= SUB_PTS; j++) {
+      const t  = j / (SUB_PTS + 1);
+      const x  = rawPts[i].x + (rawPts[i + 1].x - rawPts[i].x) * t;
+      const y  = rawPts[i].y + (rawPts[i + 1].y - rawPts[i].y) * t;
+      const h  = Math.sin(i * 127.1 + j * 311.7 + x * 0.3) * 43758.5453;
+      const n  = (h - Math.floor(h) - 0.5) * 2 * JITTER;
+      pts.push({ x, y: y + n });
+    }
+  }
+  pts.push(rawPts[rawPts.length - 1]);
 
   ctx.beginPath();
   ctx.strokeStyle = color;
-  ctx.lineWidth   = 5;
+  ctx.lineWidth   = 3;
   ctx.lineJoin    = 'round';
   ctx.lineCap     = 'round';
   ctx.moveTo(pts[0].x, pts[0].y);
@@ -168,7 +181,7 @@ function drawStepChart(
 
   // Outer glow ring (mid-pulse state of the mobile pulsating dot)
   ctx.beginPath();
-  ctx.arc(last.x, last.y, 32, 0, Math.PI * 2);
+  ctx.arc(last.x, last.y, 16, 0, Math.PI * 2);
   ctx.fillStyle = color;
   ctx.globalAlpha = 0.18;
   ctx.fill();
@@ -176,28 +189,28 @@ function drawStepChart(
 
   // Inner solid dot
   ctx.beginPath();
-  ctx.arc(last.x, last.y, 10, 0, Math.PI * 2);
+  ctx.arc(last.x, last.y, 6, 0, Math.PI * 2);
   ctx.fillStyle = color;
   ctx.fill();
 
-  // ── X-axis time labels (5 evenly spaced) ─────────────────────────────────
-  ctx.font         = `400 22px system-ui, sans-serif`;
+  // ── X-axis time labels ────────────────────────────────────────────────────
+  ctx.font         = `400 22px "JetBrains Mono", "Courier New", monospace`;
   ctx.fillStyle    = '#52525b';
   ctx.textBaseline = 'alphabetic';
   const labelY = ry + rh - 24;
 
+  // Place maxLabels evenly across the actual time range
+  const tMin = s[0].t;
+  const tMax = s[s.length - 1].t;
   const seenYears = new Set<number>();
-  let lastLabelX = -Infinity;
-  const minGap = 80;
-  for (let i = 0; i < s.length; i++) {
-    const year = new Date(s[i].t).getFullYear();
+  for (let k = 0; k < maxLabels; k++) {
+    const t    = tMin + (k / (maxLabels - 1)) * (tMax - tMin);
+    const year = new Date(t).getFullYear();
     if (seenYears.has(year)) continue;
-    seenYears.add(year); // claim the year before the gap check so no later point re-draws it
-    const lx = toX(s[i].t);
-    if (lx - lastLabelX < minGap) continue;
-    ctx.textAlign = i === 0 ? 'left' : i === s.length - 1 ? 'right' : 'center';
+    seenYears.add(year);
+    const lx = toX(t);
+    ctx.textAlign = k === 0 ? 'left' : k === maxLabels - 1 ? 'right' : 'center';
     ctx.fillText(String(year), lx, labelY);
-    lastLabelX = lx;
   }
 
   ctx.restore();
@@ -212,44 +225,57 @@ interface HeaderResult {
 }
 
 function drawHeader(
-  ctx:         CanvasRenderingContext2D,
-  market:      ChartsImageMarket,
-  img:         HTMLImageElement | null,
-  overrideName: string,
+  ctx:             CanvasRenderingContext2D,
+  market:          ChartsImageMarket,
+  img:             HTMLImageElement | null,
+  overrideName:    string,
+  cH:              number,
+  overrideIndustry?: string,
+  overridePct?:      string,
+  overrideRaw?:      string,
 ): HeaderResult {
   const displayName = overrideName || market.name;
   const SANS        = '-apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif';
+  const TOP_PAD     = topPadFor(cH);
 
-  // ── Sparkline shape (Google Trends or synthetic fallback) ─────────────────
-  const rawSeries = sparkToSeries(
-    market.sparkline?.length ? market.sparkline : generateFallbackSparkline(market.ticker),
-  );
+  // ── Sparkline shape (Google Trends) ──────────────────────────────────────
+  const fullSeries = sparkToSeries(market.sparkline?.length ? market.sparkline : []);
+
+  // Crop to first point where Google Trends value > 0
+  const firstNonZeroIdx = fullSeries.findIndex(p => p.price > 0);
+  const rawSeries = firstNonZeroIdx > 0 ? fullSeries.slice(firstNonZeroIdx) : fullSeries;
+
   const lastSpark = rawSeries[rawSeries.length - 1]?.price ?? 0;
+  const minSpark  = rawSeries.length ? Math.min(...rawSeries.map(p => p.price)) : 0;
 
-  // 5-year cut (matches drawStepChart) used only to read the trend direction
-  const cutStartT  = (rawSeries[rawSeries.length - 1]?.t ?? 0) - 5 * 365.25 * 24 * 60 * 60 * 1000;
-  const cutSeries  = rawSeries.filter(p => p.t >= cutStartT);
-  const baseSeries = cutSeries.length >= 2 ? cutSeries : rawSeries;
-  const firstSpark = baseSeries[0]?.price ?? 0;
+  // Displayed value = NPSI index from API.
+  const realPrice = market.price?.usd ?? null;
+  const lastPrice = realPrice != null && realPrice > 0 ? realPrice : Math.max(0.01, lastSpark);
 
-  // Headline price = the talent's real NPSI/sentiment price (falls back to the
-  // last sparkline value only when no price is available).
-  const realPrice    = market.price?.usd ?? null;
-  const lastPrice    = realPrice != null && realPrice > 0 ? realPrice : Math.max(0.01, lastSpark);
+  // Normalise: minSpark → 0.01, lastSpark → NPSI. Shape is scaled proportionally,
+  // all values ≥ 0.01, last point = NPSI.
+  const sparkRange = lastSpark - minSpark;
+  const series = rawSeries.map(p => ({
+    t:     p.t,
+    price: sparkRange > 0
+      ? 0.01 + ((p.price - minSpark) / sparkRange) * (lastPrice - 0.01)
+      : lastPrice,
+  }));
 
-  // Scale the sparkline so its final point equals the headline price, keeping the
-  // chart's Y-axis labels in the same range as the displayed price.
-  const scale  = lastSpark > 0 ? lastPrice / lastSpark : 1;
-  const series = rawSeries.map(p => ({ t: p.t, price: p.price * scale }));
+  // % change and raw change from last two normalised points (most recent period)
+  const lastNorm  = series[series.length - 1]?.price ?? lastPrice;
+  const prevNorm  = series[series.length - 2]?.price ?? lastNorm;
+  const calcIsPositive = lastNorm >= prevNorm;
+  const calcRawChange  = lastNorm - prevNorm;
+  const calcPct        = prevNorm > 0 ? Math.abs(calcRawChange / prevNorm * 100) : 0;
 
-  // Believable change: magnitude clamped to a 5–15% range (deterministic per
-  // person), sign following the chart's visual direction.
-  const isPositive = lastSpark >= firstSpark;
-  const pct        = seededChangePct(market.ticker);
-  const signedPct  = isPositive ? pct : -pct;
-  const startPrice = lastPrice / (1 + signedPct / 100);
-  const rawChange  = lastPrice - startPrice;
-  const color      = isPositive ? '#04df9d' : '#FF4B4B';
+  // Apply overrides (empty string = use calculated)
+  const pctOverrideVal = overridePct?.trim() ? parseFloat(overridePct) : null;
+  const rawOverrideVal = overrideRaw?.trim() ? parseFloat(overrideRaw) : null;
+  const isPositive = pctOverrideVal !== null ? pctOverrideVal >= 0 : calcIsPositive;
+  const pct        = pctOverrideVal !== null ? Math.abs(pctOverrideVal) : calcPct;
+  const rawChange  = rawOverrideVal !== null ? rawOverrideVal : calcRawChange;
+  const color      = isPositive ? '#0CDF9D' : '#FF4B4B';
 
   // ── Shared left margin — all rows left-aligned ───────────────────────────
   const LEFT = PAD;
@@ -257,12 +283,12 @@ function drawHeader(
   // ── Row 1: avatar (small) + name (+ industry under name) ─────────────────
   const nameText        = `${displayName}'s Sentiment`;
   const NAME_FONT       = `400 44px "Inter", ${SANS}`;
-  const INDUSTRY_FONT   = `400 26px "Inter", ${SANS}`;
-  const AVATAR_NAME_GAP = 28;
+  const INDUSTRY_FONT   = `400 31px "Inter", ${SANS}`;
+  const AVATAR_NAME_GAP = 42;
   const avatarCX = LEFT + AVATAR_R;
   const avatarCY = TOP_PAD + AVATAR_R;
   const nameX    = LEFT + AVATAR_R * 2 + AVATAR_NAME_GAP;
-  const industry = (market.industry ?? '').trim();
+  const industry = (overrideIndustry?.trim() ?? market.industry ?? '').trim();
 
   ctx.save();
   ctx.beginPath();
@@ -273,7 +299,7 @@ function drawHeader(
   } else {
     ctx.fillStyle = '#27272a';
     ctx.fill();
-    ctx.fillStyle    = '#04df9d';
+    ctx.fillStyle    = '#0CDF9D';
     ctx.font         = `700 ${Math.round(AVATAR_R * 0.65)}px -apple-system, sans-serif`;
     ctx.textAlign    = 'center';
     ctx.textBaseline = 'middle';
@@ -287,19 +313,21 @@ function drawHeader(
   if (industry) {
     // Stack name + industry, centred as a block on the avatar.
     ctx.textBaseline = 'alphabetic';
-    ctx.fillText(nameText, nameX, avatarCY - 4);
+    ctx.fillText(nameText, nameX, avatarCY - 8);
     ctx.font      = INDUSTRY_FONT;
     ctx.fillStyle = '#71717a';
-    ctx.fillText(industry, nameX, avatarCY + 32);
+    ctx.fillText(industry, nameX, avatarCY + 44);
   } else {
     ctx.textBaseline = 'middle';
     ctx.fillText(nameText, nameX, avatarCY);
   }
 
   // ── Row 2: price + "points" ───────────────────────────────────────────────
+  const isPpt            = cH <= 1100;
   const priceStr         = `${Math.max(0.01, lastPrice).toFixed(2)}`;
   const PRICE_FONT       = `600 56px "JetBrains Mono", "Courier New", monospace`;
   const POINTS_FONT      = `400 44px "Inter", ${SANS}`;
+  const CHANGE_FONT      = `500 30px "JetBrains Mono", "Courier New", monospace`;
   const PRICE_POINTS_GAP = 16;
   ctx.font = PRICE_FONT;  const priceW = ctx.measureText(priceStr).width;
   const priceBaseY = avatarCY + AVATAR_R + 104;
@@ -314,44 +342,80 @@ function drawHeader(
   ctx.fillStyle    = '#ffffff';
   ctx.textAlign    = 'left';
   ctx.textBaseline = 'alphabetic';
-  ctx.fillText('points', LEFT + priceW + PRICE_POINTS_GAP, priceBaseY - 1);
+  const pointsX = LEFT + priceW + PRICE_POINTS_GAP;
+  ctx.fillText('points', pointsX, priceBaseY - 1);
 
-  // ── Row 3: arrow + signed % ───────────────────────────────────────────────
-  const changeBaseY = priceBaseY + 72;
-  const CHANGE_FONT = `500 30px "JetBrains Mono", "Courier New", monospace`;
-  const pctStr      = `${isPositive ? '+' : '-'}${Math.abs(pct).toFixed(1)}%`;
-  const ARROW_W     = 28;
-  const ARROW_H     = Math.round(ARROW_W * (18 / 24));
-  const ARROW_GAP   = 10;
-  const arrowLeft   = LEFT;
-  const arrowTop  = changeBaseY - Math.round(30 * 0.35) - Math.round(ARROW_H / 2) + 3;
+  const pctStr   = `${Math.abs(pct).toFixed(1)}%`;
+  const rawStr   = `${isPositive ? '+' : '-'}$${Math.abs(rawChange).toFixed(2)}`;
+  const ARROW_W  = 28;
+  const ARROW_H  = Math.round(ARROW_W * (18 / 24));
+  const ARROW_GAP = 10;
 
-  ctx.fillStyle = color;
-  ctx.beginPath();
-  if (isPositive) {
-    ctx.moveTo(arrowLeft + ARROW_W * 0.5,    arrowTop);
-    ctx.lineTo(arrowLeft + ARROW_W * 0.933,  arrowTop + ARROW_H * 0.792);
-    ctx.lineTo(arrowLeft + ARROW_W * 0.067,  arrowTop + ARROW_H * 0.792);
+  let changeBaseY: number;
+
+  if (isPpt) {
+    // PPT: inline arrow + % + raw after "points" on the same baseline
+    ctx.font = POINTS_FONT;
+    const pointsW   = ctx.measureText('points').width;
+    const inlineGap = 32;
+    const arrowLeft = pointsX + pointsW + inlineGap;
+    const arrowTopBase = priceBaseY - Math.round(30 * 0.35) - Math.round(ARROW_H / 2) + 3;
+    const arrowTop     = isPositive ? arrowTopBase : arrowTopBase - 5;
+
+    ctx.fillStyle = color;
+    ctx.beginPath();
+    if (isPositive) {
+      ctx.moveTo(arrowLeft + ARROW_W * 0.5,   arrowTop);
+      ctx.lineTo(arrowLeft + ARROW_W * 0.933, arrowTop + ARROW_H * 0.792);
+      ctx.lineTo(arrowLeft + ARROW_W * 0.067, arrowTop + ARROW_H * 0.792);
+    } else {
+      ctx.moveTo(arrowLeft + ARROW_W * 0.5,   arrowTop + ARROW_H);
+      ctx.lineTo(arrowLeft + ARROW_W * 0.067, arrowTop + ARROW_H * 0.208);
+      ctx.lineTo(arrowLeft + ARROW_W * 0.933, arrowTop + ARROW_H * 0.208);
+    }
+    ctx.closePath();
+    ctx.fill();
+
+    ctx.font         = CHANGE_FONT;
+    ctx.fillStyle    = color;
+    ctx.textAlign    = 'left';
+    ctx.textBaseline = 'alphabetic';
+    const pctX    = arrowLeft + ARROW_W + ARROW_GAP;
+    ctx.fillText(pctStr, pctX, priceBaseY);
+    const pctTextW = ctx.measureText(pctStr).width;
+    ctx.fillText(rawStr, pctX + pctTextW + 24, priceBaseY);
+
+    changeBaseY = priceBaseY;
   } else {
-    ctx.moveTo(arrowLeft + ARROW_W * 0.5,    arrowTop + ARROW_H);
-    ctx.lineTo(arrowLeft + ARROW_W * 0.067,  arrowTop + ARROW_H * 0.208);
-    ctx.lineTo(arrowLeft + ARROW_W * 0.933,  arrowTop + ARROW_H * 0.208);
+    // Portrait: Row 3 below price row
+    changeBaseY = priceBaseY + 72;
+    const arrowLeft = LEFT;
+    const arrowTopBase = changeBaseY - Math.round(30 * 0.35) - Math.round(ARROW_H / 2) + 3;
+    const arrowTop     = isPositive ? arrowTopBase : arrowTopBase - 5;
+
+    ctx.fillStyle = color;
+    ctx.beginPath();
+    if (isPositive) {
+      ctx.moveTo(arrowLeft + ARROW_W * 0.5,   arrowTop);
+      ctx.lineTo(arrowLeft + ARROW_W * 0.933, arrowTop + ARROW_H * 0.792);
+      ctx.lineTo(arrowLeft + ARROW_W * 0.067, arrowTop + ARROW_H * 0.792);
+    } else {
+      ctx.moveTo(arrowLeft + ARROW_W * 0.5,   arrowTop + ARROW_H);
+      ctx.lineTo(arrowLeft + ARROW_W * 0.067, arrowTop + ARROW_H * 0.208);
+      ctx.lineTo(arrowLeft + ARROW_W * 0.933, arrowTop + ARROW_H * 0.208);
+    }
+    ctx.closePath();
+    ctx.fill();
+
+    ctx.font         = CHANGE_FONT;
+    ctx.fillStyle    = color;
+    ctx.textAlign    = 'left';
+    ctx.textBaseline = 'alphabetic';
+    const pctX     = arrowLeft + ARROW_W + ARROW_GAP;
+    ctx.fillText(pctStr, pctX, changeBaseY);
+    const pctTextW = ctx.measureText(pctStr).width;
+    ctx.fillText(rawStr, pctX + pctTextW + 24, changeBaseY);
   }
-  ctx.closePath();
-  ctx.fill();
-
-  ctx.font         = CHANGE_FONT;
-  ctx.fillStyle    = color;
-  ctx.textAlign    = 'left';
-  ctx.textBaseline = 'alphabetic';
-  const pctX = arrowLeft + ARROW_W + ARROW_GAP;
-  ctx.fillText(pctStr, pctX, changeBaseY);
-
-  // Raw change next to % (matches profile header's raw dollar change)
-  const rawStr  = `${isPositive ? '+' : ''}${rawChange.toFixed(2)}`;
-  const pctTextW = ctx.measureText(pctStr).width;
-  ctx.fillStyle = color;
-  ctx.fillText(rawStr, pctX + pctTextW + 24, changeBaseY);
 
   return { series, color, changeBaseY };
 }
@@ -360,8 +424,8 @@ function drawHeader(
 
 const PERIODS = ['1H', '1D', '7D', '1M', 'ALL'] as const;
 
-function drawBottomBar(ctx: CanvasRenderingContext2D, logo: HTMLImageElement | null) {
-  const BAR_CY = CANVAS_H - 160;
+function drawBottomBar(ctx: CanvasRenderingContext2D, logo: HTMLImageElement | null, cW: number, cH: number) {
+  const BAR_CY = barCyFor(cH);
 
   // Time frames (left) — 7D is the highlighted default
   ctx.font         = `400 30px "Inter", -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif`;
@@ -369,7 +433,7 @@ function drawBottomBar(ctx: CanvasRenderingContext2D, logo: HTMLImageElement | n
   ctx.textAlign    = 'left';
   let px = PAD;
   for (const p of PERIODS) {
-    ctx.fillStyle = p === '7D' ? '#ffffff' : '#52525b';
+    ctx.fillStyle = p === 'ALL' ? '#ffffff' : '#52525b';
     ctx.fillText(p, px, BAR_CY);
     px += ctx.measureText(p).width + 40;
   }
@@ -381,7 +445,7 @@ function drawBottomBar(ctx: CanvasRenderingContext2D, logo: HTMLImageElement | n
     ctx.save();
     ctx.globalAlpha = 0.20;
     ctx.filter      = 'grayscale(1)';
-    ctx.drawImage(logo, CANVAS_W - logoW - PAD, BAR_CY - logoH / 2, logoW, logoH);
+    ctx.drawImage(logo, cW - logoW - PAD, BAR_CY - logoH / 2, logoW, logoH);
     ctx.restore();
   }
 }
@@ -389,16 +453,28 @@ function drawBottomBar(ctx: CanvasRenderingContext2D, logo: HTMLImageElement | n
 // ── Component ─────────────────────────────────────────────────────────────────
 
 export const ChartsImageCanvas = forwardRef<ChartsImageCanvasRef, ChartsImageCanvasProps>(
-  function ChartsImageCanvas({ market, overrideName = '' }, ref) {
-    const canvasRef       = useRef<HTMLCanvasElement>(null);
-    const rafRef          = useRef(0);
-    const imgRef          = useRef<HTMLImageElement | null>(null);
-    const pauvLogoRef     = useRef<HTMLImageElement | null>(null);
-    const marketRef       = useRef(market);
-    const overrideNameRef = useRef(overrideName);
+  function ChartsImageCanvas({ market, overrideName = '', overrideIndustry = '', overridePct = '', overrideRaw = '', aspectRatio = 'portrait' }, ref) {
+    const cW     = aspectRatio === 'ppt' ? PPT_W     : CANVAS_W;
+    const cH     = aspectRatio === 'ppt' ? PPT_H     : CANVAS_H;
+    const dScale = aspectRatio === 'ppt' ? PPT_DISPLAY_SCALE : DISPLAY_SCALE;
 
-    useEffect(() => { marketRef.current       = market;       }, [market]);
-    useEffect(() => { overrideNameRef.current = overrideName; }, [overrideName]);
+    const canvasRef          = useRef<HTMLCanvasElement>(null);
+    const rafRef             = useRef(0);
+    const imgRef             = useRef<HTMLImageElement | null>(null);
+    const pauvLogoRef        = useRef<HTMLImageElement | null>(null);
+    const marketRef          = useRef(market);
+    const overrideNameRef    = useRef(overrideName);
+    const overrideIndustryRef = useRef(overrideIndustry);
+    const overridePctRef     = useRef(overridePct);
+    const overrideRawRef     = useRef(overrideRaw);
+    const dimensionsRef      = useRef({ cW, cH });
+
+    useEffect(() => { marketRef.current          = market;          }, [market]);
+    useEffect(() => { overrideNameRef.current    = overrideName;    }, [overrideName]);
+    useEffect(() => { overrideIndustryRef.current = overrideIndustry; }, [overrideIndustry]);
+    useEffect(() => { overridePctRef.current     = overridePct;     }, [overridePct]);
+    useEffect(() => { overrideRawRef.current     = overrideRaw;     }, [overrideRaw]);
+    useEffect(() => { dimensionsRef.current      = { cW, cH };     }, [cW, cH]);
 
     // ── Load pauv logo ──────────────────────────────────────────────────────
     useEffect(() => {
@@ -426,36 +502,38 @@ export const ChartsImageCanvas = forwardRef<ChartsImageCanvasRef, ChartsImageCan
       const ctx = canvas.getContext('2d');
       if (!ctx)  { rafRef.current = requestAnimationFrame(draw); return; }
 
+      const { cW: w, cH: h } = dimensionsRef.current;
       const mk = marketRef.current;
 
       ctx.fillStyle = '#0A0A0A';
-      ctx.fillRect(0, 0, CANVAS_W, CANVAS_H);
+      ctx.fillRect(0, 0, w, h);
 
       if (!mk) {
         ctx.textAlign    = 'center';
         ctx.textBaseline = 'middle';
         ctx.font         = `300 28px -apple-system, sans-serif`;
         ctx.fillStyle    = '#27272a';
-        ctx.fillText('Select a market to get started', CANVAS_W / 2, CANVAS_H / 2);
+        ctx.fillText('Select a market to get started', w / 2, h / 2);
         rafRef.current = requestAnimationFrame(draw);
         return;
       }
 
       const { series, color, changeBaseY } = drawHeader(
-        ctx, mk, imgRef.current, overrideNameRef.current,
+        ctx, mk, imgRef.current, overrideNameRef.current, h,
+        overrideIndustryRef.current, overridePctRef.current, overrideRawRef.current,
       );
 
       const CHART_TOP  = changeBaseY + 56;
-      const CHART_BOT  = CANVAS_H - 230;
+      const CHART_BOT  = chartBotFor(h);
       const CHART_H_PX = CHART_BOT - CHART_TOP;
       const CHART_L    = PAD;
-      const CHART_W    = CANVAS_W - PAD * 2;
+      const CHART_W    = w - PAD * 2;
 
       if (CHART_H_PX > 60) {
-        drawStepChart(ctx, series, CHART_L, CHART_TOP, CHART_W, CHART_H_PX, color);
+        drawStepChart(ctx, series, CHART_L, CHART_TOP, CHART_W, CHART_H_PX, color, h > 1100 ? 4 : 7);
       }
 
-      drawBottomBar(ctx, pauvLogoRef.current);
+      drawBottomBar(ctx, pauvLogoRef.current, w, h);
       rafRef.current = requestAnimationFrame(draw);
     }, []);
 
@@ -464,6 +542,7 @@ export const ChartsImageCanvas = forwardRef<ChartsImageCanvasRef, ChartsImageCan
       Promise.all([
         document.fonts.load('600 48px "JetBrains Mono"'),
         document.fonts.load('500 22px "JetBrains Mono"'),
+        document.fonts.load('400 22px "JetBrains Mono"'),
         document.fonts.load('400 36px "Inter"'),
         document.fonts.load('500 28px "Inter"'),
       ]).then(() => {
@@ -483,21 +562,23 @@ export const ChartsImageCanvas = forwardRef<ChartsImageCanvasRef, ChartsImageCan
         const ctx = canvas.getContext('2d');
         if (!ctx)  return;
 
+        const { cW: w, cH: h } = dimensionsRef.current;
         const mk = marketRef.current;
 
         ctx.fillStyle = '#0A0A0A';
-        ctx.fillRect(0, 0, CANVAS_W, CANVAS_H);
+        ctx.fillRect(0, 0, w, h);
 
         if (mk) {
           const { series, color, changeBaseY } = drawHeader(
-            ctx, mk, imgRef.current, overrideNameRef.current,
+            ctx, mk, imgRef.current, overrideNameRef.current, h,
+            overrideIndustryRef.current, overridePctRef.current, overrideRawRef.current,
           );
           const CHART_TOP  = changeBaseY + 56;
-          const CHART_H_PX = (CANVAS_H - 230) - CHART_TOP;
+          const CHART_H_PX = chartBotFor(h) - CHART_TOP;
           if (CHART_H_PX > 60) {
-            drawStepChart(ctx, series, PAD, CHART_TOP, CANVAS_W - PAD * 2, CHART_H_PX, color);
+            drawStepChart(ctx, series, PAD, CHART_TOP, w - PAD * 2, CHART_H_PX, color, h > 1100 ? 4 : 7);
           }
-          drawBottomBar(ctx, pauvLogoRef.current);
+          drawBottomBar(ctx, pauvLogoRef.current, w, h);
         }
 
         canvas.toBlob(blob => {
@@ -515,11 +596,11 @@ export const ChartsImageCanvas = forwardRef<ChartsImageCanvasRef, ChartsImageCan
     return (
       <canvas
         ref={canvasRef}
-        width={CANVAS_W}
-        height={CANVAS_H}
+        width={cW}
+        height={cH}
         style={{
-          width:   CANVAS_W * DISPLAY_SCALE,
-          height:  CANVAS_H * DISPLAY_SCALE,
+          width:   cW * dScale,
+          height:  cH * dScale,
           display: 'block',
         }}
       />
