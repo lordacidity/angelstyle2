@@ -10,7 +10,7 @@ interface TimelinePoint {
 
 // In-process cache — survives for the lifetime of the server process.
 // Keyed by term (lowercased). TTL: 24 hours (trends data moves slowly).
-const CACHE_TTL_MS   = 60 * 1000;
+const CACHE_TTL_MS   = 24 * 60 * 60 * 1000;
 
 const cache    = new Map<string, { points: Array<{ timestamp: number; value: number }>; at: number }>();
 const inflight = new Map<string, Promise<Array<{ timestamp: number; value: number }>>>();
