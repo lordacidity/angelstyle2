@@ -945,6 +945,8 @@ export function CanvasGrid({
   // (not VideoEntry) because it's purely UI/transient — no need to persist or
   // round-trip through hooks.
   const [socialCaptionMap, setSocialCaptionMap] = useState<Record<string, { text: string; loading: boolean; error: string | null; copied: boolean }>>({});
+  const socialCaptionMapRef = useRef(socialCaptionMap);
+  socialCaptionMapRef.current = socialCaptionMap;
 
   const [marketMap,               setMarketMap]               = useState<Record<string, Talent | null>>({});
   // Optional SECOND CTA person per entry. When set, the CTA card cube-rotates
@@ -1041,6 +1043,12 @@ export function CanvasGrid({
 
   // Charts audio track per entry
   const [chartsAudioMap,    setChartsAudioMap]    = useState<Record<string, { label: string; url: string; durationMs: number } | null>>({});
+  // Per-entry export speed multiplier for Charts (1 = normal, 2 = 2×, 3 = 3×).
+  const [chartsSpeedMap,    setChartsSpeedMap]    = useState<Record<string, number>>({});
+  // Per-entry "skip the first N% of the data" for Charts. `Applied` drives the
+  // canvas; `Draft` is the value being typed before the user presses Go.
+  const [chartsStartTrimMap,      setChartsStartTrimMap]      = useState<Record<string, number>>({});
+  const [chartsStartTrimDraftMap, setChartsStartTrimDraftMap] = useState<Record<string, string>>({});
 
   // Charts Image mode — own state, independent from Charts (single market per entry)
   const [chartsImageMarketMap,       setChartsImageMarketMap]       = useState<Record<string, ChartsMarket | null>>({});
@@ -1628,37 +1636,36 @@ export function CanvasGrid({
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [chartsMarketsMap, chartsNameOverrideMap]);
 
-  const generateChartsImageCaption = useCallback(async (entryId: string) => {
-    const mk   = chartsImageMarketMap[entryId];
-    if (!mk) return;
-    const name = (chartsImageNameOverrideMap[entryId] || mk.name).trim();
+  // Charts Image caption: auto-built (no button, no AI) from the values shown on the
+  // card — name, up/down toggle, seeded % — with a blank left at the end for the user
+  // to type the reason. It stays in sync as those change and is always ready to copy.
+  // Any text the user appends after the template is preserved across changes.
+  const chartsImageCaptionBaseRef = useRef<Record<string, string>>({});
+  useEffect(() => {
+    const cur = socialCaptionMapRef.current;
+    const updates: Array<[string, string]> = [];
+    for (const entryId of Object.keys(chartsImageMarketMap)) {
+      const mk = chartsImageMarketMap[entryId];
+      if (!mk) continue;
+      const name = (chartsImageNameOverrideMap[entryId] || mk.name).trim();
+      const pct  = seededChangePct(mk.ticker);
+      const dir  = (chartsImageDirectionMap[entryId] ?? 'up') === 'down' ? 'down' : 'up';
+      const base = `${name}'s public sentiment on Pauv is ${dir} ${pct.toFixed(1)}% after `;
 
-    // Match the rendered card: seeded 5–15% magnitude, direction from the up/down toggle.
-    const seededPct  = seededChangePct(mk.ticker);
-    const isPositive = (chartsImageDirectionMap[entryId] ?? 'up') !== 'down';
-
-    setSocialCaptionMap(prev => ({
-      ...prev,
-      [entryId]: { text: prev[entryId]?.text ?? '', loading: true, error: null, copied: false },
-    }));
-    try {
-      const r = await fetch('/api/ai/chartsimage-caption', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ name, pct: seededPct, isPositive }),
+      // Preserve whatever the user typed after the previous template.
+      const prevBase = chartsImageCaptionBaseRef.current[entryId];
+      const curText  = cur[entryId]?.text ?? '';
+      const suffix   = prevBase && curText.startsWith(prevBase) ? curText.slice(prevBase.length) : '';
+      const text     = base + suffix;
+      chartsImageCaptionBaseRef.current[entryId] = base;
+      if (curText !== text) updates.push([entryId, text]);
+    }
+    if (updates.length) {
+      setSocialCaptionMap(prev => {
+        const next = { ...prev };
+        for (const [id, text] of updates) next[id] = { text, loading: false, error: null, copied: false };
+        return next;
       });
-      if (!r.ok) throw new Error(await r.text());
-      const data = await r.json() as { caption?: string; error?: string };
-      if (data.error || !data.caption) throw new Error(data.error ?? 'no caption returned');
-      setSocialCaptionMap(prev => ({
-        ...prev,
-        [entryId]: { text: data.caption!, loading: false, error: null, copied: false },
-      }));
-    } catch (e) {
-      setSocialCaptionMap(prev => ({
-        ...prev,
-        [entryId]: { text: prev[entryId]?.text ?? '', loading: false, error: String(e), copied: false },
-      }));
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [chartsImageMarketMap, chartsImageNameOverrideMap, chartsImageDirectionMap]);
@@ -1947,26 +1954,86 @@ export function CanvasGrid({
             const recState = chartsRecordingStateMap[selectedEntry.id];
             const isRec = recState?.isRecording ?? false;
             const pct   = recState?.recProgress ?? 0;
+            const speed = chartsSpeedMap[selectedEntry.id] ?? 1;
             return (
-              <button
-                onClick={() => chartsRefsMap.current.get(selectedEntry.id)?.startDownload()}
-                disabled={isRec}
-                className="relative flex items-center gap-1.5 rounded-full bg-white px-2 py-1.5 text-xs font-medium text-black hover:bg-zinc-100 disabled:opacity-60 transition-colors overflow-hidden"
-              >
-                {isRec && (
-                  <span
-                    className="absolute inset-0 bg-zinc-300 origin-left transition-none"
-                    style={{ transform: `scaleX(${pct})` }}
-                  />
-                )}
-                <span className="relative flex items-center gap-1.5">
-                  {isRec
-                    ? <SpinnerIcon size={11} style={{ animation: 'spin 1s linear infinite' }} />
-                    : <DownloadIcon size={11} stroke="currentColor" />
-                  }
-                  {isRec ? `${Math.round(pct * 100)}%` : 'Export'}
-                </span>
-              </button>
+              <>
+                {/* Chart animation speed — how fast the line grows. The audio and
+                    total clip length are unchanged; at 2×/3× the chart finishes
+                    drawing sooner and holds at its final state while the audio
+                    plays out. */}
+                <div className="flex items-center gap-1">
+                  <span className="text-[10px] text-zinc-500 select-none">Anim</span>
+                  <div className="flex items-center rounded-full border border-zinc-700 bg-zinc-900 p-0.5" title="Chart animation speed (does not change audio or clip length)">
+                    {[1, 2, 3].map(s => (
+                      <button
+                        key={s}
+                        onClick={() => setChartsSpeedMap(prev => ({ ...prev, [selectedEntry.id]: s }))}
+                        disabled={isRec}
+                        className={`rounded-full px-2 py-1 text-[11px] font-medium transition-colors disabled:opacity-60 ${
+                          speed === s ? 'bg-white text-black' : 'text-zinc-400 hover:text-zinc-200'
+                        }`}
+                      >
+                        {s}×
+                      </button>
+                    ))}
+                  </div>
+                </div>
+                {/* Skip the first N% of the chart data (cuts a long flat intro),
+                    then replay the animation. Applied only on Go. */}
+                {(() => {
+                  const applied = chartsStartTrimMap[selectedEntry.id] ?? 0;
+                  const draft   = chartsStartTrimDraftMap[selectedEntry.id] ?? String(applied);
+                  const go = () => {
+                    const v = Math.min(90, Math.max(0, Math.round(parseFloat(draft) || 0)));
+                    setChartsStartTrimDraftMap(prev => ({ ...prev, [selectedEntry.id]: String(v) }));
+                    setChartsStartTrimMap(prev => ({ ...prev, [selectedEntry.id]: v }));
+                    // Replay after the new trim has been applied to the canvas.
+                    requestAnimationFrame(() => chartsRefsMap.current.get(selectedEntry.id)?.replay());
+                  };
+                  return (
+                    <div className="flex items-center gap-1" title="Skip the first N% of the data — cuts a flat/zero-activity intro">
+                      <span className="text-[10px] text-zinc-500 select-none">Skip</span>
+                      <input
+                        type="number"
+                        min={0}
+                        max={90}
+                        value={draft}
+                        disabled={isRec}
+                        onChange={e => setChartsStartTrimDraftMap(prev => ({ ...prev, [selectedEntry.id]: e.target.value }))}
+                        onKeyDown={e => { if (e.key === 'Enter') go(); }}
+                        className="w-11 bg-zinc-900 border border-zinc-700 rounded-md px-1.5 py-1 text-[11px] text-zinc-200 text-right outline-none focus:border-zinc-500 disabled:opacity-60"
+                      />
+                      <span className="text-[10px] text-zinc-500 select-none">%</span>
+                      <button
+                        onClick={go}
+                        disabled={isRec}
+                        className="rounded-full bg-zinc-800 border border-zinc-700 px-2.5 py-1 text-[11px] font-medium text-zinc-200 hover:bg-zinc-700 disabled:opacity-60 transition-colors"
+                      >
+                        Go
+                      </button>
+                    </div>
+                  );
+                })()}
+                <button
+                  onClick={() => chartsRefsMap.current.get(selectedEntry.id)?.startDownload()}
+                  disabled={isRec}
+                  className="relative flex items-center gap-1.5 rounded-full bg-white px-2 py-1.5 text-xs font-medium text-black hover:bg-zinc-100 disabled:opacity-60 transition-colors overflow-hidden"
+                >
+                  {isRec && (
+                    <span
+                      className="absolute inset-0 bg-zinc-300 origin-left transition-none"
+                      style={{ transform: `scaleX(${pct})` }}
+                    />
+                  )}
+                  <span className="relative flex items-center gap-1.5">
+                    {isRec
+                      ? <SpinnerIcon size={11} style={{ animation: 'spin 1s linear infinite' }} />
+                      : <DownloadIcon size={11} stroke="currentColor" />
+                    }
+                    {isRec ? `${Math.round(pct * 100)}%` : 'Export'}
+                  </span>
+                </button>
+              </>
             );
           })()}
           {isSelectedChartsImage && selectedEntry && (
@@ -2084,7 +2151,7 @@ export function CanvasGrid({
                       if (nextMks[0] && nextMks[1]) {
                         const n0 = nextNames[0] || nextMks[0].name;
                         const n1 = nextNames[1] || nextMks[1].name;
-                        onUpdateEntry(entry.id, 'caption', `${n0} vs ${n1}'s dollar-dominated sentiment on Pauv:`);
+                        onUpdateEntry(entry.id, 'caption', `${n0} vs ${n1}'s Pauv`);
                       }
                     }}
                     allMarkets={(allTalents ?? []).map(t => ({ id: t.id, name: t.name, ticker: t.ticker, photo_url: t.photo_url, industry: t.industry, price: t.price }))}
@@ -2386,6 +2453,8 @@ export function CanvasGrid({
                           onRecordingStateChange={state => setChartsRecordingStateMap(prev => ({ ...prev, [entry.id]: state }))}
                           audioUrl={chartsAudioMap[entry.id]?.url}
                           audioDurationMs={chartsAudioMap[entry.id]?.durationMs}
+                          speed={chartsSpeedMap[entry.id] ?? 1}
+                          startTrimPct={(chartsStartTrimMap[entry.id] ?? 0) / 100}
                         />
                       ) : isEntryChartsImage ? (
                         <ChartsImageCanvas
@@ -2683,23 +2752,27 @@ export function CanvasGrid({
                                   {sc.copied ? 'Copied' : 'Copy'}
                                 </button>
                               )}
-                              <button
-                                onClick={() => isEntryCharts ? generateChartsCaption(entry.id) : isEntryChartsImage ? generateChartsImageCaption(entry.id) : generateSocialCaption(entry)}
-                                disabled={sc?.loading}
-                                className="flex items-center gap-1.5 h-7 px-2.5 rounded-md bg-white text-black hover:bg-zinc-100 disabled:opacity-40 disabled:cursor-not-allowed transition-colors text-[10px] font-semibold"
-                                title="Generate caption with AI"
-                              >
-                                {sc?.loading ? (
-                                  <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" style={{ animation: 'spin 1s linear infinite' }}>
-                                    <path d="M21 12a9 9 0 1 1-6.219-8.56"/>
-                                  </svg>
-                                ) : (
-                                  <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                                    <polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/>
-                                  </svg>
-                                )}
-                                {sc?.loading ? 'Generating…' : sc?.text ? 'Regenerate' : 'Generate'}
-                              </button>
+                              {/* Charts Image builds its caption automatically (see effect);
+                                  the AI generate button is only for video + charts modes. */}
+                              {!isEntryChartsImage && (
+                                <button
+                                  onClick={() => isEntryCharts ? generateChartsCaption(entry.id) : generateSocialCaption(entry)}
+                                  disabled={sc?.loading}
+                                  className="flex items-center gap-1.5 h-7 px-2.5 rounded-md bg-white text-black hover:bg-zinc-100 disabled:opacity-40 disabled:cursor-not-allowed transition-colors text-[10px] font-semibold"
+                                  title="Generate caption with AI"
+                                >
+                                  {sc?.loading ? (
+                                    <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" style={{ animation: 'spin 1s linear infinite' }}>
+                                      <path d="M21 12a9 9 0 1 1-6.219-8.56"/>
+                                    </svg>
+                                  ) : (
+                                    <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                                      <polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/>
+                                    </svg>
+                                  )}
+                                  {sc?.loading ? 'Generating…' : sc?.text ? 'Regenerate' : 'Generate'}
+                                </button>
+                              )}
                             </div>
                           </div>
                           {!collapsed && (
@@ -3020,7 +3093,7 @@ export function CanvasGrid({
                       setChartsNameOverrideMap(prev => ({ ...prev, [aiGroupsEntryId]: [group.a.name, group.b.name] }));
                       setChartsTrendsLoadedMap(prev => ({ ...prev, [aiGroupsEntryId]: [false, false] }));
                       setChartsTrendsLoadingMap(prev => ({ ...prev, [aiGroupsEntryId]: [false, false] }));
-                      onUpdateEntry(aiGroupsEntryId, 'caption', `${group.a.name} vs ${group.b.name}'s dollar-dominated sentiment on Pauv:`);
+                      onUpdateEntry(aiGroupsEntryId, 'caption', `${group.a.name} vs ${group.b.name}'s Pauv`);
                       setShowAiGroupsPanel(false);
                     }}
                     className="w-full flex items-center gap-3 px-3 py-2.5 rounded-lg hover:bg-zinc-800 transition-colors text-left"

@@ -154,9 +154,14 @@ function drawStepChart(
     }
   }
 
-  // Insert seeded micro-jitter sub-points between each pair for organic fluctuations.
-  const JITTER   = 10; // canvas-px amplitude
-  const SUB_PTS  = 1;  // extra points per segment
+  // Insert seeded sub-points between each pair for organic fluctuations. The noise
+  // level controls BOTH how many sub-points we add (more = more jagged) and how far
+  // they jitter; level 'none' keeps the original subtle baseline (1 pt, 10px).
+  const noiseOn  = noiseScale > 0;
+  const SUB_PTS  = noiseOn ? Math.round(2 + noiseScale * 32) : 1; // small≈3, med≈4, large≈6
+  const JITTER   = noiseOn ? 10 + noiseScale * 130 : 10;          // px amplitude per sub-point
+  const yTopJ    = ry + V_PAD_T;
+  const yBotJ    = ry + V_PAD_T + chartAreaH;
   const pts: { x: number; y: number }[] = [];
   for (let i = 0; i < rawPts.length - 1; i++) {
     pts.push(rawPts[i]);
@@ -166,7 +171,7 @@ function drawStepChart(
       const y  = rawPts[i].y + (rawPts[i + 1].y - rawPts[i].y) * t;
       const h  = Math.sin(i * 127.1 + j * 311.7 + x * 0.3 + noiseSeed * 0.001) * 43758.5453;
       const n  = (h - Math.floor(h) - 0.5) * 2 * JITTER;
-      pts.push({ x, y: y + n });
+      pts.push({ x, y: Math.max(yTopJ, Math.min(yBotJ, y + n)) });
     }
   }
   pts.push(rawPts[rawPts.length - 1]);
@@ -279,6 +284,25 @@ function drawHeader(
   const startPrice = lastPrice / (1 + signedPct / 100);
   const rawChange  = lastPrice - startPrice; // +ve when up, −ve when down
   const color      = isPositive ? '#0CDF9D' : '#FF4B4B';
+
+  // Append a short fabricated move at the very end: a sharp up/down spike that swings
+  // ~20% of the data's value range but spans only ~1–2% of the chart width — so the
+  // line clearly ends up or down without overwriting any of the real history.
+  if (series.length >= 3) {
+    let sMin = Infinity, sMax = -Infinity;
+    for (const p of series) { if (p.price < sMin) sMin = p.price; if (p.price > sMax) sMax = p.price; }
+    const sRange   = Math.max(lastPrice * 0.5, sMax - sMin); // floor so flat charts still spike
+    const MOVE     = sRange * 0.2;
+    const endPrice = Math.max(0.01, isPositive ? lastPrice + MOVE : lastPrice - MOVE);
+    const tStart   = series[0].t;
+    const tEnd     = series[series.length - 1].t;
+    const stepT    = (tEnd - tStart) / Math.max(1, series.length - 1);
+    const N        = Math.max(2, Math.round(series.length * 0.015)); // ~1.5% of the width
+    for (let k = 1; k <= N; k++) {
+      const f = k / N;
+      series.push({ t: tEnd + stepT * k, price: lastPrice + (endPrice - lastPrice) * f });
+    }
+  }
 
   // ── Shared left margin — all rows left-aligned ───────────────────────────
   const LEFT = PAD;
