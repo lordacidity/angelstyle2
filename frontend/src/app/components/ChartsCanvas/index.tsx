@@ -257,6 +257,7 @@ function drawCompareChart(
   colorB: string,
   cursorT: number,           // 0..1 from animation loop
   rx: number, ry: number, rw: number, rh: number,
+  startTrimPct: number,      // 0..0.9 — leading fraction of the data span to skip
 ): ChartResult {
   // 5-point moving average to kill spikes before rendering
   const smooth = (s: { t: number; price: number }[]) => s.map((p, i) => {
@@ -293,17 +294,37 @@ function drawCompareChart(
     .filter(Boolean)
     .reduce((min, p) => Math.min(min, p!.t), Infinity);
   const chopStart = isFinite(firstAboveOneTs) ? firstAboveOneTs - TWO_YEARS_MS : -Infinity;
-  const clipSeries = (s: { t: number; price: number }[]) => {
-    if (!isFinite(chopStart) || !s.length || s[0].t >= chopStart) return s;
-    const idx = s.findIndex(p => p.t >= chopStart);
+  // Clip a series so it begins at startTs, interpolating a synthetic boundary
+  // point so the line starts cleanly rather than jumping. startTs = -Infinity
+  // (or a start before the first sample) is a no-op.
+  const clipAt = (s: { t: number; price: number }[], startTs: number) => {
+    if (!isFinite(startTs) || !s.length || s[0].t >= startTs) return s;
+    const idx = s.findIndex(p => p.t >= startTs);
     if (idx <= 0) return s;
     const prev = s[idx - 1];
     const next = s[idx];
-    const ratio = (chopStart - prev.t) / (next.t - prev.t);
-    return [{ t: chopStart, price: prev.price + ratio * (next.price - prev.price) }, ...s.slice(idx)];
+    const ratio = (startTs - prev.t) / (next.t - prev.t);
+    return [{ t: startTs, price: prev.price + ratio * (next.price - prev.price) }, ...s.slice(idx)];
   };
-  const sAc = clipSeries(sA);
-  const sBc = clipSeries(sB);
+  const sAchop = clipAt(sA, chopStart);
+  const sBchop = clipAt(sB, chopStart);
+
+  // ── Manual start trim ─────────────────────────────────────────────────────
+  // Skip the leading `startTrimPct` of the (post-chop) time span so a long flat
+  // / zero-activity intro can be cut. Stacks on top of the automatic 2-year chop
+  // above. Capped at 0.9 so at least the final 10% of the span always survives.
+  let trimTs = -Infinity;
+  if (startTrimPct > 0) {
+    const cs: number[] = [], ce: number[] = [];
+    if (sAchop.length) { cs.push(sAchop[0].t); ce.push(sAchop[sAchop.length - 1].t); }
+    if (sBchop.length) { cs.push(sBchop[0].t); ce.push(sBchop[sBchop.length - 1].t); }
+    if (cs.length) {
+      const s0 = Math.min(...cs), e0 = Math.max(...ce);
+      trimTs = s0 + Math.min(0.9, startTrimPct) * (e0 - s0);
+    }
+  }
+  const sAc = clipAt(sAchop, trimTs);
+  const sBc = clipAt(sBchop, trimTs);
 
   // ── Time domain ──────────────────────────────────────────────────────────
   const allStarts: number[] = [];
@@ -533,6 +554,7 @@ function drawProfiles(
   cursorT:       number,
   logoRef:       { current: HTMLImageElement | null },
   overrideNames: [string, string],
+  startTrimPct:  number,
 ) {
   const colW       = CANVAS_W / 2;
   const avatarCy   = dividerY + PROFILE_TOP_PAD + AVATAR_R;
@@ -569,6 +591,7 @@ function drawProfiles(
       LINE_COLOR_A, LINE_COLOR_B,
       cursorT,
       CHART_X, chartY, chartW, chartH,
+      startTrimPct,
     );
   }
 
@@ -713,7 +736,7 @@ function safeExportName(raw: string) {
 }
 
 export const ChartsCanvas = forwardRef<ChartsCanvasRef, ChartsCanvasProps>(function ChartsCanvas(
-  { overlayCaption = '', markets, overrideNames = ['', ''], onRecordingStateChange, audioUrl, audioDurationMs },
+  { overlayCaption = '', markets, overrideNames = ['', ''], onRecordingStateChange, audioUrl, audioDurationMs, speed = 1, startTrimPct = 0 },
   ref,
 ) {
   const canvasRef     = useRef<HTMLCanvasElement>(null);
@@ -738,6 +761,14 @@ export const ChartsCanvas = forwardRef<ChartsCanvasRef, ChartsCanvasProps>(funct
   const growMsRef  = useRef(GROW_MS);
   const cycleMsRef = useRef(CYCLE_MS);
   const audioUrlRef = useRef<string | null>(null);
+  // Speed multiplier (1 / 2 / 3). Divides the animation + recording duration so
+  // the exported clip is shorter; the audio is time-compressed to match in the
+  // server-side mix. Clamped to [1, 3] so a bad prop can't stall or overrun.
+  const speedRef = useRef(1);
+  useEffect(() => { speedRef.current = Math.min(3, Math.max(1, speed || 1)); }, [speed]);
+  // Leading fraction of the data span to skip (0–0.9). Read live by the draw loop.
+  const startTrimRef = useRef(0);
+  useEffect(() => { startTrimRef.current = Math.min(0.9, Math.max(0, startTrimPct || 0)); }, [startTrimPct]);
   useEffect(() => {
     audioUrlRef.current = audioUrl ?? null;
     if (audioDurationMs && audioDurationMs > 4000) {
@@ -799,10 +830,12 @@ export const ChartsCanvas = forwardRef<ChartsCanvasRef, ChartsCanvasProps>(funct
     // Only start the clock once all selected markets have sparkline data
     if (allLoaded && animStartRef.current === 0) animStartRef.current = now;
 
-    // Clamp at 1 — no loop; animation grows then holds at final state
+    // Clamp at 1 — no loop; animation grows then holds at final state. Dividing
+    // the grow window by the speed multiplier makes the preview animate at the
+    // same pace the exported clip will.
     const cursorT = animStartRef.current === 0
       ? 0
-      : Math.min((now - animStartRef.current) / growMsRef.current, 1);
+      : Math.min((now - animStartRef.current) / (growMsRef.current / speedRef.current), 1);
 
     const caption  = captionRef.current;
     const mks      = marketsRef.current;
@@ -811,7 +844,7 @@ export const ChartsCanvas = forwardRef<ChartsCanvasRef, ChartsCanvasProps>(funct
     ctx.fillStyle = '#0A0A0A';
     ctx.fillRect(0, 0, CANVAS_W, CANVAS_H);
 
-    drawProfiles(ctx, mks, imgs, CAPTION_AREA_H, cursorT, pauvLogoRef, overrideNamesRef.current);
+    drawProfiles(ctx, mks, imgs, CAPTION_AREA_H, cursorT, pauvLogoRef, overrideNamesRef.current, startTrimRef.current);
     drawCaption(ctx, caption);
 
     rafRef.current = requestAnimationFrame(draw);
@@ -837,6 +870,9 @@ export const ChartsCanvas = forwardRef<ChartsCanvasRef, ChartsCanvasProps>(funct
       const notify = (isRecording: boolean, recProgress: number, recStatus: string) =>
         onRecStateRef.current?.({ isRecording, recProgress, recStatus });
 
+      // Drives manual frame capture (see captureStream(0) below). Cleared on stop.
+      let framePump: ReturnType<typeof setInterval> | null = null;
+
       notify(true, 0, 'Starting…');
 
       try {
@@ -856,7 +892,24 @@ export const ChartsCanvas = forwardRef<ChartsCanvasRef, ChartsCanvasProps>(funct
         // Record video-only — audio is mixed server-side so the original MP3
         // goes straight to AAC via FFmpeg. Routing audio through MediaRecorder
         // encodes it as Opus which Twitter/X rejects.
-        const stream = canvas.captureStream(30);
+        //
+        // captureStream(0) = frames are emitted ONLY when we call requestFrame().
+        // A fixed-rate captureStream(30) silently STOPS emitting frames whenever
+        // the canvas paints identical pixels — which happens the instant the
+        // chart animation settles into its static final state (or the whole
+        // time if sparkline data never animates). That left the recorded video
+        // track only a few seconds long while the audio ran full length, and the
+        // server-side `-shortest` mix then clamped the entire export down to that
+        // short video. Pumping requestFrame() at 30 fps below guarantees the full
+        // duration is captured even while the canvas is visually static.
+        let stream = canvas.captureStream(0);
+        let captureTrack = stream.getVideoTracks()[0] as any;
+        // Manual-frame mode is useless without requestFrame() — it would emit
+        // zero frames. Fall back to fixed-rate capture on engines that lack it.
+        if (typeof captureTrack?.requestFrame !== 'function') {
+          stream = canvas.captureStream(30);
+          captureTrack = null;
+        }
 
         // Play audio in the browser so the user can hear it while recording,
         // but do NOT add it to the MediaRecorder stream.
@@ -873,6 +926,11 @@ export const ChartsCanvas = forwardRef<ChartsCanvasRef, ChartsCanvasProps>(funct
           } catch { audioEl = null; }
         }
 
+        // The speed multiplier only affects the chart animation pace (see the
+        // draw loop). The recording still runs the FULL audio length and the
+        // audio plays at normal speed — the chart just finishes growing sooner
+        // and holds at its final state for the remainder. So the clip length and
+        // narration are unchanged; only the line animates faster.
         const cycleMs  = cycleMsRef.current;
         const recorder = new MediaRecorder(stream, { mimeType, videoBitsPerSecond: 8_000_000 });
         const chunks: Blob[] = [];
@@ -882,6 +940,19 @@ export const ChartsCanvas = forwardRef<ChartsCanvasRef, ChartsCanvasProps>(funct
         if (audioEl) {
           audioEl.currentTime = 0;
           audioEl.play().catch(() => {});
+        }
+
+        // Force one captured frame every 1/30 s so static stretches of the chart
+        // are recorded too. Skipped while the tab is hidden (the visibility
+        // handler pauses the recorder), so we don't queue frames into a paused
+        // recorder. requestFrame() may be absent on very old engines — guard it.
+        const FRAME_INTERVAL_MS = 1000 / 30;
+        if (typeof captureTrack?.requestFrame === 'function') {
+          framePump = setInterval(() => {
+            if (!document.hidden) {
+              try { captureTrack.requestFrame(); } catch { /* track ended */ }
+            }
+          }, FRAME_INTERVAL_MS);
         }
 
         notify(true, 0.01, 'Recording…');
@@ -917,6 +988,7 @@ export const ChartsCanvas = forwardRef<ChartsCanvasRef, ChartsCanvasProps>(funct
         });
 
         document.removeEventListener('visibilitychange', onVisibility);
+        if (framePump) { clearInterval(framePump); framePump = null; }
         audioEl?.pause();
 
         recorder.stop();
@@ -959,6 +1031,7 @@ export const ChartsCanvas = forwardRef<ChartsCanvasRef, ChartsCanvasProps>(funct
         notify(true, 0, `Error: ${err instanceof Error ? err.message : String(err)}`);
         setTimeout(() => notify(false, 0, ''), 5000);
       } finally {
+        if (framePump) { clearInterval(framePump); framePump = null; }
         isRecordingRef.current = false;
       }
     },
@@ -966,6 +1039,8 @@ export const ChartsCanvas = forwardRef<ChartsCanvasRef, ChartsCanvasProps>(funct
       isRecordingRef.current = false;
       onRecStateRef.current?.({ isRecording: false, recProgress: 0, recStatus: '' });
     },
+    // Restart the grow animation from t=0 (used by the "Go" trim button).
+    replay: () => { animStartRef.current = 0; },
     setBlockTopPct: () => {},
     play:            () => {},
     pause:           () => {},
