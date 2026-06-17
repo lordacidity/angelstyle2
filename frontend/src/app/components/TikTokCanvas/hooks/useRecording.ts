@@ -244,7 +244,9 @@ export function useRecording(config: UseRecordingConfig) {
 
       // ── Fetch + demux source video ────────────────────────────────────────────
       const videoSrcUrl = video.src || video.currentSrc;
-      const videoUrl = videoSrcUrl.includes('/api/proxy')
+      // Local uploads are blob: URLs that only exist in the browser — fetch them
+      // directly. Remote videos go through the proxy (unless already proxied).
+      const videoUrl = (videoSrcUrl.startsWith('blob:') || videoSrcUrl.includes('/api/proxy'))
         ? videoSrcUrl
         : `/api/proxy?url=${encodeURIComponent(videoSrcUrl)}&stream=1`;
 

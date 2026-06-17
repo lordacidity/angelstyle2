@@ -97,9 +97,13 @@ export function useVideoLoading({
     return () => video.removeEventListener('loadedmetadata', handleLoadedMetadata);
   }, [videoSrc, brand]);
 
-  // Load new video src
+  // Load new video src. Valid sources are either a local upload (blob: URL) or a
+  // proxied remote video (/api/proxy?url=…). Bail on anything else: an empty src,
+  // or a proxy URL whose url= param is empty (nothing fetched yet).
   useEffect(() => {
-    if (!videoSrc || !videoSrc.includes('url=') || videoSrc.endsWith('url=')) {
+    const isLocalBlob = videoSrc.startsWith('blob:');
+    const isProxiedRemote = videoSrc.includes('url=') && !videoSrc.endsWith('url=');
+    if (!videoSrc || (!isLocalBlob && !isProxiedRemote)) {
       setIsVideoLoading(false);
       return;
     }
