@@ -30,7 +30,7 @@ export interface ChartsCanvasProps {
   rowNumber?: number;
   onRecordingStateChange?: (state: { isRecording: boolean; recProgress: number; recStatus: string }) => void;
   audioUrl?: string;        // proxy URL for the audio track
-  audioDurationMs?: number; // total audio duration in ms — drives GROW_MS and CYCLE_MS
+  audioDurationMs?: number; // total audio duration in ms (informational; clip length is animation + 3 s hold)
   speed?: number;           // playback multiplier (1 = normal, 2 = 2×, 3 = 3×) — shortens the clip
   startTrimPct?: number;    // 0–0.9 fraction of the leading data span to skip (cuts a flat intro)
 }

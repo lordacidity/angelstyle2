@@ -26,9 +26,9 @@ const TICKER_FONT_SIZE = 30;
 const PRICE_FONT_SIZE  = 48;
 const PCT_FONT_SIZE    = 36;
 
-// Chart animation timing — 25-second single play, no loop
+// Chart animation timing — single play, no loop. The recorded clip is the
+// animation (GROW_MS / speed) plus a fixed 3 s hold on the completed chart.
 const GROW_MS  = 22000;  // animation grows for 22 s, then holds at final state
-const CYCLE_MS = 25000;  // total intended duration (22 s grow + 3 s hold)
 
 // Each synthetic sparkline index treated as 45 days → realistic 18-month span
 const POINT_INTERVAL_MS = 45 * 24 * 60 * 60 * 1000;
@@ -759,7 +759,6 @@ export const ChartsCanvas = forwardRef<ChartsCanvasRef, ChartsCanvasProps>(funct
 
   // Dynamic timing driven by audio duration
   const growMsRef  = useRef(GROW_MS);
-  const cycleMsRef = useRef(CYCLE_MS);
   const audioUrlRef = useRef<string | null>(null);
   // Speed multiplier (1 / 2 / 3). Divides the animation + recording duration so
   // the exported clip is shorter; the audio is time-compressed to match in the
@@ -771,13 +770,11 @@ export const ChartsCanvas = forwardRef<ChartsCanvasRef, ChartsCanvasProps>(funct
   useEffect(() => { startTrimRef.current = Math.min(0.9, Math.max(0, startTrimPct || 0)); }, [startTrimPct]);
   useEffect(() => {
     audioUrlRef.current = audioUrl ?? null;
-    if (audioDurationMs && audioDurationMs > 4000) {
-      growMsRef.current  = audioDurationMs - 3000;
-      cycleMsRef.current = audioDurationMs;
-    } else {
-      growMsRef.current  = GROW_MS;
-      cycleMsRef.current = CYCLE_MS;
-    }
+    // The chart animation runs for a FIXED window (GROW_MS), independent of how
+    // long the audio is. The recorded clip is animation time + a 3 s hold on the
+    // completed chart — so a 1-minute narration is trimmed to the clip length by
+    // the server-side `-shortest` mix rather than dragging the video out.
+    growMsRef.current = GROW_MS;
   }, [audioUrl, audioDurationMs]);
 
   // Reset animation when market IDs change
@@ -926,12 +923,14 @@ export const ChartsCanvas = forwardRef<ChartsCanvasRef, ChartsCanvasProps>(funct
           } catch { audioEl = null; }
         }
 
-        // The speed multiplier only affects the chart animation pace (see the
-        // draw loop). The recording still runs the FULL audio length and the
-        // audio plays at normal speed — the chart just finishes growing sooner
-        // and holds at its final state for the remainder. So the clip length and
-        // narration are unchanged; only the line animates faster.
-        const cycleMs  = cycleMsRef.current;
+        // Clip length = animation time + a 3 s hold on the completed chart, and
+        // nothing more — regardless of how long the audio is. The animation runs
+        // for growMs / speed (the speed multiplier divides the grow window, see
+        // the draw loop), then the finished chart is held for HOLD_MS before the
+        // recorder stops. The full narration is NOT played; the server-side
+        // `-shortest` mix trims the audio down to this clip length.
+        const HOLD_MS  = 3000;
+        const cycleMs  = growMsRef.current / speedRef.current + HOLD_MS;
         const recorder = new MediaRecorder(stream, { mimeType, videoBitsPerSecond: 8_000_000 });
         const chunks: Blob[] = [];
         recorder.ondataavailable = e => { if (e.data.size > 0) chunks.push(e.data); };
@@ -1001,30 +1000,53 @@ export const ChartsCanvas = forwardRef<ChartsCanvasRef, ChartsCanvasProps>(funct
 
         // Mix the original MP3 into the video server-side as proper AAC.
         // Send video as raw binary body; audioUrl as query param — avoids 10MB multipart limit.
+        //
+        // A muted export is almost always a SILENT failure here (no track
+        // selected, or the mix request errored), so surface every mute path to
+        // the status bar instead of swallowing it — shipping a muted file with
+        // no warning is what made this hard to debug.
         let blob = videoBlob;
-        if (audioUrlRef.current) {
+        let audioMixed = false;
+        if (!audioUrlRef.current) {
+          console.warn('[mix-audio] no audio track selected — export will be silent');
+          notify(true, 0.98, '⚠ No audio track selected — exporting silent');
+          await new Promise<void>(r => setTimeout(r, 1500));
+        } else {
           try {
+            console.log('[mix-audio] mixing', audioUrlRef.current, 'into', mimeType, `(${(videoBlob.size / 1024 / 1024).toFixed(1)}MB)`);
             const tr = await fetch(
               `/api/charts/mix-audio?audioUrl=${encodeURIComponent(audioUrlRef.current)}`,
               { method: 'POST', body: videoBlob, headers: { 'Content-Type': 'video/mp4' } },
             );
-            if (tr.ok) blob = await tr.blob();
-            else console.warn('[mix-audio] failed:', await tr.text());
-          } catch (e) { console.warn('[mix-audio] error:', e); }
+            if (tr.ok) {
+              blob = await tr.blob();
+              audioMixed = true;
+            } else {
+              const errText = await tr.text();
+              console.error('[mix-audio] failed:', tr.status, errText);
+              notify(true, 0.98, `⚠ Audio mix failed (${tr.status}) — exporting silent`);
+              await new Promise<void>(r => setTimeout(r, 2000));
+            }
+          } catch (e) {
+            console.error('[mix-audio] error:', e);
+            notify(true, 0.98, `⚠ Audio mix error — exporting silent`);
+            await new Promise<void>(r => setTimeout(r, 2000));
+          }
         }
 
+        const audioTag = audioMixed ? ' 🔊' : ' (muted)';
         try {
           const form = new FormData();
           form.append('files', blob, filename);
           const resp = await fetch(`${PHONEDECK_URL}/api/upload`, { method: 'POST', body: form });
           if (!resp.ok) throw new Error(await resp.text());
-          notify(true, 1, `In Phonedeck: ${filename}`);
+          notify(true, 1, `In Phonedeck: ${filename}${audioTag}`);
           setTimeout(() => notify(false, 0, ''), 5000);
         } catch {
           const url = URL.createObjectURL(blob);
           Object.assign(document.createElement('a'), { href: url, download: filename }).click();
           URL.revokeObjectURL(url);
-          notify(true, 1, 'Saved to Downloads');
+          notify(true, 1, `Saved to Downloads${audioTag}`);
           setTimeout(() => notify(false, 0, ''), 4000);
         }
       } catch (err) {
