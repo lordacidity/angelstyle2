@@ -3,9 +3,6 @@
 import { useState, useRef } from 'react';
 import type { MutableRefObject, RefObject } from 'react';
 
-// @ts-ignore
-import MP4Box from 'mp4box';
-
 import {
   CANVAS_W, CANVAS_H, BASE_HEADER_HEIGHT, CAPTION_TOP_PADDING, CAPTION_LINE_HEIGHT,
   HEADER_PADDING_X,
@@ -242,6 +239,61 @@ export function useRecording(config: UseRecordingConfig) {
         return merged;
       }
 
+      // Transcode arbitrary source audio (Opus / MP3 / AC-3 / PCM / …) to AAC for
+      // the MP4 output. Dropped local files frequently aren't AAC, and AAC is the
+      // only audio the MP4 muxer takes verbatim — without this they export silent,
+      // or the codec mismatch trips output.finalize() and the export never
+      // completes. Decodes via Web Audio (container-agnostic) then re-encodes with
+      // AudioEncoder, mirroring mergeWithEdit. Returns trimmed, 0-based AAC packets.
+      async function transcodeAudioToAac(
+        srcBuffer: ArrayBuffer, clipStartSec: number, clipEndSec: number,
+      ): Promise<{ packets: any[]; config: any } | null> {
+        if (typeof AudioEncoder === 'undefined' || typeof AudioContext === 'undefined') return null;
+        const SR = 44100, AFRAME = 1024;
+        const tmp = new AudioContext({ sampleRate: SR });
+        let decoded: AudioBuffer;
+        try { decoded = await tmp.decodeAudioData(srcBuffer.slice(0)); }
+        catch (e) { await tmp.close(); console.warn('[audio transcode] decode failed:', e); return null; }
+        await tmp.close();
+
+        const ch = Math.min(2, decoded.numberOfChannels) || 1;
+        const startF = Math.max(0, Math.floor(clipStartSec * SR));
+        const endF = Math.min(decoded.length, Math.ceil(clipEndSec * SR));
+        if (endF - startF <= 0) return null;
+
+        const chunks: EncodedAudioChunk[] = [];
+        let cfg: AudioDecoderConfig | null = null;
+        let err: Error | null = null;
+        const enc = new AudioEncoder({
+          output: (chunk: EncodedAudioChunk, meta?: EncodedAudioChunkMetadata) => {
+            chunks.push(chunk);
+            if (meta?.decoderConfig && !cfg) cfg = meta.decoderConfig;
+          },
+          error: (e: Error) => { err = e; },
+        });
+        enc.configure({ codec: 'mp4a.40.2', sampleRate: SR, numberOfChannels: ch, bitrate: 128_000 });
+
+        const chData = Array.from({ length: ch }, (_, c) => decoded.getChannelData(Math.min(c, decoded.numberOfChannels - 1)));
+        let tMicros = 0;
+        for (let off = startF; off < endF; off += AFRAME) {
+          const fc = Math.min(AFRAME, endF - off);
+          const planar = new Float32Array(fc * ch);
+          for (let c = 0; c < ch; c++) { const s = chData[c]; for (let i = 0; i < fc; i++) planar[c * fc + i] = s[off + i] ?? 0; }
+          const ad = new AudioData({ format: 'f32-planar', sampleRate: SR, numberOfFrames: fc, numberOfChannels: ch, timestamp: tMicros, data: planar });
+          enc.encode(ad); ad.close();
+          tMicros += Math.round((fc / SR) * 1_000_000);
+        }
+        await enc.flush(); enc.close();
+        if (err) { console.warn('[audio transcode] encode failed:', err); return null; }
+        if (chunks.length === 0) return null;
+        if (!cfg) {
+          const sfIdx = [96000, 88200, 64000, 48000, 44100, 32000, 24000, 22050, 16000, 12000, 11025, 8000, 7350].indexOf(SR);
+          const si = sfIdx >= 0 ? sfIdx : 4;
+          cfg = { codec: 'mp4a.40.2', sampleRate: SR, numberOfChannels: ch, description: new Uint8Array([(2 << 3) | (si >> 1), ((si & 1) << 7) | (ch << 3)]) };
+        }
+        return { packets: chunks.map((c) => EncodedPacket.fromEncodedChunk(c)), config: cfg };
+      }
+
       // ── Fetch + demux source video ────────────────────────────────────────────
       const videoSrcUrl = video.src || video.currentSrc;
       // Local uploads are blob: URLs that only exist in the browser — fetch them
@@ -268,63 +320,44 @@ export function useRecording(config: UseRecordingConfig) {
       }
 
       setRecStatus('Parsing video file...');
-      console.log('[EXPORT] parsing with MP4Box...');
+      console.log('[EXPORT] parsing with mediabunny...');
 
-      // @ts-ignore
-      const MP4BoxFile = MP4Box.createFile();
-      let videoSamples: Array<{ data: Uint8Array; timestamp: number; duration: number; isKeyframe: boolean }> = [];
-      let audioSamples: Array<{ data: Uint8Array; timestamp: number; duration: number }> = [];
-      let videoTrackId: number | null = null;
-      let audioTrackId: number | null = null;
-      let videoTimescale = 90000;
-      let audioTimescale = 44100;
+      // Demux the source with mediabunny, which understands every container we
+      // might be handed (mp4, mov, webm, mkv, …). The old path ran samples through
+      // MP4Box, which only parses ISOBMFF — so a dropped .webm/.mkv (or a
+      // fragmented file) produced "Box of type '' has a size …" garbage and zero
+      // samples, and the export silently failed. One Input drives both the decoder
+      // config and the encoded video packets.
+      const demuxInput = new Input({ source: new BlobSource(new Blob([arrayBuffer], { type: 'video/mp4' })), formats: ALL_FORMATS });
+      const primaryVideoTrack = await demuxInput.getPrimaryVideoTrack();
+      if (!primaryVideoTrack) throw new Error('No video track found in source');
 
-      MP4BoxFile.onReady = (info: any) => {
-        console.log('[EXPORT] MP4Box onReady, tracks:', info.tracks?.map((t: any) => ({ id: t.id, type: t.type, codec: t.codec, timescale: t.timescale, duration: t.duration, w: t.video?.width, h: t.video?.height })));
-        for (const track of info.tracks || []) {
-          if (track.type === 'video' && !videoTrackId) { videoTrackId = track.id; videoTimescale = track.timescale || 90000; }
-          if (track.type === 'audio' && !audioTrackId) { audioTrackId = track.id; audioTimescale = track.timescale || 44100; }
-        }
-        console.log('[EXPORT] selected videoTrackId:', videoTrackId, 'audioTrackId:', audioTrackId);
-        if (videoTrackId) MP4BoxFile.setExtractionOptions(videoTrackId, null, { nbSamples: Infinity });
-        if (audioTrackId) MP4BoxFile.setExtractionOptions(audioTrackId, null, { nbSamples: Infinity });
-        MP4BoxFile.start();
-      };
+      let videoDecoderConfig: any = null;
+      try { videoDecoderConfig = await primaryVideoTrack.getDecoderConfig(); }
+      catch (cfgErr) { console.warn('[EXPORT] mediabunny video config failed:', cfgErr); }
+      if (!videoDecoderConfig) throw new Error('Could not read the video codec — the file may be unsupported or corrupted');
 
-      MP4BoxFile.onSamples = (id: number, _user: any, samples: any[]) => {
-        if (id === videoTrackId) {
-          for (const s of samples) videoSamples.push({ data: new Uint8Array(s.data), timestamp: s.cts / videoTimescale, duration: s.duration / videoTimescale, isKeyframe: s.is_sync });
-        }
-        if (id === audioTrackId) {
-          for (const s of samples) audioSamples.push({ data: new Uint8Array(s.data), timestamp: s.cts / audioTimescale, duration: s.duration / audioTimescale });
-        }
-      };
-
-      // @ts-ignore
-      MP4BoxFile.onError = (e: any) => console.error('[EXPORT] ❌ MP4Box error:', e);
-
-      const copy = arrayBuffer.slice(0);
-      // @ts-ignore
-      copy.fileStart = 0;
-      // @ts-ignore
-      MP4BoxFile.appendBuffer(copy);
-      // @ts-ignore
-      MP4BoxFile.flush();
-
-      await new Promise<void>((resolve, reject) => {
-        const t = Date.now();
-        const id = setInterval(() => {
-          if (videoSamples.length > 0) { clearInterval(id); resolve(); }
-          else if (Date.now() - t > 10000) { clearInterval(id); reject(new Error('Timeout extracting video samples')); }
-        }, 100);
-      });
-
-      console.log('[EXPORT] extracted samples — video:', videoSamples.length, 'audio:', audioSamples.length);
-      console.log('[EXPORT] videoTimescale:', videoTimescale, 'audioTimescale:', audioTimescale);
+      // Packets arrive in DECODE order (required for the VideoDecoder); each
+      // carries its presentation timestamp. Keep arrival order for the decoder,
+      // but derive the clip duration from the max presentation end so B-frame
+      // reordering doesn't truncate it.
+      const videoSamples: Array<{ data: Uint8Array; timestamp: number; duration: number; isKeyframe: boolean }> = [];
+      let maxTs = 0, maxEnd = 0;
+      for await (const p of new EncodedPacketSink(primaryVideoTrack).packets()) {
+        const dur = p.duration || 0;
+        videoSamples.push({ data: p.data, timestamp: p.timestamp, duration: dur, isKeyframe: p.type === 'key' });
+        if (p.timestamp > maxTs) maxTs = p.timestamp;
+        if (p.timestamp + dur > maxEnd) maxEnd = p.timestamp + dur;
+      }
+      console.log('[EXPORT] extracted video samples:', videoSamples.length);
       if (videoSamples.length === 0) throw new Error('No video samples found');
 
-      const lastSample = videoSamples[videoSamples.length - 1];
-      const fullDuration = lastSample.timestamp + lastSample.duration;
+      const descBufEarly = videoDecoderConfig.description;
+      const dbgDescEarly = descBufEarly instanceof Uint8Array ? descBufEarly : descBufEarly ? new Uint8Array(descBufEarly) : undefined;
+      const hexDescEarly = dbgDescEarly ? Array.from(dbgDescEarly.slice(0, Math.min(32, dbgDescEarly.length))).map((b: number) => b.toString(16).padStart(2, '0')).join(' ') : '<none>';
+      console.log('[EXPORT] decoder config — codec:', videoDecoderConfig.codec, `${videoDecoderConfig.codedWidth}×${videoDecoderConfig.codedHeight}`, 'description length:', dbgDescEarly?.byteLength ?? 0, 'first bytes:', hexDescEarly);
+
+      const fullDuration = maxEnd > maxTs ? maxEnd : maxTs + EXPORT_FRAME_DURATION;
       const clipStart = trimStartRef.current;
       const clipEnd = trimEndRef.current > 0 && trimEndRef.current <= fullDuration ? trimEndRef.current : fullDuration;
       const clipDuration = Math.max(0.1, clipEnd - clipStart);
@@ -346,49 +379,6 @@ export function useRecording(config: UseRecordingConfig) {
 
       console.log('[EXPORT] fullDuration:', fullDuration, 'clipStart:', clipStart, 'clipEnd:', clipEnd, 'clipDuration:', clipDuration, 'totalFrames:', totalFrames);
 
-      // ── Derive the VideoDecoder config from the source itself ────────────────
-      // Configure the decoder with the file's REAL codec string, coded
-      // dimensions, and AVC `description` (the avcC box). Hardcoding
-      // avc1.64001F / 1080×1920 breaks the instant a source ships a different
-      // H.264 profile/level or resolution — Chromium then rejects the first
-      // chunk with "a key frame is required after configure()… fill out the
-      // description field". mediabunny parses all of this correctly (the merge
-      // and audio paths already rely on getDecoderConfig), so use it here too,
-      // falling back to the hand-rolled MP4Box extraction only if it fails.
-      let videoDecoderConfig: any = null;
-      try {
-        const vInput = new Input({ source: new BlobSource(new Blob([arrayBuffer], { type: 'video/mp4' })), formats: ALL_FORMATS });
-        const vTrack = await vInput.getPrimaryVideoTrack();
-        if (vTrack) videoDecoderConfig = await vTrack.getDecoderConfig();
-      } catch (cfgErr) { console.warn('[EXPORT] mediabunny video config failed, falling back to MP4Box:', cfgErr); }
-
-      if (!videoDecoderConfig) {
-        let description: Uint8Array | undefined;
-        // @ts-ignore
-        if (typeof MP4BoxFile.getSampleDescription === 'function') {
-          // @ts-ignore
-          const descs = MP4BoxFile.getSampleDescription(videoTrackId);
-          // @ts-ignore
-          if (descs?.[0]) description = descs[0].avcC?.config || descs[0].avcC;
-        }
-        if (!description) {
-          try {
-            // @ts-ignore
-            const stsd = MP4BoxFile.getTrackById(videoTrackId)?.mdia?.minf?.stbl?.stsd;
-            const entry = stsd?.entries?.[0];
-            if (entry?.avcC?.config?.length > 0) description = new Uint8Array(entry.avcC.config);
-            else if (typeof entry?.avcC?.subarray === 'function') description = entry.avcC.subarray();
-            else if (typeof entry?.avcC?.start !== 'undefined' && entry?.avcC?.size) description = new Uint8Array(arrayBuffer, entry.avcC.start + 8, entry.avcC.size - 8);
-          } catch (descErr) { console.warn('[EXPORT] description extraction fallback failed:', descErr); }
-        }
-        videoDecoderConfig = { codec: 'avc1.64001F', codedWidth: 1080, codedHeight: 1920, description };
-      }
-      const descBuf = videoDecoderConfig.description;
-      const dbgDesc = descBuf instanceof Uint8Array ? descBuf : descBuf ? new Uint8Array(descBuf) : undefined;
-      const hexDesc = dbgDesc ? Array.from(dbgDesc.slice(0, Math.min(32, dbgDesc.length))).map((b: number) => b.toString(16).padStart(2, '0')).join(' ') : '<none>';
-      console.log('[EXPORT] decoder config — codec:', videoDecoderConfig.codec, `${videoDecoderConfig.codedWidth}×${videoDecoderConfig.codedHeight}`, 'description length:', dbgDesc?.byteLength ?? 0, 'first bytes:', hexDesc);
-      if (!videoDecoderConfig.description) console.warn('[EXPORT] ⚠️ no AVC description — decoder may fail');
-
       // ── Set up output container + audio BEFORE decoding so we can stream ─────
       setRecStatus('Preparing audio...');
 
@@ -400,26 +390,37 @@ export function useRecording(config: UseRecordingConfig) {
       let audioPackets: any[] = [];
       let audioDecoderConfigForExport: any = null;
 
-      if (audioSamples.length > 0) {
-        try {
-          const input = new Input({ source: new BlobSource(new Blob([arrayBuffer], { type: 'video/mp4' })), formats: ALL_FORMATS });
-          const audioTrack = await input.getPrimaryAudioTrack();
-          if (audioTrack) {
-            audioDecoderConfigForExport = await audioTrack.getDecoderConfig();
+      // Decide audio inclusion + path from the real demuxed audio track. AAC
+      // sources copy through verbatim; anything else (Opus / MP3 / AC-3 / PCM —
+      // all common in dropped local files) is transcoded to AAC so it isn't
+      // dropped silently or rejected by the MP4 muxer at finalize.
+      try {
+        const input = new Input({ source: new BlobSource(new Blob([arrayBuffer], { type: 'video/mp4' })), formats: ALL_FORMATS });
+        const audioTrack = await input.getPrimaryAudioTrack();
+        if (audioTrack && audioTrack.codec === 'aac') {
+          audioDecoderConfigForExport = await audioTrack.getDecoderConfig();
+          audioSource = new EncodedAudioPacketSource('aac');
+          output.addAudioTrack(audioSource);
+          const sink = new EncodedPacketSink(audioTrack);
+          for await (const packet of sink.packets()) audioPackets.push(packet);
+          const firstTs = audioPackets[0]?.timestamp || 0;
+          for (const p of audioPackets) p.timestamp -= firstTs;
+          audioPackets = audioPackets.filter((p: any) => p.timestamp >= clipStart && p.timestamp < clipEnd);
+          if (audioPackets.length > 0) {
+            const firstTrim = audioPackets[0].timestamp;
+            for (const p of audioPackets) p.timestamp -= firstTrim;
+          }
+        } else if (audioTrack) {
+          console.log('[EXPORT] non-AAC source audio (' + audioTrack.codec + ') — transcoding to AAC');
+          const t = await transcodeAudioToAac(arrayBuffer, clipStart, clipEnd);
+          if (t) {
+            audioPackets = t.packets;
+            audioDecoderConfigForExport = t.config;
             audioSource = new EncodedAudioPacketSource('aac');
             output.addAudioTrack(audioSource);
-            const sink = new EncodedPacketSink(audioTrack);
-            for await (const packet of sink.packets()) audioPackets.push(packet);
-            const firstTs = audioPackets[0]?.timestamp || 0;
-            for (const p of audioPackets) p.timestamp -= firstTs;
-            audioPackets = audioPackets.filter((p: any) => p.timestamp >= clipStart && p.timestamp < clipEnd);
-            if (audioPackets.length > 0) {
-              const firstTrim = audioPackets[0].timestamp;
-              for (const p of audioPackets) p.timestamp -= firstTrim;
-            }
           }
-        } catch (e) { console.error('[audio setup]', e); }
-      }
+        }
+      } catch (e) { console.error('[audio setup]', e); }
 
       // Ensure logo is loaded with crossOrigin=anonymous — the preview canvas may have
       // cached it without CORS, which would taint the OffscreenCanvas and fail VideoSample.
@@ -765,8 +766,14 @@ export function useRecording(config: UseRecordingConfig) {
 
       if (audioSource && audioPackets.length > 0) {
         setRecStatus('Adding audio...');
-        for (let i = 0; i < audioPackets.length; i++) {
-          await audioSource.add(audioPackets[i], i === 0 ? { decoderConfig: audioDecoderConfigForExport } : undefined);
+        // Don't let a late audio failure abort the whole export — a muted video is
+        // a far better outcome than a render that "never finishes".
+        try {
+          for (let i = 0; i < audioPackets.length; i++) {
+            await audioSource.add(audioPackets[i], i === 0 ? { decoderConfig: audioDecoderConfigForExport } : undefined);
+          }
+        } catch (audioAddErr) {
+          console.error('[EXPORT] audio add failed — exporting without audio:', audioAddErr);
         }
       }
 
