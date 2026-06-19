@@ -148,12 +148,13 @@ export function drawCtaLink({
   const ls      = linkSize ?? (isBio ? BIO_LINK_SIZE : LINK_SIZE);
 
   // One shared font (Inter at `ls`) for every segment — only the weight and
-  // colour change between them, so ".com", "to trade" and the category all sit
-  // on the SAME baseline at the SAME size, on one line.
+  // colour change between them, so ".com", "to trade[ on]" and the category all
+  // sit on the SAME baseline at the SAME size, on one line.
   const font = (weight: number) => `${weight} ${ls}px Inter, ${SANS}`;
   const dotCom = '.com';
-  const txt    = 'to trade';
   const catLabel = (isBio && ctaCategory) ? ctaCategory : '';
+  // Bio reads "to trade on artists / people"; large/small stay "to trade".
+  const txt    = catLabel ? 'to trade on' : 'to trade';
   const catText  = catLabel ? ` ${catLabel}` : '';
 
   ctx.font = font(600); const dotComW = ctx.measureText(dotCom).width;
