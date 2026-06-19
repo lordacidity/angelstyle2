@@ -73,8 +73,9 @@ export interface MarketData {
    *  to trade" link (no market row). Defaults to 'large'. */
   size?: 'large' | 'small' | 'bio';
   /** For the bio CTA only — appends a bold talent category to the link, e.g.
-   *  "pauv.com to trade Artists" / "…Athletes". From the brand kit. */
-  ctaCategory?: 'artists' | 'athletes';
+   *  "pauv.com to trade Artists" / "…Athletes" / "…People". From the brand kit,
+   *  or 'people' when the per-video People toggle is on. */
+  ctaCategory?: 'artists' | 'athletes' | 'people';
   /** When true, render the change as a LOSS: red, down arrow, and a declining
    *  sparkline — the inverse of the default bullish (green/up) treatment. */
   down?: boolean;

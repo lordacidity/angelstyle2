@@ -122,7 +122,7 @@ export interface DrawMarketRowOptions {
   down?: boolean;
   size?: 'large' | 'small' | 'bio';
   /** bio CTA only: appends a bold " Artists" / " Athletes" after "to trade". */
-  ctaCategory?: 'artists' | 'athletes';
+  ctaCategory?: 'artists' | 'athletes' | 'people';
 }
 
 // "pauv.com to trade [Artists]" — light grey, centered under the CTA box. Drawn
@@ -137,7 +137,7 @@ export function drawCtaLink({
   cw: number;
   videoBottomY: number;
   size?: 'large' | 'small' | 'bio';
-  ctaCategory?: 'artists' | 'athletes';
+  ctaCategory?: 'artists' | 'athletes' | 'people';
   pauvLogoImgRef?: MutableRefObject<HTMLImageElement | null>;
   linkSize?: number;
 }): void {
@@ -153,7 +153,7 @@ export function drawCtaLink({
   const font = (weight: number) => `${weight} ${ls}px Inter, ${SANS}`;
   const dotCom = '.com';
   const txt    = 'to trade';
-  const catLabel = (isBio && ctaCategory) ? (ctaCategory === 'athletes' ? 'athletes' : 'artists') : '';
+  const catLabel = (isBio && ctaCategory) ? ctaCategory : '';
   const catText  = catLabel ? ` ${catLabel}` : '';
 
   ctx.font = font(600); const dotComW = ctx.measureText(dotCom).width;

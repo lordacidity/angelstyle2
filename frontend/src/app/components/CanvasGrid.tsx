@@ -963,6 +963,9 @@ export function CanvasGrid({
   // each rotating person can independently show a gain or a loss.
   const [marketDownMap,           setMarketDownMap]           = useState<Record<string, boolean>>({});
   const [marketDownMap2,          setMarketDownMap2]          = useState<Record<string, boolean>>({});
+  // Per-entry "People" toggle for the bio CTA: when on, the link reads "pauv.com
+  // to trade People" instead of the brand-kit category (Athletes / Artists).
+  const [marketBioPeopleMap,      setMarketBioPeopleMap]      = useState<Record<string, boolean>>({});
   // Global toggle controlling whether the market widget is drawn on the
   // canvas (and exported). Persisted in localStorage so flipping it off
   // applies to every video — current, future, after Clear, after refresh —
@@ -1389,6 +1392,7 @@ export function CanvasGrid({
     setMarketSizeMap({});
     setMarketDownMap({});
     setMarketDownMap2({});
+    setMarketBioPeopleMap({});
     setMarketOverrideMap({});
     setMarketOverrideMap2({});
     setSparklineMap({});
@@ -1451,9 +1455,11 @@ export function CanvasGrid({
     // toggle: each machine's brand kit ("Pauv Athletes" / "Pauv Artists" / etc.)
     // should drive the wording the bio renders. The toggle is the fallback for
     // display names that don't mention either word (e.g. just "Pauv").
-    const bioCategory: 'artists' | 'athletes' =
-      /athletes/i.test(brand.displayName) ? 'athletes' :
-      /artists/i.test(brand.displayName)  ? 'artists'  :
+    // The per-video People toggle overrides the brand-kit wording entirely.
+    const bioCategory: 'artists' | 'athletes' | 'people' =
+      marketBioPeopleMap[entryId]            ? 'people'   :
+      /athletes/i.test(brand.displayName)    ? 'athletes' :
+      /artists/i.test(brand.displayName)     ? 'artists'  :
       brand.category;
     if (sizePref === 'bio') {
       return { name: '', ticker: '', photo_url: null, industry: null, subcategory: null, sparkline: null, size: 'bio', ctaCategory: bioCategory, price: { usd: null, lifetimeChangePct: null } };
@@ -1463,7 +1469,7 @@ export function CanvasGrid({
     const size = sizePref;
     const down = marketDownMap[entryId] ?? false;
     return buildMarketData(sel, marketOverrideMap[entryId], size, down);
-  }, [marketMap, marketOverrideMap, sparklineMap, marketSizeMap, marketDownMap, marketWidgetVisible, brand.category, brand.displayName]);
+  }, [marketMap, marketOverrideMap, sparklineMap, marketSizeMap, marketDownMap, marketBioPeopleMap, marketWidgetVisible, brand.category, brand.displayName]);
 
   // The OPTIONAL second CTA person — non-null only when the user has added a
   // second person (and the primary exists, and size isn't 'bio', which has no
@@ -2603,8 +2609,20 @@ export function CanvasGrid({
                             </div>
                           </div>
                           {!collapsed && ((marketSizeMap[entry.id] ?? 'bio') === 'bio' ? (
-                            <div className="px-3 py-4 text-center">
-                              <p className="text-[11px] text-zinc-600">Bio CTA — just the <span className="text-zinc-400 font-medium">pauv.com to trade</span> line. No person needed.</p>
+                            <div className="px-3 py-4 flex flex-col items-center gap-3">
+                              <p className="text-[11px] text-zinc-600 text-center">Bio CTA — just the <span className="text-zinc-400 font-medium">pauv.com to trade</span> line. No person needed.</p>
+                              {/* People toggle — swaps the brand-kit category (Athletes /
+                                  Artists) for the word "People" in the bio link. */}
+                              <button
+                                onClick={() => setMarketBioPeopleMap(prev => ({ ...prev, [entry.id]: !prev[entry.id] }))}
+                                title={marketBioPeopleMap[entry.id] ? 'Link reads “pauv.com to trade People”' : 'Link uses the brand-kit category (Athletes / Artists)'}
+                                className="inline-flex items-center gap-2"
+                              >
+                                <span className="text-[11px] font-medium text-zinc-400">People</span>
+                                <span className={`inline-flex items-center shrink-0 w-9 h-5 rounded-full px-0.5 transition-colors ${marketBioPeopleMap[entry.id] ? 'bg-[#04df9d]' : 'bg-zinc-700'}`}>
+                                  <span className={`block w-4 h-4 rounded-full bg-white shadow-sm transition-transform ${marketBioPeopleMap[entry.id] ? 'translate-x-4' : 'translate-x-0'}`} />
+                                </span>
+                              </button>
                             </div>
                           ) : (() => {
                             const selected2 = marketMap2[entry.id] ?? null;

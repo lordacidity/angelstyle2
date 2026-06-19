@@ -22,9 +22,10 @@ import { useRecording } from './hooks/useRecording';
 
 export type { TikTokCanvasRef, MarketData, SparkPoint } from './types';
 
-// Default fraction of black space above vs below the VIDEO (header/CTA ignored).
-// Stored as a fraction so the "Top %" input in the controls bar can override it
-// per video by writing into blockTopPctRef. 0.5 = video centred in the frame.
+// Default fraction of black space above vs below the BLOCK (header + video + CTA
+// for pauv; video alone for clean). Stored as a fraction so the "Top %" input in
+// the controls bar can override it per video by writing into blockTopPctRef.
+// 0.5 = block centred in the frame.
 
 export const TikTokCanvas = forwardRef<TikTokCanvasRef, TikTokCanvasProps>(function TikTokCanvas({
   videoSrc,
@@ -373,18 +374,20 @@ export const TikTokCanvas = forwardRef<TikTokCanvasRef, TikTokCanvasProps>(funct
     return row + topGap + CTA_LINK_AREA_H; // gap + row + "Link in bio" line
   }
 
-  // Auto-size + position the crop box so the VIDEO sits centred in the frame.
-  // The black spacing is measured off the video box ALONE — the header (pauvinc)
-  // and CTA are intentionally ignored, so the video itself is what's centred, not
-  // the whole block. The leftover black space is CANVAS_H - videoHeight; the
-  // video's top is TOP_FRAC of that leftover (0.5 = dead-centre). The video is
-  // shown at the template's full width; its height is the natural height at that
-  // width, capped to the frame (leaving room for the full chrome) so nothing is
-  // cut off and the box never spills off-frame. The draw loop cover-fills this
-  // box, so the frame stays tight around the video — no black bars, no distortion.
+  // Auto-size + position the crop box so the whole block sits centred in the
+  // frame. For the pauv (Twitter/X) template the block is header + video + CTA:
+  // the leftover black space is measured off the FULL block height, then split
+  // TOP_FRAC above / the rest below (0.5 = block dead-centre), and the video's
+  // top is dropped below the header within that centred block. The clean template
+  // keeps the older video-only centring (header/CTA ignored). The video is shown
+  // at the template's full width; its height is the natural height at that width,
+  // capped to the frame (leaving room for the full chrome) so nothing is cut off
+  // and the box never spills off-frame. The draw loop cover-fills this box, so the
+  // frame stays tight around the video — no black bars, no distortion.
   function anchorBlockTop() {
     const video = videoRef.current;
-    const chrome = computeHeaderHeight() + ctaHeight();
+    const headerH = computeHeaderHeight();
+    const chrome = headerH + ctaHeight();
 
     const topFrac = blockTopPctRef.current;
     if (!video || !video.videoWidth || !video.videoHeight) {
@@ -397,20 +400,27 @@ export const TikTokCanvas = forwardRef<TikTokCanvasRef, TikTokCanvasProps>(funct
     const boxW = brand === 'clean' ? CANVAS_W : VIDEO_TARGET_W;
     const naturalH = video.videoHeight * (boxW / video.videoWidth);
     const boxH = Math.max(MIN_DIM, Math.min(naturalH, CANVAS_H - chrome));
-    const y = Math.max(0, (CANVAS_H - boxH) * topFrac);
+    const y = brand === 'clean'
+      ? Math.max(0, (CANVAS_H - boxH) * topFrac)
+      : Math.max(0, (CANVAS_H - (boxH + chrome)) * topFrac + headerH);
 
     const b = { x: (CANVAS_W - boxW) / 2, y, w: boxW, h: boxH };
     boxRef.current = b;
     setBox({ ...b });
   }
 
-  // Re-centre the video using the CURRENT box size (unlike anchorBlockTop, which
-  // re-fits the photo to its natural height). Used after a manual resize, or when
-  // the chrome changes — the video re-centres on its own box, ignoring the header
-  // and CTA, without resetting the size the user just set.
+  // Re-centre using the CURRENT box size (unlike anchorBlockTop, which re-fits the
+  // photo to its natural height). Used after a manual resize, or when the chrome
+  // changes — re-centres on the same box without resetting the size the user just
+  // set. Mirrors anchorBlockTop: pauv centres the whole block (header + video +
+  // CTA), clean centres the video alone.
   function repositionBlock() {
     const boxH = boxRef.current.h;
-    const y = Math.max(0, (CANVAS_H - boxH) * blockTopPctRef.current);
+    const headerH = computeHeaderHeight();
+    const chrome = headerH + ctaHeight();
+    const y = brand === 'clean'
+      ? Math.max(0, (CANVAS_H - boxH) * blockTopPctRef.current)
+      : Math.max(0, (CANVAS_H - (boxH + chrome)) * blockTopPctRef.current + headerH);
     const b = { ...boxRef.current, y };
     boxRef.current = b;
     setBox({ ...b });

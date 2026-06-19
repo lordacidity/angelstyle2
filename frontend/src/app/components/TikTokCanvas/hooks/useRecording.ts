@@ -753,7 +753,13 @@ export function useRecording(config: UseRecordingConfig) {
             }
           }
 
-          const sample = new VideoSample(offscreen, { timestamp: targetTs, duration: EXPORT_FRAME_DURATION });
+          // targetTs includes clipStart so we seek the RIGHT source frame, but the
+          // OUTPUT sample must start at 0 — otherwise a trimmed clip leaves the
+          // first clipStart seconds of the output timeline blank while the audio
+          // (both AAC copy-through and transcode paths normalise to 0) plays from
+          // the start, so video runs clipStart seconds behind audio for the whole
+          // clip. Subtract clipStart to align the video track with the audio.
+          const sample = new VideoSample(offscreen, { timestamp: targetTs - clipStart, duration: EXPORT_FRAME_DURATION });
           await videoSource.add(sample);
           sample.close();
           reportProgress(0.15 + (frameIdx / totalFrames) * 0.7);
