@@ -1443,7 +1443,7 @@ export function CanvasGrid({
     // Respect the global visibility toggle — hiding the widget keeps the
     // selected talent + overrides intact for an easy re-enable.
     if (!marketWidgetVisible) return null;
-    const sizePref = marketSizeMap[entryId] ?? 'small';
+    const sizePref = marketSizeMap[entryId] ?? 'bio';
     // Bio CTA needs no talent — it's just the "pauv.com to trade" line under the
     // video — so return a minimal record (no name / price / sparkline).
     //
@@ -1470,7 +1470,7 @@ export function CanvasGrid({
   // person card to rotate). Drives the cube rotation in TikTokCanvas.
   const getMarketDataAlt = useCallback((entryId: string): MarketData | null => {
     if (!marketWidgetVisible) return null;
-    const sizePref = marketSizeMap[entryId] ?? 'small';
+    const sizePref = marketSizeMap[entryId] ?? 'bio';
     if (sizePref === 'bio') return null;            // bio has no card to rotate
     if (!marketMap[entryId]) return null;           // need a primary to rotate from
     const sel2 = marketMap2[entryId];
@@ -1847,7 +1847,7 @@ export function CanvasGrid({
     canvasRefsMap.current.get(id)?.setZoom(clamped);
   }, [canvasRefsMap]);
 
-  const getTopPct = useCallback((id: string) => blockTopPctMap[id] ?? 15, [blockTopPctMap]);
+  const getTopPct = useCallback((id: string) => blockTopPctMap[id] ?? 50, [blockTopPctMap]);
 
   const applyTopPct = useCallback((id: string, pct: number) => {
     const clamped = Math.max(0, Math.min(100, pct));
@@ -2496,7 +2496,7 @@ export function CanvasGrid({
                           brand={entry.mode === 'caption' ? 'clean' : 'pauv'}
                           overlayLogoSrc={brand.logoSrc || '/templatelogo.png'}
                           overlayDisplayName={brand.displayName || 'Pauv'}
-                          overlayHandle={brand.handle || '@Pauv'}
+                          overlayHandle={brand.handle || '@pauv_inc'}
                           overlayVerified={true}
                           overlayCaption={entry.caption}
                           marketData={entry.mode === 'twitter' ? getMarketData(entry.id) : null}
@@ -2576,7 +2576,7 @@ export function CanvasGrid({
                               {/* CTA size toggle — Large (full row) vs Small (one line) vs Bio (link only). */}
                               <div className="flex items-center rounded-md border border-zinc-800 overflow-hidden">
                                 {(['large', 'small', 'bio'] as const).map(sz => {
-                                  const active = (marketSizeMap[entry.id] ?? 'small') === sz;
+                                  const active = (marketSizeMap[entry.id] ?? 'bio') === sz;
                                   return (
                                     <button
                                       key={sz}
@@ -2602,7 +2602,7 @@ export function CanvasGrid({
                               </button>
                             </div>
                           </div>
-                          {!collapsed && ((marketSizeMap[entry.id] ?? 'small') === 'bio' ? (
+                          {!collapsed && ((marketSizeMap[entry.id] ?? 'bio') === 'bio' ? (
                             <div className="px-3 py-4 text-center">
                               <p className="text-[11px] text-zinc-600">Bio CTA — just the <span className="text-zinc-400 font-medium">pauv.com to trade</span> line. No person needed.</p>
                             </div>

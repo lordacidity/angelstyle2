@@ -156,7 +156,7 @@ export function VideoControlsBar({ entryId, activeRef, recordingState, videoSrc,
   const [timelineZoom, setTimelineZoom] = useState(1.0);
   const [selection,    setSelection]    = useState<string | null>(null);
   // Vertical anchor of the block top, shown as a whole-number percentage.
-  const [topPct,       setTopPct]       = useState(15);
+  const [topPct,       setTopPct]       = useState(50);
 
   const trimStartRef    = useRef(0);
   const trimEndRef      = useRef(0);
@@ -192,7 +192,7 @@ export function VideoControlsBar({ entryId, activeRef, recordingState, videoSrc,
     const ref = activeRefRef.current;
     if (!ref) return;
     const state = ref.getTrimState();
-    setTopPct(Math.round((state.blockTopPct ?? 0.3865) * 100));
+    setTopPct(Math.round((state.blockTopPct ?? 0.5) * 100));
     setFrames([]); setTimelineZoom(1.0); timelineZoomRef.current = 1.0;
     setSelection(null);
     setSegments([]); segmentsRef.current = [];

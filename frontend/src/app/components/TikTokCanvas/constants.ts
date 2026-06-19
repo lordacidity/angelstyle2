@@ -9,12 +9,13 @@ export const DISPLAY_SCALE = 0.38; // 1080×1920 → ~410×730 on screen
 export const MIN_DIM = 40;
 export const H_SIZE = 10; // handle square side length
 
-// Default split of the LEFTOVER black space (CANVAS_H minus the chrome the
-// block reserves) that sits ABOVE the block — the rest sits below it. The
-// "Top %" field in the controls bar overrides this per video; lower values
-// push the block toward the top of the frame, higher values push it down.
-// 0.3865 ≈ a 1.26 : 2 top-vs-bottom split (about 63%).
-export const BLOCK_TOP_PCT = 0.3865;
+// Fraction of the leftover black space (CANVAS_H minus the VIDEO height) that
+// sits ABOVE the video — the rest sits below. The black spacing is measured off
+// the video box ALONE; the header (pauvinc) and CTA are intentionally ignored so
+// the video sits perfectly centred in the frame. 0.5 = dead-centre by default;
+// the "Top %" field in the controls bar overrides this per video (lower = video
+// toward the top, higher = toward the bottom).
+export const BLOCK_TOP_PCT = 0.5;
 
 // Minimum breathing room reserved below the block (under the CTA, or under the
 // video when there's no CTA) when auto-sizing the video to fit the frame.

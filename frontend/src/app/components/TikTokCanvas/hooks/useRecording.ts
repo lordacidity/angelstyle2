@@ -114,7 +114,7 @@ export function useRecording(config: UseRecordingConfig) {
       const {
         Output, Mp4OutputFormat, BufferTarget, VideoSample, VideoSampleSource,
         EncodedAudioPacketSource, EncodedVideoPacketSource, EncodedPacketSink, EncodedPacket,
-        Input, BlobSource, ALL_FORMATS, QUALITY_HIGH,
+        Input, BlobSource, ALL_FORMATS, QUALITY_VERY_HIGH,
       } = mediabunny;
 
       const EXPORT_FPS = 30;
@@ -383,7 +383,10 @@ export function useRecording(config: UseRecordingConfig) {
       setRecStatus('Preparing audio...');
 
       const output = new Output({ format: new Mp4OutputFormat(), target: new BufferTarget() });
-      const videoSource = new VideoSampleSource({ codec: 'avc', bitrate: QUALITY_HIGH });
+      // QUALITY_VERY_HIGH ≈ 12 Mbps at 1080×1920 (double QUALITY_HIGH's ~6 Mbps) —
+      // keeps text edges, the favicon and fine video detail crisp instead of
+      // smearing them into compression mush.
+      const videoSource = new VideoSampleSource({ codec: 'avc', bitrate: QUALITY_VERY_HIGH });
       output.addVideoTrack(videoSource);
 
       let audioSource: any = null;
@@ -555,6 +558,10 @@ export function useRecording(config: UseRecordingConfig) {
 
       const offscreen = new OffscreenCanvas(CANVAS_W, CANVAS_H);
       const offCtx = offscreen.getContext('2d')!;
+      // High-quality resampling for the per-frame video cover-fill and any scaled
+      // overlay — the default 'low' softens edges on the export.
+      offCtx.imageSmoothingEnabled = true;
+      offCtx.imageSmoothingQuality = 'high';
       let currentFrame: { frame: VideoFrame; ts: number } | null = null;
 
       // ── Pre-bake static overlays into a sprite ──────────────────────────────
@@ -566,6 +573,10 @@ export function useRecording(config: UseRecordingConfig) {
       // and sparkline geometry that used to run on every iteration.
       const overlaySprite = new OffscreenCanvas(CANVAS_W, CANVAS_H);
       const spriteCtx = overlaySprite.getContext('2d')!;
+      // High-quality resampling for the baked overlay — favicon avatar, market
+      // photo and sparkline are all scaled down into this sprite.
+      spriteCtx.imageSmoothingEnabled = true;
+      spriteCtx.imageSmoothingQuality = 'high';
       const cropBoxFrozen = boxRef.current;
       if (isClean) {
         if (overlayCaption) {

@@ -15,10 +15,69 @@ import { wrapRichText, drawRichLine } from '@/lib/emoji';
 
 const CHIRP = 'Chirp, "Twitter Chirp", -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif';
 
-// Proportionally matches X's shape-square-rx-16 (16px on 40px = 40% corner radius)
+// Slightly squarer than X's shape-square-rx-16 (was 16px on 108px)
 const AVATAR_SIZE = PAUV_AVATAR_SIZE;           // 108
-const AVATAR_RADIUS = 16;
+const AVATAR_RADIUS = 10;
 const TEXT_X_OFFSET = PAUV_TEXT_X;              // 201 from canvas left
+
+// Supersample factor for the rounded avatar. The source logo (1080px) is drawn
+// into a 3×-size offscreen canvas with the rounded clip, then drawn DOWN into the
+// header. The downscale anti-aliases the rounded corners (a raw canvas clip leaves
+// them jagged) and softens the big logo→108px reduction — so the avatar stays
+// crisp, especially at the corners.
+const AVATAR_SS = 3;
+
+// The brand "p" mark (pauv-p.png) is a black "p" on white. Rather than treat it as
+// a photo, we paint a flat brand-gold background and composite the "p" with
+// 'multiply' (white → gold, black "p" → black). A flat fill has no banding and
+// compresses cleanly, so the avatar stays crisp through the video encoder.
+const BRAND_P_LOGO = 'pauv-p.png';
+const BRAND_BG = '#E5C68D';
+
+// Pre-rendered rounded avatar, cached per logo image so we don't re-supersample on
+// every frame of the draw loop. Keyed by the image element; rebuilt if the cached
+// tile's size no longer matches (e.g. a different DPR/size).
+const roundedAvatarCache = new WeakMap<HTMLImageElement, HTMLCanvasElement>();
+
+function getRoundedAvatar(logo: HTMLImageElement): HTMLCanvasElement {
+  const cached = roundedAvatarCache.get(logo);
+  const dim = AVATAR_SIZE * AVATAR_SS;
+  if (cached && cached.width === dim) return cached;
+
+  const c = document.createElement('canvas');
+  c.width = dim;
+  c.height = dim;
+  const octx = c.getContext('2d')!;
+  octx.imageSmoothingEnabled = true;
+  octx.imageSmoothingQuality = 'high';
+
+  octx.beginPath();
+  octx.roundRect(0, 0, dim, dim, AVATAR_RADIUS * AVATAR_SS);
+  octx.clip();
+
+  // object-fit: cover — scale to fill, crop center
+  const iw = logo.naturalWidth;
+  const ih = logo.naturalHeight;
+  const scale = Math.max(dim / iw, dim / ih);
+  const sw = dim / scale;
+  const sh = dim / scale;
+  const sx = (iw - sw) / 2;
+  const sy = (ih - sh) / 2;
+
+  if (logo.src.includes(BRAND_P_LOGO)) {
+    // Flat brand-gold fill, then the black "p" multiplied on top.
+    octx.fillStyle = BRAND_BG;
+    octx.fillRect(0, 0, dim, dim);
+    octx.globalCompositeOperation = 'multiply';
+    octx.drawImage(logo, sx, sy, sw, sh, 0, 0, dim, dim);
+    octx.globalCompositeOperation = 'source-over';
+  } else {
+    octx.drawImage(logo, sx, sy, sw, sh, 0, 0, dim, dim);
+  }
+
+  roundedAvatarCache.set(logo, c);
+  return c;
+}
 
 // Scaled from Twitter's 15px @ ~390px content width → 1080px canvas
 const NAME_SIZE = 42;
@@ -69,21 +128,15 @@ export function drawHeaderOnContext({
   }
 
   if (logo.complete && logo.naturalWidth > 0) {
-    ctx.save();
-    ctx.beginPath();
-    ctx.roundRect(avatarX, avatarY, AVATAR_SIZE, AVATAR_SIZE, AVATAR_RADIUS);
-    ctx.closePath();
-    ctx.clip();
-    // object-fit: cover — scale to fill, crop center
-    const iw = logo.naturalWidth;
-    const ih = logo.naturalHeight;
-    const scale = Math.max(AVATAR_SIZE / iw, AVATAR_SIZE / ih);
-    const sw = AVATAR_SIZE / scale;
-    const sh = AVATAR_SIZE / scale;
-    const sx = (iw - sw) / 2;
-    const sy = (ih - sh) / 2;
-    ctx.drawImage(logo, sx, sy, sw, sh, avatarX, avatarY, AVATAR_SIZE, AVATAR_SIZE);
-    ctx.restore();
+    // Draw the supersampled, pre-clipped avatar DOWN into the header — high-quality
+    // smoothing keeps the corners smooth and the logo crisp.
+    const prevSmooth = ctx.imageSmoothingEnabled;
+    const prevQuality = ctx.imageSmoothingQuality;
+    ctx.imageSmoothingEnabled = true;
+    ctx.imageSmoothingQuality = 'high';
+    ctx.drawImage(getRoundedAvatar(logo), avatarX, avatarY, AVATAR_SIZE, AVATAR_SIZE);
+    ctx.imageSmoothingEnabled = prevSmooth;
+    ctx.imageSmoothingQuality = prevQuality;
   }
 
   // ── Right column: Name + Handle (stacked, vertically centered in avatar) ────

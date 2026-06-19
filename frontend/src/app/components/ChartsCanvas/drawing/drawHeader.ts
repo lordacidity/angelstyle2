@@ -15,10 +15,62 @@ import { wrapRichText, drawRichLine } from '@/lib/emoji';
 
 const CHIRP = 'Chirp, "Twitter Chirp", -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif';
 
-// Proportionally matches X's shape-square-rx-16 (16px on 40px = 40% corner radius)
+// Slightly squarer than X's shape-square-rx-16 (was 16px on 108px)
 const AVATAR_SIZE = PAUV_AVATAR_SIZE;           // 108
-const AVATAR_RADIUS = 16;
+const AVATAR_RADIUS = 10;
 const TEXT_X_OFFSET = PAUV_TEXT_X;              // 201 from canvas left
+
+// Supersample the rounded avatar 3× then draw it down, so the corners and logo
+// stay crisp (a raw canvas clip leaves jagged corners; downscaling anti-aliases).
+const AVATAR_SS = 3;
+
+// The brand "p" mark (pauv-p.png) is a black "p" on white. Paint a flat brand-gold
+// background and composite the "p" with 'multiply' (white → gold, black "p" →
+// black) instead of treating it as a photo — a flat fill has no banding and
+// compresses cleanly, so the avatar stays crisp through the video encoder.
+const BRAND_P_LOGO = 'pauv-p.png';
+const BRAND_BG = '#E5C68D';
+
+const roundedAvatarCache = new WeakMap<HTMLImageElement, HTMLCanvasElement>();
+
+function getRoundedAvatar(logo: HTMLImageElement): HTMLCanvasElement {
+  const cached = roundedAvatarCache.get(logo);
+  const dim = AVATAR_SIZE * AVATAR_SS;
+  if (cached && cached.width === dim) return cached;
+
+  const c = document.createElement('canvas');
+  c.width = dim;
+  c.height = dim;
+  const octx = c.getContext('2d')!;
+  octx.imageSmoothingEnabled = true;
+  octx.imageSmoothingQuality = 'high';
+
+  octx.beginPath();
+  octx.roundRect(0, 0, dim, dim, AVATAR_RADIUS * AVATAR_SS);
+  octx.clip();
+
+  // object-fit: cover — scale to fill, crop center
+  const iw = logo.naturalWidth;
+  const ih = logo.naturalHeight;
+  const scale = Math.max(dim / iw, dim / ih);
+  const sw = dim / scale;
+  const sh = dim / scale;
+  const sx = (iw - sw) / 2;
+  const sy = (ih - sh) / 2;
+
+  if (logo.src.includes(BRAND_P_LOGO)) {
+    octx.fillStyle = BRAND_BG;
+    octx.fillRect(0, 0, dim, dim);
+    octx.globalCompositeOperation = 'multiply';
+    octx.drawImage(logo, sx, sy, sw, sh, 0, 0, dim, dim);
+    octx.globalCompositeOperation = 'source-over';
+  } else {
+    octx.drawImage(logo, sx, sy, sw, sh, 0, 0, dim, dim);
+  }
+
+  roundedAvatarCache.set(logo, c);
+  return c;
+}
 
 // Scaled from Twitter's 15px @ ~390px content width → 1080px canvas
 const NAME_SIZE = 42;
@@ -69,21 +121,13 @@ export function drawHeaderOnContext({
   }
 
   if (logo.complete && logo.naturalWidth > 0) {
-    ctx.save();
-    ctx.beginPath();
-    ctx.roundRect(avatarX, avatarY, AVATAR_SIZE, AVATAR_SIZE, AVATAR_RADIUS);
-    ctx.closePath();
-    ctx.clip();
-    // object-fit: cover — scale to fill, crop center
-    const iw = logo.naturalWidth;
-    const ih = logo.naturalHeight;
-    const scale = Math.max(AVATAR_SIZE / iw, AVATAR_SIZE / ih);
-    const sw = AVATAR_SIZE / scale;
-    const sh = AVATAR_SIZE / scale;
-    const sx = (iw - sw) / 2;
-    const sy = (ih - sh) / 2;
-    ctx.drawImage(logo, sx, sy, sw, sh, avatarX, avatarY, AVATAR_SIZE, AVATAR_SIZE);
-    ctx.restore();
+    const prevSmooth = ctx.imageSmoothingEnabled;
+    const prevQuality = ctx.imageSmoothingQuality;
+    ctx.imageSmoothingEnabled = true;
+    ctx.imageSmoothingQuality = 'high';
+    ctx.drawImage(getRoundedAvatar(logo), avatarX, avatarY, AVATAR_SIZE, AVATAR_SIZE);
+    ctx.imageSmoothingEnabled = prevSmooth;
+    ctx.imageSmoothingQuality = prevQuality;
   }
 
   // ── Right column: Name + Handle (stacked, vertically centered in avatar) ────

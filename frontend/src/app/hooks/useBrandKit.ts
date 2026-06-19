@@ -8,15 +8,24 @@ import type { BrandProps, BrandLogo, BrandCategory } from '../types';
 // always has a working logo with zero Supabase/auth dependency. Any logos that
 // DO load from the shared account are appended after this one. The `static:`
 // id prefix marks it as non-deletable — it isn't a Supabase row.
+// pauv-p.png is just the black "p" on white. The header renderer (drawHeader.ts)
+// detects this asset and draws a flat brand-gold background + the "p" via multiply
+// instead of treating it as a photo — a flat fill survives the video encoder far
+// cleaner than a baked-in background, so the avatar stays crisp and unbanded.
 const STATIC_LOGOS: BrandLogo[] = [
-  { id: 'static:pauv', url: '/pauv-favicon.png', label: 'Pauv', position: -1 },
+  { id: 'static:pauv', url: '/pauv-p.png', label: 'Pauv', position: -1 },
 ];
+
+// The handle is always exactly @pauv_inc — it is NOT read from localStorage or the
+// shared Supabase column, so every machine renders the same handle regardless of
+// any per-machine or shared saved value.
+const DEFAULT_HANDLE = '@pauv_inc';
 
 const EMPTY_BRAND: BrandProps = {
   logoSrc: STATIC_LOGOS[0].url,
   logos: STATIC_LOGOS,
   displayName: '',
-  handle: '',
+  handle: DEFAULT_HANDLE,
   category: 'artists',
 };
 
@@ -79,7 +88,7 @@ export function useBrandKit(userId: string | null) {
       const local = readLocalIdentity();
       setBrand({
         displayName: local.displayName ?? '',
-        handle: local.handle ? toDisplayHandle(local.handle) : '',
+        handle: DEFAULT_HANDLE,
         category: toCategory(local.category),
         logos: STATIC_LOGOS,
         logoSrc: STATIC_LOGOS[0].url,
@@ -109,7 +118,7 @@ export function useBrandKit(userId: string | null) {
         // local identity plus the static Pauv logo so the kit is usable offline.
         setBrand({
           displayName: local.displayName ?? '',
-          handle: local.handle ? toDisplayHandle(local.handle) : '',
+          handle: DEFAULT_HANDLE,
           category: toCategory(local.category),
           logos: STATIC_LOGOS,
           logoSrc: STATIC_LOGOS[0].url,
@@ -137,14 +146,13 @@ export function useBrandKit(userId: string | null) {
         })),
       ];
 
-      // Identity (display name + handle): localStorage wins so each machine
-      // keeps its own brand; the Supabase columns are only a fallback seed.
+      // Display name: localStorage wins per-machine, seeded from the shared
+      // Supabase column. The handle is always @pauv_inc (never stored/read).
       const displayName = local.displayName ?? (kit.display_name ?? '');
-      const handleRaw   = local.handle      ?? (kit.handle      ?? '');
 
       setBrand({
         displayName,
-        handle: handleRaw ? toDisplayHandle(handleRaw) : '',
+        handle: DEFAULT_HANDLE,
         category: toCategory(local.category),
         logos,
         logoSrc: logos[0]?.url ?? '',

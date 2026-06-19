@@ -22,10 +22,9 @@ import { useRecording } from './hooks/useRecording';
 
 export type { TikTokCanvasRef, MarketData, SparkPoint } from './types';
 
-// Default split of the leftover black space above vs below the block. Stored
-// as a fraction so the "Top %" input in the controls bar can override it per
-// video by writing into blockTopPctRef. 0.3865 ≈ 1.26 : 2 (the comment says
-// "top : bottom = 1.26 : 2 = 63%"), kept as a documented baseline.
+// Default fraction of black space above vs below the VIDEO (header/CTA ignored).
+// Stored as a fraction so the "Top %" input in the controls bar can override it
+// per video by writing into blockTopPctRef. 0.5 = video centred in the frame.
 
 export const TikTokCanvas = forwardRef<TikTokCanvasRef, TikTokCanvasProps>(function TikTokCanvas({
   videoSrc,
@@ -35,7 +34,7 @@ export const TikTokCanvas = forwardRef<TikTokCanvasRef, TikTokCanvasProps>(funct
   brand = 'pauv',
   overlayLogoSrc = '/templatelogo.png',
   overlayDisplayName = 'Pauv',
-  overlayHandle = '@Pauv',
+  overlayHandle = '@pauv_inc',
   overlayVerified = true,
   overlayCaption = '',
   marketData = null,
@@ -374,29 +373,22 @@ export const TikTokCanvas = forwardRef<TikTokCanvasRef, TikTokCanvasProps>(funct
     return row + topGap + CTA_LINK_AREA_H; // gap + row + "Link in bio" line
   }
 
-  // Auto-size + position the crop box so the whole block (header → video → CTA)
-  // sits with the black space ABOVE it 1.26 parts to the 2 parts below it
-  // (top : bottom = 1.26 : 2 = 63%). The fixed chrome (header + CTA) is constant, so the
-  // leftover black space is CANVAS_H - splitChrome - videoHeight; blockTop is
-  // TOP_FRAC of that leftover. The "link in bio" line is intentionally left OUT
-  // of splitChrome so it reads as part of the bottom black space, not the block.
-  // The video is shown at the template's full width; its height is the natural
-  // height at that width, capped to the frame (using the FULL chrome incl. the
-  // link line) so nothing is cut off and blockTop never goes negative. The draw
-  // loop cover-fills this box, so the frame is always tight around the video — no
-  // black bars, no distortion. The header draws at `y - headerHeight + 4`, so
-  // y = blockTop + headerHeight - 4 puts the header's top edge exactly at blockTop.
+  // Auto-size + position the crop box so the VIDEO sits centred in the frame.
+  // The black spacing is measured off the video box ALONE — the header (pauvinc)
+  // and CTA are intentionally ignored, so the video itself is what's centred, not
+  // the whole block. The leftover black space is CANVAS_H - videoHeight; the
+  // video's top is TOP_FRAC of that leftover (0.5 = dead-centre). The video is
+  // shown at the template's full width; its height is the natural height at that
+  // width, capped to the frame (leaving room for the full chrome) so nothing is
+  // cut off and the box never spills off-frame. The draw loop cover-fills this
+  // box, so the frame stays tight around the video — no black bars, no distortion.
   function anchorBlockTop() {
     const video = videoRef.current;
-    const headerHeight = computeHeaderHeight();
-    const chrome = headerHeight + ctaHeight();
-    // Chrome for the top:bottom split excludes the "link in bio" line.
-    const splitChrome = chrome - (marketData ? ((marketData.size ?? 'large') === 'bio' ? CTA_LINK_AREA_H_BIO : CTA_LINK_AREA_H) : 0);
+    const chrome = computeHeaderHeight() + ctaHeight();
 
     const topFrac = blockTopPctRef.current;
     if (!video || !video.videoWidth || !video.videoHeight) {
-      const blockTop = Math.max(0, (CANVAS_H - splitChrome) * topFrac);
-      const b = { ...boxRef.current, y: blockTop + headerHeight - 4 };
+      const b = { ...boxRef.current, y: Math.max(0, (CANVAS_H - boxRef.current.h) * topFrac) };
       boxRef.current = b;
       setBox({ ...b });
       return;
@@ -405,27 +397,21 @@ export const TikTokCanvas = forwardRef<TikTokCanvasRef, TikTokCanvasProps>(funct
     const boxW = brand === 'clean' ? CANVAS_W : VIDEO_TARGET_W;
     const naturalH = video.videoHeight * (boxW / video.videoWidth);
     const boxH = Math.max(MIN_DIM, Math.min(naturalH, CANVAS_H - chrome));
-    const blockTop = Math.max(0, (CANVAS_H - splitChrome - boxH) * topFrac);
-    const y = blockTop + headerHeight - 4;
+    const y = Math.max(0, (CANVAS_H - boxH) * topFrac);
 
     const b = { x: (CANVAS_W - boxW) / 2, y, w: boxW, h: boxH };
     boxRef.current = b;
     setBox({ ...b });
   }
 
-  // Re-apply the 1.4:2 top:bottom split using the CURRENT photo size (unlike
-  // anchorBlockTop, which re-fits the photo to its natural height). Used when the
-  // chrome changes height — CTA toggled small/large, caption edited — or after a
-  // manual resize, so the block re-centers vertically without resetting the size
-  // the user just set.
+  // Re-centre the video using the CURRENT box size (unlike anchorBlockTop, which
+  // re-fits the photo to its natural height). Used after a manual resize, or when
+  // the chrome changes — the video re-centres on its own box, ignoring the header
+  // and CTA, without resetting the size the user just set.
   function repositionBlock() {
-    const headerHeight = computeHeaderHeight();
-    const chrome = headerHeight + ctaHeight();
-    // Chrome for the top:bottom split excludes the "link in bio" line.
-    const splitChrome = chrome - (marketData ? ((marketData.size ?? 'large') === 'bio' ? CTA_LINK_AREA_H_BIO : CTA_LINK_AREA_H) : 0);
     const boxH = boxRef.current.h;
-    const blockTop = Math.max(0, (CANVAS_H - splitChrome - boxH) * blockTopPctRef.current);
-    const b = { ...boxRef.current, y: blockTop + headerHeight - 4 };
+    const y = Math.max(0, (CANVAS_H - boxH) * blockTopPctRef.current);
+    const b = { ...boxRef.current, y };
     boxRef.current = b;
     setBox({ ...b });
   }

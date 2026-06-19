@@ -173,10 +173,11 @@ export function BrandKit({
             <input
               type="text"
               value={handle}
-              onChange={e => setHandle(e.target.value)}
-              placeholder="e.g. @Pauv"
-              className="w-full bg-zinc-900 border border-zinc-800 focus:border-zinc-600 rounded-lg px-3 py-2.5 text-sm text-white placeholder-zinc-600 outline-none transition-colors"
+              readOnly
+              title="The handle is fixed to @pauv_inc"
+              className="w-full bg-zinc-900/60 border border-zinc-800 rounded-lg px-3 py-2.5 text-sm text-zinc-400 outline-none cursor-not-allowed"
             />
+            <span className="text-[11px] text-zinc-600">Always @pauv_inc</span>
           </div>
 
           {/* Category — drives the bio CTA wording ("pauv.com to trade Artists"
