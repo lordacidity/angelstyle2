@@ -14,14 +14,27 @@ async function mixAudio(videoPath: string, audioPath: string, outputPath: string
     ffmpeg()
       .input(videoPath)
       .input(audioPath)
-      .videoCodec('copy')
+      // RE-ENCODE the video — do NOT `-c copy`. MediaRecorder (Chrome) emits a
+      // FRAGMENTED MP4 whose moov/mvhd carries no valid duration; the real timing
+      // lives scattered across fragments. A stream copy preserves that broken
+      // header, so the file plays full-length on desktop (players rescan frames)
+      // but Android's MediaStore trusts the bogus mvhd duration and shows ~3 s.
+      // Re-encoding rebuilds a clean, non-fragmented MP4 with a correct mvhd
+      // duration and constant 30 fps — fixing the Android 3-second bug and the
+      // glitchy seeking on desktop. CFR output (-r 30) also smooths the variable
+      // frame rate produced by manual requestFrame() pumping.
+      .videoCodec('libx264')
       .audioCodec('aac')
       .audioBitrate(192)
       .outputOptions([
         '-map', '0:v:0',
         '-map', '1:a:0',
+        '-preset', 'veryfast',
+        '-crf', '20',
+        '-pix_fmt', 'yuv420p',
+        '-r', '30',
         '-shortest',
-        '-movflags', 'faststart',
+        '-movflags', '+faststart',
         '-fflags', '+genpts',
       ])
       .output(outputPath)
