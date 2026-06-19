@@ -735,6 +735,134 @@ function safeExportName(raw: string) {
   return raw.replace(/[<>:"/\\|?*]/g, '').replace(/\s+/g, ' ').trim().slice(0, 70).replace(/[. ]+$/g, '').trim() || 'charts';
 }
 
+// Mux the recorded canvas video together with the chosen audio track ENTIRELY
+// in the browser (mediabunny demux/remux + WebCodecs AudioEncoder), the same
+// approach TikTokCanvas uses. The old path POSTed the raw recording to the
+// server-side /api/charts/mix-audio (ffmpeg) route — which works on localhost
+// but SILENTLY FAILS on Vercel: there's no ffmpeg binary in the serverless
+// runtime, and the audio file written by save-audio lives on an ephemeral,
+// per-invocation fs the mix function can't read. The client then shipped the
+// raw MediaRecorder MP4: no audio, and a broken container whose moov reports
+// ~3 s while the file actually plays full length. Doing it here is
+// host-independent and rewrites a correct moov, fixing both bugs at once.
+//
+// Audio is trimmed to the video's duration (mirrors the old ffmpeg `-shortest`).
+// Returns hasAudio=false when no track was chosen or audio encoding failed, so
+// the caller can still ship a (correctly-muxed, silent) clip rather than abort.
+async function muxClientSide(
+  videoBlob: Blob,
+  audioUrl: string | null,
+  onStatus: (status: string) => void,
+): Promise<{ blob: Blob; hasAudio: boolean }> {
+  const {
+    Output, Mp4OutputFormat, BufferTarget,
+    EncodedAudioPacketSource, EncodedVideoPacketSource, EncodedPacketSink, EncodedPacket,
+    Input, BlobSource, ALL_FORMATS,
+  } = await import('mediabunny');
+
+  // ── Demux the recorded video track ────────────────────────────────────────
+  const vidBuf = await videoBlob.arrayBuffer();
+  const vInput = new Input({ source: new BlobSource(new Blob([vidBuf], { type: 'video/mp4' })), formats: ALL_FORMATS });
+  const vTrack = await vInput.getPrimaryVideoTrack();
+  if (!vTrack) throw new Error('No video track in recording');
+  const vConfig = await vTrack.getDecoderConfig();
+
+  const vPackets: any[] = [];
+  let maxEnd = 0;
+  for await (const p of new EncodedPacketSink(vTrack).packets()) {
+    vPackets.push(p);
+    const end = p.timestamp + (p.duration || 0);
+    if (end > maxEnd) maxEnd = end;
+  }
+  if (vPackets.length === 0) throw new Error('No video packets in recording');
+  const videoDuration = maxEnd;
+
+  // ── Decode + re-encode the audio to AAC, trimmed to the video length ───────
+  let audioPackets: any[] = [];
+  let audioConfig: any = null;
+  if (audioUrl) {
+    onStatus('Encoding audio…');
+    try {
+      if (typeof AudioEncoder === 'undefined' || typeof AudioContext === 'undefined')
+        throw new Error('WebCodecs / Web Audio API unavailable');
+
+      const SR = 44100, AFRAME = 1024;
+      const aRes = await fetch(audioUrl);
+      if (!aRes.ok) throw new Error(`audio fetch ${aRes.status}`);
+      const aBuf = await aRes.arrayBuffer();
+
+      const actx = new AudioContext({ sampleRate: SR });
+      let decoded: AudioBuffer;
+      try { decoded = await actx.decodeAudioData(aBuf.slice(0)); }
+      finally { await actx.close(); }
+
+      const ch = Math.min(2, decoded.numberOfChannels) || 1;
+      const endF = Math.min(decoded.length, Math.ceil(videoDuration * SR)); // -shortest
+
+      const chunks: EncodedAudioChunk[] = [];
+      let cfg: AudioDecoderConfig | null = null;
+      let encErr: Error | null = null;
+      const enc = new AudioEncoder({
+        output: (chunk: EncodedAudioChunk, meta?: EncodedAudioChunkMetadata) => {
+          chunks.push(chunk);
+          if (meta?.decoderConfig && !cfg) cfg = meta.decoderConfig;
+        },
+        error: (e: Error) => { encErr = e; },
+      });
+      enc.configure({ codec: 'mp4a.40.2', sampleRate: SR, numberOfChannels: ch, bitrate: 192_000 });
+
+      const chData = Array.from({ length: ch }, (_, c) => decoded.getChannelData(Math.min(c, decoded.numberOfChannels - 1)));
+      let tMicros = 0;
+      for (let off = 0; off < endF; off += AFRAME) {
+        const fc = Math.min(AFRAME, endF - off);
+        const planar = new Float32Array(fc * ch);
+        for (let c = 0; c < ch; c++) { const s = chData[c]; for (let i = 0; i < fc; i++) planar[c * fc + i] = s[off + i] ?? 0; }
+        const ad = new AudioData({ format: 'f32-planar', sampleRate: SR, numberOfFrames: fc, numberOfChannels: ch, timestamp: tMicros, data: planar });
+        enc.encode(ad); ad.close();
+        tMicros += Math.round((fc / SR) * 1_000_000);
+      }
+      await enc.flush(); enc.close();
+      if (encErr) throw encErr;
+
+      if (chunks.length > 0) {
+        if (!cfg) {
+          const sfIdx = [96000, 88200, 64000, 48000, 44100, 32000, 24000, 22050, 16000, 12000, 11025, 8000, 7350].indexOf(SR);
+          const si = sfIdx >= 0 ? sfIdx : 4;
+          cfg = { codec: 'mp4a.40.2', sampleRate: SR, numberOfChannels: ch, description: new Uint8Array([(2 << 3) | (si >> 1), ((si & 1) << 7) | (ch << 3)]) };
+        }
+        audioConfig = cfg;
+        audioPackets = chunks.map((c) => EncodedPacket.fromEncodedChunk(c));
+      }
+    } catch (e) {
+      console.error('[charts mux] audio encode failed — muxing silent:', e);
+    }
+  }
+
+  // ── Remux into a clean MP4 (rewrites the moov → fixes the broken duration) ─
+  onStatus('Finalizing…');
+  const out = new Output({ format: new Mp4OutputFormat(), target: new BufferTarget() });
+  const vSrc = new EncodedVideoPacketSource(vTrack.codec as any);
+  out.addVideoTrack(vSrc);
+  let aSrc: any = null;
+  if (audioPackets.length > 0) {
+    aSrc = new EncodedAudioPacketSource('aac');
+    out.addAudioTrack(aSrc);
+  }
+  await out.start();
+  for (let i = 0; i < vPackets.length; i++) {
+    await vSrc.add(vPackets[i], i === 0 && vConfig ? { decoderConfig: vConfig } : undefined);
+  }
+  if (aSrc) {
+    for (let i = 0; i < audioPackets.length; i++) {
+      await aSrc.add(audioPackets[i], i === 0 ? { decoderConfig: audioConfig } : undefined);
+    }
+  }
+  await out.finalize();
+  const buf = out.target.buffer;
+  if (!buf) throw new Error('No buffer from mux output');
+  return { blob: new Blob([buf], { type: 'video/mp4' }), hasAudio: audioPackets.length > 0 };
+}
+
 export const ChartsCanvas = forwardRef<ChartsCanvasRef, ChartsCanvasProps>(function ChartsCanvas(
   { overlayCaption = '', markets, overrideNames = ['', ''], onRecordingStateChange, audioUrl, audioDurationMs, speed = 1, startTrimPct = 0 },
   ref,
@@ -993,45 +1121,36 @@ export const ChartsCanvas = forwardRef<ChartsCanvasRef, ChartsCanvasProps>(funct
         recorder.stop();
         await new Promise<void>(r => { recorder.onstop = () => r(); });
 
-        notify(true, 0.98, 'Mixing audio…');
+        notify(true, 0.98, 'Processing…');
 
         const videoBlob = new Blob(chunks, { type: mimeType });
         const filename  = `${safeExportName(captionRef.current || 'charts')}.mp4`;
 
-        // Mix the original MP3 into the video server-side as proper AAC.
-        // Send video as raw binary body; audioUrl as query param — avoids 10MB multipart limit.
-        //
-        // A muted export is almost always a SILENT failure here (no track
-        // selected, or the mix request errored), so surface every mute path to
-        // the status bar instead of swallowing it — shipping a muted file with
-        // no warning is what made this hard to debug.
+        // Mux the audio in and rewrite the container CLIENT-SIDE (mediabunny +
+        // WebCodecs). This used to POST to /api/charts/mix-audio (server ffmpeg),
+        // which works on localhost but silently fails on Vercel — no ffmpeg
+        // binary and no shared fs for the audio file — leaving a raw recording
+        // with no audio and a broken duration header (reports ~3 s, plays full).
+        // muxClientSide is host-independent and writes a correct moov, fixing
+        // both. If no track is chosen it still remuxes to a (silent) clean MP4.
         let blob = videoBlob;
         let audioMixed = false;
         if (!audioUrlRef.current) {
-          console.warn('[mix-audio] no audio track selected — export will be silent');
-          notify(true, 0.98, '⚠ No audio track selected — exporting silent');
-          await new Promise<void>(r => setTimeout(r, 1500));
-        } else {
-          try {
-            console.log('[mix-audio] mixing', audioUrlRef.current, 'into', mimeType, `(${(videoBlob.size / 1024 / 1024).toFixed(1)}MB)`);
-            const tr = await fetch(
-              `/api/charts/mix-audio?audioUrl=${encodeURIComponent(audioUrlRef.current)}`,
-              { method: 'POST', body: videoBlob, headers: { 'Content-Type': 'video/mp4' } },
-            );
-            if (tr.ok) {
-              blob = await tr.blob();
-              audioMixed = true;
-            } else {
-              const errText = await tr.text();
-              console.error('[mix-audio] failed:', tr.status, errText);
-              notify(true, 0.98, `⚠ Audio mix failed (${tr.status}) — exporting silent`);
-              await new Promise<void>(r => setTimeout(r, 2000));
-            }
-          } catch (e) {
-            console.error('[mix-audio] error:', e);
-            notify(true, 0.98, `⚠ Audio mix error — exporting silent`);
+          console.warn('[charts export] no audio track selected — export will be silent');
+        }
+        try {
+          console.log('[charts export] muxing', audioUrlRef.current ?? '(no audio)', 'from', mimeType, `(${(videoBlob.size / 1024 / 1024).toFixed(1)}MB)`);
+          const res = await muxClientSide(videoBlob, audioUrlRef.current, s => notify(true, 0.98, s));
+          blob = res.blob;
+          audioMixed = res.hasAudio;
+          if (audioUrlRef.current && !res.hasAudio) {
+            notify(true, 0.98, '⚠ Audio encode failed — exporting silent');
             await new Promise<void>(r => setTimeout(r, 2000));
           }
+        } catch (e) {
+          console.error('[charts export] client-side mux failed — exporting raw recording:', e);
+          notify(true, 0.98, '⚠ Export processing failed — raw file');
+          await new Promise<void>(r => setTimeout(r, 2000));
         }
 
         const audioTag = audioMixed ? ' 🔊' : ' (muted)';
