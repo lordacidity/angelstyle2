@@ -14,8 +14,10 @@ export interface VideoCanvasRef {
   centerBox: () => void;
   // Only the TikTok video canvas supports a tunable top anchor; carousel doesn't.
   setBlockTopPct?: (pct: number) => void;
+  // Only the carousel video canvas supports muting the source audio on export.
+  setMuted?: (muted: boolean) => void;
   getVideoElement: () => HTMLVideoElement | null;
-  getTrimState: () => { trimStart: number; trimEnd: number; duration: number; blockTopPct?: number };
+  getTrimState: () => { trimStart: number; trimEnd: number; duration: number; blockTopPct?: number; muted?: boolean };
   startDownload: () => Promise<string | void>;
   cancelExport: () => void;
 }
@@ -157,6 +159,8 @@ export function VideoControlsBar({ entryId, activeRef, recordingState, videoSrc,
   const [selection,    setSelection]    = useState<string | null>(null);
   // Vertical anchor of the block top, shown as a whole-number percentage.
   const [topPct,       setTopPct]       = useState(50);
+  // Mute the source audio on export (carousel video only).
+  const [muted,        setMuted]        = useState(false);
 
   const trimStartRef    = useRef(0);
   const trimEndRef      = useRef(0);
@@ -193,6 +197,7 @@ export function VideoControlsBar({ entryId, activeRef, recordingState, videoSrc,
     if (!ref) return;
     const state = ref.getTrimState();
     setTopPct(Math.round((state.blockTopPct ?? 0.5) * 100));
+    setMuted(state.muted ?? false);
     setFrames([]); setTimelineZoom(1.0); timelineZoomRef.current = 1.0;
     setSelection(null);
     setSegments([]); segmentsRef.current = [];
@@ -640,6 +645,29 @@ export function VideoControlsBar({ entryId, activeRef, recordingState, videoSrc,
           className="text-[10px] text-zinc-600 hover:text-zinc-400 transition-colors">Reset trim</button>
         <div className="w-px h-3 bg-zinc-800" />
         <button onClick={() => activeRef.resetBox()}  className="text-[10px] text-zinc-600 hover:text-zinc-400 transition-colors">Reset box</button>
+        {activeRef.setMuted && (
+          <>
+            <div className="w-px h-3 bg-zinc-800" />
+            <button
+              onClick={() => { const next = !muted; setMuted(next); activeRef.setMuted?.(next); }}
+              title={muted ? 'Audio muted — export will be silent. Click to unmute.' : 'Mute audio for export'}
+              className={`flex items-center gap-1 text-[10px] transition-colors ${muted ? 'text-[#fe2c55] hover:text-[#ff5277]' : 'text-zinc-600 hover:text-zinc-400'}`}
+            >
+              {muted ? (
+                <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+                  <polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"/>
+                  <line x1="23" y1="9" x2="17" y2="15"/><line x1="17" y1="9" x2="23" y2="15"/>
+                </svg>
+              ) : (
+                <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+                  <polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"/>
+                  <path d="M15.54 8.46a5 5 0 0 1 0 7.07"/><path d="M19.07 4.93a10 10 0 0 1 0 14.14"/>
+                </svg>
+              )}
+              {muted ? 'Muted' : 'Mute'}
+            </button>
+          </>
+        )}
         {activeRef.setBlockTopPct && (
           <label className="flex items-center gap-1 text-[10px] text-zinc-600" title="Distance of the block's top edge from the top of the frame">
             <span>Top</span>

@@ -29,7 +29,7 @@ import { PhonedeckImages } from './phonedeck/PhonedeckImages';
 import { GRID_BG_STYLE } from '@/lib/ui-constants';
 import { makeEmptyEntry } from '@/lib/entry';
 import { sectionFromPath, pathForSection } from '@/lib/sections';
-import type { VideoMode } from './types';
+import type { VideoMode, CarouselPage } from './types';
 
 const AiCardsSection = lazy(() =>
   import('./components/AiCardsSection').then(m => ({ default: m.AiCardsSection }))
@@ -206,6 +206,9 @@ export function StudioShell() {
   const [pushOrigins, setPushOrigins] = useState<Record<string, { table: BoardTable; id: string }>>({});
 
   const [pendingAiSeed, setPendingAiSeed] = useState<{ imageSrc: string; headline: string; subheadline: string; subheadline2?: string; articleUrl?: string } | null>(null);
+  // Multi-page seed for the "Trending (auto)" carousel flow. Presence triggers
+  // CanvasGrid to stamp each entry's settings from the saved template.
+  const [pendingCarouselSeed, setPendingCarouselSeed] = useState<CarouselPage[] | null>(null);
 
   // Set to an entry id when the Board widget's send arrow drops a row into the
   // generator; CanvasGrid picks it up, runs the fetch→crop→caption pipeline for
@@ -244,6 +247,26 @@ export function StudioShell() {
   function handleBuildCard(seed: { imageSrc: string; headline: string; subheadline: string; subheadline2?: string; articleUrl?: string }) {
     setPendingAiSeed(seed);
     setEntries(prev => prev.map(e => ({ ...e, mode: 'carousel' as const })));
+    setTimeout(() => router.push(pathForSection('media')), 400);
+  }
+
+  // "Trending (auto)" → build a whole multi-page carousel at once. Replace the
+  // current rows with one entry per AI page (main first, then supporting_1s),
+  // each carrying its headline/subheadline. Per-page settings come from the
+  // saved template via CanvasGrid (which has access to savedSlides); we pass the
+  // pages as pendingCarouselSeed so it can stamp settingsMap once they load.
+  function handleBuildCarousel(pages: CarouselPage[]) {
+    if (pages.length === 0) return;
+    const stamp = Date.now();
+    const built = pages.map((p, i) => ({
+      ...makeEmptyEntry(`${stamp}-${i}`, 'carousel' as const, p.slideType),
+      headline: p.headline,
+      subheadline: p.subheadline,
+      ...(p.imageSrc ? { imageSrc: p.imageSrc } : {}),
+      ...(p.articleUrl ? { articleUrl: p.articleUrl } : {}),
+    }));
+    setEntries(built);
+    setPendingCarouselSeed(pages);
     setTimeout(() => router.push(pathForSection('media')), 400);
   }
 
@@ -299,7 +322,7 @@ export function StudioShell() {
   }
 
   return (
-    <div className="flex min-h-screen bg-black text-white">
+    <div className="flex min-h-screen bg-[#0f0f0f] text-white">
       {/* Floating Phonedeck panel — bottom-right, mirrors Phonedeck's Incoming
           list over HTTP/SSE so a fresh export can be pushed to phones without
           switching tabs. Works locally; can point at a peer machine on the LAN
@@ -333,6 +356,8 @@ export function StudioShell() {
             <Suspense fallback={<SectionLoader />}>
               <AiCardsSection
                 onBuildCard={handleBuildCard}
+                onBuildCarousel={handleBuildCarousel}
+                brandCategory={brand.category}
                 onCancel={() => router.push(pathForSection('brandkit'))}
               />
             </Suspense>
@@ -358,6 +383,7 @@ export function StudioShell() {
           <div style={{ display: activeSection === 'media' ? undefined : 'none' }}>
             <GridSection>
               <CanvasGrid
+                active={activeSection === 'media'}
                 entries={entries}
                 canvasRefsMap={canvasRefsMap}
                 carouselRefsMap={carouselRefsMap}
@@ -386,10 +412,13 @@ export function StudioShell() {
                 setSettingsMap={setCarouselSettingsMap}
                 pendingAiSeed={pendingAiSeed}
                 onAiSeedConsumed={() => setPendingAiSeed(null)}
+                pendingCarouselSeed={pendingCarouselSeed}
+                onCarouselSeedConsumed={() => setPendingCarouselSeed(null)}
                 pendingBoardSend={pendingBoardSend}
                 onBoardSendConsumed={() => setPendingBoardSend(null)}
                 onEntryExported={handleEntryExported}
                 onBackToAi={() => router.push(pathForSection('ai'))}
+                onOpenAiTrending={() => router.push(`${pathForSection('ai')}?flow=trending`)}
               />
             </GridSection>
           </div>

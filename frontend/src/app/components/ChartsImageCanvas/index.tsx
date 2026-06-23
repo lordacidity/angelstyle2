@@ -2,485 +2,17 @@
 
 import { useRef, useEffect, useCallback, forwardRef, useImperativeHandle } from 'react';
 import { CANVAS_W, CANVAS_H, DISPLAY_SCALE, PPT_W, PPT_H, PPT_DISPLAY_SCALE } from './constants';
-import type { ChartsImageCanvasProps, ChartsImageCanvasRef, ChartsImageMarket, ChartsImageDirection, ChartsImageNoiseLevel, SparkPoint } from './types';
-
-export type { ChartsImageCanvasRef, ChartsImageMarket, CanvasAspectRatio, ChartsImageDirection, ChartsImageNoiseLevel } from './types';
-
-// Noise amplitude per level, as a fraction of the chart's plot height. 0 = off.
-const NOISE_SCALE: Record<ChartsImageNoiseLevel, number> = { none: 0, small: 0.035, med: 0.075, large: 0.13 };
-
-// Stable per-ticker seed so each market's noise shape is consistent across redraws.
-function tickerSeed(ticker: string): number {
-  return (ticker.split('').reduce((a, c) => (a * 31 + c.charCodeAt(0)) | 0, 9) >>> 0) || 1;
-}
-
-// ── Constants ─────────────────────────────────────────────────────────────────
-
-const PAD      = 80; // uniform content padding on all four sides
-const AVATAR_R = 52; // small inline avatar (≈h-9 at 0.38 display scale)
-// Portrait gets extra breathing room; PPT keeps the original tighter values
-const topPadFor    = (cH: number) => cH > 1100 ? PAD + 68 : PAD + 20;
-const chartBotFor  = (cH: number) => cH > 1100 ? cH - 266  : cH - 210;
-const barCyFor     = (cH: number) => cH > 1100 ? cH - 177  : cH - 140;
-
-// Each synthetic sparkline index treated as 45 days → realistic 18-month span
-const POINT_INTERVAL_MS = 45 * 24 * 60 * 60 * 1000;
-
-// ── Helpers copied verbatim from ChartsCanvas/index.tsx ───────────────────────
-
-// Deterministic, believable change% in [5, 15] seeded by ticker. Must be stable
-// across redraws (the canvas repaints every animation frame) — no Math.random().
-// Exported so the caption generator shows the same magnitude as the rendered card.
-export function seededChangePct(ticker: string): number {
-  let seed = ticker.split('').reduce((a, c) => (a * 31 + c.charCodeAt(0)) | 0, 7) >>> 0;
-  seed = (seed * 1664525 + 1013904223) >>> 0;
-  return 5 + (seed / 0xffffffff) * 10; // 5.0 – 15.0
-}
-
-function sparkToSeries(spark: SparkPoint[] | null | undefined): { t: number; price: number }[] {
-  if (!spark?.length) return [];
-  // Real Google Trends timestamps are ms-since-epoch (> year 2000 = 9.46e11).
-  // Synthetic fallback timestamps are sequential indices 0, 1, 2 …
-  const isReal = spark[0].timestamp > 946_684_800_000;
-  if (isReal) {
-    return spark.map(p => ({ t: p.timestamp, price: p.value }));
-  }
-  // Synthetic: space each index 45 days apart so we get ~18 months of virtual history
-  const nowMs = Date.now();
-  const n     = spark.length;
-  return spark.map((p, i) => ({
-    t:     nowMs - (n - 1 - i) * POINT_INTERVAL_MS,
-    price: p.value,
-  }));
-}
-
-// ── drawImageCover ─────────────────────────────────────────────────────────────
-
-function drawImageCover(
-  ctx: CanvasRenderingContext2D,
-  img: HTMLImageElement,
-  cx: number, cy: number, r: number,
-) {
-  const iw    = img.naturalWidth  || img.width  || 1;
-  const ih    = img.naturalHeight || img.height || 1;
-  const d     = r * 2;
-  const scale = Math.max(d / iw, d / ih);
-  const sw    = d / scale;
-  const sh    = d / scale;
-  const sx    = (iw - sw) / 2;
-  const sy    = (ih - sh) / 2;
-  ctx.drawImage(img, sx, sy, sw, sh, cx - r, cy - r, d, d);
-}
-
-// ── drawStepChart ─────────────────────────────────────────────────────────────
-
-function drawStepChart(
-  ctx:       CanvasRenderingContext2D,
-  series:    { t: number; price: number }[],
-  rx: number, ry: number, rw: number, rh: number,
-  color:     string,
-  maxLabels: number = 20,
-  noiseSeed:  number = 0,
-  noiseScale: number = 0,
-) {
-  if (series.length < 2) return;
-
-  const src = series;
-
-  const s = src;
-
-  const V_PAD_T    = 48;
-  const V_PAD_B    = 80;
-  const chartAreaH = rh - V_PAD_T - V_PAD_B;
-
-  const prices    = s.map(p => p.price);
-  const minPrice  = Math.min(...prices);
-  const maxPrice  = Math.max(...prices);
-  const priceRange = maxPrice === minPrice ? 1 : maxPrice - minPrice;
-
-  const tStart = s[0].t;
-  const tEnd   = s[s.length - 1].t;
-  const tRange = Math.max(tEnd - tStart, 1);
-
-  // Right gutter for Y-axis labels; inner pad keeps the line/dot off the gutter edge
-  const RIGHT_GUTTER    = 90;
-  const CHART_RIGHT_PAD = 40;
-
-  const toX = (t: number) =>
-    rx + ((t - tStart) / tRange) * (rw - RIGHT_GUTTER - CHART_RIGHT_PAD);
-
-  const toY = (price: number) =>
-    ry + V_PAD_T + (1 - (price - minPrice) / priceRange) * chartAreaH;
-
-  // ── Grid lines at fractions 0, 0.25, 0.5, 0.75 of rh ────────────────────
-  ctx.save();
-  for (const frac of [0, 0.25, 0.5, 0.75]) {
-    const gy = ry + frac * rh;
-
-    ctx.strokeStyle = '#484848';
-    ctx.lineWidth   = 1.5;
-    ctx.setLineDash([4, 10]);
-    ctx.beginPath();
-    ctx.moveTo(rx, gy);
-    ctx.lineTo(rx + rw - RIGHT_GUTTER, gy);
-    ctx.stroke();
-    ctx.setLineDash([]);
-
-    // Y-axis price label
-    const labelPrice = minPrice + (1 - (gy - ry - V_PAD_T) / chartAreaH) * priceRange;
-    ctx.font         = `400 20px "JetBrains Mono", "Courier New", monospace`;
-    ctx.fillStyle    = '#52525b';
-    ctx.textAlign    = 'right';
-    ctx.textBaseline = 'middle';
-    ctx.fillText(`${labelPrice.toFixed(2)}`, rx + rw, gy);
-  }
-
-  // ── Step-line path ────────────────────────────────────────────────────────
-  const rawPts = s.map(p => ({ x: toX(p.t), y: toY(p.price) }));
-
-  // Optional noise: nudge each interior point vertically by a seeded amount so the
-  // line reads as more volatile. noiseScale === 0 (level 'none') → no extra noise.
-  // Amplitude scales with the chosen level; first/last points stay anchored (last
-  // keeps the head dot on the real price).
-  if (noiseScale > 0 && rawPts.length > 2) {
-    let rng = (noiseSeed >>> 0) || 1;
-    const nextRand  = () => { rng = (rng * 1664525 + 1013904223) >>> 0; return rng / 0xffffffff; };
-    const NOISE_AMP = chartAreaH * noiseScale;
-    const yTop = ry + V_PAD_T;
-    const yBot = ry + V_PAD_T + chartAreaH;
-    for (let i = 1; i < rawPts.length - 1; i++) {
-      const n = (nextRand() - 0.5) * 2 * NOISE_AMP;
-      rawPts[i].y = Math.max(yTop, Math.min(yBot, rawPts[i].y + n));
-    }
-  }
-
-  // Insert seeded sub-points between each pair for organic fluctuations. The noise
-  // level controls BOTH how many sub-points we add (more = more jagged) and how far
-  // they jitter; level 'none' keeps the original subtle baseline (1 pt, 10px).
-  const noiseOn  = noiseScale > 0;
-  const SUB_PTS  = noiseOn ? Math.round(2 + noiseScale * 32) : 1; // small≈3, med≈4, large≈6
-  const JITTER   = noiseOn ? 10 + noiseScale * 130 : 10;          // px amplitude per sub-point
-  const yTopJ    = ry + V_PAD_T;
-  const yBotJ    = ry + V_PAD_T + chartAreaH;
-  const pts: { x: number; y: number }[] = [];
-  for (let i = 0; i < rawPts.length - 1; i++) {
-    pts.push(rawPts[i]);
-    for (let j = 1; j <= SUB_PTS; j++) {
-      const t  = j / (SUB_PTS + 1);
-      const x  = rawPts[i].x + (rawPts[i + 1].x - rawPts[i].x) * t;
-      const y  = rawPts[i].y + (rawPts[i + 1].y - rawPts[i].y) * t;
-      const h  = Math.sin(i * 127.1 + j * 311.7 + x * 0.3 + noiseSeed * 0.001) * 43758.5453;
-      const n  = (h - Math.floor(h) - 0.5) * 2 * JITTER;
-      pts.push({ x, y: Math.max(yTopJ, Math.min(yBotJ, y + n)) });
-    }
-  }
-  pts.push(rawPts[rawPts.length - 1]);
-
-  ctx.beginPath();
-  ctx.strokeStyle = color;
-  ctx.lineWidth   = 3;
-  ctx.lineJoin    = 'round';
-  ctx.lineCap     = 'round';
-  ctx.moveTo(pts[0].x, pts[0].y);
-  for (let i = 1; i < pts.length - 1; i++) {
-    const mx = (pts[i].x + pts[i + 1].x) / 2;
-    const my = (pts[i].y + pts[i + 1].y) / 2;
-    ctx.quadraticCurveTo(pts[i].x, pts[i].y, mx, my);
-  }
-  ctx.lineTo(pts[pts.length - 1].x, pts[pts.length - 1].y);
-  ctx.stroke();
-
-  // ── Dot at last point ─────────────────────────────────────────────────────
-  const last = pts[pts.length - 1];
-
-  // Outer glow ring (mid-pulse state of the mobile pulsating dot)
-  ctx.beginPath();
-  ctx.arc(last.x, last.y, 16, 0, Math.PI * 2);
-  ctx.fillStyle = color;
-  ctx.globalAlpha = 0.18;
-  ctx.fill();
-  ctx.globalAlpha = 1;
-
-  // Inner solid dot
-  ctx.beginPath();
-  ctx.arc(last.x, last.y, 6, 0, Math.PI * 2);
-  ctx.fillStyle = color;
-  ctx.fill();
-
-  // ── X-axis time labels ────────────────────────────────────────────────────
-  ctx.font         = `400 22px "JetBrains Mono", "Courier New", monospace`;
-  ctx.fillStyle    = '#52525b';
-  ctx.textBaseline = 'alphabetic';
-  const labelY = ry + rh - 24;
-
-  // Place maxLabels evenly across the actual time range
-  const tMin = s[0].t;
-  const tMax = s[s.length - 1].t;
-  const seenYears = new Set<number>();
-  for (let k = 0; k < maxLabels; k++) {
-    const t    = tMin + (k / (maxLabels - 1)) * (tMax - tMin);
-    const year = new Date(t).getFullYear();
-    if (seenYears.has(year)) continue;
-    seenYears.add(year);
-    const lx = toX(t);
-    ctx.textAlign = k === 0 ? 'left' : k === maxLabels - 1 ? 'right' : 'center';
-    ctx.fillText(String(year), lx, labelY);
-  }
-
-  ctx.restore();
-}
-
-// ── drawHeader ────────────────────────────────────────────────────────────────
-
-interface HeaderResult {
-  series:      { t: number; price: number }[];
-  color:       string;
-  changeBaseY: number;
-}
-
-function drawHeader(
-  ctx:             CanvasRenderingContext2D,
-  market:          ChartsImageMarket,
-  img:             HTMLImageElement | null,
-  overrideName:    string,
-  cH:              number,
-  overrideIndustry?: string,
-  direction:       ChartsImageDirection = 'up',
-): HeaderResult {
-  const displayName = overrideName || market.name;
-  const SANS        = '-apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif';
-  const TOP_PAD     = topPadFor(cH);
-
-  // ── Sparkline shape (Google Trends) ──────────────────────────────────────
-  const fullSeries = sparkToSeries(market.sparkline?.length ? market.sparkline : []);
-
-  // Crop to first point where Google Trends value > 0
-  const firstNonZeroIdx = fullSeries.findIndex(p => p.price > 0);
-  const rawSeries = firstNonZeroIdx > 0 ? fullSeries.slice(firstNonZeroIdx) : fullSeries;
-
-  const lastSpark = rawSeries[rawSeries.length - 1]?.price ?? 0;
-  const minSpark  = rawSeries.length ? Math.min(...rawSeries.map(p => p.price)) : 0;
-
-  // Displayed value = NPSI index from API.
-  const realPrice = market.price?.usd ?? null;
-  const lastPrice = realPrice != null && realPrice > 0 ? realPrice : Math.max(0.01, lastSpark);
-
-  // Normalise: minSpark → 0.01, lastSpark → NPSI. Shape is scaled proportionally,
-  // all values ≥ 0.01, last point = NPSI.
-  const sparkRange = lastSpark - minSpark;
-  const series = rawSeries.map(p => ({
-    t:     p.t,
-    price: sparkRange > 0
-      ? 0.01 + ((p.price - minSpark) / sparkRange) * (lastPrice - 0.01)
-      : lastPrice,
-  }));
-
-  // Headline change: magnitude is a seeded random 5–15% per ticker (stable across
-  // redraws), sign comes from the up/down toggle. Raw $ change is derived from the
-  // pct applied to the displayed price, so the two always agree.
-  const isPositive = direction !== 'down';
-  const pct        = seededChangePct(market.ticker);
-  const signedPct  = isPositive ? pct : -pct;
-  const startPrice = lastPrice / (1 + signedPct / 100);
-  const rawChange  = lastPrice - startPrice; // +ve when up, −ve when down
-  const color      = isPositive ? '#0CDF9D' : '#FF4B4B';
-
-  // Append a short fabricated move at the very end: a sharp up/down spike that swings
-  // ~20% of the data's value range but spans only ~1–2% of the chart width — so the
-  // line clearly ends up or down without overwriting any of the real history.
-  if (series.length >= 3) {
-    let sMin = Infinity, sMax = -Infinity;
-    for (const p of series) { if (p.price < sMin) sMin = p.price; if (p.price > sMax) sMax = p.price; }
-    const sRange   = Math.max(lastPrice * 0.5, sMax - sMin); // floor so flat charts still spike
-    const MOVE     = sRange * 0.2;
-    const endPrice = Math.max(0.01, isPositive ? lastPrice + MOVE : lastPrice - MOVE);
-    const tStart   = series[0].t;
-    const tEnd     = series[series.length - 1].t;
-    const stepT    = (tEnd - tStart) / Math.max(1, series.length - 1);
-    const N        = Math.max(2, Math.round(series.length * 0.015)); // ~1.5% of the width
-    for (let k = 1; k <= N; k++) {
-      const f = k / N;
-      series.push({ t: tEnd + stepT * k, price: lastPrice + (endPrice - lastPrice) * f });
-    }
-  }
-
-  // ── Shared left margin — all rows left-aligned ───────────────────────────
-  const LEFT = PAD;
-
-  // ── Row 1: avatar (small) + name (+ industry under name) ─────────────────
-  const nameText        = `${displayName}'s Sentiment`;
-  const NAME_FONT       = `400 44px "Inter", ${SANS}`;
-  const INDUSTRY_FONT   = `400 31px "Inter", ${SANS}`;
-  const AVATAR_NAME_GAP = 42;
-  const avatarCX = LEFT + AVATAR_R;
-  const avatarCY = TOP_PAD + AVATAR_R;
-  const nameX    = LEFT + AVATAR_R * 2 + AVATAR_NAME_GAP;
-  const industry = (overrideIndustry?.trim() ?? market.industry ?? '').trim();
-
-  ctx.save();
-  ctx.beginPath();
-  ctx.arc(avatarCX, avatarCY, AVATAR_R, 0, Math.PI * 2);
-  if (img) {
-    ctx.clip();
-    drawImageCover(ctx, img, avatarCX, avatarCY, AVATAR_R);
-  } else {
-    ctx.fillStyle = '#27272a';
-    ctx.fill();
-    ctx.fillStyle    = '#0CDF9D';
-    ctx.font         = `700 ${Math.round(AVATAR_R * 0.65)}px -apple-system, sans-serif`;
-    ctx.textAlign    = 'center';
-    ctx.textBaseline = 'middle';
-    ctx.fillText(displayName.charAt(0).toUpperCase(), avatarCX, avatarCY);
-  }
-  ctx.restore();
-
-  ctx.font      = NAME_FONT;
-  ctx.fillStyle = '#ffffff';
-  ctx.textAlign = 'left';
-  if (industry) {
-    // Stack name + industry, centred as a block on the avatar.
-    ctx.textBaseline = 'alphabetic';
-    ctx.fillText(nameText, nameX, avatarCY - 8);
-    ctx.font      = INDUSTRY_FONT;
-    ctx.fillStyle = '#71717a';
-    ctx.fillText(industry, nameX, avatarCY + 44);
-  } else {
-    ctx.textBaseline = 'middle';
-    ctx.fillText(nameText, nameX, avatarCY);
-  }
-
-  // ── Row 2: price + "points" ───────────────────────────────────────────────
-  const isPpt            = cH <= 1100;
-  const priceStr         = `${Math.max(0.01, lastPrice).toFixed(2)}`;
-  const PRICE_FONT       = `600 56px "JetBrains Mono", "Courier New", monospace`;
-  const POINTS_FONT      = `400 44px "Inter", ${SANS}`;
-  const CHANGE_FONT      = `500 30px "JetBrains Mono", "Courier New", monospace`;
-  const PRICE_POINTS_GAP = 16;
-  ctx.font = PRICE_FONT;  const priceW = ctx.measureText(priceStr).width;
-  const priceBaseY = avatarCY + AVATAR_R + 104;
-
-  ctx.font         = PRICE_FONT;
-  ctx.fillStyle    = '#ffffff';
-  ctx.textAlign    = 'left';
-  ctx.textBaseline = 'alphabetic';
-  ctx.fillText(priceStr, LEFT, priceBaseY);
-
-  ctx.font         = POINTS_FONT;
-  ctx.fillStyle    = '#ffffff';
-  ctx.textAlign    = 'left';
-  ctx.textBaseline = 'alphabetic';
-  const pointsX = LEFT + priceW + PRICE_POINTS_GAP;
-  ctx.fillText('points', pointsX, priceBaseY - 1);
-
-  const pctStr   = `${Math.abs(pct).toFixed(1)}%`;
-  const rawStr   = `${isPositive ? '+' : '-'}$${Math.abs(rawChange).toFixed(2)}`;
-  const ARROW_W  = 28;
-  const ARROW_H  = Math.round(ARROW_W * (18 / 24));
-  const ARROW_GAP = 10;
-
-  let changeBaseY: number;
-
-  if (isPpt) {
-    // PPT: inline arrow + % + raw after "points" on the same baseline
-    ctx.font = POINTS_FONT;
-    const pointsW   = ctx.measureText('points').width;
-    const inlineGap = 32;
-    const arrowLeft = pointsX + pointsW + inlineGap;
-    const arrowTopBase = priceBaseY - Math.round(30 * 0.35) - Math.round(ARROW_H / 2) + 3;
-    const arrowTop     = isPositive ? arrowTopBase : arrowTopBase - 5;
-
-    ctx.fillStyle = color;
-    ctx.beginPath();
-    if (isPositive) {
-      ctx.moveTo(arrowLeft + ARROW_W * 0.5,   arrowTop);
-      ctx.lineTo(arrowLeft + ARROW_W * 0.933, arrowTop + ARROW_H * 0.792);
-      ctx.lineTo(arrowLeft + ARROW_W * 0.067, arrowTop + ARROW_H * 0.792);
-    } else {
-      ctx.moveTo(arrowLeft + ARROW_W * 0.5,   arrowTop + ARROW_H);
-      ctx.lineTo(arrowLeft + ARROW_W * 0.067, arrowTop + ARROW_H * 0.208);
-      ctx.lineTo(arrowLeft + ARROW_W * 0.933, arrowTop + ARROW_H * 0.208);
-    }
-    ctx.closePath();
-    ctx.fill();
-
-    ctx.font         = CHANGE_FONT;
-    ctx.fillStyle    = color;
-    ctx.textAlign    = 'left';
-    ctx.textBaseline = 'alphabetic';
-    const pctX    = arrowLeft + ARROW_W + ARROW_GAP;
-    ctx.fillText(pctStr, pctX, priceBaseY);
-    const pctTextW = ctx.measureText(pctStr).width;
-    ctx.fillText(rawStr, pctX + pctTextW + 24, priceBaseY);
-
-    changeBaseY = priceBaseY;
-  } else {
-    // Portrait: Row 3 below price row
-    changeBaseY = priceBaseY + 72;
-    const arrowLeft = LEFT;
-    const arrowTopBase = changeBaseY - Math.round(30 * 0.35) - Math.round(ARROW_H / 2) + 3;
-    const arrowTop     = isPositive ? arrowTopBase : arrowTopBase - 5;
-
-    ctx.fillStyle = color;
-    ctx.beginPath();
-    if (isPositive) {
-      ctx.moveTo(arrowLeft + ARROW_W * 0.5,   arrowTop);
-      ctx.lineTo(arrowLeft + ARROW_W * 0.933, arrowTop + ARROW_H * 0.792);
-      ctx.lineTo(arrowLeft + ARROW_W * 0.067, arrowTop + ARROW_H * 0.792);
-    } else {
-      ctx.moveTo(arrowLeft + ARROW_W * 0.5,   arrowTop + ARROW_H);
-      ctx.lineTo(arrowLeft + ARROW_W * 0.067, arrowTop + ARROW_H * 0.208);
-      ctx.lineTo(arrowLeft + ARROW_W * 0.933, arrowTop + ARROW_H * 0.208);
-    }
-    ctx.closePath();
-    ctx.fill();
-
-    ctx.font         = CHANGE_FONT;
-    ctx.fillStyle    = color;
-    ctx.textAlign    = 'left';
-    ctx.textBaseline = 'alphabetic';
-    const pctX     = arrowLeft + ARROW_W + ARROW_GAP;
-    ctx.fillText(pctStr, pctX, changeBaseY);
-    const pctTextW = ctx.measureText(pctStr).width;
-    ctx.fillText(rawStr, pctX + pctTextW + 24, changeBaseY);
-  }
-
-  return { series, color, changeBaseY };
-}
-
-// ── drawBottomBar ─────────────────────────────────────────────────────────────
-
-const PERIODS = ['1H', '1D', '7D', '1M', 'ALL'] as const;
-
-function drawBottomBar(ctx: CanvasRenderingContext2D, logo: HTMLImageElement | null, cW: number, cH: number) {
-  const BAR_CY = barCyFor(cH);
-
-  // Time frames (left) — 7D is the highlighted default
-  ctx.font         = `400 30px "Inter", -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif`;
-  ctx.textBaseline = 'middle';
-  ctx.textAlign    = 'left';
-  let px = PAD;
-  for (const p of PERIODS) {
-    ctx.fillStyle = p === 'ALL' ? '#ffffff' : '#52525b';
-    ctx.fillText(p, px, BAR_CY);
-    px += ctx.measureText(p).width + 40;
-  }
-
-  // Pauv logo (right) — grayscale + low opacity
-  if (logo) {
-    const logoH = 40;
-    const logoW  = logo.naturalWidth * (logoH / (logo.naturalHeight || 1));
-    ctx.save();
-    ctx.globalAlpha = 0.20;
-    ctx.filter      = 'grayscale(1)';
-    ctx.drawImage(logo, cW - logoW - PAD, BAR_CY - logoH / 2, logoW, logoH);
-    ctx.restore();
-  }
-}
+import type { ChartsImageCanvasProps, ChartsImageCanvasRef } from './types';
+import { muxClientSide, safeExportName, PHONEDECK_URL } from '@/lib/canvasVideoExport';
+import { drawChartImageFrame, seededChangePct, GROW_MS, HOLD_MS, PULSE_MS } from './render';
+
+export type { ChartsImageCanvasRef, ChartsImageMarket, CanvasAspectRatio, ChartsImageDirection, ChartsImageNoiseLevel, ChartsImageSubMode } from './types';
+export { seededChangePct };
 
 // ── Component ─────────────────────────────────────────────────────────────────
 
 export const ChartsImageCanvas = forwardRef<ChartsImageCanvasRef, ChartsImageCanvasProps>(
-  function ChartsImageCanvas({ market, overrideName = '', overrideIndustry = '', direction = 'up', noiseLevel = 'none', aspectRatio = 'portrait' }, ref) {
+  function ChartsImageCanvas({ market, overrideName = '', overrideIndustry = '', direction = 'up', noiseLevel = 'none', aspectRatio = 'portrait', subMode = 'image', speed = 1, audioUrl, onRecordingStateChange }, ref) {
     const cW     = aspectRatio === 'ppt' ? PPT_W     : CANVAS_W;
     const cH     = aspectRatio === 'ppt' ? PPT_H     : CANVAS_H;
     const dScale = aspectRatio === 'ppt' ? PPT_DISPLAY_SCALE : DISPLAY_SCALE;
@@ -496,12 +28,27 @@ export const ChartsImageCanvas = forwardRef<ChartsImageCanvasRef, ChartsImageCan
     const noiseLevelRef      = useRef(noiseLevel);
     const dimensionsRef      = useRef({ cW, cH });
 
+    // Video mode
+    const subModeRef     = useRef(subMode);
+    const speedRef       = useRef(Math.min(3, Math.max(1, speed || 1)));
+    const audioUrlRef    = useRef<string | null>(audioUrl ?? null);
+    const onRecStateRef  = useRef(onRecordingStateChange);
+    const animStartRef   = useRef(0);   // ms timestamp the reveal clock started (0 = not started)
+    const isRecordingRef = useRef(false);
+
     useEffect(() => { marketRef.current          = market;          }, [market]);
     useEffect(() => { overrideNameRef.current    = overrideName;    }, [overrideName]);
     useEffect(() => { overrideIndustryRef.current = overrideIndustry; }, [overrideIndustry]);
     useEffect(() => { directionRef.current       = direction;       }, [direction]);
     useEffect(() => { noiseLevelRef.current      = noiseLevel;      }, [noiseLevel]);
     useEffect(() => { dimensionsRef.current      = { cW, cH };     }, [cW, cH]);
+    useEffect(() => { speedRef.current   = Math.min(3, Math.max(1, speed || 1)); }, [speed]);
+    useEffect(() => { audioUrlRef.current = audioUrl ?? null; }, [audioUrl]);
+    useEffect(() => { onRecStateRef.current = onRecordingStateChange; }, [onRecordingStateChange]);
+    // Entering video mode (re)starts the reveal from t=0; image mode shows it full.
+    useEffect(() => { subModeRef.current = subMode; animStartRef.current = 0; }, [subMode]);
+    // Replay when fresh data / a different market arrives, so the preview plays in.
+    useEffect(() => { animStartRef.current = 0; }, [market?.id, market?.sparkline?.length]);
 
     // ── Load pauv logo ──────────────────────────────────────────────────────
     useEffect(() => {
@@ -532,10 +79,9 @@ export const ChartsImageCanvas = forwardRef<ChartsImageCanvasRef, ChartsImageCan
       const { cW: w, cH: h } = dimensionsRef.current;
       const mk = marketRef.current;
 
-      ctx.fillStyle = '#0A0A0A';
-      ctx.fillRect(0, 0, w, h);
-
       if (!mk) {
+        ctx.fillStyle = '#0A0A0A';
+        ctx.fillRect(0, 0, w, h);
         ctx.textAlign    = 'center';
         ctx.textBaseline = 'middle';
         ctx.font         = `300 28px -apple-system, sans-serif`;
@@ -545,23 +91,31 @@ export const ChartsImageCanvas = forwardRef<ChartsImageCanvasRef, ChartsImageCan
         return;
       }
 
-      const { series, color, changeBaseY } = drawHeader(
-        ctx, mk, imgRef.current, overrideNameRef.current, h,
-        overrideIndustryRef.current, directionRef.current,
-      );
-
-      const CHART_TOP  = changeBaseY + 56;
-      const CHART_BOT  = chartBotFor(h);
-      const CHART_H_PX = CHART_BOT - CHART_TOP;
-      const CHART_L    = PAD;
-      const CHART_W    = w - PAD * 2;
-
-      if (CHART_H_PX > 60) {
-        drawStepChart(ctx, series, CHART_L, CHART_TOP, CHART_W, CHART_H_PX, color, h > 1100 ? 4 : 7,
-          tickerSeed(mk.ticker), NOISE_SCALE[noiseLevelRef.current] ?? 0);
+      // Reveal fraction: in video mode the line draws in over GROW_MS/speed, then
+      // holds at full. In image mode it's always full. The tip dot pulses (radar
+      // ping) only in video mode; the still image keeps the frozen mid-pulse.
+      let revealT = 1;
+      let tipPulseT = -1;
+      if (subModeRef.current === 'video') {
+        const hasData = (mk.sparkline?.length ?? 0) > 0;
+        if (hasData && animStartRef.current === 0) animStartRef.current = performance.now();
+        revealT = animStartRef.current === 0
+          ? 0
+          : Math.min((performance.now() - animStartRef.current) / (GROW_MS / speedRef.current), 1);
+        tipPulseT = (performance.now() % PULSE_MS) / PULSE_MS;
       }
 
-      drawBottomBar(ctx, pauvLogoRef.current, w, h);
+      drawChartImageFrame(ctx, w, h, {
+        market: mk,
+        overrideName:     overrideNameRef.current,
+        overrideIndustry: overrideIndustryRef.current,
+        direction:        directionRef.current,
+        noiseLevel:       noiseLevelRef.current,
+        avatarImg:        imgRef.current,
+        pauvLogo:         pauvLogoRef.current,
+        revealT,
+        tipPulseT,
+      });
       rafRef.current = requestAnimationFrame(draw);
     }, []);
 
@@ -593,21 +147,20 @@ export const ChartsImageCanvas = forwardRef<ChartsImageCanvasRef, ChartsImageCan
         const { cW: w, cH: h } = dimensionsRef.current;
         const mk = marketRef.current;
 
-        ctx.fillStyle = '#0A0A0A';
-        ctx.fillRect(0, 0, w, h);
-
         if (mk) {
-          const { series, color, changeBaseY } = drawHeader(
-            ctx, mk, imgRef.current, overrideNameRef.current, h,
-            overrideIndustryRef.current, directionRef.current,
-          );
-          const CHART_TOP  = changeBaseY + 56;
-          const CHART_H_PX = chartBotFor(h) - CHART_TOP;
-          if (CHART_H_PX > 60) {
-            drawStepChart(ctx, series, PAD, CHART_TOP, w - PAD * 2, CHART_H_PX, color, h > 1100 ? 4 : 7,
-              tickerSeed(mk.ticker), NOISE_SCALE[noiseLevelRef.current] ?? 0);
-          }
-          drawBottomBar(ctx, pauvLogoRef.current, w, h);
+          // Static full chart (revealT 1, frozen mid-pulse) — paints its own bg.
+          drawChartImageFrame(ctx, w, h, {
+            market: mk,
+            overrideName:     overrideNameRef.current,
+            overrideIndustry: overrideIndustryRef.current,
+            direction:        directionRef.current,
+            noiseLevel:       noiseLevelRef.current,
+            avatarImg:        imgRef.current,
+            pauvLogo:         pauvLogoRef.current,
+          });
+        } else {
+          ctx.fillStyle = '#0A0A0A';
+          ctx.fillRect(0, 0, w, h);
         }
 
         canvas.toBlob(blob => {
@@ -619,6 +172,164 @@ export const ChartsImageCanvas = forwardRef<ChartsImageCanvasRef, ChartsImageCan
           a.click();
           setTimeout(() => URL.revokeObjectURL(url), 5000);
         }, 'image/png');
+      },
+
+      // Restart the reveal animation from t=0 (preview replay button).
+      replay: () => { animStartRef.current = 0; },
+
+      // ── Video export ────────────────────────────────────────────────────────
+      // Record the on-canvas reveal animation with MediaRecorder, then mux in the
+      // chosen audio + rewrite a clean MP4 client-side (same approach as the
+      // Charts artist feature, host-independent so it works on Vercel too).
+      startVideoExport: async () => {
+        const canvas = canvasRef.current;
+        const mk = marketRef.current;
+        if (!canvas || isRecordingRef.current || !mk) return;
+        if ((mk.sparkline?.length ?? 0) === 0) return; // nothing to animate yet
+
+        isRecordingRef.current = true;
+        const notify = (isRecording: boolean, recProgress: number, recStatus: string) =>
+          onRecStateRef.current?.({ isRecording, recProgress, recStatus });
+
+        let framePump: ReturnType<typeof setInterval> | null = null;
+        notify(true, 0, 'Starting…');
+
+        try {
+          // Restart the reveal from the beginning of the recording.
+          animStartRef.current = 0;
+          await new Promise<void>(r => setTimeout(r, 80)); // let one RAF tick restart the clock
+
+          const mimeType =
+            typeof MediaRecorder !== 'undefined' && MediaRecorder.isTypeSupported('video/mp4;codecs=avc1')
+              ? 'video/mp4;codecs=avc1'
+              : typeof MediaRecorder !== 'undefined' && MediaRecorder.isTypeSupported('video/mp4')
+                ? 'video/mp4'
+                : 'video/webm;codecs=vp9';
+
+          // captureStream(0) = a frame is emitted ONLY when we call requestFrame().
+          // A fixed-rate capture silently stops emitting frames once the canvas
+          // paints identical pixels — which happens the instant the chart settles
+          // into its held final state — truncating the video. Pumping requestFrame
+          // at 30 fps guarantees the full duration (incl. the hold) is captured.
+          let stream = canvas.captureStream(0);
+          let captureTrack = stream.getVideoTracks()[0] as any;
+          if (typeof captureTrack?.requestFrame !== 'function') {
+            stream = canvas.captureStream(30);
+            captureTrack = null;
+          }
+
+          // Play the audio in the browser so the user hears it while recording,
+          // but do NOT add it to the recorder stream (it's muxed in as AAC after).
+          let audioEl: HTMLAudioElement | null = null;
+          if (audioUrlRef.current) {
+            try {
+              audioEl = new Audio(audioUrlRef.current);
+              audioEl.preload = 'auto';
+              await new Promise<void>(res => {
+                if (!audioEl || audioEl.readyState >= 3) { res(); return; }
+                audioEl.oncanplay = () => res();
+                setTimeout(res, 6000);
+              });
+            } catch { audioEl = null; }
+          }
+
+          const cycleMs  = GROW_MS / speedRef.current + HOLD_MS;
+          const recorder = new MediaRecorder(stream, { mimeType, videoBitsPerSecond: 8_000_000 });
+          const chunks: Blob[] = [];
+          recorder.ondataavailable = e => { if (e.data.size > 0) chunks.push(e.data); };
+          recorder.start(200);
+
+          if (audioEl) { audioEl.currentTime = 0; audioEl.play().catch(() => {}); }
+
+          const FRAME_INTERVAL_MS = 1000 / 30;
+          if (typeof captureTrack?.requestFrame === 'function') {
+            framePump = setInterval(() => {
+              if (!document.hidden) { try { captureTrack.requestFrame(); } catch { /* track ended */ } }
+            }, FRAME_INTERVAL_MS);
+          }
+
+          notify(true, 0.01, 'Recording…');
+
+          // Pause recorder + audio + reveal clock while the tab is hidden so the
+          // output has no frozen-frame gaps from background throttling.
+          let hiddenAt = 0;
+          let totalHiddenMs = 0;
+          const onVisibility = () => {
+            if (document.hidden) {
+              hiddenAt = performance.now();
+              recorder.pause();
+              audioEl?.pause();
+            } else {
+              const gap = performance.now() - hiddenAt;
+              totalHiddenMs += gap;
+              if (animStartRef.current) animStartRef.current += gap;
+              recorder.resume();
+              if (audioEl && audioEl.paused) audioEl.play().catch(() => {});
+            }
+          };
+          document.addEventListener('visibilitychange', onVisibility);
+
+          const startMs = performance.now();
+          await new Promise<void>(resolve => {
+            const tick = () => {
+              const elapsed = performance.now() - startMs - totalHiddenMs;
+              const p = Math.min(elapsed / cycleMs, 1);
+              notify(true, p, 'Recording…');
+              if (p >= 1) resolve(); else requestAnimationFrame(tick);
+            };
+            requestAnimationFrame(tick);
+          });
+
+          document.removeEventListener('visibilitychange', onVisibility);
+          if (framePump) { clearInterval(framePump); framePump = null; }
+          audioEl?.pause();
+
+          recorder.stop();
+          await new Promise<void>(r => { recorder.onstop = () => r(); });
+
+          notify(true, 0.98, 'Processing…');
+
+          const videoBlob = new Blob(chunks, { type: mimeType });
+          const filename  = `${safeExportName(mk.name || 'chart')}-sentiment.mp4`;
+
+          let blob = videoBlob;
+          let audioMixed = false;
+          try {
+            const res = await muxClientSide(videoBlob, audioUrlRef.current, s => notify(true, 0.98, s));
+            blob = res.blob;
+            audioMixed = res.hasAudio;
+            if (audioUrlRef.current && !res.hasAudio) {
+              notify(true, 0.98, '⚠ Audio encode failed — exporting silent');
+              await new Promise<void>(r => setTimeout(r, 2000));
+            }
+          } catch (e) {
+            console.error('[chartsimage export] client-side mux failed — exporting raw recording:', e);
+            notify(true, 0.98, '⚠ Export processing failed — raw file');
+            await new Promise<void>(r => setTimeout(r, 2000));
+          }
+
+          const audioTag = audioMixed ? ' 🔊' : ' (muted)';
+          try {
+            const form = new FormData();
+            form.append('files', blob, filename);
+            const resp = await fetch(`${PHONEDECK_URL}/api/upload`, { method: 'POST', body: form });
+            if (!resp.ok) throw new Error(await resp.text());
+            notify(true, 1, `In Phonedeck: ${filename}${audioTag}`);
+            setTimeout(() => notify(false, 0, ''), 5000);
+          } catch {
+            const url = URL.createObjectURL(blob);
+            Object.assign(document.createElement('a'), { href: url, download: filename }).click();
+            URL.revokeObjectURL(url);
+            notify(true, 1, `Saved to Downloads${audioTag}`);
+            setTimeout(() => notify(false, 0, ''), 4000);
+          }
+        } catch (err) {
+          notify(true, 0, `Error: ${err instanceof Error ? err.message : String(err)}`);
+          setTimeout(() => notify(false, 0, ''), 5000);
+        } finally {
+          if (framePump) { clearInterval(framePump); framePump = null; }
+          isRecordingRef.current = false;
+        }
       },
     }), []);
 

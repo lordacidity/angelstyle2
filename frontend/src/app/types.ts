@@ -3,6 +3,16 @@ export type AppSection = 'deck' | 'brandkit' | 'media' | 'builder' | 'trending' 
 
 export type SlideType = 'main' | 'supporting_1' | 'supporting_2';
 
+/** One page of an AI-generated multi-page carousel (the "Trending (auto)" flow).
+ *  Used to seed several carousel entries at once. */
+export interface CarouselPage {
+  slideType: SlideType;
+  headline: string;
+  subheadline: string;
+  imageSrc?: string;
+  articleUrl?: string;
+}
+
 export interface BrandLogo {
   id: string;
   url: string;

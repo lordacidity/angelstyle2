@@ -19,6 +19,11 @@ export type ChartsImageDirection = 'up' | 'down';
 // How much synthetic volatility to add to the chart line. 'none' = clean (default).
 export type ChartsImageNoiseLevel = 'none' | 'small' | 'med' | 'large';
 
+// 'image' = static PNG card. 'video' = the line animates in (drawing left→right
+// with a leading head dot) and exports as an MP4 with the same animation, the
+// same way the Charts (artist) feature records its chart.
+export type ChartsImageSubMode = 'image' | 'video';
+
 export interface ChartsImageCanvasProps {
   market: ChartsImageMarket | null;
   overrideName?: string;
@@ -26,8 +31,17 @@ export interface ChartsImageCanvasProps {
   direction?: ChartsImageDirection;
   noiseLevel?: ChartsImageNoiseLevel;
   aspectRatio?: CanvasAspectRatio;
+  // Video mode
+  subMode?: ChartsImageSubMode;
+  speed?: number;                 // 1/2/3 — divides the grow window (faster draw-in)
+  audioUrl?: string;              // optional narration track muxed into the export
+  onRecordingStateChange?: (s: { isRecording: boolean; recProgress: number; recStatus: string }) => void;
 }
 
 export interface ChartsImageCanvasRef {
   exportPng: () => void;
+  // Record the reveal animation to an MP4 (video sub-mode).
+  startVideoExport: () => Promise<void>;
+  // Restart the reveal animation from t=0 (preview).
+  replay: () => void;
 }

@@ -29,6 +29,22 @@ import { divHexToRgba, drawWaveSegment, applyShadow, clearShadow, drawDividerOnC
 import { ensureFontLoaded, wrapText, drawAligned, hexToRgba, roundRectPath, drawTag, drawLogoFit } from './drawing/helpers';
 import { drawSwipeArrow, drawSwipeOnCanvas } from './drawing/swipe';
 import { wrapTextOffsets, getLineSpanSegs, drawSpanLine, spansToHtml, rgbToHex, htmlToSpans } from './drawing/spans';
+import { drawChartImageFrame, GROW_MS, HOLD_MS, PULSE_MS } from '../ChartsImageCanvas/render';
+import type { ChartsImageMarket, ChartsImageDirection, ChartsImageNoiseLevel } from '../ChartsImageCanvas/types';
+import { muxClientSide } from '@/lib/canvasVideoExport';
+
+// A chart used as the carousel background (alternative to a photo/video). Renders
+// the Charts Image card full-frame behind the fade + headline/subheadline.
+export interface CarouselChartBg {
+  market:            ChartsImageMarket;
+  overrideName?:     string;
+  overrideIndustry?: string;
+  direction?:        ChartsImageDirection;
+  noiseLevel?:       ChartsImageNoiseLevel;
+  subMode:           'image' | 'video'; // static card vs animated draw-in
+  speed?:            number;            // 1/2/3 — line-draw speed (video)
+  audioUrl?:         string;            // optional narration muxed into the MP4
+}
 
 // Swatch palette for the inline rich-text colour picker (the foreColor swatches
 // in the floating text toolbar). A spread of vivid, legible colours plus
@@ -67,6 +83,7 @@ async function sendToPhonedeck(blob: Blob, filename: string): Promise<string> {
 interface CarouselCanvasProps {
   imageSrc: string;
   videoSrc?: string;
+  chartBg?: CarouselChartBg | null;
   headline: string;
   subheadline: string;
   settings: CarouselSettings;
@@ -87,7 +104,7 @@ interface CarouselCanvasProps {
 // ── CarouselCanvas (canvas + pan/zoom only) ──────────────────────────────────
 
 const CarouselCanvas = forwardRef<CarouselCanvasRef, CarouselCanvasProps>(
-  function CarouselCanvas({ imageSrc, videoSrc, headline, subheadline, settings, onScaleChange, onSettingsChange, onBgLayerStateChange, brandLogoSrc, onRecordingStateChange, onHeadlineChange, onSubheadlineChange, rectMode = false, isDraggingElement = false, invertedSlots = false, onSlotDrop, staticMode = false }, ref) {
+  function CarouselCanvas({ imageSrc, videoSrc, chartBg = null, headline, subheadline, settings, onScaleChange, onSettingsChange, onBgLayerStateChange, brandLogoSrc, onRecordingStateChange, onHeadlineChange, onSubheadlineChange, rectMode = false, isDraggingElement = false, invertedSlots = false, onSlotDrop, staticMode = false }, ref) {
     const canvasRef    = useRef<HTMLCanvasElement>(null);
     const wrapperRef   = useRef<HTMLDivElement>(null);
     const cachedImgRef = useRef<HTMLImageElement | null>(null);
@@ -101,9 +118,21 @@ const CarouselCanvas = forwardRef<CarouselCanvasRef, CarouselCanvasProps>(
     useEffect(() => { videoModeRef.current = !!videoSrc; }, [videoSrc]);
     const trimStartRef = useRef(0);
     const trimEndRef   = useRef(Infinity);
+    // When true, the source video's audio is dropped from the export and live
+    // preview is silenced. Toggled from the VideoControlsBar mute button.
+    const mutedRef     = useRef(false);
 
     const videoSrcRef = useRef<string | undefined>(videoSrc);
     useEffect(() => { videoSrcRef.current = videoSrc; }, [videoSrc]);
+
+    // ── Chart background (alternative to photo/video) ─────────────────────────
+    const chartBgRef        = useRef<CarouselChartBg | null>(chartBg);
+    const chartAvatarRef    = useRef<HTMLImageElement | null>(null);
+    const chartPauvLogoRef  = useRef<HTMLImageElement | null>(null);
+    const chartAnimStartRef = useRef(0);   // reveal clock for chart-video (0 = not started)
+    // True only for an animated chart background — drives the MP4 (canvas-record) export path.
+    const chartVideoModeRef = useRef(!!chartBg && chartBg.subMode === 'video');
+    useEffect(() => { chartBgRef.current = chartBg; chartVideoModeRef.current = !!chartBg && chartBg.subMode === 'video'; }, [chartBg]);
     const [isVideoExporting,    setIsVideoExporting]    = useState(false);
     const [videoExportProgress, setVideoExportProgress] = useState(0);
     const [videoExportStatus,   setVideoExportStatus]   = useState('');
@@ -146,8 +175,6 @@ const CarouselCanvas = forwardRef<CarouselCanvasRef, CarouselCanvasProps>(
 
     const [circleSrcs, setCircleSrcs] = useState<(string|null)[]>([null, null]);
     const circleImgRefsArr    = useRef<(HTMLImageElement|null)[]>([null, null]);
-    const circleInput0Ref     = useRef<HTMLInputElement>(null);
-    const circleInput1Ref     = useRef<HTMLInputElement>(null);
     const circlePosRefsArr    = useRef<({x:number;y:number}|null)[]>([null, null]);
     const [circlePoses, setCirclePoses]   = useState<({x:number;y:number}|null)[]>([null, null]);
     const [activeDragCircle, setActiveDragCircle]     = useState<number|null>(null);
@@ -227,10 +254,34 @@ const CarouselCanvas = forwardRef<CarouselCanvasRef, CarouselCanvasProps>(
       const sfs = (sz: number) => `${s.subItalic ? 'italic ' : ''}${s.subFontWeight} ${sz}px ${subFontDef.css}`;
 
       ctx.clearRect(0, 0, W, H);
-      ctx.fillStyle = '#111';
+      ctx.fillStyle = s.bgColor || '#111';
       ctx.fillRect(0, 0, W, H);
 
-      if (img) {
+      // Chart background takes precedence over photo/video. It fills the whole
+      // frame (1080×1350, same as the standalone Charts Image), so the fade +
+      // headline/subheadline below composite on top exactly as for a photo.
+      const _chartBg = chartBgRef.current;
+      if (_chartBg?.market) {
+        let revealT = 1, tipPulseT = -1;
+        if (_chartBg.subMode === 'video') {
+          const hasData = (_chartBg.market.sparkline?.length ?? 0) > 0;
+          if (hasData && chartAnimStartRef.current === 0) chartAnimStartRef.current = performance.now();
+          revealT = chartAnimStartRef.current === 0
+            ? 0
+            : Math.min((performance.now() - chartAnimStartRef.current) / (GROW_MS / Math.min(3, Math.max(1, _chartBg.speed || 1))), 1);
+          tipPulseT = (performance.now() % PULSE_MS) / PULSE_MS;
+        }
+        drawChartImageFrame(ctx, W, H, {
+          market:           _chartBg.market,
+          overrideName:     _chartBg.overrideName,
+          overrideIndustry: _chartBg.overrideIndustry,
+          direction:        _chartBg.direction,
+          noiseLevel:       _chartBg.noiseLevel,
+          avatarImg:        chartAvatarRef.current,
+          pauvLogo:         chartPauvLogoRef.current,
+          revealT, tipPulseT,
+        });
+      } else if (img) {
         const crop = imgSrcCropRef.current;
         const sx = crop?.sx ?? 0;
         const sy = crop?.sy ?? 0;
@@ -1352,6 +1403,43 @@ const CarouselCanvas = forwardRef<CarouselCanvasRef, CarouselCanvasProps>(
       return () => { cancelAnimationFrame(id); animFrameRef.current = null; };
     }, [videoSrc, redraw]);
 
+    // ── Chart background: load the market avatar (via proxy) ──────────────────
+    useEffect(() => {
+      const url = chartBg?.market?.photo_url;
+      if (!url) { chartAvatarRef.current = null; redraw(cachedImgRef.current); return; }
+      const img = new Image();
+      img.crossOrigin = 'anonymous';
+      img.onload  = () => { chartAvatarRef.current = img; redraw(cachedImgRef.current); };
+      img.onerror = () => { chartAvatarRef.current = null; redraw(cachedImgRef.current); };
+      img.src = `/api/charts/image-proxy?url=${encodeURIComponent(url)}`;
+    }, [chartBg?.market?.photo_url, redraw]);
+
+    // Load the Pauv logo once (drawn faint in the chart's bottom bar).
+    useEffect(() => {
+      const img = new Image();
+      img.onload = () => { chartPauvLogoRef.current = img; redraw(cachedImgRef.current); };
+      img.src = '/pauvlogo.png';
+    }, [redraw]);
+
+    // Redraw (and restart the reveal) whenever the chart or its config changes.
+    useEffect(() => {
+      chartAnimStartRef.current = 0;
+      redraw(cachedImgRef.current);
+    }, [chartBg?.market?.id, chartBg?.market?.sparkline?.length, chartBg?.subMode,
+        chartBg?.direction, chartBg?.noiseLevel, chartBg?.overrideName,
+        chartBg?.overrideIndustry, chartBg?.speed, redraw]);
+
+    // Animation loop for an animated chart background (line draws in + tip pulses).
+    const chartVideoActive = !!chartBg && chartBg.subMode === 'video';
+    useEffect(() => {
+      if (!chartVideoActive) return;
+      let id = requestAnimationFrame(function loop() {
+        redraw(cachedImgRef.current);
+        id = requestAnimationFrame(loop);
+      });
+      return () => cancelAnimationFrame(id);
+    }, [chartVideoActive, redraw]);
+
     // Pulse animation loop for divider placeholder boxes
     useEffect(() => {
       const hasDivSlots = (settings.dividerSlots ?? []).some(d => d !== null);
@@ -1379,6 +1467,13 @@ const CarouselCanvas = forwardRef<CarouselCanvasRef, CarouselCanvasProps>(
       img.onload = () => { fgMaskImgRef.current = img; redraw(cachedImgRef.current); };
       img.src = fgMaskSrc;
     }, [fgMaskSrc, redraw]);
+
+    // Circle images are sourced from settings (uploaded/pasted in the settings
+    // panel). Mirror them into circleSrcs, which the rest of the circle machinery
+    // (load → draw, drag/resize) already keys off.
+    useEffect(() => {
+      setCircleSrcs([settings.circleImageSrc ?? null, settings.circle2ImageSrc ?? null]);
+    }, [settings.circleImageSrc, settings.circle2ImageSrc]);
 
     // Circle image loads (separate effects so changing one src doesn't re-trigger the other)
     const [circleSrc0, circleSrc1] = [circleSrcs[0], circleSrcs[1]];
@@ -1671,6 +1766,124 @@ const CarouselCanvas = forwardRef<CarouselCanvasRef, CarouselCanvasProps>(
     }
     runBgRemovalRef.current = runBgRemoval;
 
+    // ── Animated chart background → MP4 ──────────────────────────────────────
+    // A generated chart has no source video file, so the normal carousel export
+    // (which decodes a source MP4) doesn't apply. Instead record the live canvas
+    // (captureStream + MediaRecorder), then mux in the chosen audio + rewrite a
+    // clean MP4 client-side — the same host-independent approach the Charts
+    // Image video export uses.
+    const startChartVideoExportRef = useRef<() => Promise<void>>(async () => {});
+    async function startChartVideoExport(): Promise<void> {
+      const canvas = canvasRef.current;
+      const cb = chartBgRef.current;
+      if (!canvas || isVideoExporting || !cb?.market) return;
+      if ((cb.market.sparkline?.length ?? 0) === 0) return;
+
+      const emit = (progress: number, status: string) => {
+        setVideoExportProgress(progress);
+        setVideoExportStatus(status);
+        onRecordingStateChangeRef.current?.({ isRecording: true, recProgress: progress, recStatus: status });
+      };
+      const done = () => {
+        setVideoExportStatus('');
+        onRecordingStateChangeRef.current?.({ isRecording: false, recProgress: 0, recStatus: '' });
+      };
+
+      setIsVideoExporting(true);
+      emit(0, 'Starting…');
+      let framePump: ReturnType<typeof setInterval> | null = null;
+
+      try {
+        // Restart the reveal so the recording captures the full draw-in.
+        chartAnimStartRef.current = 0;
+        await new Promise<void>(r => setTimeout(r, 80)); // let one frame restart the clock
+
+        const mimeType =
+          typeof MediaRecorder !== 'undefined' && MediaRecorder.isTypeSupported('video/mp4;codecs=avc1')
+            ? 'video/mp4;codecs=avc1'
+            : typeof MediaRecorder !== 'undefined' && MediaRecorder.isTypeSupported('video/mp4')
+              ? 'video/mp4'
+              : 'video/webm;codecs=vp9';
+
+        // captureStream(0) + manual requestFrame so static stretches (the hold)
+        // are still captured. See the Charts Image export for the rationale.
+        let stream = canvas.captureStream(0);
+        let captureTrack = stream.getVideoTracks()[0] as MediaStreamTrack & { requestFrame?: () => void };
+        if (typeof captureTrack?.requestFrame !== 'function') {
+          stream = canvas.captureStream(30);
+          captureTrack = null as never;
+        }
+
+        let audioEl: HTMLAudioElement | null = null;
+        if (cb.audioUrl && !mutedRef.current) {
+          try {
+            audioEl = new Audio(cb.audioUrl);
+            audioEl.preload = 'auto';
+            await new Promise<void>(res => {
+              if (!audioEl || audioEl.readyState >= 3) { res(); return; }
+              audioEl.oncanplay = () => res();
+              setTimeout(res, 6000);
+            });
+          } catch { audioEl = null; }
+        }
+
+        const speed   = Math.min(3, Math.max(1, cb.speed || 1));
+        const cycleMs  = GROW_MS / speed + HOLD_MS;
+        const recorder = new MediaRecorder(stream, { mimeType, videoBitsPerSecond: 8_000_000 });
+        const chunks: Blob[] = [];
+        recorder.ondataavailable = e => { if (e.data.size > 0) chunks.push(e.data); };
+        recorder.start(200);
+
+        if (audioEl) { audioEl.currentTime = 0; audioEl.play().catch(() => {}); }
+
+        if (typeof captureTrack?.requestFrame === 'function') {
+          framePump = setInterval(() => {
+            if (!document.hidden) { try { captureTrack.requestFrame?.(); } catch { /* track ended */ } }
+          }, 1000 / 30);
+        }
+
+        emit(0.01, 'Recording…');
+
+        const startMs = performance.now();
+        await new Promise<void>(resolve => {
+          const tick = () => {
+            const p = Math.min((performance.now() - startMs) / cycleMs, 1);
+            emit(p, 'Recording…');
+            if (p >= 1) resolve(); else requestAnimationFrame(tick);
+          };
+          requestAnimationFrame(tick);
+        });
+
+        if (framePump) { clearInterval(framePump); framePump = null; }
+        audioEl?.pause();
+
+        recorder.stop();
+        await new Promise<void>(r => { recorder.onstop = () => r(); });
+
+        emit(0.98, 'Processing…');
+        const videoBlob = new Blob(chunks, { type: mimeType });
+
+        let blob = videoBlob;
+        try {
+          const res = await muxClientSide(videoBlob, mutedRef.current ? null : (cb.audioUrl ?? null), s => emit(0.98, s));
+          blob = res.blob;
+        } catch (e) {
+          console.error('[carousel chart export] client-side mux failed — raw recording:', e);
+        }
+
+        const status = await sendToPhonedeck(blob, `carousel-chart-${Date.now()}.mp4`);
+        emit(1, status);
+        setTimeout(done, 5000);
+      } catch (err) {
+        emit(0, `Error: ${err instanceof Error ? err.message : String(err)}`);
+        setTimeout(done, 5000);
+      } finally {
+        if (framePump) { clearInterval(framePump); framePump = null; }
+        setIsVideoExporting(false);
+      }
+    }
+    startChartVideoExportRef.current = startChartVideoExport;
+
     const startVideoExportRef = useRef<() => Promise<void>>(async () => {});
 
     async function startVideoExport(): Promise<void> {
@@ -1829,7 +2042,7 @@ const CarouselCanvas = forwardRef<CarouselCanvasRef, CarouselCanvasProps>(
         let audioPackets: any[] = [];
         let audioDecoderConfigForExport: any = null;
 
-        if (audioSamples.length > 0) {
+        if (audioSamples.length > 0 && !mutedRef.current) {
           try {
             const input = new Input({ source: new BlobSource(new Blob([arrayBuffer], { type: 'video/mp4' })), formats: ALL_FORMATS });
             const audioTrack = await input.getPrimaryAudioTrack();
@@ -1875,7 +2088,11 @@ const CarouselCanvas = forwardRef<CarouselCanvasRef, CarouselCanvasProps>(
             { source: sourceFrame.frame, vw, vh },
           );
 
-          const sample = new VideoSample(offscreen, { timestamp: targetTs, duration: EXPORT_FRAME_DURATION });
+          // Output timeline is 0-based (the audio above was shifted to start at 0
+          // after trimming). targetTs is SOURCE time (clipStart-based) used only to
+          // pick the right source frame — the written sample must start at 0 so the
+          // trimmed video and audio stay in sync.
+          const sample = new VideoSample(offscreen, { timestamp: targetTs - clipStart, duration: EXPORT_FRAME_DURATION });
           await videoSource.add(sample);
           sample.close();
           emit(0.35 + (frameIdx / totalFrames) * 0.55, `Rendering frame ${frameIdx + 1}/${totalFrames}`);
@@ -1921,6 +2138,10 @@ const CarouselCanvas = forwardRef<CarouselCanvasRef, CarouselCanvasProps>(
 
     useImperativeHandle(ref, () => ({
       async startDownload() {
+        if (chartVideoModeRef.current) {
+          await startChartVideoExportRef.current();
+          return;
+        }
         if (videoModeRef.current) {
           await startVideoExportRef.current();
           return;
@@ -1967,9 +2188,10 @@ const CarouselCanvas = forwardRef<CarouselCanvasRef, CarouselCanvasProps>(
       enterCropMode() { startCropMode(); },
       toggleSplit() { runBgRemovalRef.current('split'); },
       toggleBlur()  { runBgRemovalRef.current('blur');  },
-      play()  { videoRef.current?.play(); },
+      play()  { const v = videoRef.current; if (v) { v.muted = mutedRef.current; v.play(); } },
       pause() { videoRef.current?.pause(); },
       seekTo(t: number) { if (videoRef.current) videoRef.current.currentTime = t; },
+      setMuted(m: boolean) { mutedRef.current = m; if (videoRef.current) videoRef.current.muted = m; },
       setTrimRange(start: number, end: number) {
         trimStartRef.current = start;
         trimEndRef.current   = end;
@@ -1994,6 +2216,7 @@ const CarouselCanvas = forwardRef<CarouselCanvasRef, CarouselCanvasProps>(
           trimStart: trimStartRef.current,
           trimEnd:   trimEndRef.current === Infinity ? dur : trimEndRef.current,
           duration:  dur,
+          muted:     mutedRef.current,
         };
       },
     }), [redraw, onScaleChange, drawCanvas]);
@@ -2173,10 +2396,12 @@ const CarouselCanvas = forwardRef<CarouselCanvasRef, CarouselCanvasProps>(
           style={{ width: CAROUSEL_PREVIEW_W, height: CAROUSEL_PREVIEW_H, display: 'block', pointerEvents: 'none' }}
         />
 
-        {/* Hidden video element — only mounted in video mode for frame capture */}
+        {/* Hidden video element — only mounted in video mode for frame capture.
+            Not autoplay/muted: playback is driven by the video controller so it
+            plays WITH sound (a muted autoplay preview would always be silent). */}
         {videoSrc && (
           <video key={videoSrc} ref={videoRef} src={videoSrc}
-            style={{ display: 'none' }} autoPlay loop muted playsInline crossOrigin="anonymous"
+            style={{ display: 'none' }} loop playsInline crossOrigin="anonymous"
             onLoadedData={() => redraw(null)}
           />
         )}
@@ -2688,8 +2913,8 @@ const CarouselCanvas = forwardRef<CarouselCanvasRef, CarouselCanvasProps>(
         })()}
 
         {/* ── Circle placeholder (rectMode) — sits between top-3 and bottom-3 tag slots ── */}
-        {/* ── Circle placeholders — hidden in video mode ── */}
-        {!videoSrc && (rectMode ? [0] : [0, 1]).map(ci => {
+        {/* ── Circle placeholders — hidden in video mode and for a chart background ── */}
+        {!videoSrc && !chartBg && (rectMode ? [0] : [0, 1]).map(ci => {
           const RECT_GAP    = 8;
           const _bandTop    = padXPv + LOGO_PH + RECT_GAP;
           const _bandBottom = aboveHLTop - RECT_GAP;
@@ -2699,10 +2924,12 @@ const CarouselCanvas = forwardRef<CarouselCanvasRef, CarouselCanvasProps>(
             rectBandRef.current = { top: _bandTop, bottom: _bandBottom, left: padXPv, right: CAROUSEL_PREVIEW_W - padXPv };
           }
           const circleSrc       = circleSrcs[ci];
+          // No on-canvas placeholder: the circle only appears once an image has been
+          // uploaded/pasted from its settings section. Nothing to drop into otherwise.
+          if (!circleSrc) return null;
           const circlePos       = circlePoses[ci];
           const circleRadius    = circleRadii[ci];
           const circleElRef     = ci === 0 ? circleEl0Ref : circleEl1Ref;
-          const circleInputRef  = ci === 0 ? circleInput0Ref : circleInput1Ref;
           const editMode        = circleImgEditModes[ci];
           const isImgDragging   = activeImgDragCircle === ci;
           const defaultX        = rectMode ? Math.round(CAROUSEL_PREVIEW_W / 2 + 50) : (ci === 0 ? Math.round(CAROUSEL_PREVIEW_W / 4) : Math.round(CAROUSEL_PREVIEW_W * 3 / 4));
@@ -2750,44 +2977,24 @@ const CarouselCanvas = forwardRef<CarouselCanvasRef, CarouselCanvasProps>(
                   ...(boxShadowVal ? { boxShadow: boxShadowVal } : {}),
                 }}
               >
-                {circleSrc ? (
-                  <>
-                    {/* eslint-disable-next-line @next/next/no-img-element */}
-                    <img src={circleSrc} alt="" style={{ width: '100%', height: '100%', objectFit: 'cover', display: 'block', borderRadius: '50%', pointerEvents: 'none', visibility: blurLayerActive ? 'hidden' : 'visible' }} />
-                    {!editMode && (
-                      <button
-                        onMouseDown={e => e.stopPropagation()}
-                        onClick={() => {
-                          setCircleSrcs(prev => { const n = [...prev]; n[ci] = null; return n; });
-                          circlePosRefsArr.current[ci]    = null;
-                          setCirclePoses(prev => { const n = [...prev]; n[ci] = null; return n; });
-                          circleRadsArr.current[ci]        = 90;
-                          setCircleRadii(prev => { const n = [...prev]; n[ci] = 90; return n; });
-                          circleImgOffsetsArr.current[ci]  = { x: 0, y: 0 };
-                          circleImgScalesArr.current[ci]   = 1;
-                        }}
-                        className="absolute -top-1 -right-1 w-5 h-5 rounded-full bg-black/80 border border-zinc-600 text-zinc-300 text-[10px] flex items-center justify-center hover:bg-red-900/90 hover:border-red-600 transition-colors leading-none z-10"
-                      >×</button>
-                    )}
-                  </>
-                ) : (
+                {/* eslint-disable-next-line @next/next/no-img-element */}
+                <img src={circleSrc} alt="" style={{ width: '100%', height: '100%', objectFit: 'cover', display: 'block', borderRadius: '50%', pointerEvents: 'none', visibility: blurLayerActive ? 'hidden' : 'visible' }} />
+                {!editMode && (
                   <button
                     onMouseDown={e => e.stopPropagation()}
-                    onClick={() => circleInputRef.current?.click()}
-                    className="group w-full h-full flex items-center justify-center transition-colors text-white/40 hover:text-white/70 relative"
-                  >
-                    <svg width={d} height={d} className="absolute inset-0" style={{ pointerEvents: 'none' }}>
-                      <circle
-                        cx={r} cy={r} r={r - 0.5}
-                        fill="rgba(255,255,255,0.10)" strokeWidth="1" strokeDasharray="3 3"
-                        className="stroke-white/40 group-hover:stroke-white/70 transition-colors"
-                      />
-                    </svg>
-                    <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round">
-                      <line x1="12" y1="5" x2="12" y2="19"/>
-                      <line x1="5" y1="12" x2="19" y2="12"/>
-                    </svg>
-                  </button>
+                    onClick={() => {
+                      // Clearing routes through settings (the source of truth); the
+                      // sync effect then empties circleSrcs and removes the circle.
+                      onSettingsChange?.(ci === 0 ? { circleImageSrc: null } : { circle2ImageSrc: null });
+                      circlePosRefsArr.current[ci]    = null;
+                      setCirclePoses(prev => { const n = [...prev]; n[ci] = null; return n; });
+                      circleRadsArr.current[ci]        = 90;
+                      setCircleRadii(prev => { const n = [...prev]; n[ci] = 90; return n; });
+                      circleImgOffsetsArr.current[ci]  = { x: 0, y: 0 };
+                      circleImgScalesArr.current[ci]   = 1;
+                    }}
+                    className="absolute -top-1 -right-1 w-5 h-5 rounded-full bg-black/80 border border-zinc-600 text-zinc-300 text-[10px] flex items-center justify-center hover:bg-red-900/90 hover:border-red-600 transition-colors leading-none z-10"
+                  >×</button>
                 )}
               </div>
 
@@ -2833,25 +3040,6 @@ const CarouselCanvas = forwardRef<CarouselCanvasRef, CarouselCanvasProps>(
                   style={{ position: 'absolute', left: circleCxPv - handleOffset - 5, top: circleCyPv + handleOffset - 5, width: 10, height: 10, background: '#a3e635', border: '1.5px solid rgba(0,0,0,0.4)', borderRadius: 3, cursor: 'ns-resize', zIndex: 10 }}
                 />
               )}
-
-              {/* Hidden file input */}
-              <input ref={circleInputRef} type="file" accept="image/*" className="hidden"
-                onChange={e => {
-                  const f = e.target.files?.[0];
-                  if (!f) return;
-                  // Lock circle to placeholder position on first upload so canvas and HTML overlay are in sync
-                  if (!circlePosRefsArr.current[ci]) {
-                    const pos = { x: defaultX, y: Math.round(defaultCy) };
-                    circlePosRefsArr.current[ci] = pos;
-                    setCirclePoses(prev => { const n=[...prev]; n[ci]=pos; return n; });
-                  }
-                  circleImgOffsetsArr.current[ci] = { x: 0, y: 0 };
-                  circleImgScalesArr.current[ci]  = 1;
-                  setCircleImgEditModes(prev => { const n=[...prev]; n[ci]=false; return n; });
-                  setCircleSrcs(prev => { const n=[...prev]; n[ci]=URL.createObjectURL(f); return n; });
-                  e.target.value = '';
-                }}
-              />
             </React.Fragment>
           );
         })}

@@ -21,8 +21,11 @@ export interface CarouselCanvasRef {
   resetTrim: () => void;
   resetBox: () => void;
   centerBox: () => void;
+  // Mute the source video's audio — drops the audio track from the export and
+  // silences live preview. Persisted per-canvas (one instance per carousel page).
+  setMuted: (muted: boolean) => void;
   getVideoElement: () => HTMLVideoElement | null;
-  getTrimState: () => { trimStart: number; trimEnd: number; duration: number };
+  getTrimState: () => { trimStart: number; trimEnd: number; duration: number; muted?: boolean };
 }
 
 export type CarouselTextAlign  = 'left' | 'center' | 'right' | 'justify';
@@ -351,6 +354,10 @@ export interface CarouselSettings {
   circleShadowColor:   string;
   circleShadowOpacity: number;
   circleLift:          number;
+  // Circle images now live in settings (uploaded/pasted from the settings panel)
+  // rather than via an on-canvas placeholder.
+  circleImageSrc?:     string | null;
+  circle2ImageSrc?:    string | null;
   quoteSlots:     (string | null)[];
   dividerSlots?:     (string | null)[];
   dividerSubSlots?:  (DividerSubSlotContent | null)[];
@@ -377,6 +384,8 @@ export interface CarouselSettings {
   circle2ShadowColor:   string;
   circle2ShadowOpacity: number;
   circle2Lift:          number;
+  // Base canvas fill, drawn beneath the image/video (shows where they don't cover).
+  bgColor?:             string;
 }
 
 export function defaultCarouselSettings(): CarouselSettings {
@@ -390,6 +399,7 @@ export function defaultCarouselSettings(): CarouselSettings {
     headSubGap: 20, aboveLogoGap: 8, logoOpacity: 100, logoScale: 100, logoCornerRadius: 0, contentPadding: 50,
     tagStyle: defaultTagStyle(),
     tagSlots: Array(3).fill(null),
+    bgColor: '#111111',
     bgBlurEnabled: false, bgBlurAmount: 10, bgDarkenAmount: 0,
     layerOrder: ['background', 'circle', 'circle2', 'subject'] as LayerId[],
     circleBorderWidth: 10, circleBorderColor: '#ffffff', circleBorderOpacity: 100,

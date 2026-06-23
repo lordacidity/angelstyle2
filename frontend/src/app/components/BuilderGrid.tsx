@@ -604,7 +604,7 @@ export function BuilderGrid({ brand, onSelectLogo, userId }: { brand: BrandProps
     <div className="w-full flex flex-col h-full overflow-hidden">
 
       {/* Toolbar */}
-      <div className="flex items-center justify-between gap-4 px-4 py-3 border-b border-zinc-800 shrink-0 bg-zinc-950">
+      <div className="flex items-center justify-between gap-4 px-4 py-3 border-b border-zinc-800 shrink-0 bg-[#0f0f0f]">
         <div className="flex items-center gap-2">
           <span className="text-[10px] text-zinc-600 select-none tabular-nums w-8 text-right">
             {Math.round(viewScale * 100)}%

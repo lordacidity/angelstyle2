@@ -10,6 +10,38 @@ import type {
   DividerSubSlotContent,
 } from './carouselTypes';
 import { CAROUSEL_FONTS, CAROUSEL_WEIGHTS, MAX_FONT, SUB_MAX, defaultTagStyle, defaultDividerSettings, defaultSwipeStyle, defaultShadowStyle } from './carouselTypes';
+
+// Upload / paste / clear the image for a circle, straight from its settings
+// section (the circle renders on the canvas once it has an image — there's no
+// on-canvas placeholder anymore).
+function CircleImageRow({ src, onSet }: { src?: string | null; onSet: (src: string | null) => void }) {
+  const fileRef = useRef<HTMLInputElement>(null);
+  const setFromBlob = (b: Blob) => onSet(URL.createObjectURL(b));
+  const paste = async () => {
+    if (typeof navigator === 'undefined' || !navigator.clipboard?.read) return;
+    try {
+      for (const item of await navigator.clipboard.read()) {
+        const t = item.types.find(x => x.startsWith('image/'));
+        if (t) { setFromBlob(await item.getType(t)); return; }
+      }
+    } catch { /* clipboard blocked / no image — ignore */ }
+  };
+  return (
+    <div className="flex items-center justify-between gap-2">
+      <span className="text-[11px] text-zinc-400">Image</span>
+      <div className="flex items-center gap-1.5">
+        {src && (
+          // eslint-disable-next-line @next/next/no-img-element
+          <img src={src} alt="" className="w-7 h-7 rounded-full object-cover shrink-0" />
+        )}
+        <button type="button" onClick={() => fileRef.current?.click()} className="px-2 py-1 rounded bg-zinc-800 hover:bg-zinc-700 text-[10px] font-medium text-zinc-200 transition-colors">Upload</button>
+        <button type="button" onClick={paste} className="px-2 py-1 rounded bg-zinc-800 hover:bg-zinc-700 text-[10px] font-medium text-zinc-200 transition-colors">Paste</button>
+        {src && <button type="button" onClick={() => onSet(null)} title="Remove" className="px-2 py-1 rounded bg-zinc-800 hover:bg-red-900/80 text-[10px] text-zinc-300 transition-colors">✕</button>}
+        <input ref={fileRef} type="file" accept="image/*" className="hidden" onChange={e => { const f = e.target.files?.[0]; if (f) setFromBlob(f); e.target.value = ''; }} />
+      </div>
+    </div>
+  );
+}
 import { QUOTE_STYLES } from './quoteStyles';
 import { SwipePreviewMini } from './SwipePreviewMini';
 
@@ -916,6 +948,26 @@ export function CarouselSettingsPanel({ settings, onChange, videoMode }: Carouse
       </CollapsibleSection>
 
       {/* Layout */}
+      <CollapsibleSection title="Background" defaultOpen={false}>
+        <div className="flex items-center justify-between">
+          <span className="text-[11px] text-zinc-400">Canvas colour</span>
+          <div className="flex items-center gap-2">
+            <input
+              type="color"
+              value={s.bgColor ?? '#111111'}
+              onChange={e => onChange({ bgColor: e.target.value })}
+              className="w-7 h-7 cursor-pointer rounded border-0 bg-transparent p-0"
+            />
+            <button
+              type="button"
+              onClick={() => onChange({ bgColor: '#111111' })}
+              className="px-2 py-1 rounded bg-zinc-800 hover:bg-zinc-700 text-[10px] font-medium text-zinc-300 transition-colors"
+            >Reset</button>
+          </div>
+        </div>
+        <span className="text-[10px] text-zinc-600 leading-snug">Shown beneath the image/video, wherever it doesn’t cover the frame.</span>
+      </CollapsibleSection>
+
       <CollapsibleSection title="Layout" defaultOpen={false}>
         <Slider label="Head / Sub Gap" value={s.headSubGap}     min={0} max={100} onChange={v => onChange({ headSubGap: v })} />
         <Slider label="Heading top padding" value={s.aboveLogoGap} min={0} max={50} unit="px" onChange={v => onChange({ aboveLogoGap: v })} />
@@ -1049,6 +1101,7 @@ export function CarouselSettingsPanel({ settings, onChange, videoMode }: Carouse
 
       {/* Circle + Circle 2 — hidden in video mode */}
       {!videoMode && <CollapsibleSection title="Circle" defaultOpen={false}>
+        <CircleImageRow src={s.circleImageSrc} onSet={src => onChange({ circleImageSrc: src })} />
         <div className="flex items-center justify-between">
           <span className="text-[11px] text-zinc-400">Border Color</span>
           <input type="color" value={s.circleBorderColor}
@@ -1081,6 +1134,7 @@ export function CarouselSettingsPanel({ settings, onChange, videoMode }: Carouse
       </CollapsibleSection>}
 
       {!videoMode && <CollapsibleSection title="Circle 2" defaultOpen={false}>
+        <CircleImageRow src={s.circle2ImageSrc} onSet={src => onChange({ circle2ImageSrc: src })} />
         <div className="flex items-center justify-between">
           <span className="text-[11px] text-zinc-400">Border Color</span>
           <input type="color" value={s.circle2BorderColor}

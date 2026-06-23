@@ -1,6 +1,8 @@
 'use client';
 
 import { useEffect, useRef, useState } from 'react';
+import { useSearchParams } from 'next/navigation';
+import type { CarouselPage } from '../types';
 
 interface Talent {
   id: string; ticker: string; name: string; bio: string | null; photo_url: string | null;
@@ -20,12 +22,32 @@ type Step = 'market' | 'ai' | 'photo';
 
 interface AiCardsSectionProps {
   onBuildCard: (seed: { imageSrc: string; headline: string; subheadline: string; subheadline2?: string; articleUrl?: string }) => void;
+  onBuildCarousel: (pages: CarouselPage[]) => void;
+  brandCategory?: 'artists' | 'athletes';
   onCancel: () => void;
 }
 
-export function AiCardsSection({ onBuildCard, onCancel }: AiCardsSectionProps) {
+export function AiCardsSection({ onBuildCard, onBuildCarousel, brandCategory, onCancel }: AiCardsSectionProps) {
+  // Two flows share this screen: "market" (pick a Pauv talent → one card) and
+  // "trending" (Gemini finds any hot public figure → a whole multi-page carousel).
+  // The carousel toolbar's "AI" button deep-links here with ?flow=trending.
+  const searchParams = useSearchParams();
+  const [flow, setFlow] = useState<'market' | 'trending'>(
+    searchParams.get('flow') === 'trending' ? 'trending' : 'market',
+  );
+  // Kept mounted across navigation, so re-apply the deep-link on later visits too.
+  useEffect(() => {
+    if (searchParams.get('flow') === 'trending') setFlow('trending');
+  }, [searchParams]);
   const [step, setStep] = useState<Step>('market');
   const [error, setError] = useState<string | null>(null);
+
+  // ── Trending (auto) flow state ──
+  const [trNameHint, setTrNameHint] = useState('');
+  const [trLoading, setTrLoading] = useState(false);
+  const [trFigure, setTrFigure] = useState('');
+  const [trArticleUrl, setTrArticleUrl] = useState<string | undefined>(undefined);
+  const [trPages, setTrPages] = useState<CarouselPage[]>([]);
 
   const [talents, setTalents] = useState<Talent[]>([]);
   const [talentsLoading, setTalentsLoading] = useState(true);
@@ -183,6 +205,34 @@ export function AiCardsSection({ onBuildCard, onCancel }: AiCardsSectionProps) {
   const restart = () => {
     setStep('market'); setSelectedTalent(null); setSearch(''); setStories([]);
     setSelectedItem(null); setHeadline(''); setSubheadline(''); setSubheadline2(''); setPhotos([]); setSelectedPhoto(null); setError(null);
+    setTrPages([]); setTrFigure(''); setTrArticleUrl(undefined); setTrNameHint('');
+  };
+
+  const generateTrending = async () => {
+    setError(null); setTrLoading(true); setTrPages([]); setTrFigure(''); setTrArticleUrl(undefined);
+    try {
+      const r = await fetch('/api/ai/trending-carousel', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ nameHint: trNameHint.trim() || undefined, category: brandCategory }),
+      });
+      const data = await r.json() as { figure?: string; articleUrl?: string; pages?: CarouselPage[]; error?: string };
+      if (!r.ok || data.error) throw new Error(data.error ?? `Request failed (${r.status})`);
+      if (!data.pages?.length) throw new Error('No pages returned');
+      setTrFigure(data.figure ?? '');
+      setTrArticleUrl(data.articleUrl);
+      setTrPages(data.pages);
+    } catch (e) { setError(String(e)); }
+    finally { setTrLoading(false); }
+  };
+
+  const updateTrPage = (i: number, field: 'headline' | 'subheadline', value: string) =>
+    setTrPages(prev => prev.map((p, idx) => idx === i ? { ...p, [field]: value } : p));
+
+  const buildTrending = () => {
+    if (!trPages.length) return;
+    // Attach the source article to the main page so the media tab's article-link
+    // field pre-populates, mirroring the single-card flow.
+    onBuildCarousel(trPages.map((p, i) => (i === 0 && trArticleUrl ? { ...p, articleUrl: trArticleUrl } : p)));
   };
 
   const stepLabels: Array<{ key: Step; label: string }> = [
@@ -195,12 +245,21 @@ export function AiCardsSection({ onBuildCard, onCancel }: AiCardsSectionProps) {
   return (
     <div className="min-h-screen bg-black text-zinc-100 flex flex-col">
       {/* Header — matches CanvasGrid toolbar */}
-      <div className="flex items-center gap-4 px-4 py-3 bg-zinc-950 border-b border-zinc-800 shrink-0">
+      <div className="flex items-center gap-4 px-4 py-3 bg-[#0f0f0f] border-b border-zinc-800 shrink-0">
         <button onClick={onCancel} className="text-zinc-500 hover:text-zinc-200 text-sm transition-colors">Back</button>
         <div className="w-px h-4 bg-zinc-800" />
         <span className="text-sm font-semibold text-zinc-100">AI Cards</span>
-        <p className="text-xs text-zinc-600 hidden sm:block">Pauv market · AI news · headline · card</p>
-        {step !== 'market' && (
+        {/* Flow toggle: a single card from a Pauv market, or a whole carousel
+            auto-built from a trending public figure (not limited to Pauv). */}
+        <div className="flex gap-1 rounded-md bg-zinc-950 border border-zinc-800 p-0.5">
+          {([['market', 'Pick market'], ['trending', 'Trending (auto)']] as const).map(([key, label]) => (
+            <button key={key} onClick={() => setFlow(key)}
+              className={`text-xs px-2.5 py-1 rounded transition-colors ${flow === key ? 'bg-zinc-800 text-zinc-100' : 'text-zinc-500 hover:text-zinc-300'}`}>
+              {label}
+            </button>
+          ))}
+        </div>
+        {((flow === 'market' && step !== 'market') || (flow === 'trending' && trPages.length > 0)) && (
           <button onClick={restart} className="ml-auto text-xs px-2.5 py-1.5 rounded-md bg-zinc-950 border border-zinc-800 text-zinc-400 hover:text-zinc-200 hover:border-zinc-600 transition-colors">
             Start over
           </button>
@@ -208,16 +267,18 @@ export function AiCardsSection({ onBuildCard, onCancel }: AiCardsSectionProps) {
       </div>
 
       <div className="flex-1 max-w-5xl mx-auto w-full px-4 py-6">
-        {/* Step bar */}
-        <div className="flex gap-2 mb-6">
-          {stepLabels.map((s, i) => (
-            <div key={s.key} className={`px-3 py-1 rounded-md text-xs font-medium border transition-colors ${
-              i < stepIdx  ? 'bg-zinc-900 border-zinc-800 text-zinc-500'
-              : i === stepIdx ? 'bg-zinc-800 border-zinc-600 text-zinc-200'
-              : 'bg-zinc-950 border-zinc-800 text-zinc-600'
-            }`}>{s.label}</div>
-          ))}
-        </div>
+        {/* Step bar (market flow only) */}
+        {flow === 'market' && (
+          <div className="flex gap-2 mb-6">
+            {stepLabels.map((s, i) => (
+              <div key={s.key} className={`px-3 py-1 rounded-md text-xs font-medium border transition-colors ${
+                i < stepIdx  ? 'bg-zinc-900 border-zinc-800 text-zinc-500'
+                : i === stepIdx ? 'bg-zinc-800 border-zinc-600 text-zinc-200'
+                : 'bg-zinc-950 border-zinc-800 text-zinc-600'
+              }`}>{s.label}</div>
+            ))}
+          </div>
+        )}
 
         {error && (
           <div className="mb-4 px-4 py-3 rounded-lg bg-red-950/50 border border-red-800 text-red-300 text-sm">
@@ -225,8 +286,80 @@ export function AiCardsSection({ onBuildCard, onCancel }: AiCardsSectionProps) {
           </div>
         )}
 
+        {/* ── TRENDING (auto) flow ── */}
+        {flow === 'trending' && (
+          <div className="flex flex-col gap-4">
+            <div className="bg-zinc-950 rounded-lg border border-zinc-800 p-6">
+              <h2 className="text-sm font-semibold mb-1">Trending carousel</h2>
+              <p className="text-xs text-zinc-600 mb-4">
+                Gemini searches the web for a trending public figure and writes a full carousel — a main page plus supporting pages ending in a pauv.com CTA. Leave the name blank to let it pick who&rsquo;s hot right now.
+              </p>
+              <label className="block text-xs text-zinc-500 mb-1.5">Name hint (optional)</label>
+              <div className="flex items-center border border-zinc-700 rounded-md px-2.5 h-9 mb-3">
+                <input value={trNameHint} onChange={e => setTrNameHint(e.target.value)}
+                  onKeyDown={e => { if (e.key === 'Enter' && !trLoading) generateTrending(); }}
+                  placeholder="e.g. Vozinha — or leave blank for auto"
+                  className="flex-1 bg-transparent text-sm text-white placeholder-zinc-600 outline-none min-w-0" />
+              </div>
+              <div className="flex items-center gap-3">
+                {brandCategory && <span className="text-xs text-zinc-600">Steering toward <span className="text-zinc-400">{brandCategory}</span></span>}
+                <button onClick={generateTrending} disabled={trLoading}
+                  className="ml-auto px-4 py-2 rounded-md bg-white text-black hover:bg-zinc-100 disabled:opacity-30 disabled:cursor-not-allowed text-sm font-semibold transition-colors">
+                  {trLoading ? 'Searching & writing…' : trPages.length ? 'Regenerate' : 'Generate carousel'}
+                </button>
+              </div>
+            </div>
+
+            {trLoading && (
+              <div className="flex flex-col gap-2">
+                {[1, 2, 3, 4, 5].map(i => <div key={i} className="h-24 bg-zinc-900 rounded-lg animate-pulse" />)}
+              </div>
+            )}
+
+            {!trLoading && trPages.length > 0 && (
+              <>
+                <div className="flex items-center justify-between px-1">
+                  <p className="text-sm text-zinc-400">
+                    {trFigure && <>Story: <span className="text-white font-medium">{trFigure}</span> · </>}
+                    {trPages.length} pages. Edit freely.
+                    {trArticleUrl && <> · <a href={trArticleUrl} target="_blank" rel="noreferrer" className="text-zinc-500 hover:text-zinc-300 underline">source</a></>}
+                  </p>
+                </div>
+                {trPages.map((p, i) => {
+                  const isMain = p.slideType === 'main';
+                  const isLast = i === trPages.length - 1;
+                  const label = isMain ? 'Main' : isLast ? 'CTA · Supporting 1' : 'Supporting 1';
+                  return (
+                    <div key={i} className="bg-zinc-950 rounded-lg border border-zinc-800 p-5">
+                      <div className="flex items-center gap-2 mb-3">
+                        <span className="text-xs font-semibold text-zinc-500">Page {i + 1}</span>
+                        <span className="text-[10px] uppercase tracking-wide px-1.5 py-0.5 rounded bg-zinc-900 border border-zinc-800 text-zinc-500">{label}</span>
+                      </div>
+                      <label className="block text-xs text-zinc-500 mb-1.5">Headline{isMain ? '' : ' (text box)'}</label>
+                      <textarea value={p.headline} onChange={e => updateTrPage(i, 'headline', e.target.value)} rows={2}
+                        placeholder="Headline…"
+                        className="w-full bg-transparent border border-zinc-700 rounded-md px-2.5 py-2 text-sm text-white placeholder-zinc-600 outline-none resize-none mb-3" />
+                      <label className="block text-xs text-zinc-500 mb-1.5">
+                        Subheadline {isMain ? '(small text)' : '(optional — same size as headline)'}
+                      </label>
+                      <textarea value={p.subheadline} onChange={e => updateTrPage(i, 'subheadline', e.target.value)} rows={2}
+                        placeholder={isMain ? 'Short supporting line…' : 'Optional — leave blank for a single text box'}
+                        className="w-full bg-transparent border border-zinc-700 rounded-md px-2.5 py-2 text-sm text-white placeholder-zinc-600 outline-none resize-none" />
+                    </div>
+                  );
+                })}
+                <button onClick={buildTrending}
+                  className="self-start px-4 py-2 rounded-md bg-white text-black hover:bg-zinc-100 text-sm font-semibold transition-colors">
+                  Build carousel ({trPages.length} pages)
+                </button>
+                <p className="text-xs text-zinc-600">Images are left blank — drop photos onto each page in the editor.</p>
+              </>
+            )}
+          </div>
+        )}
+
         {/* STEP 1: Market picker */}
-        {step === 'market' && (
+        {flow === 'market' && step === 'market' && (
           <div className="bg-zinc-950 rounded-lg border border-zinc-800 p-6">
             <h2 className="text-sm font-semibold mb-1">Pick a Pauv market</h2>
             <p className="text-xs text-zinc-600 mb-4">Search by name or ticker. AI will fetch news about them.</p>
@@ -283,7 +416,7 @@ export function AiCardsSection({ onBuildCard, onCancel }: AiCardsSectionProps) {
         )}
 
         {/* STEP 2: AI — news + headline mesh */}
-        {step === 'ai' && selectedTalent && (
+        {flow === 'market' && step === 'ai' && selectedTalent && (
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
             <div className="flex flex-col gap-4">
               <div className="flex items-center gap-3 px-4 py-3 bg-zinc-950 rounded-lg border border-zinc-800">
@@ -386,7 +519,7 @@ export function AiCardsSection({ onBuildCard, onCancel }: AiCardsSectionProps) {
         )}
 
         {/* STEP 3: Photo picker */}
-        {step === 'photo' && selectedTalent && (
+        {flow === 'market' && step === 'photo' && selectedTalent && (
           <div className="bg-zinc-950 rounded-lg border border-zinc-800 p-5">
             <h2 className="text-sm font-semibold mb-4">Pick a photo</h2>
             <div className="flex flex-col gap-2 mb-4">

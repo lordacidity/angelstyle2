@@ -123,7 +123,7 @@ export function Sidebar({
 
   return (
     <>
-    <aside className="fixed top-0 left-0 h-screen w-[72px] bg-zinc-950 border-r border-zinc-800 flex flex-col z-30">
+    <aside className="fixed top-0 left-0 h-screen w-[72px] bg-[#0f0f0f] border-r border-zinc-800 flex flex-col z-30">
       {/* Nav — real links so each section has its own URL (prefetch + open in new tab) */}
       <nav className="flex-1 px-2 py-4 flex flex-col gap-1">
         {NAV.map(({ id, label, icon }) => {
