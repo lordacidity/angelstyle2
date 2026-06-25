@@ -29,7 +29,7 @@
     "mp4box": "^0.5.4",
     "next": "^16.2.7",
     "onnxruntime-web": "^1.21.0",
-    "pg": "^8.21.0",
+    "pg": "^8.22.0",
     "probe-image-size": "^7.2.3",
     "react": "19.2.3",
     "react-dom": "19.2.3",

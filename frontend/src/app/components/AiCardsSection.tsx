@@ -23,7 +23,7 @@ type Step = 'market' | 'ai' | 'photo';
 interface AiCardsSectionProps {
   onBuildCard: (seed: { imageSrc: string; headline: string; subheadline: string; subheadline2?: string; articleUrl?: string }) => void;
   onBuildCarousel: (pages: CarouselPage[]) => void;
-  brandCategory?: 'artists' | 'athletes';
+  brandCategory?: 'artists' | 'athletes' | 'gamers';
   onCancel: () => void;
 }
 

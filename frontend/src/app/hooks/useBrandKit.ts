@@ -31,7 +31,7 @@ const EMPTY_BRAND: BrandProps = {
 
 function toDbHandle(h: string) { return h.replace(/^@+/, ''); }
 function toDisplayHandle(h: string) { return h.startsWith('@') ? h : `@${h}`; }
-function toCategory(v: string | null): BrandCategory { return v === 'athletes' ? 'athletes' : 'artists'; }
+function toCategory(v: string | null): BrandCategory { return v === 'athletes' ? 'athletes' : v === 'gamers' ? 'gamers' : 'artists'; }
 
 // Logos are shared (Supabase, under the one Pauv account) so everyone pulls from
 // the same logo library. Display name + handle are PER-PERSON: each machine

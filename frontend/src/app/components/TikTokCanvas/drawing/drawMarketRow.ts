@@ -122,7 +122,7 @@ export interface DrawMarketRowOptions {
   down?: boolean;
   size?: 'large' | 'small' | 'bio';
   /** bio CTA only: appends a bold " Artists" / " Athletes" after "to trade". */
-  ctaCategory?: 'artists' | 'athletes' | 'people';
+  ctaCategory?: 'artists' | 'athletes' | 'gamers' | 'people';
 }
 
 // "pauv.com to trade [Artists]" — light grey, centered under the CTA box. Drawn
@@ -137,7 +137,7 @@ export function drawCtaLink({
   cw: number;
   videoBottomY: number;
   size?: 'large' | 'small' | 'bio';
-  ctaCategory?: 'artists' | 'athletes' | 'people';
+  ctaCategory?: 'artists' | 'athletes' | 'gamers' | 'people';
   pauvLogoImgRef?: MutableRefObject<HTMLImageElement | null>;
   linkSize?: number;
 }): void {

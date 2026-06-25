@@ -125,7 +125,7 @@ export async function POST(req: NextRequest) {
       context:    z.string().optional(),  // editor's free-form context
       videoTitle: z.string().optional(),  // scraped VideoData.title
       author:     z.string().optional(),  // scraped VideoData.author.nickname
-      category:   z.enum(['athlete', 'artist']).optional(),  // from the brand kit
+      category:   z.enum(['athlete', 'artist', 'gamer']).optional(),  // from the brand kit
     });
     const parsed = Schema.safeParse(await req.json().catch(() => ({})));
     if (!parsed.success) return NextResponse.json({ error: 'invalid body' }, { status: 400 });
@@ -135,8 +135,11 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: 'need at least caption, context, or fetched video title' }, { status: 400 });
     }
 
-    const cat: PromptCategory = category === 'artist' ? 'artist' : 'athlete';
-    const industry = cat === 'artist' ? 'music / artists' : 'sports / athletes';
+    const cat: PromptCategory = category ?? 'athlete';
+    const industry =
+      cat === 'artist' ? 'music / artists' :
+      cat === 'gamer'  ? 'gaming / esports' :
+      'sports / athletes';
 
     // ── 1 + 2. Pick the best-fitting topic from this category's AI-Prompts pool ──
     let prompts: AiPromptRow[] = [];

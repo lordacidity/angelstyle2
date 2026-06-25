@@ -21,8 +21,8 @@ export interface BrandLogo {
 }
 
 /** Talent category the brand promotes — drives the bio CTA wording
- *  ("pauv.com to trade Artists" vs "…Athletes"). */
-export type BrandCategory = 'artists' | 'athletes';
+ *  ("pauv.com to trade Artists" vs "…Athletes" vs "…Gamers"). */
+export type BrandCategory = 'artists' | 'athletes' | 'gamers';
 
 /** Brand-kit data passed to canvas templates */
 export interface BrandProps {

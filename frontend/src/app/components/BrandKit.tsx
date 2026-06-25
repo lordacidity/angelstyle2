@@ -184,8 +184,8 @@ export function BrandKit({
               vs "…Athletes") in the Media generator. */}
           <div className="flex flex-col gap-1.5">
             <label className="text-xs font-medium text-zinc-500 uppercase tracking-wider">Category</label>
-            <div className="grid grid-cols-2 gap-2">
-              {(['artists', 'athletes'] as const).map(cat => {
+            <div className="grid grid-cols-3 gap-2">
+              {(['artists', 'athletes', 'gamers'] as const).map(cat => {
                 const active = category === cat;
                 return (
                   <button

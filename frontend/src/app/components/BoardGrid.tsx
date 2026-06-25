@@ -10,7 +10,7 @@
 // flex-column parent that owns the header above it.
 
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { type UseBoardReturn, type BoardRow, type TextField, TEXT_FIELDS } from '../hooks/useBoard';
+import { type UseBoardReturn, type BoardRow, type BoolField, type TextField, TEXT_FIELDS } from '../hooks/useBoard';
 import { BoardTabs } from './BoardTabs';
 import { useEmojiField } from './EmojiPicker';
 
@@ -248,6 +248,88 @@ function CellTextarea({
   );
 }
 
+// One existing data row, memoized. Because useBoard's handlers are now
+// referentially stable and patchLocal only swaps the edited row's object (others
+// keep identity), React.memo lets a keystroke in one row skip re-rendering all
+// the others — the core fix for the board's typing/scroll jank with many rows.
+const BoardRowItem = React.memo(function BoardRowItem({
+  row, onTextChange, onTextCommit, toggleBool, deleteRow, autoContext,
+}: {
+  row: BoardRow;
+  onTextChange: (id: string, field: TextField, value: string) => void;
+  onTextCommit: (row: BoardRow, field: TextField) => void;
+  toggleBool: (row: BoardRow, field: BoolField) => void;
+  deleteRow: (id: string) => void;
+  autoContext: (row: BoardRow) => Promise<void>;
+}) {
+  return (
+    <tr className="group align-top">
+      <td className="border border-zinc-800 text-center align-middle">
+        <input
+          type="checkbox"
+          checked={row.posted}
+          onChange={() => toggleBool(row, 'posted')}
+          className="h-4 w-4 cursor-pointer accent-emerald-500"
+        />
+      </td>
+      <td className="border border-zinc-800 text-center align-middle">
+        <input
+          type="checkbox"
+          checked={row.unusable}
+          onChange={() => toggleBool(row, 'unusable')}
+          title="Unusable"
+          className="h-4 w-4 cursor-pointer accent-red-500"
+        />
+      </td>
+      {TEXT_FIELDS.map((f) => {
+        const cell = f.multiline ? (
+          <CellTextarea
+            value={row[f.key]}
+            onChange={(v) => onTextChange(row.id, f.key, v)}
+            onCommit={() => onTextCommit(row, f.key)}
+          />
+        ) : f.key === 'url' ? (
+          <CellInput
+            value={row[f.key]}
+            onChange={(v) => onTextChange(row.id, f.key, v)}
+            onCommit={() => onTextCommit(row, f.key)}
+          />
+        ) : (
+          <EmojiCellInput
+            value={row[f.key]}
+            onChange={(v) => onTextChange(row.id, f.key, v)}
+            onCommit={() => onTextCommit(row, f.key)}
+          />
+        );
+        return (
+          <td key={f.key} className="border border-zinc-800 p-0">
+            {f.key === 'context' ? (
+              <div className="flex items-start">
+                <AutoContextButton url={row.url} onRun={() => autoContext(row)} />
+                <div className="min-w-0 flex-1">{cell}</div>
+              </div>
+            ) : (
+              cell
+            )}
+          </td>
+        );
+      })}
+      <td className="border border-zinc-800 text-center align-middle">
+        <button
+          onClick={() => deleteRow(row.id)}
+          title="Delete row"
+          className="p-1 text-zinc-700 opacity-0 group-hover:opacity-100 hover:text-red-400 transition"
+        >
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+            <polyline points="3 6 5 6 21 6" />
+            <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2" />
+          </svg>
+        </button>
+      </td>
+    </tr>
+  );
+});
+
 export function BoardGrid({ board }: { board: UseBoardReturn }) {
   const {
     rows, loading, error,
@@ -400,62 +482,17 @@ export function BoardGrid({ board }: { board: UseBoardReturn }) {
               </td>
             </tr>
 
-            {/* Existing rows */}
+            {/* Existing rows — memoized so editing one cell doesn't re-render the rest */}
             {rows.map((row) => (
-              <tr key={row.id} className="group align-top">
-                <td className="border border-zinc-800 text-center align-middle">
-                  <input
-                    type="checkbox"
-                    checked={row.posted}
-                    onChange={() => toggleBool(row, 'posted')}
-                    className="h-4 w-4 cursor-pointer accent-emerald-500"
-                  />
-                </td>
-                <td className="border border-zinc-800 text-center align-middle">
-                  <input
-                    type="checkbox"
-                    checked={row.unusable}
-                    onChange={() => toggleBool(row, 'unusable')}
-                    title="Unusable"
-                    className="h-4 w-4 cursor-pointer accent-red-500"
-                  />
-                </td>
-                {TEXT_FIELDS.map((f) => (
-                  <td key={f.key} className="border border-zinc-800 p-0">
-                    {f.key === 'context' ? (
-                      // Context cell carries the ✨ auto-write button on its left.
-                      <div className="flex items-start">
-                        <AutoContextButton url={row.url} onRun={() => autoContext(row)} />
-                        <div className="min-w-0 flex-1">
-                          {renderTextCell(
-                            f.key, f.multiline, row[f.key],
-                            (v) => onTextChange(row.id, f.key, v),
-                            () => onTextCommit(row, f.key),
-                          )}
-                        </div>
-                      </div>
-                    ) : (
-                      renderTextCell(
-                        f.key, f.multiline, row[f.key],
-                        (v) => onTextChange(row.id, f.key, v),
-                        () => onTextCommit(row, f.key),
-                      )
-                    )}
-                  </td>
-                ))}
-                <td className="border border-zinc-800 text-center align-middle">
-                  <button
-                    onClick={() => deleteRow(row.id)}
-                    title="Delete row"
-                    className="p-1 text-zinc-700 opacity-0 group-hover:opacity-100 hover:text-red-400 transition"
-                  >
-                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                      <polyline points="3 6 5 6 21 6" />
-                      <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2" />
-                    </svg>
-                  </button>
-                </td>
-              </tr>
+              <BoardRowItem
+                key={row.id}
+                row={row}
+                onTextChange={onTextChange}
+                onTextCommit={onTextCommit}
+                toggleBool={toggleBool}
+                deleteRow={deleteRow}
+                autoContext={autoContext}
+              />
             ))}
             {!loading && rows.length === 0 && (
               <tr>

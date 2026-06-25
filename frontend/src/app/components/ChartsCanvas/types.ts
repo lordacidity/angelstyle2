@@ -9,7 +9,7 @@ export interface SparkPoint { value: number; timestamp: number }
 export interface MarketData {
   name: string; ticker: string; photo_url: string | null; industry: string | null;
   subcategory: string | null; sparkline?: SparkPoint[] | null;
-  size?: 'large' | 'small' | 'bio'; ctaCategory?: 'artists' | 'athletes';
+  size?: 'large' | 'small' | 'bio'; ctaCategory?: 'artists' | 'athletes' | 'gamers';
   price: { usd: number | null; lifetimeChangePct: number | null };
 }
 

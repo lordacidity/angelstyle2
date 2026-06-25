@@ -13,8 +13,8 @@
 
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 
-type PromptCategory = 'athlete' | 'artist';
-const CATEGORIES: PromptCategory[] = ['athlete', 'artist'];
+type PromptCategory = 'athlete' | 'artist' | 'gamer';
+const CATEGORIES: PromptCategory[] = ['athlete', 'artist', 'gamer'];
 
 interface AiPrompt {
   id: string;

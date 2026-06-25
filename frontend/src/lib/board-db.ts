@@ -24,6 +24,22 @@ const PHYSICAL: Record<BoardTable, string> = {
   artists: 'board_artists',
 };
 
+// Retention: rows are permanently deleted once they're older than this many days
+// (anchored on created_at — when the row was added). The board is a short-lived
+// working queue, so old links age out automatically to keep it small and fast.
+export const BOARD_RETENTION_DAYS = 5;
+
+// Hard cap on rows returned per table — a safety net so a runaway table can never
+// balloon the payload / render cost even if the purge hasn't run yet.
+const BOARD_ROW_CAP = 500;
+
+// Running a DELETE on every single GET would add write latency to every load, so
+// the purge is throttled: at most once per this interval per table per process.
+// Cached on globalThis so a dev hot-reload doesn't reset the clock and re-purge
+// on every edit.
+const PURGE_INTERVAL_MS = 10 * 60 * 1000;
+const gpurge = globalThis as unknown as { __boardLastPurge?: Record<string, number> };
+
 export function isBoardTable(v: string): v is BoardTable {
   return (BOARD_TABLES as readonly string[]).includes(v);
 }
@@ -108,6 +124,11 @@ function ensureSchema(): Promise<void> {
       await pool.query(
         `ALTER TABLE ${physical} ADD COLUMN IF NOT EXISTS unusable BOOLEAN NOT NULL DEFAULT false`,
       );
+      // Index created_at — the board both sorts (ORDER BY created_at DESC) and
+      // purges (WHERE created_at < cutoff) on it, so an index keeps both cheap.
+      await pool.query(
+        `CREATE INDEX IF NOT EXISTS ${physical}_created_at_idx ON ${physical} (created_at DESC)`,
+      );
     }
   })().catch((e) => {
     // Reset so a transient Railway hiccup doesn't permanently wedge the board.
@@ -146,13 +167,36 @@ function toRow(r: DbRow): BoardRow {
 const SELECT_COLS =
   'id, posted, unusable, url, vid_caption, context, notes, created_at, updated_at';
 
+// Permanently delete rows older than BOARD_RETENTION_DAYS. Throttled to once per
+// PURGE_INTERVAL_MS per table so it doesn't add a write to every load. Best-effort:
+// a failed purge never blocks the list (the rows just linger until the next pass).
+async function purgeExpired(table: BoardTable): Promise<void> {
+  const now = Date.now();
+  const last = gpurge.__boardLastPurge?.[table] ?? 0;
+  if (now - last < PURGE_INTERVAL_MS) return;
+  gpurge.__boardLastPurge = { ...(gpurge.__boardLastPurge ?? {}), [table]: now };
+  try {
+    await getPool().query(
+      `DELETE FROM ${PHYSICAL[table]} WHERE created_at < now() - make_interval(days => $1)`,
+      [BOARD_RETENTION_DAYS],
+    );
+  } catch (e) {
+    // Don't wedge the board on a transient purge failure — let it retry next pass.
+    gpurge.__boardLastPurge = { ...(gpurge.__boardLastPurge ?? {}), [table]: last };
+    console.error('[board purge]', e);
+  }
+}
+
 // ── CRUD ──────────────────────────────────────────────────────────────────────
 export async function listRows(table: BoardTable): Promise<BoardRow[]> {
   await ensureSchema();
+  // Age out expired rows first (throttled), so the board shrinks on its own.
+  await purgeExpired(table);
   const r = await getPool().query<DbRow>(
     // Newest first — the board reads top-to-bottom with the most recent rows up
-    // top, and freshly-added rows land at the top of the list.
-    `SELECT ${SELECT_COLS} FROM ${PHYSICAL[table]} ORDER BY created_at DESC`,
+    // top, and freshly-added rows land at the top of the list. Capped so the
+    // payload can never run away.
+    `SELECT ${SELECT_COLS} FROM ${PHYSICAL[table]} ORDER BY created_at DESC LIMIT ${BOARD_ROW_CAP}`,
   );
   return r.rows.map(toRow);
 }

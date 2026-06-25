@@ -113,7 +113,7 @@ export async function POST(req: NextRequest) {
   try {
     const Schema = z.object({
       nameHint: z.string().trim().max(120).optional().default(''),
-      category: z.enum(['artists', 'athletes']).optional(),
+      category: z.enum(['artists', 'athletes', 'gamers']).optional(),
     });
     const parsed = Schema.safeParse(await req.json().catch(() => ({})));
     if (!parsed.success) return NextResponse.json({ error: 'invalid body' }, { status: 400 });

@@ -1937,10 +1937,11 @@ export function CanvasGrid({
     // should drive the wording the bio renders. The toggle is the fallback for
     // display names that don't mention either word (e.g. just "Pauv").
     // The per-video People toggle overrides the brand-kit wording entirely.
-    const bioCategory: 'artists' | 'athletes' | 'people' =
+    const bioCategory: 'artists' | 'athletes' | 'gamers' | 'people' =
       marketBioPeopleMap[entryId]            ? 'people'   :
       /athletes/i.test(brand.displayName)    ? 'athletes' :
       /artists/i.test(brand.displayName)     ? 'artists'  :
+      /gamers/i.test(brand.displayName)      ? 'gamers'   :
       brand.category;
     if (sizePref === 'bio') {
       return { name: '', ticker: '', photo_url: null, industry: null, subcategory: null, sparkline: null, size: 'bio', ctaCategory: bioCategory, price: { usd: null, lifetimeChangePct: null } };
@@ -1983,8 +1984,11 @@ export function CanvasGrid({
     }));
     try {
       // Category drives which AI-Prompts topic pool we draw from — taken straight
-      // from the brand kit toggle.
-      const promptCategory: 'athlete' | 'artist' = brand.category === 'athletes' ? 'athlete' : 'artist';
+      // from the brand kit toggle (athletes→athlete, gamers→gamer, else artist).
+      const promptCategory: 'athlete' | 'artist' | 'gamer' =
+        brand.category === 'athletes' ? 'athlete' :
+        brand.category === 'gamers'   ? 'gamer'   :
+        'artist';
 
       // CTA person pick — kicked off first so it overlaps the caption write. It
       // depends ONLY on the human signals (on-card caption + context), never the

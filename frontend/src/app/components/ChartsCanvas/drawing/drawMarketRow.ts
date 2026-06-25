@@ -99,8 +99,8 @@ export interface DrawMarketRowOptions {
   arrowOpacity?: number;
   triangleOnly?: boolean;
   size?: 'large' | 'small' | 'bio';
-  /** bio CTA only: appends a bold " Artists" / " Athletes" after "to trade". */
-  ctaCategory?: 'artists' | 'athletes';
+  /** bio CTA only: appends a bold " Artists" / " Athletes" / " Gamers" after "to trade". */
+  ctaCategory?: 'artists' | 'athletes' | 'gamers';
 }
 
 // Avatar outline: a circle by default, or a rounded square when `cornerRadius`
@@ -215,7 +215,7 @@ export function drawMarketRow({
     const font = (weight: number) => `${weight} ${linkSize}px Inter, ${SANS}`;
     const dotCom = '.com';
     const txt    = 'to trade';
-    const catLabel = (isBio && ctaCategory) ? (ctaCategory === 'athletes' ? 'athletes' : 'artists') : '';
+    const catLabel = (isBio && ctaCategory) ? ctaCategory : '';
     const catText  = catLabel ? ` ${catLabel}` : '';
 
     ctx.font = font(600); const dotComW = ctx.measureText(dotCom).width;

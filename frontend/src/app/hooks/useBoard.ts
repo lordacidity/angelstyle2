@@ -18,7 +18,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 export type BoardTable = 'markets' | 'athletes' | 'artists';
 
 export const TABS: { id: BoardTable; label: string }[] = [
-  { id: 'markets', label: 'Markets' },
+  { id: 'markets', label: 'Gamers' },
   { id: 'athletes', label: 'Athletes' },
   { id: 'artists', label: 'Artists' },
 ];
@@ -104,6 +104,16 @@ export function useBoard(): UseBoardReturn {
   // actually changed — keyed `${rowId}:${field}`.
   const dirty = useRef<Set<string>>(new Set());
 
+  // Live refs for the latest active tab + row cache. The data handlers read these
+  // instead of closing over `active` / `rowsByTable` directly, which keeps the
+  // handlers referentially STABLE across edits. That stability is what lets the
+  // memoized row (BoardGrid's BoardRowItem) skip re-rendering every other row on
+  // each keystroke — the fix for the board's typing/scroll jank.
+  const activeRef = useRef(active);
+  activeRef.current = active;
+  const rowsByTableRef = useRef(rowsByTable);
+  rowsByTableRef.current = rowsByTable;
+
   const rows = rowsByTable[active] ?? [];
   const draftHasContent =
     draft.url.trim() !== '' || draft.vidCaption.trim() !== '' ||
@@ -131,15 +141,16 @@ export function useBoard(): UseBoardReturn {
   }, [active, rowsByTable, loadTable]);
 
   const patchLocal = useCallback((id: string, patch: Partial<BoardRow>) => {
+    const table = activeRef.current;
     setRowsByTable((prev) => ({
       ...prev,
-      [active]: (prev[active] ?? []).map((r) => (r.id === id ? { ...r, ...patch } : r)),
+      [table]: (prev[table] ?? []).map((r) => (r.id === id ? { ...r, ...patch } : r)),
     }));
-  }, [active]);
+  }, []);
 
   const savePatch = useCallback(async (id: string, patch: Partial<BoardRow>) => {
     try {
-      const res = await fetch(`/api/board/${active}/${id}`, {
+      const res = await fetch(`/api/board/${activeRef.current}/${id}`, {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(patch),
@@ -148,7 +159,7 @@ export function useBoard(): UseBoardReturn {
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Failed to save');
     }
-  }, [active]);
+  }, []);
 
   const onTextChange = useCallback((id: string, field: TextField, value: string) => {
     dirty.current.add(`${id}:${field}`);
@@ -159,9 +170,9 @@ export function useBoard(): UseBoardReturn {
     const key = `${row.id}:${field}`;
     if (!dirty.current.has(key)) return;
     dirty.current.delete(key);
-    const current = (rowsByTable[active] ?? []).find((r) => r.id === row.id);
+    const current = (rowsByTableRef.current[activeRef.current] ?? []).find((r) => r.id === row.id);
     if (current) void savePatch(row.id, { [field]: current[field] } as Partial<BoardRow>);
-  }, [rowsByTable, active, savePatch]);
+  }, [savePatch]);
 
   const toggleBool = useCallback((row: BoardRow, field: BoolField) => {
     const next = !row[field];
@@ -195,16 +206,20 @@ export function useBoard(): UseBoardReturn {
   }, [draftHasContent, posting, active, draft]);
 
   const deleteRow = useCallback(async (id: string) => {
-    const snapshot = rowsByTable[active] ?? [];
-    setRowsByTable((prev) => ({ ...prev, [active]: snapshot.filter((r) => r.id !== id) }));
+    const table = activeRef.current;
+    let snapshot: BoardRow[] = [];
+    setRowsByTable((prev) => {
+      snapshot = prev[table] ?? [];
+      return { ...prev, [table]: snapshot.filter((r) => r.id !== id) };
+    });
     try {
-      const res = await fetch(`/api/board/${active}/${id}`, { method: 'DELETE' });
+      const res = await fetch(`/api/board/${table}/${id}`, { method: 'DELETE' });
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
     } catch {
-      setRowsByTable((prev) => ({ ...prev, [active]: snapshot }));
+      setRowsByTable((prev) => ({ ...prev, [table]: snapshot }));
       setError('Failed to delete row');
     }
-  }, [rowsByTable, active]);
+  }, []);
 
   // Set posted=true for a row in any table (not just the active one) and persist
   // it. If that table isn't loaded yet the local map is left as-is — the PATCH

@@ -16,7 +16,7 @@ import pg from 'pg';
 export const PROMPT_COUNT = 15;
 
 // Each topic is tagged as either an athlete or an artist.
-export const PROMPT_CATEGORIES = ['athlete', 'artist'] as const;
+export const PROMPT_CATEGORIES = ['athlete', 'artist', 'gamer'] as const;
 export type PromptCategory = (typeof PROMPT_CATEGORIES)[number];
 
 export function isPromptCategory(v: unknown): v is PromptCategory {

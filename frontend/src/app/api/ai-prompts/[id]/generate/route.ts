@@ -103,7 +103,10 @@ export async function POST(
       })
       .join('\n');
 
-    const person = existing.category === 'artist' ? 'artist' : 'athlete';
+    const person =
+      existing.category === 'artist' ? 'artist' :
+      existing.category === 'gamer'  ? 'gamer'  :
+      'athlete';
 
     const raw = await deepseekChat(
       [

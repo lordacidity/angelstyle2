@@ -3,7 +3,7 @@
 // /generate sub-route, not here.
 
 import { NextRequest, NextResponse } from 'next/server';
-import { updatePrompt, isPromptCategory } from '@/lib/ai-prompts-db';
+import { updatePrompt, isPromptCategory, type PromptCategory } from '@/lib/ai-prompts-db';
 
 export const runtime = 'nodejs';
 
@@ -15,7 +15,7 @@ export async function PATCH(
   try {
     const body = (await req.json().catch(() => ({}))) as { topic?: unknown; category?: unknown };
 
-    const patch: { topic?: string; category?: 'athlete' | 'artist' } = {};
+    const patch: { topic?: string; category?: PromptCategory } = {};
     if (body.topic !== undefined) {
       if (typeof body.topic !== 'string') {
         return NextResponse.json({ error: 'topic must be a string' }, { status: 400 });
@@ -24,7 +24,7 @@ export async function PATCH(
     }
     if (body.category !== undefined) {
       if (!isPromptCategory(body.category)) {
-        return NextResponse.json({ error: 'category must be "athlete" or "artist"' }, { status: 400 });
+        return NextResponse.json({ error: 'category must be "athlete", "artist", or "gamer"' }, { status: 400 });
       }
       patch.category = body.category;
     }
