@@ -8,7 +8,7 @@
 // machine (localStorage), so each person keeps their own and no login is needed.
 
 import { useRef, useState, useCallback } from 'react';
-import type { BrandProps, BrandLogo, BrandCategory } from '../types';
+import type { BrandProps, BrandLogo, BrandLogoKind, BrandCategory } from '../types';
 
 interface BrandKitProps {
   brand: BrandProps;
@@ -20,18 +20,119 @@ interface BrandKitProps {
   onUploadLogo: (file: File) => void;
   onDeleteLogo: (id: string) => void;
   onSelectLogo: (url: string) => void;
+  onSelectFullLogo: (url: string) => void;
   onClearError?: () => void;
+}
+
+function logoKind(logo: BrandLogo): BrandLogoKind { return logo.kind ?? 'favicon'; }
+
+// One labelled logo slot: a grid of its logos (click to select, hover to delete
+// non-static ones), plus an upload button when the slot accepts uploads. Reused
+// for the Favicon-logo slot (uploadable) and the Logo slot (a bundled static
+// asset, no upload) so both stay pixel-identical.
+function LogoSection({
+  label, hint, logos, activeUrl, uploading, fit = 'cover', onSelect, onUpload, onDelete,
+}: {
+  label: string;
+  hint?: string;
+  logos: BrandLogo[];
+  activeUrl: string;
+  uploading?: boolean;
+  // 'cover' fills the square (good for icons); 'contain' shows a wide logo whole.
+  fit?: 'cover' | 'contain';
+  onSelect: (url: string) => void;
+  onUpload?: (file: File) => void;
+  onDelete: (id: string) => void;
+}) {
+  const fileRef = useRef<HTMLInputElement>(null);
+  const [hoveredLogo, setHoveredLogo] = useState<string | null>(null);
+
+  function handleFile(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0];
+    if (!file || !onUpload) return;
+    onUpload(file);
+    e.target.value = '';
+  }
+
+  return (
+    <div className="flex flex-col gap-2">
+      <label className="text-xs font-medium text-zinc-500 uppercase tracking-wider">{label}</label>
+      <div className="flex flex-wrap gap-3">
+        {logos.map(logo => {
+          const isActive = activeUrl === logo.url;
+          return (
+            <div
+              key={logo.id}
+              className="relative"
+              onMouseEnter={() => setHoveredLogo(logo.id)}
+              onMouseLeave={() => setHoveredLogo(null)}
+            >
+              <button
+                onClick={() => onSelect(logo.url)}
+                className={`w-16 h-16 rounded-xl overflow-hidden border-2 transition-all ${
+                  isActive ? 'border-white' : 'border-zinc-700 hover:border-zinc-500'
+                }`}
+              >
+                {/* eslint-disable-next-line @next/next/no-img-element */}
+                <img src={logo.url} alt="" className={`w-full h-full ${fit === 'contain' ? 'object-contain bg-zinc-900 p-1' : 'object-cover'}`} />
+              </button>
+
+              {isActive && (
+                <div className="absolute -top-1.5 -right-1.5 w-4 h-4 rounded-full bg-white flex items-center justify-center shadow">
+                  <svg width="8" height="8" viewBox="0 0 12 12" fill="none">
+                    <path d="M2 6l3 3 5-5" stroke="#000" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/>
+                  </svg>
+                </div>
+              )}
+
+              {hoveredLogo === logo.id && !logo.id.startsWith('static:') && (
+                <button
+                  onClick={() => onDelete(logo.id)}
+                  className="absolute -top-1.5 -left-1.5 w-4 h-4 rounded-full bg-red-500 flex items-center justify-center shadow hover:bg-red-400 transition-colors"
+                >
+                  <svg width="7" height="7" viewBox="0 0 12 12" fill="none">
+                    <path d="M2 2l8 8M10 2l-8 8" stroke="#fff" strokeWidth="2" strokeLinecap="round"/>
+                  </svg>
+                </button>
+              )}
+            </div>
+          );
+        })}
+
+        {/* Upload button — only for slots that accept uploads (the favicon slot) */}
+        {onUpload && (
+          <>
+            <button
+              onClick={() => fileRef.current?.click()}
+              disabled={uploading}
+              className="w-16 h-16 rounded-xl border-2 border-dashed border-zinc-700 hover:border-zinc-500 flex items-center justify-center transition-colors disabled:opacity-40"
+            >
+              {uploading ? (
+                <div className="w-4 h-4 border-2 border-zinc-600 border-t-white rounded-full animate-spin" />
+              ) : (
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" className="text-zinc-500">
+                  <line x1="12" y1="5" x2="12" y2="19"/>
+                  <line x1="5" y1="12" x2="19" y2="12"/>
+                </svg>
+              )}
+            </button>
+
+            <input ref={fileRef} type="file" accept="image/*" className="hidden" onChange={handleFile} />
+          </>
+        )}
+      </div>
+      {hint && logos.length > 0 && <p className="text-[11px] text-zinc-600">{hint}</p>}
+    </div>
+  );
 }
 
 export function BrandKit({
   brand, loading, saving, uploading, error,
-  onSave, onUploadLogo, onDeleteLogo, onSelectLogo, onClearError,
+  onSave, onUploadLogo, onDeleteLogo, onSelectLogo, onSelectFullLogo, onClearError,
 }: BrandKitProps) {
-  const fileRef = useRef<HTMLInputElement>(null);
   const [displayName, setDisplayName] = useState(brand.displayName);
   const [handle, setHandle] = useState(brand.handle);
   const [category, setCategory] = useState<BrandCategory>(brand.category);
-  const [hoveredLogo, setHoveredLogo] = useState<string | null>(null);
   const [saved, setSaved] = useState(false);
   const savedTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
@@ -58,12 +159,8 @@ export function BrandKit({
     }
   }, [onSave, displayName, handle, category]);
 
-  function handleFile(e: React.ChangeEvent<HTMLInputElement>) {
-    const file = e.target.files?.[0];
-    if (!file) return;
-    onUploadLogo(file);
-    e.target.value = '';
-  }
+  const faviconLogos = brand.logos.filter(l => logoKind(l) === 'favicon');
+  const fullLogos = brand.logos.filter(l => logoKind(l) === 'logo');
 
   if (loading) {
     return (
@@ -88,73 +185,29 @@ export function BrandKit({
           <p className="text-sm text-zinc-500">Set your identity once — used on every post</p>
         </div>
 
-        {/* Logos grid */}
-        <div className="flex flex-col gap-2">
-          <label className="text-xs font-medium text-zinc-500 uppercase tracking-wider">Logos</label>
-          <div className="flex flex-wrap gap-3">
-            {brand.logos.map((logo: BrandLogo) => {
-              const isActive = brand.logoSrc === logo.url;
-              return (
-                <div
-                  key={logo.id}
-                  className="relative"
-                  onMouseEnter={() => setHoveredLogo(logo.id)}
-                  onMouseLeave={() => setHoveredLogo(null)}
-                >
-                  <button
-                    onClick={() => onSelectLogo(logo.url)}
-                    className={`w-16 h-16 rounded-xl overflow-hidden border-2 transition-all ${
-                      isActive ? 'border-white' : 'border-zinc-700 hover:border-zinc-500'
-                    }`}
-                  >
-                    {/* eslint-disable-next-line @next/next/no-img-element */}
-                    <img src={logo.url} alt="" className="w-full h-full object-cover" />
-                  </button>
+        {/* Favicon logo — the small square avatar/icon used on posts today.
+            Uploadable (Supabase-backed) plus the bundled static Pauv "p". */}
+        <LogoSection
+          label="Favicon logo"
+          hint="Click a logo to use it on posts"
+          logos={faviconLogos}
+          activeUrl={brand.logoSrc}
+          uploading={uploading}
+          onSelect={onSelectLogo}
+          onUpload={onUploadLogo}
+          onDelete={onDeleteLogo}
+        />
 
-                  {isActive && (
-                    <div className="absolute -top-1.5 -right-1.5 w-4 h-4 rounded-full bg-white flex items-center justify-center shadow">
-                      <svg width="8" height="8" viewBox="0 0 12 12" fill="none">
-                        <path d="M2 6l3 3 5-5" stroke="#000" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/>
-                      </svg>
-                    </div>
-                  )}
-
-                  {hoveredLogo === logo.id && !logo.id.startsWith('static:') && (
-                    <button
-                      onClick={() => onDeleteLogo(logo.id)}
-                      className="absolute -top-1.5 -left-1.5 w-4 h-4 rounded-full bg-red-500 flex items-center justify-center shadow hover:bg-red-400 transition-colors"
-                    >
-                      <svg width="7" height="7" viewBox="0 0 12 12" fill="none">
-                        <path d="M2 2l8 8M10 2l-8 8" stroke="#fff" strokeWidth="2" strokeLinecap="round"/>
-                      </svg>
-                    </button>
-                  )}
-                </div>
-              );
-            })}
-
-            {/* Upload button */}
-            <button
-              onClick={() => fileRef.current?.click()}
-              disabled={uploading}
-              className="w-16 h-16 rounded-xl border-2 border-dashed border-zinc-700 hover:border-zinc-500 flex items-center justify-center transition-colors disabled:opacity-40"
-            >
-              {uploading ? (
-                <div className="w-4 h-4 border-2 border-zinc-600 border-t-white rounded-full animate-spin" />
-              ) : (
-                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" className="text-zinc-500">
-                  <line x1="12" y1="5" x2="12" y2="19"/>
-                  <line x1="5" y1="12" x2="19" y2="12"/>
-                </svg>
-              )}
-            </button>
-
-            <input ref={fileRef} type="file" accept="image/*" className="hidden" onChange={handleFile} />
-          </div>
-          {brand.logos.length > 0 && (
-            <p className="text-[11px] text-zinc-600">Click a logo to use it on posts</p>
-          )}
-        </div>
+        {/* Logo — the full logo, a bundled static asset (public/pauvlogo.png).
+            No upload/backend; it just displays as the brand's full logo. */}
+        <LogoSection
+          label="Logo"
+          logos={fullLogos}
+          activeUrl={brand.logoFullSrc}
+          fit="contain"
+          onSelect={onSelectFullLogo}
+          onDelete={onDeleteLogo}
+        />
 
         {/* Fields */}
         <div className="flex flex-col gap-4">

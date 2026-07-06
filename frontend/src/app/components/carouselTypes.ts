@@ -386,6 +386,11 @@ export interface CarouselSettings {
   circle2Lift:          number;
   // Base canvas fill, drawn beneath the image/video (shows where they don't cover).
   bgColor?:             string;
+  // Solid band pinned to the bottom of the card — a hard section the text sits
+  // in (instead of a fade over the photo). Sized to fit the text block, but
+  // never shorter than ~1/5 of the card.
+  bottomBandEnabled?:   boolean;
+  bottomBandColor?:     string;
 }
 
 export function defaultCarouselSettings(): CarouselSettings {

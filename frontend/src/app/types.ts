@@ -1,5 +1,5 @@
 /** Navigation sections in the sidebar */
-export type AppSection = 'deck' | 'brandkit' | 'media' | 'builder' | 'trending' | 'images' | 'board' | 'schedule' | 'ai' | 'prompts' | 'pricer';
+export type AppSection = 'deck' | 'brandkit' | 'media' | 'carousel' | 'builder' | 'trending' | 'images' | 'board' | 'schedule' | 'prompts' | 'pricer';
 
 export type SlideType = 'main' | 'supporting_1' | 'supporting_2';
 
@@ -13,11 +13,17 @@ export interface CarouselPage {
   articleUrl?: string;
 }
 
+/** Which slot a logo belongs to. 'favicon' is the small square avatar/icon (the
+ *  current "normal" logo, e.g. the Pauv "p"); 'logo' is the separate full logo.
+ *  Missing/legacy rows are treated as 'favicon'. */
+export type BrandLogoKind = 'favicon' | 'logo';
+
 export interface BrandLogo {
   id: string;
   url: string;
   label?: string;
   position: number;
+  kind?: BrandLogoKind;
 }
 
 /** Talent category the brand promotes — drives the bio CTA wording
@@ -26,7 +32,10 @@ export type BrandCategory = 'artists' | 'athletes' | 'gamers';
 
 /** Brand-kit data passed to canvas templates */
 export interface BrandProps {
+  /** Active favicon logo (the small square avatar/icon used on posts today). */
   logoSrc: string;
+  /** Active full logo — stored in the Brand Kit; not yet wired into posts. */
+  logoFullSrc: string;
   logos: BrandLogo[];
   displayName: string;
   handle: string;

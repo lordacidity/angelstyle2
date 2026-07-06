@@ -2,21 +2,19 @@
 
 import { useState, useRef } from 'react';
 import type { TikTokCanvasRef } from '../components/TikTokCanvas';
-import type { CarouselCanvasRef } from '../components/carouselTypes';
-import type { VideoEntry, VideoMode, SlideType, VideoData } from '../types';
+import type { VideoEntry, VideoMode, VideoData } from '../types';
 import { makeEmptyEntry } from '@/lib/entry';
 
 export function useVideoEntries() {
   const [entries, setEntries] = useState<VideoEntry[]>([makeEmptyEntry('1')]);
   const canvasRefsMap = useRef<Map<string, TikTokCanvasRef>>(new Map());
-  const carouselRefsMap = useRef<Map<string, CarouselCanvasRef>>(new Map());
 
   // Always-current snapshot used inside async callbacks to avoid stale closures
   const entriesRef = useRef(entries);
   entriesRef.current = entries;
 
-  function addRow(carouselSlideType?: SlideType) {
-    setEntries(prev => [...prev, makeEmptyEntry(Date.now().toString(), prev[0]?.mode ?? 'twitter', carouselSlideType)]);
+  function addRow() {
+    setEntries(prev => [...prev, makeEmptyEntry(Date.now().toString(), prev[0]?.mode ?? 'twitter')]);
   }
 
   function removeRow(id: string) {
@@ -47,14 +45,6 @@ export function useVideoEntries() {
     setEntries(prev => prev.map(e => e.id === id ? { ...e, [field]: value } : e));
   }
 
-  function updateCarouselEntry(id: string, field: 'imageSrc' | 'headline' | 'subheadline' | 'articleUrl', value: string) {
-    setEntries(prev => prev.map(e => e.id === id ? { ...e, [field]: value } : e));
-  }
-
-  function setCarouselSubMode(id: string, subMode: 'image' | 'video') {
-    setEntries(prev => prev.map(e => e.id === id ? { ...e, carouselSubMode: subMode } : e));
-  }
-
   function updateLocalVideo(id: string, src: string, name: string) {
     setEntries(prev => prev.map(e =>
       e.id === id ? { ...e, localVideoSrc: src || undefined, localVideoName: name || undefined, data: null, error: '', videoFailed: false } : e
@@ -70,7 +60,7 @@ export function useVideoEntries() {
       setEntries(prev => prev.map(e => e.id === id ? { ...e, error: 'URL is required' } : e));
       return null;
     }
-    if (currentEntry.mode !== 'carousel' && !currentEntry.caption.trim()) {
+    if (!currentEntry.caption.trim()) {
       setEntries(prev => prev.map(e => e.id === id ? { ...e, error: 'Caption is required' } : e));
       return null;
     }
@@ -137,8 +127,8 @@ export function useVideoEntries() {
   }
 
   return {
-    entries, setEntries, canvasRefsMap, carouselRefsMap,
-    addRow, removeRow, resetEverything, updateEntry, updateCarouselEntry, updateLocalVideo, setMode, handleVideoError,
-    fetchVideo, fetchAllVideos, downloadAll, setCarouselSubMode,
+    entries, setEntries, canvasRefsMap,
+    addRow, removeRow, resetEverything, updateEntry, updateLocalVideo, setMode, handleVideoError,
+    fetchVideo, fetchAllVideos, downloadAll,
   };
 }

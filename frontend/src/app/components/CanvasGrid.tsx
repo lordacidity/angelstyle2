@@ -1,6 +1,6 @@
 'use client';
 
-import type { MutableRefObject, Dispatch, SetStateAction } from 'react';
+import type { MutableRefObject } from 'react';
 import { useState, useRef, useEffect, useMemo, useCallback, memo, Fragment } from 'react';
 import { createPortal } from 'react-dom';
 import { TikTokCanvas } from './TikTokCanvas';
@@ -12,13 +12,9 @@ import type { ChartsImageCanvasRef, ChartsImageMarket, CanvasAspectRatio, Charts
 import { ChartsInputCard } from './ChartsInputCard';
 import type { PreloadedAudio } from './ChartsInputCard';
 import { AudioPicker } from './AudioPicker';
-import CarouselCanvas, { CAROUSEL_PREVIEW_W } from './CarouselCanvas';
-import type { CarouselChartBg } from './CarouselCanvas';
-import { CarouselSettingsPanel } from './CarouselSettingsPanel';
-import { defaultCarouselSettings } from './carouselTypes';
-import type { CarouselCanvasRef, CarouselSettings, CarouselBgLayerState } from './carouselTypes';
-import { useCarouselTemplates } from '../hooks/useCarouselTemplates';
-import type { VideoEntry, BrandProps, SlideType, VideoData, VideoMode, CarouselPage } from '../types';
+import { CAROUSEL_PREVIEW_W } from './CarouselCanvas';
+import { ChartsImageInputCard } from './ChartsImageInputCard';
+import type { VideoEntry, BrandProps, VideoData, VideoMode } from '../types';
 import type { RecordingState } from './TikTokCanvas/types';
 import { VideoControlsBar } from './VideoControlsBar';
 import { EditablePct } from './EditablePct';
@@ -28,7 +24,7 @@ import { EmojiPicker } from './EmojiPicker';
 import { BTN_ICON, BTN_TEXT } from '@/lib/ui-constants';
 import {
   UploadIcon, ArrowRightIcon, SpinnerIcon,
-  TrashIcon, CloseIcon, DownloadIcon, VideoIcon, LinkIcon, CropIcon,
+  TrashIcon, CloseIcon, DownloadIcon, VideoIcon, LinkIcon,
 } from '@/lib/icons';
 
 const CARD_W = CAROUSEL_PREVIEW_W; // 410 — same width as canvas preview
@@ -55,32 +51,20 @@ interface Talent {
 interface CanvasGridProps {
   entries: VideoEntry[];
   canvasRefsMap: MutableRefObject<Map<string, TikTokCanvasRef>>;
-  carouselRefsMap: MutableRefObject<Map<string, CarouselCanvasRef>>;
   brand: BrandProps;
-  onAddRow: (carouselSlideType?: SlideType) => void;
+  onAddRow: () => void;
   onRemoveRow: (id: string) => void;
   onClearAll: () => void;
   onDownloadAll: () => void;
   onHandleVideoError: (id: string) => void;
   onUpdateEntry: (id: string, field: 'url' | 'caption' | 'context', value: string) => void;
-  onUpdateCarouselEntry: (id: string, field: 'imageSrc' | 'headline' | 'subheadline' | 'articleUrl', value: string) => void;
   onUpdateLocalVideo: (id: string, src: string, name: string) => void;
   onFetchVideo: (id: string) => Promise<VideoData | null>;
-  onSetCarouselSubMode: (id: string, mode: 'image' | 'video') => void;
   userId: string | null;
   // Current post format + setter for the Media toolbar's format toggle
-  // (Twitter / Caption / Carousel) — replaces the old template picker.
+  // (Twitter / Caption / Charts / Charts Image) — replaces the old template picker.
   format?: VideoMode;
   onSetFormat?: (mode: VideoMode) => void;
-  settingsMap: Record<string, CarouselSettings>;
-  setSettingsMap: Dispatch<SetStateAction<Record<string, CarouselSettings>>>;
-  pendingAiSeed?: { imageSrc: string; headline: string; subheadline: string; subheadline2?: string; articleUrl?: string } | null;
-  onAiSeedConsumed?: () => void;
-  // Multi-page seed from the "Trending (auto)" flow. The entries themselves are
-  // already built upstream (StudioShell); this only tells us to stamp each
-  // entry's settings from its saved-template slide type once savedSlides loads.
-  pendingCarouselSeed?: CarouselPage[] | null;
-  onCarouselSeedConsumed?: () => void;
   // Set to an entry id by the Board widget's send arrow — that entry is fetched
   // and advanced through the same "Next" pipeline (fetch → crop → caption).
   pendingBoardSend?: string | null;
@@ -93,240 +77,6 @@ interface CanvasGridProps {
   // portalled to <body>, which escapes the parent's display:none, so it must be
   // gated on this or it would show on every section.
   active?: boolean;
-  // Optional — when provided, renders a back arrow in the toolbar that
-  // returns the user to the AI Cards flow (headline + photo picker) for the
-  // same person. Placeholder behaviour for now: re-enters the AI section.
-  onBackToAi?: () => void;
-  // Opens the AI Cards screen straight into the "Trending (auto)" flow.
-  onOpenAiTrending?: () => void;
-}
-
-// ── Carousel input card ───────────────────────────────────────────────────────
-
-function CarouselInputCard({
-  entry,
-  onUpdateCarousel,
-  onUpdateUrl,
-  onUpdateLocalVideo,
-  onFetch,
-  bgSource,
-  onSetBgSource,
-  onRemove,
-}: {
-  entry: VideoEntry;
-  onUpdateCarousel: (field: 'imageSrc' | 'headline' | 'subheadline' | 'articleUrl', value: string) => void;
-  onUpdateUrl: (url: string) => void;
-  onUpdateLocalVideo: (src: string, name: string) => void;
-  onFetch: () => void;
-  bgSource: 'photo' | 'video' | 'chart';
-  onSetBgSource: (source: 'photo' | 'video' | 'chart') => void;
-  onRemove: () => void;
-}) {
-  const fileRef = useRef<HTMLInputElement>(null);
-  const videoFileRef = useRef<HTMLInputElement>(null);
-  const hasLocalVideo = !!entry.localVideoSrc;
-
-  function handleVideoFile(e: React.ChangeEvent<HTMLInputElement>) {
-    const file = e.target.files?.[0];
-    if (!file) return;
-    onUpdateLocalVideo(URL.createObjectURL(file), file.name);
-    onUpdateUrl('');
-    if (videoFileRef.current) videoFileRef.current.value = '';
-  }
-
-  function clearLocalVideo() {
-    if (entry.localVideoSrc) URL.revokeObjectURL(entry.localVideoSrc);
-    onUpdateLocalVideo('', '');
-  }
-
-  // Set the photo from a pasted/blob image, revoking any previous blob URL first.
-  function setImageFromBlob(blob: Blob) {
-    if (entry.imageSrc?.startsWith('blob:')) URL.revokeObjectURL(entry.imageSrc);
-    onUpdateCarousel('imageSrc', URL.createObjectURL(blob));
-  }
-
-  // Ctrl/⌘+V inside the image input.
-  function handleImagePaste(e: React.ClipboardEvent) {
-    for (const it of Array.from(e.clipboardData?.items ?? [])) {
-      if (it.type.startsWith('image/')) {
-        const f = it.getAsFile();
-        if (f) { e.preventDefault(); setImageFromBlob(f); return; }
-      }
-    }
-  }
-
-  // Explicit "Paste" button — reads the clipboard directly (needs the click gesture).
-  async function pasteImageFromClipboard() {
-    if (typeof navigator === 'undefined' || !navigator.clipboard?.read) return;
-    try {
-      for (const item of await navigator.clipboard.read()) {
-        const type = item.types.find(t => t.startsWith('image/'));
-        if (type) { setImageFromBlob(await item.getType(type)); return; }
-      }
-    } catch { /* clipboard blocked / no image — ignore */ }
-  }
-
-  return (
-    <div className="rounded-lg bg-zinc-950 border border-zinc-800 overflow-hidden" style={{ width: CARD_W }}>
-
-      {/* Source toggle row — Photo / Video / Chart background */}
-      <div className="flex items-center gap-2 px-3 py-2 border-b border-zinc-800">
-        {([['photo', 'Photo'], ['video', 'Video'], ['chart', 'Chart']] as const).map(([m, label]) => (
-          <button key={m} onClick={() => onSetBgSource(m)}
-            className={`px-3 py-1 rounded text-xs font-medium transition-colors ${
-              bgSource === m ? 'bg-zinc-700 text-white' : 'text-zinc-500 hover:text-zinc-300'
-            }`}
-          >{label}</button>
-        ))}
-        <button onClick={onRemove} className="ml-auto flex items-center justify-center w-7 h-7 rounded text-zinc-600 hover:text-red-400 hover:bg-zinc-800 transition-colors" title="Delete row">
-          <TrashIcon size={13} />
-        </button>
-      </div>
-
-      {/* Image / Video input row — hidden for Chart (the chart card below picks the market) */}
-      {bgSource !== 'chart' && (
-      <div className="flex items-center gap-2 px-3 py-3 border-b border-zinc-800">
-        {bgSource === 'photo' ? (
-          <>
-            {entry.imageSrc ? (
-              // eslint-disable-next-line @next/next/no-img-element
-              <img src={entry.imageSrc} alt="" className="w-9 h-9 rounded object-cover shrink-0" />
-            ) : (
-              // Focusable so the user can click it and paste (Ctrl/⌘+V) an image straight in.
-              <div
-                tabIndex={0}
-                onPaste={handleImagePaste}
-                title="Click then paste (⌘/Ctrl+V), or use the Paste button"
-                className="flex items-center gap-2 flex-1 min-w-0 border border-zinc-700 rounded-md px-2.5 h-9 text-zinc-500 outline-none focus:border-zinc-500 cursor-text"
-              >
-                <ImagePlaceholderIcon />
-                <span className="text-sm text-zinc-600">Upload or paste image…</span>
-              </div>
-            )}
-            <button onClick={pasteImageFromClipboard} title="Paste image from clipboard"
-              className="flex items-center justify-center h-9 px-2.5 rounded-md bg-white hover:bg-zinc-100 transition-colors shrink-0 text-[11px] font-medium text-black">
-              Paste
-            </button>
-            <button onClick={() => fileRef.current?.click()} title="Upload image"
-              className="flex items-center justify-center w-9 h-9 rounded-md bg-white hover:bg-zinc-100 transition-colors shrink-0">
-              <UploadIcon stroke="black" />
-            </button>
-            <input ref={fileRef} type="file" accept="image/*" className="hidden"
-              onChange={e => {
-                const f = e.target.files?.[0];
-                if (!f) return;
-                if (entry.imageSrc?.startsWith('blob:')) URL.revokeObjectURL(entry.imageSrc);
-                onUpdateCarousel('imageSrc', URL.createObjectURL(f));
-              }}
-            />
-          </>
-        ) : hasLocalVideo ? (
-          <>
-            <VideoIcon className="text-zinc-400 shrink-0" size={13} />
-            <span className="text-sm text-zinc-300 truncate flex-1 min-w-0">{entry.localVideoName || 'Uploaded video'}</span>
-            <button onClick={() => videoFileRef.current?.click()} title="Change video"
-              className="flex items-center justify-center w-9 h-9 rounded-md bg-white hover:bg-zinc-100 transition-colors shrink-0">
-              <UploadIcon stroke="black" />
-            </button>
-            <button onClick={clearLocalVideo} title="Remove video"
-              className="flex items-center justify-center w-9 h-9 rounded-md bg-white hover:bg-zinc-100 transition-colors shrink-0">
-              <CloseIcon size={13} stroke="black" />
-            </button>
-            <input ref={videoFileRef} type="file" accept="video/*" className="hidden" onChange={handleVideoFile} />
-          </>
-        ) : (
-          <>
-            <div className="flex items-center gap-2 flex-1 min-w-0 border border-zinc-700 rounded-md px-2.5 h-9">
-              <LinkIcon size={13} className="text-zinc-500 shrink-0" />
-              <input
-                value={entry.url}
-                onChange={e => onUpdateUrl(e.target.value)}
-                onKeyDown={e => { if (e.key === 'Enter') onFetch(); }}
-                placeholder="Paste TikTok, Instagram or X URL…"
-                className="flex-1 bg-transparent text-sm text-white placeholder-zinc-600 outline-none min-w-0"
-              />
-            </div>
-            <button onClick={() => videoFileRef.current?.click()} title="Upload video file"
-              className="flex items-center justify-center w-9 h-9 rounded-md bg-white hover:bg-zinc-100 transition-colors shrink-0">
-              <UploadIcon stroke="black" />
-            </button>
-            <button
-              onClick={onFetch}
-              disabled={entry.loading || !entry.url.trim()}
-              title="Fetch video"
-              className="flex items-center justify-center w-9 h-9 rounded-md bg-white hover:bg-zinc-100 transition-colors shrink-0 disabled:opacity-30 disabled:cursor-not-allowed"
-            >
-              {entry.loading
-                ? <SpinnerIcon stroke="black" style={{ animation: 'spin 1s linear infinite' }} />
-                : <ArrowRightIcon stroke="black" />}
-            </button>
-            <input ref={videoFileRef} type="file" accept="video/*" className="hidden" onChange={handleVideoFile} />
-            {entry.error && <span className="text-[11px] text-red-400 ml-1">{entry.error}</span>}
-          </>
-        )}
-      </div>
-      )}
-
-      {/* Source article — small + muted, sits above the headline so the user
-          keeps track of the story this card was built from. Main slide only —
-          supporting slides inherit the same article and don't need the field
-          repeated. Always editable; clickable ↗ icon appears once a URL is in. */}
-      {(entry.carouselSlideType ?? 'main') === 'main' && (
-        <div className="px-3 py-1.5 border-b border-zinc-800 flex items-center gap-2">
-          <LinkIcon size={11} className="text-zinc-600 shrink-0" />
-          <input
-            type="text"
-            value={entry.articleUrl ?? ''}
-            onChange={e => onUpdateCarousel('articleUrl', e.target.value)}
-            placeholder="Source article link (optional)…"
-            className="flex-1 bg-transparent text-[11px] text-zinc-500 placeholder-zinc-700 outline-none min-w-0"
-          />
-          {entry.articleUrl && (
-            <a
-              href={entry.articleUrl}
-              target="_blank"
-              rel="noreferrer"
-              className="shrink-0 text-zinc-600 hover:text-zinc-300 transition-colors"
-              title="Open article in new tab"
-              onClick={e => e.stopPropagation()}
-            >
-              <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                <path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/>
-                <polyline points="15 3 21 3 21 9"/>
-                <line x1="10" y1="14" x2="21" y2="3"/>
-              </svg>
-            </a>
-          )}
-        </div>
-      )}
-
-      {/* Headline */}
-      <div className="px-3 py-2 border-b border-zinc-800">
-        <textarea value={entry.headline ?? ''} onChange={e => onUpdateCarousel('headline', e.target.value)}
-          placeholder="Headline…" rows={2}
-          className="w-full bg-transparent text-sm text-white placeholder-zinc-600 outline-none resize-none leading-relaxed"
-        />
-      </div>
-
-      {/* Sub-headline */}
-      <div className="px-3 py-2">
-        <textarea value={entry.subheadline ?? ''} onChange={e => onUpdateCarousel('subheadline', e.target.value)}
-          placeholder="Sub-headline (optional)…" rows={1}
-          className="w-full bg-transparent text-sm text-zinc-400 placeholder-zinc-700 outline-none resize-none leading-relaxed"
-        />
-      </div>
-
-    </div>
-  );
-}
-
-// Small inline SVG used only inside this file — not exported
-function ImagePlaceholderIcon() {
-  return (
-    <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" className="shrink-0">
-      <rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="8.5" cy="8.5" r="1.5"/><polyline points="21 15 16 10 5 21"/>
-    </svg>
-  );
 }
 
 // ── Video input card ──────────────────────────────────────────────────────────
@@ -524,370 +274,6 @@ function VideoInputCard({
   );
 }
 
-// ── ChartsImage input card (single-market picker) ─────────────────────────────
-
-function ChartsImageInputCard({
-  market,
-  overrideName,
-  allMarkets,
-  marketsLoading,
-  onEnsureMarkets,
-  onUpdateMarket,
-  onUpdateOverrideName,
-  anyLoading,
-  trendsLoaded,
-  trendsError,
-  onStart,
-  onRemove,
-  onOpenPhotoPicker,
-  overrideIndustry,
-  direction,
-  noiseLevel,
-  onUpdateOverrideIndustry,
-  onUpdateDirection,
-  onUpdateNoiseLevel,
-  subMode,
-  preloadedAudios,
-  audioTrack,
-  onSelectAudioTrack,
-  onAddAudio,
-  onDeleteAudio,
-  onRenameAudio,
-}: {
-  entry: VideoEntry;
-  market: ChartsMarket | null;
-  overrideName: string;
-  allMarkets: ChartsMarket[];
-  marketsLoading: boolean;
-  onEnsureMarkets: () => void;
-  onUpdateMarket: (market: ChartsMarket | null) => void;
-  onUpdateOverrideName: (name: string) => void;
-  anyLoading: boolean;
-  trendsLoaded: boolean;
-  trendsError: string | null;
-  onStart: () => void;
-  onRemove: () => void;
-  onOpenPhotoPicker: (query: string) => void;
-  overrideIndustry: string;
-  direction: ChartsImageDirection;
-  noiseLevel: ChartsImageNoiseLevel;
-  onUpdateOverrideIndustry: (v: string) => void;
-  onUpdateDirection: (v: ChartsImageDirection) => void;
-  onUpdateNoiseLevel: (v: ChartsImageNoiseLevel) => void;
-  subMode: ChartsImageSubMode;
-  preloadedAudios: PreloadedAudio[];
-  audioTrack: { label: string; url: string; durationMs: number } | null;
-  onSelectAudioTrack: (track: { label: string; url: string; durationMs: number }) => void;
-  onAddAudio: (track: { label: string; url: string; durationMs: number }) => void;
-  onDeleteAudio: (idx: number) => void;
-  onRenameAudio: (idx: number, label: string) => void;
-}) {
-  const [query,   setQuery]   = useState('');
-  const [open,    setOpen]    = useState(false);
-  const [rect,    setRect]    = useState<DOMRect | null>(null);
-  const anchorRef = useRef<HTMLButtonElement>(null);
-  const inputRef  = useRef<HTMLInputElement>(null);
-  const dropRef   = useRef<HTMLDivElement>(null);
-
-  const filtered = allMarkets
-    .filter(m => {
-      const q = query.trim().toLowerCase();
-      return !q || m.name.toLowerCase().includes(q) || (m.industry ?? '').toLowerCase().includes(q);
-    })
-    .slice(0, 50);
-
-  const handleOpen = () => {
-    onEnsureMarkets();
-    const r = anchorRef.current?.getBoundingClientRect() ?? null;
-    setRect(r);
-    setOpen(true);
-    setQuery('');
-    setTimeout(() => inputRef.current?.focus(), 0);
-  };
-
-  useEffect(() => {
-    if (!open) return;
-    const update = () => setRect(anchorRef.current?.getBoundingClientRect() ?? null);
-    window.addEventListener('scroll', update, true);
-    window.addEventListener('resize', update);
-    return () => {
-      window.removeEventListener('scroll', update, true);
-      window.removeEventListener('resize', update);
-    };
-  }, [open]);
-
-  useEffect(() => {
-    if (!open) return;
-    function onDown(e: MouseEvent) {
-      const t = e.target as Node;
-      if (!dropRef.current?.contains(t) && !anchorRef.current?.contains(t)) setOpen(false);
-    }
-    document.addEventListener('mousedown', onDown);
-    return () => document.removeEventListener('mousedown', onDown);
-  }, [open]);
-
-  return (
-    <div className="flex flex-col gap-2" style={{ width: CARD_W }}>
-      <div className="rounded-lg bg-zinc-950 border border-zinc-800 overflow-hidden">
-        <div className="px-3 py-2 border-b border-zinc-800 flex items-center justify-between">
-          <span className="text-[10px] font-semibold text-zinc-400 uppercase tracking-wider">Market</span>
-          <div className="flex items-center gap-2">
-            <span className="text-[10px] text-zinc-600">Select · edit name · Start</span>
-            <button
-              type="button"
-              onClick={onRemove}
-              className="text-zinc-700 hover:text-red-400 transition-colors"
-              title="Remove"
-            >
-              <CloseIcon size={11} />
-            </button>
-          </div>
-        </div>
-
-        <div className="p-2 flex flex-col gap-2">
-          {/* Market picker */}
-          {market ? (
-            <div className="flex items-center gap-2.5 px-3 py-2.5 rounded-lg bg-zinc-900 border border-zinc-800">
-              <button
-                type="button"
-                onClick={() => onOpenPhotoPicker(market.name)}
-                className="shrink-0 rounded-full ring-2 ring-transparent hover:ring-white transition-all"
-                title="Change photo"
-              >
-                {market.photo_url ? (
-                  // eslint-disable-next-line @next/next/no-img-element
-                  <img src={market.photo_url} alt={market.name} className="w-8 h-8 rounded-full object-cover" />
-                ) : (
-                  <div className="w-8 h-8 rounded-full bg-zinc-700 flex items-center justify-center text-xs font-bold text-zinc-300">
-                    {market.name.charAt(0).toUpperCase()}
-                  </div>
-                )}
-              </button>
-              <input
-                value={overrideName}
-                onChange={e => onUpdateOverrideName(e.target.value)}
-                placeholder={market.name}
-                className="flex-1 min-w-0 bg-transparent text-sm text-white placeholder-zinc-600 outline-none"
-              />
-              {trendsLoaded && (
-                <span className="shrink-0 text-[10px] font-semibold text-emerald-400 tracking-wider">LIVE</span>
-              )}
-              <button
-                type="button"
-                onClick={() => onUpdateMarket(null)}
-                className="shrink-0 text-zinc-600 hover:text-zinc-300 transition-colors"
-              >
-                <CloseIcon size={12} />
-              </button>
-            </div>
-          ) : (
-            <>
-              <button
-                ref={anchorRef}
-                type="button"
-                onClick={handleOpen}
-                className="w-full flex items-center gap-2 px-3 py-2.5 rounded-lg bg-zinc-900 border border-zinc-700 hover:border-zinc-500 transition-colors text-left"
-              >
-                <span className="text-sm text-zinc-500">Search market…</span>
-              </button>
-              {open && rect && typeof document !== 'undefined' && createPortal(
-                <div
-                  ref={dropRef}
-                  className="fixed z-[1000] rounded-lg bg-zinc-900 border border-zinc-700 shadow-2xl overflow-hidden"
-                  style={{ left: rect.left, top: rect.bottom + 4, width: rect.width }}
-                >
-                  <div className="p-2 border-b border-zinc-800">
-                    <input
-                      ref={inputRef}
-                      value={query}
-                      onChange={e => setQuery(e.target.value)}
-                      placeholder="Name, ticker or industry…"
-                      className="w-full bg-zinc-800 border border-zinc-700 rounded-md px-2.5 py-1.5 text-xs text-zinc-200 placeholder-zinc-500 outline-none focus:border-zinc-500"
-                    />
-                  </div>
-                  <div className="max-h-48 overflow-y-auto">
-                    {marketsLoading && !allMarkets.length ? (
-                      <p className="text-xs text-zinc-600 text-center py-4">Loading…</p>
-                    ) : filtered.length === 0 ? (
-                      <p className="text-xs text-zinc-600 text-center py-4">No results.</p>
-                    ) : (
-                      filtered.map(m => (
-                        <button
-                          key={m.id}
-                          type="button"
-                          onMouseDown={ev => ev.preventDefault()}
-                          onClick={() => { onUpdateMarket(m); setOpen(false); }}
-                          className="w-full flex items-center gap-2.5 px-3 py-2 hover:bg-zinc-800 transition-colors text-left"
-                        >
-                          {m.photo_url ? (
-                            // eslint-disable-next-line @next/next/no-img-element
-                            <img src={m.photo_url} alt={m.name} className="w-6 h-6 rounded-full object-cover shrink-0" />
-                          ) : (
-                            <div className="w-6 h-6 rounded-full bg-zinc-700 flex items-center justify-center shrink-0 text-[10px] font-bold text-zinc-300">
-                              {m.name.charAt(0).toUpperCase()}
-                            </div>
-                          )}
-                          <span className="flex-1 min-w-0 text-sm text-zinc-200 truncate">{m.name}</span>
-                        </button>
-                      ))
-                    )}
-                  </div>
-                </div>,
-                document.body,
-              )}
-            </>
-          )}
-
-          {/* Industry override + up/down direction toggle. The change % is a seeded
-              random 5–15% and the raw $ is derived from it; this toggle only flips the
-              sign (and colour) of both. */}
-          {market && (
-            <div className="flex flex-col gap-1.5">
-              <input
-                value={overrideIndustry}
-                onChange={e => onUpdateOverrideIndustry(e.target.value)}
-                placeholder={market.industry ?? 'Industry…'}
-                className="w-full bg-zinc-900 border border-zinc-800 rounded-md px-2.5 py-1.5 text-xs text-zinc-200 placeholder-zinc-600 outline-none focus:border-zinc-600"
-              />
-              <button
-                type="button"
-                onClick={() => onUpdateDirection(direction === 'up' ? 'down' : 'up')}
-                title="Toggle the sentiment direction up or down"
-                className={`w-full flex items-center justify-center gap-1.5 rounded-md px-2.5 py-1.5 text-xs font-semibold border transition-colors ${
-                  direction === 'down'
-                    ? 'bg-[#FF4B4B]/10 border-[#FF4B4B]/40 text-[#FF4B4B]'
-                    : 'bg-[#0CDF9D]/10 border-[#0CDF9D]/40 text-[#0CDF9D]'
-                }`}
-              >
-                {direction === 'down' ? '▼ Down' : '▲ Up'}
-              </button>
-              {/* Noise level — how much synthetic volatility to add to the line */}
-              <div className="flex items-center gap-1">
-                <span className="text-[10px] text-zinc-500 select-none shrink-0 mr-1">Noise</span>
-                {(['none', 'small', 'med', 'large'] as const).map(lvl => (
-                  <button
-                    key={lvl}
-                    type="button"
-                    onClick={() => onUpdateNoiseLevel(lvl)}
-                    title={`${lvl[0].toUpperCase()}${lvl.slice(1)} chart noise`}
-                    className={`flex-1 min-w-0 rounded-md px-1.5 py-1.5 text-[11px] font-medium border capitalize transition-colors ${
-                      noiseLevel === lvl
-                        ? 'bg-zinc-700 border-zinc-500 text-zinc-100'
-                        : 'bg-zinc-900 border-zinc-800 text-zinc-400 hover:border-zinc-600'
-                    }`}
-                  >
-                    {lvl}
-                  </button>
-                ))}
-              </div>
-            </div>
-          )}
-
-          {/* Start button */}
-          {market && (
-            <div className="px-0 pb-0">
-              <button
-                type="button"
-                onClick={onStart}
-                disabled={anyLoading || trendsLoaded}
-                className="w-full flex items-center justify-center gap-2 py-2 rounded-lg text-[12px] font-semibold bg-white/10 border border-white/20 text-white hover:bg-white/20 disabled:opacity-40 transition-colors"
-              >
-                {anyLoading && (
-                  <svg className="animate-spin w-3 h-3" viewBox="0 0 24 24" fill="none">
-                    <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"/>
-                    <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"/>
-                  </svg>
-                )}
-                {anyLoading ? 'Loading…' : trendsLoaded ? 'Loaded' : 'Start'}
-              </button>
-              {trendsError && (
-                <p className="mt-1.5 text-[11px] text-red-400 text-center leading-snug">{trendsError}</p>
-              )}
-            </div>
-          )}
-        </div>
-      </div>
-
-      {/* Audio track picker — only relevant in Video sub-mode (muxed into the MP4). */}
-      {market && subMode === 'video' && (
-        <AudioPicker
-          preloadedAudios={preloadedAudios}
-          audioTrack={audioTrack}
-          onSelectAudioTrack={onSelectAudioTrack}
-          onDeleteAudio={onDeleteAudio}
-          onAddAudio={onAddAudio}
-          onRenameAudio={onRenameAudio}
-        />
-      )}
-    </div>
-  );
-}
-
-// ── Carousel BG controls ──────────────────────────────────────────────────────
-
-function CarouselBgControls({
-  entry,
-  bgState,
-  settings,
-  carouselRef,
-  onRemoveRow,
-  isCarouselVideo,
-}: {
-  entry: VideoEntry;
-  bgState: CarouselBgLayerState;
-  settings: CarouselSettings;
-  carouselRef: CarouselCanvasRef | undefined;
-  onRemoveRow: (id: string) => void;
-  isCarouselVideo: boolean;
-}) {
-  const splitActive = settings.bgBlurEnabled && settings.bgBlurAmount === 0 && bgState.fgMaskReady;
-  const blurActive  = settings.bgBlurEnabled && settings.bgBlurAmount > 0 && bgState.fgMaskReady;
-  return (
-    <div className="flex items-center gap-1.5 ml-8">
-      <button onClick={() => carouselRef?.enterCropMode()} className={BTN_ICON} title="Crop">
-        <CropIcon size={12} />
-      </button>
-
-      {!isCarouselVideo && (
-        <>
-          <button
-            onClick={() => carouselRef?.toggleSplit()}
-            disabled={bgState.isBgProcessing}
-            title="Split layers"
-            className={`${BTN_TEXT} ${
-              splitActive  ? 'bg-white text-black border-white' :
-              bgState.bgProcessError ? 'bg-red-900/50 text-red-400 border-red-800 hover:bg-red-900' :
-              'bg-zinc-950 border-zinc-800 text-zinc-400 hover:text-zinc-200 hover:border-zinc-600'
-            }`}
-          >
-            {bgState.isBgProcessing ? (
-              <><SpinnerIcon size={9} style={{ animation: 'spin 1s linear infinite' }} />Processing…</>
-            ) : bgState.bgProcessError ? 'Retry' : splitActive ? 'Split: On' : 'Split'}
-          </button>
-
-          {bgState.fgMaskReady && (
-            <button
-              onClick={() => carouselRef?.toggleBlur()}
-              title="Blur background"
-              className={`${BTN_TEXT} ${
-                blurActive
-                  ? 'bg-white text-black border-white'
-                  : 'bg-zinc-950 border-zinc-800 text-zinc-400 hover:text-zinc-200 hover:border-zinc-600'
-              }`}
-            >
-              {blurActive ? 'Blur: On' : 'BG Blur'}
-            </button>
-          )}
-        </>
-      )}
-
-      <button onClick={() => onRemoveRow(entry.id)} className={BTN_ICON} title="Delete row">
-        <TrashIcon size={15} />
-      </button>
-    </div>
-  );
-}
-
 // ── Ghost "add" card — memoized (static content, stable prop) ─────────────────
 
 function PlusIcon() {
@@ -921,56 +307,19 @@ const GhostAddCard = memo(function GhostAddCard({ onAdd }: { onAdd: () => void }
   );
 });
 
-const SLIDE_TYPE_LABELS: [SlideType, string][] = [
-  ['main',        'Main'],
-  ['supporting_1','Supporting 1'],
-  ['supporting_2','Supporting 2'],
-];
-
-const CarouselAddRow = memo(function CarouselAddRow({ onAdd }: { onAdd: (type: SlideType) => void }) {
-  return (
-    <div className="flex gap-2" style={{ width: CARD_W }}>
-      {SLIDE_TYPE_LABELS.map(([type, label]) => (
-        <button
-          key={type}
-          onClick={() => onAdd(type)}
-          className="relative flex flex-1 flex-col items-center justify-center gap-2 rounded-lg bg-zinc-950 text-zinc-600 hover:text-zinc-400 transition-colors py-5"
-        >
-          <svg className="absolute inset-0 pointer-events-none" width="100%" height="100%">
-            <rect x="1" y="1" width="calc(100% - 2px)" height="calc(100% - 2px)"
-              rx="7" fill="none" stroke="currentColor" strokeWidth="2" strokeDasharray="5 4" />
-          </svg>
-          <div className="flex items-center justify-center w-7 h-7 rounded-full border border-dashed border-current">
-            <PlusIcon />
-          </div>
-          <span className="text-[11px] font-medium text-center leading-tight">{label}</span>
-        </button>
-      ))}
-    </div>
-  );
-});
-
 // ── CanvasGrid ────────────────────────────────────────────────────────────────
 
-const CAROUSEL_SLIDE_TYPES: SlideType[] = ['main', 'supporting_1', 'supporting_2'];
-
 export function CanvasGrid({
-  entries, canvasRefsMap, carouselRefsMap, brand,
+  entries, canvasRefsMap, brand,
   onAddRow, onRemoveRow, onClearAll, onDownloadAll, onHandleVideoError,
-  onUpdateEntry, onUpdateCarouselEntry, onUpdateLocalVideo,
-  onFetchVideo, onSetCarouselSubMode, userId,
+  onUpdateEntry, onUpdateLocalVideo,
+  onFetchVideo, userId,
   format, onSetFormat,
-  settingsMap, setSettingsMap,
-  pendingAiSeed, onAiSeedConsumed, onBackToAi, onOpenAiTrending,
-  pendingCarouselSeed, onCarouselSeedConsumed,
   pendingBoardSend, onBoardSendConsumed,
   onEntryExported, active = true,
 }: CanvasGridProps) {
-  const isCarousel = entries.length > 0 && entries[0].mode === 'carousel';
-
   const [selectedId,                setSelectedId]                = useState<string>(entries[0]?.id ?? '');
   const [scaleMap,                  setScaleMap]                  = useState<Record<string, number>>({});
-  const [bgStateMap,                setBgStateMap]                = useState<Record<string, CarouselBgLayerState>>({});
   const [viewScale,                 setViewScale]                 = useState(0.9);
 
   // Portals to <body> must not render during SSR / the first hydration pass —
@@ -1022,9 +371,7 @@ export function CanvasGrid({
     };
   }, [hDragging]);
   const [recordingStateMap,         setRecordingStateMap]         = useState<Record<string, RecordingState>>({});
-  const [carouselRecordingStateMap, setCarouselRecordingStateMap] = useState<Record<string, RecordingState>>({});
   const [canvasRefVersion,          setCanvasRefVersion]          = useState(0);
-  const [carouselRefVersion,        setCarouselRefVersion]        = useState(0);
   const [videoZoomMap,              setVideoZoomMap]              = useState<Record<string, number>>({});
   // Per-entry vertical anchor of the block top, as a whole-number percent (default 15).
   const [blockTopPctMap,            setBlockTopPctMap]            = useState<Record<string, number>>({});
@@ -1156,9 +503,6 @@ export function CanvasGrid({
   const [chartsImageSpeedMap,            setChartsImageSpeedMap]            = useState<Record<string, number>>({});
   const [chartsImageAudioMap,            setChartsImageAudioMap]            = useState<Record<string, { label: string; url: string; durationMs: number } | null>>({});
   const [chartsImageRecordingStateMap,   setChartsImageRecordingStateMap]   = useState<Record<string, { isRecording: boolean; recProgress: number; recStatus: string }>>({});
-  // Carousel background source: 'photo' | 'video' | 'chart'. 'chart' reuses the
-  // chartsImage* maps (keyed by the same entry id) for its market/config/audio.
-  const [carouselBgSourceMap,            setCarouselBgSourceMap]            = useState<Record<string, 'photo' | 'video' | 'chart'>>({});
   // Shared library of available audio tracks (loaded once from disk)
   const [preloadedAudios,   setPreloadedAudios]   = useState<PreloadedAudio[]>([]);
 
@@ -1402,9 +746,8 @@ export function CanvasGrid({
   const [allTalents,          setAllTalents]          = useState<Talent[] | null>(null);
   const [talentsLoading,      setTalentsLoading]      = useState(false);
 
-  // Charts Image market card — shared by the standalone "Charts Image" mode AND
-  // by a carousel row whose background source is set to "Chart". Both bind to the
-  // same chartsImage* maps keyed by entry.id (an entry is only ever one mode).
+  // Charts Image market card — the standalone "Charts Image" mode's input,
+  // bound to the chartsImage* maps keyed by entry.id.
   function chartsImageInputCardFor(entry: VideoEntry, onRemove: () => void) {
     return (
       <ChartsImageInputCard
@@ -1486,38 +829,12 @@ export function CanvasGrid({
 
   // The input card for one entry — rendered in the right-hand panel for the
   // SELECTED canvas (so it switches as you click between slides), not above each
-  // canvas. Mode-specific: carousel source card (+ chart card), charts pair,
-  // charts-image market, or the video/twitter/caption link+caption card.
+  // canvas. Mode-specific: charts pair, charts-image market, or the
+  // video/twitter/caption link+caption card.
   function renderEntryInputs(entry: VideoEntry) {
-    const isEntryCarousel    = entry.mode === 'carousel';
     const isEntryCharts      = entry.mode === 'charts';
     const isEntryChartsImage = entry.mode === 'chartsimage';
-    const carouselBgSource: 'photo' | 'video' | 'chart' = isEntryCarousel
-      ? (carouselBgSourceMap[entry.id] ?? (entry.carouselSubMode === 'video' ? 'video' : 'photo'))
-      : 'photo';
-    const isCarouselChart = isEntryCarousel && carouselBgSource === 'chart';
 
-    if (isEntryCarousel) {
-      return (
-        <>
-          <CarouselInputCard
-            entry={entry}
-            onUpdateCarousel={(field, value) => onUpdateCarouselEntry(entry.id, field, value)}
-            onUpdateUrl={url => onUpdateEntry(entry.id, 'url', url)}
-            onUpdateLocalVideo={(src, name) => onUpdateLocalVideo(entry.id, src, name)}
-            onFetch={() => onFetchVideo(entry.id)}
-            bgSource={carouselBgSource}
-            onSetBgSource={source => {
-              setCarouselBgSourceMap(prev => ({ ...prev, [entry.id]: source }));
-              onSetCarouselSubMode(entry.id, source === 'video' ? 'video' : 'image');
-            }}
-            onRemove={() => onRemoveRow(entry.id)}
-          />
-          {isCarouselChart && chartsImageInputCardFor(entry, () =>
-            setCarouselBgSourceMap(prev => ({ ...prev, [entry.id]: 'photo' })))}
-        </>
-      );
-    }
     if (isEntryCharts) {
       return (
         <ChartsInputCard
@@ -1625,32 +942,11 @@ export function CanvasGrid({
   // Everything else (inputs + controls) lives in the left panel.
   function renderEntryCanvas(entry: VideoEntry, index: number) {
     const isSelected         = entry.id === selectedId;
-    const isEntryCarousel    = entry.mode === 'carousel';
     const isEntryCharts      = entry.mode === 'charts';
     const isEntryChartsImage = entry.mode === 'chartsimage';
-    const carouselBgSource: 'photo' | 'video' | 'chart' = isEntryCarousel
-      ? (carouselBgSourceMap[entry.id] ?? (entry.carouselSubMode === 'video' ? 'video' : 'photo'))
-      : 'photo';
-    const isCarouselChart = isEntryCarousel && carouselBgSource === 'chart';
-    const carouselChartMarket = isCarouselChart ? (chartsImageMarketMap[entry.id] ?? null) : null;
-    const carouselChartBg: CarouselChartBg | null = (isCarouselChart && carouselChartMarket)
-      ? {
-          market:           carouselChartMarket as ChartsImageMarket,
-          overrideName:     chartsImageNameOverrideMap[entry.id] ?? '',
-          overrideIndustry: chartsImageIndustryOverrideMap[entry.id] ?? '',
-          direction:        chartsImageDirectionMap[entry.id] ?? 'up',
-          noiseLevel:       chartsImageNoiseLevelMap[entry.id] ?? 'none',
-          subMode:          chartsImageSubModeMap[entry.id] ?? 'image',
-          speed:            chartsImageSpeedMap[entry.id] ?? 1,
-          audioUrl:         chartsImageAudioMap[entry.id]?.url,
-        }
-      : null;
     return (
       <div
-        onClick={e => {
-          if ((e.target as Element).closest('[data-carousel-slot]')) return;
-          setSelectedId(entry.id);
-        }}
+        onClick={() => setSelectedId(entry.id)}
         className={`relative cursor-pointer transition-all duration-150 ${
           isSelected
             ? 'ring-2 ring-white ring-offset-2 ring-offset-black'
@@ -1658,37 +954,7 @@ export function CanvasGrid({
         }`}
         style={isEntryChartsImage ? { width: 'fit-content' } : undefined}
       >
-        {isEntryCarousel ? (
-          <CarouselCanvas
-            ref={r => {
-              if (r) {
-                carouselRefsMap.current.set(entry.id, r);
-                if (!carouselRefRegistered.current.has(entry.id)) {
-                  carouselRefRegistered.current.add(entry.id);
-                  setCarouselRefVersion(v => v + 1);
-                }
-              } else {
-                carouselRefsMap.current.delete(entry.id);
-              }
-            }}
-            imageSrc={carouselBgSource === 'photo' ? (entry.imageSrc ?? '') : ''}
-            videoSrc={carouselBgSource === 'video'
-              ? (entry.localVideoSrc ?? (entry.data ? bestVideoUrl(entry.data) : undefined))
-              : undefined}
-            chartBg={carouselChartBg}
-            headline={entry.headline ?? ''}
-            subheadline={entry.subheadline ?? ''}
-            settings={getSettings(entry.id)}
-            invertedSlots={entrySlideTypeMap.get(entry.id) === 'supporting_2'}
-            onScaleChange={s => setScaleMap(prev => ({ ...prev, [entry.id]: s }))}
-            onSettingsChange={partial => updateSettings(entry.id, partial)}
-            onBgLayerStateChange={s => setBgStateMap(prev => ({ ...prev, [entry.id]: s }))}
-            brandLogoSrc={brand.logoSrc || undefined}
-            onRecordingStateChange={state => setCarouselRecordingStateMap(prev => ({ ...prev, [entry.id]: state }))}
-            onHeadlineChange={text => onUpdateCarouselEntry(entry.id, 'headline', text)}
-            onSubheadlineChange={text => onUpdateCarouselEntry(entry.id, 'subheadline', text)}
-          />
-        ) : isEntryCharts ? (
+        {isEntryCharts ? (
           <ChartsCanvas
             ref={r => {
               if (r) {
@@ -1767,7 +1033,7 @@ export function CanvasGrid({
         )}
 
         {/* Safe-zone guide overlay — video templates only. */}
-        {!isEntryCarousel && !isEntryCharts && !isEntryChartsImage && (safeZoneMap[entry.id] ?? true) && (
+        {!isEntryCharts && !isEntryChartsImage && (safeZoneMap[entry.id] ?? true) && (
           <img
             src="/safe-zones.png"
             alt=""
@@ -1862,9 +1128,7 @@ export function CanvasGrid({
   // transient maps CanvasGrid owns so nothing from the old run lingers.
   const handleClearAll = useCallback(() => {
     setScaleMap({});
-    setBgStateMap({});
     setRecordingStateMap({});
-    setCarouselRecordingStateMap({});
     setVideoZoomMap({});
     setBlockTopPctMap({});
     setSocialCaptionMap({});
@@ -2187,7 +1451,7 @@ export function CanvasGrid({
     if (!pendingBoardSend) return;
     const entry = entries.find(e => e.id === pendingBoardSend);
     onBoardSendConsumed?.();
-    if (entry && entry.mode !== 'carousel' && entry.url.trim()) {
+    if (entry && entry.url.trim()) {
       setSelectedId(entry.id);
       void handleFetchThenGenerate(entry);
     }
@@ -2212,99 +1476,10 @@ export function CanvasGrid({
     }
   }, [socialCaptionMap]);
 
-  const { savedSlides } = useCarouselTemplates(isCarousel ? userId : null);
-  const savedSlidesRef  = useRef(savedSlides);
-  savedSlidesRef.current = savedSlides;
-
-  const entrySlideTypeMap = useMemo(() => {
-    const m = new Map<string, SlideType>();
-    entries.forEach((e, i) => {
-      m.set(e.id, e.carouselSlideType ?? CAROUSEL_SLIDE_TYPES[i % 3]);
-    });
-    return m;
-  }, [entries]);
-
-  // Holds subheadline2 that needs to be applied to a supporting_1 entry once it exists.
-  const pendingSupporting1Ref = useRef<string | null>(null);
-
-  // When savedSlides is ready AND there is a pending AI seed, apply the template settings
-  // first, then set imageSrc/headline/subheadline on the entry.  This mirrors exactly what
-  // happens in the manual flow: template loads → user uploads image.  The image-load effect
-  // inside CarouselCanvas calls onSettingsChange({bgBlurEnabled:false}); by the time that
-  // fires here, settingsMap[id] is already stamped with the saved template so updateSettings
-  // uses it as the base instead of defaultCarouselSettings().
-  useEffect(() => {
-    if (!savedSlides || !pendingAiSeed) return;
-    const entry = entries.find(e => e.mode === 'carousel');
-    if (!entry) return;
-
-    const slideType = entry.carouselSlideType ?? 'main';
-    const saved = savedSlides[slideType];
-
-    // Stamp the template settings into settingsMap first (same render batch)
-    if (saved?.settings) {
-      setSettingsMap(prev => ({ ...prev, [entry.id]: saved.settings }));
-    }
-
-    // Apply the AI content — CarouselCanvas will receive both in the same render
-    onUpdateCarouselEntry(entry.id, 'imageSrc',    pendingAiSeed.imageSrc);
-    onUpdateCarouselEntry(entry.id, 'headline',    pendingAiSeed.headline);
-    onUpdateCarouselEntry(entry.id, 'subheadline', pendingAiSeed.subheadline);
-    if (pendingAiSeed.articleUrl) {
-      onUpdateCarouselEntry(entry.id, 'articleUrl', pendingAiSeed.articleUrl);
-    }
-
-    // For subheadline2 → supporting_1 slide: if the entry already exists update it,
-    // otherwise store in ref and add the row; the effect below will apply it.
-    if (pendingAiSeed.subheadline2) {
-      const s1 = entries.find(e => e.mode === 'carousel' && (e.carouselSlideType ?? 'main') === 'supporting_1');
-      if (s1) {
-        onUpdateCarouselEntry(s1.id, 'subheadline', pendingAiSeed.subheadline2);
-      } else {
-        pendingSupporting1Ref.current = pendingAiSeed.subheadline2;
-        onAddRow('supporting_1');
-      }
-    }
-
-    onAiSeedConsumed?.();
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [savedSlides, pendingAiSeed]);
-
-  // Trending (auto) multi-page seed: entries are already built upstream with
-  // their slide types + headline/subheadline. Once savedSlides is ready, stamp
-  // each entry's settings from its slide-type template so every page renders
-  // with the saved look (and the settings panel edits off the template base).
-  useEffect(() => {
-    if (!savedSlides || !pendingCarouselSeed) return;
-    setSettingsMap(prev => {
-      const next = { ...prev };
-      for (const e of entries) {
-        if (e.mode !== 'carousel') continue;
-        const slideType = e.carouselSlideType ?? 'main';
-        const saved = savedSlides[slideType];
-        if (saved?.settings) next[e.id] = saved.settings;
-      }
-      return next;
-    });
-    onCarouselSeedConsumed?.();
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [savedSlides, pendingCarouselSeed]);
-
-  // Second pass: once the supporting_1 entry is added, apply the stored subheadline2.
-  useEffect(() => {
-    if (!pendingSupporting1Ref.current) return;
-    const s1 = entries.find(e => e.mode === 'carousel' && (e.carouselSlideType ?? 'main') === 'supporting_1');
-    if (!s1) return;
-    onUpdateCarouselEntry(s1.id, 'subheadline', pendingSupporting1Ref.current);
-    pendingSupporting1Ref.current = null;
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [entries]);
-
   const scrollRef             = useRef<HTMLDivElement>(null);
   const cardRefs              = useRef<Record<string, HTMLDivElement | null>>({});
   const prevLengthRef         = useRef(entries.length);
   const canvasRefRegistered   = useRef(new Set<string>());
-  const carouselRefRegistered = useRef(new Set<string>());
   const chartsRefsMap         = useRef(new Map<string, ChartsCanvasRef>());
   const chartsRefRegistered   = useRef(new Set<string>());
   const [chartsRefVersion,    setChartsRefVersion]    = useState(0);
@@ -2334,22 +1509,6 @@ export function CanvasGrid({
     prevLengthRef.current = entries.length;
   }, [entries.length]);
 
-  const getSettings = useCallback((id: string): CarouselSettings => {
-    if (settingsMap[id]) return settingsMap[id];
-    const slideType = entrySlideTypeMap.get(id) ?? 'main';
-    const saved = savedSlides?.[slideType];
-    return saved?.settings ?? defaultCarouselSettings();
-  }, [settingsMap, entrySlideTypeMap, savedSlides]);
-
-  const updateSettings = useCallback((id: string, partial: Partial<CarouselSettings>) => {
-    setSettingsMap(prev => {
-      const slideType = entrySlideTypeMap.get(id) ?? 'main';
-      const saved = savedSlidesRef.current?.[slideType];
-      const base  = prev[id] ?? saved?.settings ?? defaultCarouselSettings();
-      return { ...prev, [id]: { ...base, ...partial } };
-    });
-  }, [entrySlideTypeMap, setSettingsMap]);
-
   const getVideoZoom = useCallback((id: string) => videoZoomMap[id] ?? 1, [videoZoomMap]);
 
   const applyVideoZoom = useCallback((id: string, s: number) => {
@@ -2367,34 +1526,22 @@ export function CanvasGrid({
   }, [canvasRefsMap]);
 
   const selectedEntry      = entries.find(e => e.id === selectedId) ?? entries[0];
-  // A carousel page that hasn't picked a slide type yet shows only the picker —
-  // no input box — so the left inputs panel is hidden for it.
-  const selectedUncommittedCarousel = selectedEntry?.mode === 'carousel' && selectedEntry.carouselSlideType == null;
-  const showLeftPanel = !!selectedEntry && !selectedUncommittedCarousel;
-  const isSelectedCarousel    = selectedEntry?.mode === 'carousel';
+  const showLeftPanel = !!selectedEntry;
   const isSelectedCharts      = selectedEntry?.mode === 'charts';
   const isSelectedChartsImage = selectedEntry?.mode === 'chartsimage';
 
-  const isSelectedVideo = !isSelectedCarousel && !isSelectedCharts && selectedEntry && (
+  const isSelectedVideo = !isSelectedCharts && selectedEntry && (
     !!selectedEntry.localVideoSrc || (!!selectedEntry.data && !selectedEntry.loading)
   );
-  const isSelectedChartsVideo = false; // Charts has no video
-  const isCarouselVideoSelected = isSelectedCarousel && selectedEntry?.carouselSubMode === 'video' && (
-    !!selectedEntry.localVideoSrc || (!!selectedEntry.data && !selectedEntry.loading)
-  );
-  const showVideoControls = isSelectedVideo || isCarouselVideoSelected;
+  const showVideoControls = isSelectedVideo;
 
-  // canvasRefVersion / carouselRefVersion force re-derivation when refs populate
-  const activeVideoRef = showVideoControls && canvasRefVersion >= 0 && carouselRefVersion >= 0
-    ? (isSelectedVideo
-        ? (canvasRefsMap.current.get(selectedEntry!.id) ?? null)
-        : (carouselRefsMap.current.get(selectedEntry!.id) ?? null))
+  // canvasRefVersion forces re-derivation when refs populate
+  const activeVideoRef = showVideoControls && canvasRefVersion >= 0
+    ? (canvasRefsMap.current.get(selectedEntry!.id) ?? null)
     : null;
 
   const activeRecordingState = showVideoControls
-    ? (isSelectedVideo
-        ? (recordingStateMap[selectedEntry!.id] ?? null)
-        : (carouselRecordingStateMap[selectedEntry!.id] ?? null))
+    ? (recordingStateMap[selectedEntry!.id] ?? null)
     : null;
 
   const activeVideoSrc = useMemo(() => {
@@ -2415,32 +1562,8 @@ export function CanvasGrid({
 
       {/* ── Toolbar ── */}
       <div className="flex items-center justify-between gap-4 px-4 py-3 border-b border-zinc-800 shrink-0 bg-[#0f0f0f]">
-        {/* Back to AI Cards + view zoom */}
+        {/* View zoom */}
         <div className="flex items-center gap-2">
-          {onBackToAi && (
-            <button
-              onClick={onBackToAi}
-              title="Back to headline + photo"
-              className="flex items-center justify-center w-7 h-7 rounded-md text-zinc-500 hover:text-zinc-200 hover:bg-zinc-800 transition-colors"
-            >
-              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
-                <path d="M19 12H5"/>
-                <polyline points="12 19 5 12 12 5"/>
-              </svg>
-            </button>
-          )}
-          {onOpenAiTrending && (
-            <button
-              onClick={onOpenAiTrending}
-              title="Auto-generate a carousel from a trending public figure"
-              className="flex items-center gap-1.5 px-2.5 h-7 rounded-md bg-white text-black hover:bg-zinc-100 text-xs font-semibold transition-colors"
-            >
-              <svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor">
-                <path d="M12 2l1.9 5.5L19.5 9l-5.6 1.5L12 16l-1.9-5.5L4.5 9l5.6-1.5L12 2z"/>
-              </svg>
-              AI
-            </button>
-          )}
           <span className="text-[10px] text-zinc-600 select-none tabular-nums w-8 text-right">{Math.round(viewScale * 100)}%</span>
           <input
             type="range" min={40} max={150} step={10}
@@ -2453,7 +1576,7 @@ export function CanvasGrid({
               row (and future rows inherit it). */}
           {onSetFormat && (
             <div className="flex items-center gap-0.5 ml-2 rounded-lg bg-zinc-900 border border-zinc-800 p-0.5">
-              {([['twitter', 'Twitter'], ['caption', 'Caption'], ['charts', 'Charts'], ['chartsimage', 'Charts Image'], ['carousel', 'Carousel']] as const).map(([m, label]) => (
+              {([['twitter', 'Twitter'], ['caption', 'Caption'], ['charts', 'Charts'], ['chartsimage', 'Charts Image']] as const).map(([m, label]) => (
                 <button
                   key={m}
                   onClick={() => onSetFormat(m)}
@@ -2470,33 +1593,6 @@ export function CanvasGrid({
 
         {/* Right actions */}
         <div className="flex items-center gap-4">
-          {isSelectedCarousel && selectedEntry && (() => {
-            const src = carouselBgSourceMap[selectedEntry.id] ?? (selectedEntry.carouselSubMode === 'video' ? 'video' : 'photo');
-            const chartSub  = chartsImageSubModeMap[selectedEntry.id] ?? 'image';
-            // MP4 export when the media is a video, or the chart background is animated.
-            const isVid = src === 'video' || (src === 'chart' && chartSub === 'video');
-            const recState = carouselRecordingStateMap[selectedEntry.id];
-            const isRec = recState?.isRecording ?? false;
-            const pct   = recState?.recProgress ?? 0;
-            return (
-              <button
-                onClick={() => carouselRefsMap.current.get(selectedEntry.id)?.startDownload()}
-                disabled={isRec}
-                className="relative flex items-center gap-1.5 rounded-full bg-white px-2 py-1.5 text-xs font-medium text-black hover:bg-zinc-100 disabled:opacity-60 transition-colors overflow-hidden"
-              >
-                {isRec && (
-                  <span className="absolute inset-0 bg-zinc-300 origin-left transition-none" style={{ transform: `scaleX(${pct})` }} />
-                )}
-                <span className="relative flex items-center gap-1.5">
-                  {isRec
-                    ? <SpinnerIcon size={11} style={{ animation: 'spin 1s linear infinite' }} />
-                    : <DownloadIcon size={11} stroke="currentColor" />
-                  }
-                  {isRec ? `${Math.round(pct * 100)}%` : isVid ? 'Export' : 'PNG'}
-                </span>
-              </button>
-            );
-          })()}
           {isSelectedCharts && selectedEntry && (() => {
             const recState = chartsRecordingStateMap[selectedEntry.id];
             const isRec = recState?.isRecording ?? false;
@@ -2671,7 +1767,7 @@ export function CanvasGrid({
       <div
         ref={scrollRef}
         className="flex-1 overflow-y-auto overflow-x-hidden scroll-smooth"
-        style={{ paddingLeft: showLeftPanel ? 450 : 0, paddingRight: isSelectedCarousel ? 360 : 0 }}
+        style={{ paddingLeft: showLeftPanel ? 450 : 0 }}
       >
         {/* Horizontal-move wrapper — the grip slides the whole creator left/right. */}
         <div style={{ transform: `translateX(${hOffset}px)` }}>
@@ -2692,40 +1788,13 @@ export function CanvasGrid({
 
           {entries.map((entry, index) => {
             const isSelected           = entry.id === (selectedEntry?.id ?? '');
-            const isEntryCarousel      = entry.mode === 'carousel';
             const isEntryCharts        = entry.mode === 'charts';
             const isEntryChartsImage   = entry.mode === 'chartsimage';
 
-            // A carousel page only exists once a slide type has been picked. The
-            // initial blank entry has none, so it shows the picker (below) instead
-            // of an input box.
-            if (isEntryCarousel && entry.carouselSlideType == null) return null;
-
-            // Carousel background source: 'photo' | 'video' | 'chart'. Defaults derive
-            // from the legacy carouselSubMode so existing rows are unaffected.
-            const carouselBgSource: 'photo' | 'video' | 'chart' = isEntryCarousel
-              ? (carouselBgSourceMap[entry.id] ?? (entry.carouselSubMode === 'video' ? 'video' : 'photo'))
-              : 'photo';
-            const isCarouselChart = isEntryCarousel && carouselBgSource === 'chart';
-            const isCarouselVideo = isEntryCarousel && carouselBgSource === 'video';
-            const carouselChartMarket = isCarouselChart ? (chartsImageMarketMap[entry.id] ?? null) : null;
-            const carouselChartBg: CarouselChartBg | null = (isCarouselChart && carouselChartMarket)
-              ? {
-                  market:           carouselChartMarket as ChartsImageMarket,
-                  overrideName:     chartsImageNameOverrideMap[entry.id] ?? '',
-                  overrideIndustry: chartsImageIndustryOverrideMap[entry.id] ?? '',
-                  direction:        chartsImageDirectionMap[entry.id] ?? 'up',
-                  noiseLevel:       chartsImageNoiseLevelMap[entry.id] ?? 'none',
-                  subMode:          chartsImageSubModeMap[entry.id] ?? 'image',
-                  speed:            chartsImageSpeedMap[entry.id] ?? 1,
-                  audioUrl:         chartsImageAudioMap[entry.id]?.url,
-                }
-              : null;
             // Every entry always renders its canvas/template — even before a link is
             // pasted — so the user sees what they're building (Twitter/Caption/Video
-            // show the empty template; charts/carousel show their default canvas).
+            // show the empty template; charts show their default canvas).
             const hasRender = true;
-            const scale     = scaleMap[entry.id] ?? 1;
 
             return (
               <Fragment key={entry.id}>
@@ -2745,79 +1814,6 @@ export function CanvasGrid({
                   <div className="fixed left-[72px] top-[52px] z-20 w-[450px] h-[calc(100vh-52px)] overflow-y-auto bg-zinc-950 border-r border-zinc-800 p-4 flex flex-col items-center gap-3">
                     {renderEntryInputs(entry)}
                     <div className="flex flex-col gap-4" style={{ width: CARD_W }}>
-
-                    {/* Carousel-specific controls row. Chart background gets its own
-                        per-page settings (still image vs animated video + speed);
-                        photo/video keep the zoom + crop/blur controls. */}
-                    {isEntryCarousel && (isCarouselChart ? (
-                      (() => {
-                        const chartSub = chartsImageSubModeMap[entry.id] ?? 'image';
-                        const chSpeed  = chartsImageSpeedMap[entry.id] ?? 1;
-                        const isRec    = carouselRecordingStateMap[entry.id]?.isRecording ?? false;
-                        return (
-                          <div className="flex items-center justify-between gap-4 px-0.5">
-                            <div className="flex items-center gap-2">
-                              <span className="text-[10px] text-zinc-600 select-none">Chart</span>
-                              <div className="flex items-center rounded-full border border-zinc-700 bg-zinc-900 p-0.5" title="Render the chart background as a still image or animated video">
-                                {([['image', 'Image'], ['video', 'Video']] as const).map(([m, label]) => (
-                                  <button key={m} disabled={isRec}
-                                    onClick={() => setChartsImageSubModeMap(prev => ({ ...prev, [entry.id]: m }))}
-                                    className={`rounded-full px-2.5 py-1 text-[11px] font-medium transition-colors disabled:opacity-60 ${chartSub === m ? 'bg-white text-black' : 'text-zinc-400 hover:text-zinc-200'}`}
-                                  >{label}</button>
-                                ))}
-                              </div>
-                              {chartSub === 'video' && (
-                                <div className="flex items-center gap-1">
-                                  <span className="text-[10px] text-zinc-600 select-none">Anim</span>
-                                  <div className="flex items-center rounded-full border border-zinc-700 bg-zinc-900 p-0.5" title="Chart animation speed">
-                                    {[1, 2, 3].map(s => (
-                                      <button key={s} disabled={isRec}
-                                        onClick={() => setChartsImageSpeedMap(prev => ({ ...prev, [entry.id]: s }))}
-                                        className={`rounded-full px-2 py-1 text-[11px] font-medium transition-colors disabled:opacity-60 ${chSpeed === s ? 'bg-white text-black' : 'text-zinc-400 hover:text-zinc-200'}`}
-                                      >{s}×</button>
-                                    ))}
-                                  </div>
-                                </div>
-                              )}
-                            </div>
-                            <button onClick={() => onRemoveRow(entry.id)} className={BTN_ICON} title="Delete page">
-                              <TrashIcon size={15} />
-                            </button>
-                          </div>
-                        );
-                      })()
-                    ) : (
-                      <div className="flex items-center justify-between gap-4">
-                        {/* Zoom */}
-                        <div className="flex items-center gap-2 shrink-0">
-                          <span className="text-[10px] text-zinc-600 select-none shrink-0">Zoom</span>
-                          <input
-                            type="range" min={20} max={800} step={5}
-                            value={Math.round(scale * 100)}
-                            onChange={e => {
-                              const n = parseInt(e.target.value) / 100;
-                              carouselRefsMap.current.get(entry.id)?.setZoom(n);
-                            }}
-                            className="w-20 h-1 accent-white cursor-pointer"
-                          />
-                          <EditablePct
-                            value={Math.round(scale * 100)}
-                            min={20} max={800} step={5}
-                            onCommit={pct => carouselRefsMap.current.get(entry.id)?.setZoom(pct / 100)}
-                          />
-                        </div>
-
-                        {/* Crop / Split / BG Blur */}
-                        <CarouselBgControls
-                          entry={entry}
-                          bgState={bgStateMap[entry.id] ?? { fgMaskReady: false, isBgProcessing: false, bgProcessError: false }}
-                          settings={getSettings(entry.id)}
-                          carouselRef={carouselRefsMap.current.get(entry.id)}
-                          onRemoveRow={onRemoveRow}
-                          isCarouselVideo={isCarouselVideo}
-                        />
-                      </div>
-                    ))}
 
                     {/* Charts / Charts Image — delete button (+ aspect ratio toggle for chartsimage) */}
                     {(isEntryCharts || isEntryChartsImage) && (
@@ -2846,8 +1842,8 @@ export function CanvasGrid({
                       </div>
                     )}
 
-                    {/* Video canvas zoom + delete (non-carousel, non-charts only) */}
-                    {!isEntryCarousel && !isEntryCharts && !isEntryChartsImage && (
+                    {/* Video canvas zoom + delete (non-charts only) */}
+                    {!isEntryCharts && !isEntryChartsImage && (
                       <div className="flex items-center gap-2 px-0.5">
                         <span className="text-[10px] text-zinc-600 select-none shrink-0">Zoom</span>
                         <input
@@ -2890,7 +1886,7 @@ export function CanvasGrid({
 
                     {/* Safe-zone toggle — slim row under the canvas, styled like the
                         market section's controls. On by default. */}
-                    {!isEntryCarousel && !isEntryCharts && !isEntryChartsImage && (() => {
+                    {!isEntryCharts && !isEntryChartsImage && (() => {
                       const on = safeZoneMap[entry.id] ?? true;
                       return (
                         <div className="mt-2 flex items-center justify-between gap-3 px-3 py-1.5 rounded-md bg-zinc-950 border border-zinc-800">
@@ -3074,7 +2070,7 @@ export function CanvasGrid({
                         Charts mode generates via generateChartsCaption; video
                         mode via generateSocialCaption. The card, copy button,
                         and editable text area are shared by both. */}
-                    {!isEntryCarousel && (() => {
+                    {(() => {
                       const sc = socialCaptionMap[entry.id];
                       const collapsed = postCaptionCollapsedMap[entry.id] ?? false;
                       return (
@@ -3183,13 +2179,8 @@ export function CanvasGrid({
             );
           })}
 
-          {/* Add-canvas box. Carousel picks Main / Supporting 1 / Supporting 2
-              (the right template page); other formats add a plain canvas/slide. */}
-          {format === 'carousel' ? (
-            <CarouselAddRow onAdd={type => onAddRow(type)} />
-          ) : (
-            <GhostAddCard onAdd={() => onAddRow()} />
-          )}
+          {/* Add-canvas box — adds a plain canvas/slide in the current format. */}
+          <GhostAddCard onAdd={() => onAddRow()} />
 
           </div>
         </div>
@@ -3203,7 +2194,7 @@ export function CanvasGrid({
           and his gore instead of being covered. Still below modals/dropdowns
           (z-[1000]+). Safe to compete at the root stacking level: no ancestor
           between here and the page root creates a stacking context. */}
-      <div className="relative z-[70] bg-zinc-950" style={{ paddingRight: isCarouselVideoSelected ? 360 : 0 }}>
+      <div className="relative z-[70] bg-zinc-950">
         <VideoControlsBar
           entryId={showVideoControls ? selectedEntry!.id : null}
           activeRef={activeVideoRef}
@@ -3517,17 +2508,6 @@ export function CanvasGrid({
         </div>
       )}
 
-      {/* ── Style settings — separate fixed column on the RIGHT (carousel only).
-          The inputs + per-canvas controls live in the LEFT panel (in the map). */}
-      {isSelectedCarousel && selectedEntry && (
-        <div className="fixed top-[52px] right-0 z-20 bg-transparent w-[360px] h-[calc(100vh-52px)] flex flex-col">
-          <CarouselSettingsPanel
-            settings={getSettings(selectedEntry.id)}
-            onChange={partial => updateSettings(selectedEntry.id, partial)}
-            videoMode={selectedEntry.carouselSubMode === 'video'}
-          />
-        </div>
-      )}
     </div>
   );
 }

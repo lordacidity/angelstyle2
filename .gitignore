@@ -34,3 +34,7 @@ npm-debug.log*
 
 # Misc
 *.tsbuildinfo
+
+# Local device tooling — scrcpy/adb binaries downloaded by setup.ps1 at install
+# time (~55MB). Regenerated per machine; never committed.
+tools/

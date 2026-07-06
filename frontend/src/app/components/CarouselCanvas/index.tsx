@@ -481,6 +481,15 @@ const CarouselCanvas = forwardRef<CarouselCanvasRef, CarouselCanvasProps>(
         setGapPv(prev => prev === gPv ? prev : gPv);
       }
 
+      // Solid bottom band — a hard section the text sits IN (not a fade over the
+      // photo). Grows upward to fit the text block, minimum ~1/5 of the card.
+      if (s.bottomBandEnabled) {
+        const bandPad = H * 0.035;
+        const bandTop = Math.min(H * 0.8, blockTop - bandPad);
+        ctx.fillStyle = s.bottomBandColor || '#000000';
+        ctx.fillRect(0, bandTop, W, H - bandTop);
+      }
+
       if (s.showFade) {
         const alpha    = s.fadeIntensity / 100;
         const floorH   = H * 0.6 * (s.fadeFloor / 100);
@@ -1513,7 +1522,9 @@ const CarouselCanvas = forwardRef<CarouselCanvasRef, CarouselCanvasProps>(
       if (!wrapper) return;
       function onWheel(e: WheelEvent) {
         e.preventDefault();
-        const next = Math.max(0.2, Math.min(8, imgScaleRef.current * (1 + (-e.deltaY) * 0.005)));
+        // Gentle steps per wheel tick — zooming should creep, not jump, so the
+        // crop can be dialled in precisely.
+        const next = Math.max(0.2, Math.min(8, imgScaleRef.current * (1 + (-e.deltaY) * 0.0008)));
         imgScaleRef.current = next; setImgScale(next);
         onScaleChange?.(next);
         redraw(cachedImgRef.current);

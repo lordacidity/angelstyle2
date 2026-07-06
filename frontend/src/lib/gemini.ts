@@ -104,6 +104,63 @@ export async function geminiGenerate(parts: GeminiPart[], opts: {
   throw new Error(`Gemini returned no usable text (tried ${queue.join(', ')}). Last reason: ${lastWhy}`);
 }
 
+// ── Search-grounded generation ───────────────────────────────────────────────
+// For routes that need REAL current facts (trending-pick, carousel-copy): the
+// google_search tool grounds the output in live results. JSON response_mime_type
+// is unreliable alongside the search tool, so callers ask for JSON in the prompt
+// and parse it out with extractGeminiJson.
+
+export async function geminiWithSearch(prompt: string, opts: { temperature?: number; maxOutputTokens?: number } = {}): Promise<string> {
+  const apiKey = process.env.GEMINI_API_KEY ?? '';
+  if (!apiKey) throw new Error('GEMINI_API_KEY is not set');
+  const model = process.env.GEMINI_MODEL || 'gemini-2.5-flash';
+
+  const body = JSON.stringify({
+    contents: [{ role: 'user', parts: [{ text: prompt }] }],
+    tools: [{ google_search: {} }],
+    generationConfig: {
+      temperature: opts.temperature ?? 0.7,
+      maxOutputTokens: opts.maxOutputTokens ?? 2048,
+      thinkingConfig: { thinkingBudget: 0 },
+    },
+  });
+
+  for (let attempt = 1; attempt <= 4; attempt++) {
+    const res = await fetch(`${API_BASE}/v1beta/models/${model}:generateContent?key=${apiKey}`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body,
+    });
+    if (res.ok) {
+      const data = await res.json() as GeminiResponse;
+      const { text } = extractText(data);
+      if (text) return text;
+      throw new Error('Gemini returned empty response');
+    }
+    const txt = await res.text();
+    const transient = res.status === 503 || res.status === 429 || res.status === 500;
+    if (transient && attempt < 4) { await sleep(Math.min(8000, 800 * 2 ** (attempt - 1))); continue; }
+    throw new Error(`Gemini ${res.status}: ${txt.slice(0, 300)}`);
+  }
+  throw new Error('Gemini: max retries exceeded');
+}
+
+// Pull the first balanced JSON object out of a model response that may be
+// wrapped in ```json fences or have grounding prose around it.
+export function extractGeminiJson(raw: string): string {
+  const fenced = raw.match(/```(?:json)?\s*([\s\S]*?)```/i);
+  const body = fenced ? fenced[1] : raw;
+  const start = body.indexOf('{');
+  if (start === -1) throw new Error('No JSON object in response');
+  let depth = 0;
+  for (let i = start; i < body.length; i++) {
+    const c = body[i];
+    if (c === '{') depth++;
+    else if (c === '}') { depth--; if (depth === 0) return body.slice(start, i + 1); }
+  }
+  throw new Error('Unterminated JSON object in response');
+}
+
 // ── Files API ────────────────────────────────────────────────────────────────
 // For clips too big to send inline (inline requests cap at ~20MB total). Upload
 // the bytes once, wait until Gemini finishes processing, then reference the file

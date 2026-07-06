@@ -2,7 +2,7 @@
 
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { supabase } from '@/lib/supabase';
-import type { BrandProps, BrandLogo, BrandCategory } from '../types';
+import type { BrandProps, BrandLogo, BrandLogoKind, BrandCategory } from '../types';
 
 // The Pauv logo ships as a static asset in frontend/public, so the brand kit
 // always has a working logo with zero Supabase/auth dependency. Any logos that
@@ -13,8 +13,25 @@ import type { BrandProps, BrandLogo, BrandCategory } from '../types';
 // instead of treating it as a photo — a flat fill survives the video encoder far
 // cleaner than a baked-in background, so the avatar stays crisp and unbanded.
 const STATIC_LOGOS: BrandLogo[] = [
-  { id: 'static:pauv', url: '/pauv-p.png', label: 'Pauv', position: -1 },
+  { id: 'static:pauv', url: '/pauv-p.png', label: 'Pauv', position: -1, kind: 'favicon' },
 ];
+
+// The full "Logo" is a bundled asset too (public/pauvlogo.png) — no Supabase, no
+// upload, no backend. It lives in its own slot alongside the favicon logo above.
+const STATIC_FULL_LOGOS: BrandLogo[] = [
+  { id: 'static:pauv-logo', url: '/pauvlogo.png', label: 'Pauv Logo', position: -1, kind: 'logo' },
+];
+
+// `kind` is a client-side slot marker only — it is NEVER stored in Supabase.
+// Shared/uploaded logos come back with no kind and default to favicon; only the
+// bundled static logos above set theirs explicitly.
+function logoKind(logo: BrandLogo): BrandLogoKind { return logo.kind ?? 'favicon'; }
+
+// The active URL for a slot is simply the first logo of that kind (favicon logos
+// — including the static Pauv "p" — sort ahead of full logos). Empty if none.
+function firstUrlOfKind(logos: BrandLogo[], kind: BrandLogoKind): string {
+  return logos.find(l => logoKind(l) === kind)?.url ?? '';
+}
 
 // The handle is always exactly @pauv_inc — it is NOT read from localStorage or the
 // shared Supabase column, so every machine renders the same handle regardless of
@@ -23,7 +40,8 @@ const DEFAULT_HANDLE = '@pauv_inc';
 
 const EMPTY_BRAND: BrandProps = {
   logoSrc: STATIC_LOGOS[0].url,
-  logos: STATIC_LOGOS,
+  logoFullSrc: STATIC_FULL_LOGOS[0].url,
+  logos: [...STATIC_LOGOS, ...STATIC_FULL_LOGOS],
   displayName: '',
   handle: DEFAULT_HANDLE,
   category: 'artists',
@@ -90,8 +108,9 @@ export function useBrandKit(userId: string | null) {
         displayName: local.displayName ?? '',
         handle: DEFAULT_HANDLE,
         category: toCategory(local.category),
-        logos: STATIC_LOGOS,
+        logos: [...STATIC_LOGOS, ...STATIC_FULL_LOGOS],
         logoSrc: STATIC_LOGOS[0].url,
+        logoFullSrc: STATIC_FULL_LOGOS[0].url,
       });
       brandKitIdRef.current = null;
       return;
@@ -120,8 +139,9 @@ export function useBrandKit(userId: string | null) {
           displayName: local.displayName ?? '',
           handle: DEFAULT_HANDLE,
           category: toCategory(local.category),
-          logos: STATIC_LOGOS,
+          logos: [...STATIC_LOGOS, ...STATIC_FULL_LOGOS],
           logoSrc: STATIC_LOGOS[0].url,
+          logoFullSrc: STATIC_FULL_LOGOS[0].url,
         });
         setLoading(false);
         return;
@@ -135,7 +155,9 @@ export function useBrandKit(userId: string | null) {
         .eq('brand_kit_id', kit.id)
         .order('position');
 
-      // Static Pauv logo first, then any logos uploaded to the shared account.
+      // Favicon slot: the static Pauv "p" first, then any logos uploaded to the
+      // shared account (Supabase stores no kind — they default to favicon). The
+      // full Logo is the bundled static asset, kept in its own slot at the end.
       const logos: BrandLogo[] = [
         ...STATIC_LOGOS,
         ...(logoRows ?? []).map(l => ({
@@ -144,6 +166,7 @@ export function useBrandKit(userId: string | null) {
           label: l.label ?? undefined,
           position: l.position,
         })),
+        ...STATIC_FULL_LOGOS,
       ];
 
       // Display name: localStorage wins per-machine, seeded from the shared
@@ -155,7 +178,8 @@ export function useBrandKit(userId: string | null) {
         handle: DEFAULT_HANDLE,
         category: toCategory(local.category),
         logos,
-        logoSrc: logos[0]?.url ?? '',
+        logoSrc: firstUrlOfKind(logos, 'favicon'),
+        logoFullSrc: firstUrlOfKind(logos, 'logo'),
       });
 
       setLoading(false);
@@ -232,10 +256,12 @@ export function useBrandKit(userId: string | null) {
     if (logoInsertErr) {
       setError(`Logo save error: ${logoInsertErr.message}`);
     } else if (logo) {
+      // Uploads only ever feed the favicon slot (no kind stored → defaults to
+      // favicon). The full Logo is the bundled static asset, kept at the end.
       const newLogo: BrandLogo = { id: logo.id, url: publicUrl, position: logo.position };
       setBrand(prev => ({
         ...prev,
-        logos: [...prev.logos, newLogo],
+        logos: [...prev.logos.filter(l => logoKind(l) !== 'logo'), newLogo, ...STATIC_FULL_LOGOS],
         logoSrc: prev.logoSrc || publicUrl,
       }));
     }
@@ -249,11 +275,16 @@ export function useBrandKit(userId: string | null) {
     const logo = brandRef.current.logos.find(l => l.id === logoId);
     if (!logo) return;
 
-    // Optimistic UI update
+    // Optimistic UI update — if the deleted logo was the active pick for its
+    // slot, fall back to the next logo of the same kind.
     setBrand(prev => {
       const logos = prev.logos.filter(l => l.id !== logoId);
-      const logoSrc = prev.logoSrc === logo.url ? (logos[0]?.url ?? '') : prev.logoSrc;
-      return { ...prev, logos, logoSrc };
+      return {
+        ...prev,
+        logos,
+        logoSrc: prev.logoSrc === logo.url ? firstUrlOfKind(logos, 'favicon') : prev.logoSrc,
+        logoFullSrc: prev.logoFullSrc === logo.url ? firstUrlOfKind(logos, 'logo') : prev.logoFullSrc,
+      };
     });
 
     // Delete DB row
@@ -264,12 +295,17 @@ export function useBrandKit(userId: string | null) {
 
     if (dbErr) {
       setError(`Delete error: ${dbErr.message}`);
-      // Revert optimistic update
-      setBrand(prev => ({
-        ...prev,
-        logos: [...prev.logos, logo].sort((a, b) => a.position - b.position),
-        logoSrc: prev.logoSrc || logo.url,
-      }));
+      // Revert optimistic update — restore the row and, if its slot was emptied
+      // by the optimistic delete, re-select it.
+      setBrand(prev => {
+        const k = logoKind(logo);
+        return {
+          ...prev,
+          logos: [...prev.logos, logo].sort((a, b) => a.position - b.position),
+          logoSrc: k === 'favicon' ? (prev.logoSrc || logo.url) : prev.logoSrc,
+          logoFullSrc: k === 'logo' ? (prev.logoFullSrc || logo.url) : prev.logoFullSrc,
+        };
+      });
       return;
     }
 
@@ -287,5 +323,9 @@ export function useBrandKit(userId: string | null) {
     setBrand(prev => ({ ...prev, logoSrc: url }));
   }, []);
 
-  return { brand, setBrand, saving, uploading, loading, error, setError, save, uploadLogo, deleteLogo, selectLogo };
+  const selectFullLogo = useCallback((url: string) => {
+    setBrand(prev => ({ ...prev, logoFullSrc: url }));
+  }, []);
+
+  return { brand, setBrand, saving, uploading, loading, error, setError, save, uploadLogo, deleteLogo, selectLogo, selectFullLogo };
 }

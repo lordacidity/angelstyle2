@@ -52,6 +52,17 @@ const NAV: { id: AppSection; label: string; icon: React.ReactNode }[] = [
     ),
   },
   {
+    id: 'carousel',
+    label: 'Carousel',
+    // Stacked cards — a multi-page swipe post.
+    icon: (
+      <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+        <rect x="7" y="3" width="14" height="14" rx="2"/>
+        <path d="M17 21H5a2 2 0 0 1-2-2V7"/>
+      </svg>
+    ),
+  },
+  {
     id: 'builder',
     label: 'Builder',
     icon: (
@@ -97,20 +108,6 @@ const NAV: { id: AppSection; label: string; icon: React.ReactNode }[] = [
     ),
   },
 ];
-
-// Pinned to the bottom of the nav (below the main sections). Routes to the AI-maker (Aier),
-// now merged into Studio as the in-app /ai-maker page.
-const AI_NAV: { id: AppSection; label: string; icon: React.ReactNode } = {
-  id: 'ai',
-  label: 'AI',
-  // Four-point sparkle + a small companion spark — the conventional AI glyph.
-  icon: (
-    <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
-      <path d="M12 2l2.2 5.8L20 10l-5.8 2.2L12 18l-2.2-5.8L4 10l5.8-2.2z"/>
-      <path d="M19 3l.7 1.9L21.6 5.6l-1.9.7L19 8.2l-.7-1.9L16.4 5.6l1.9-.7z"/>
-    </svg>
-  ),
-};
 
 export function Sidebar({
   googleToken, onConnectGoogle, onOpenSheetsModal, onDisconnectGoogle, onResetAll,
@@ -162,17 +159,6 @@ export function Sidebar({
           <span className="text-[9px] font-medium leading-none">Emojis</span>
         </button>
 
-        {/* AI — pinned to the bottom (mt-auto). Routes to the in-app AI-maker page. */}
-        <Link
-          href="/ai-maker"
-          title="AI maker"
-          className={`mt-auto w-full flex flex-col items-center gap-2 py-2.5 px-1 rounded-lg transition-colors ${
-            pathname.startsWith('/ai-maker') ? 'text-white' : 'text-zinc-700 hover:text-zinc-200'
-          }`}
-        >
-          {AI_NAV.icon}
-          <span className="text-[9px] font-medium leading-none">{AI_NAV.label}</span>
-        </Link>
       </nav>
 
       {/* Bottom */}

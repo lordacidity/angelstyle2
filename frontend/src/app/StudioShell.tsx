@@ -12,7 +12,6 @@ import { useVideoEntries } from './hooks/useVideoEntries';
 import { useGoogleSheets } from './hooks/useGoogleSheets';
 import { useBrandKit } from './hooks/useBrandKit';
 import { usePauvSession } from './hooks/usePauvSession';
-import type { CarouselSettings } from './components/carouselTypes';
 import { Sidebar } from './components/Sidebar';
 import { BoardSection } from './components/BoardSection';
 import { BrandKit } from './components/BrandKit';
@@ -29,10 +28,10 @@ import { PhonedeckImages } from './phonedeck/PhonedeckImages';
 import { GRID_BG_STYLE } from '@/lib/ui-constants';
 import { makeEmptyEntry } from '@/lib/entry';
 import { sectionFromPath, pathForSection } from '@/lib/sections';
-import type { VideoMode, CarouselPage } from './types';
+import type { VideoMode } from './types';
 
-const AiCardsSection = lazy(() =>
-  import('./components/AiCardsSection').then(m => ({ default: m.AiCardsSection }))
+const CarouselSection = lazy(() =>
+  import('./components/carousel/CarouselSection').then(m => ({ default: m.CarouselSection }))
 );
 
 const BuilderGrid = lazy(() =>
@@ -179,16 +178,15 @@ export function StudioShell() {
   const router = useRouter();
   const activeSection = sectionFromPath(pathname);
 
-  const [carouselSettingsMap, setCarouselSettingsMap] = useState<Record<string, CarouselSettings>>({});
   // No login UI — silently signed in as the shared Pauv account so the brand
   // kit / templates persist against a real Supabase user.
   const { userId } = usePauvSession();
-  const { brand, saving, uploading, loading, error, setError, save, uploadLogo, deleteLogo, selectLogo } = useBrandKit(userId);
+  const { brand, saving, uploading, loading, error, setError, save, uploadLogo, deleteLogo, selectLogo, selectFullLogo } = useBrandKit(userId);
 
   const {
-    entries, setEntries, canvasRefsMap, carouselRefsMap,
-    addRow, removeRow, resetEverything, updateEntry, updateCarouselEntry, updateLocalVideo,
-    handleVideoError, fetchVideo, downloadAll, setCarouselSubMode,
+    entries, setEntries, canvasRefsMap,
+    addRow, removeRow, resetEverything, updateEntry, updateLocalVideo,
+    handleVideoError, fetchVideo, downloadAll,
   } = useVideoEntries();
 
   const googleSheets = useGoogleSheets({ onImport: setEntries });
@@ -205,11 +203,6 @@ export function StudioShell() {
   // which is the moment we flip the row to Posted.
   const [pushOrigins, setPushOrigins] = useState<Record<string, { table: BoardTable; id: string }>>({});
 
-  const [pendingAiSeed, setPendingAiSeed] = useState<{ imageSrc: string; headline: string; subheadline: string; subheadline2?: string; articleUrl?: string } | null>(null);
-  // Multi-page seed for the "Trending (auto)" carousel flow. Presence triggers
-  // CanvasGrid to stamp each entry's settings from the saved template.
-  const [pendingCarouselSeed, setPendingCarouselSeed] = useState<CarouselPage[] | null>(null);
-
   // Set to an entry id when the Board widget's send arrow drops a row into the
   // generator; CanvasGrid picks it up, runs the fetch→crop→caption pipeline for
   // that entry, then clears it.
@@ -218,12 +211,11 @@ export function StudioShell() {
   // here so handleClearAll can wipe it at the same time it wipes the entries.
   const [activeBoardRowId, setActiveBoardRowId] = useState<string | null>(null);
 
-  // Once the user has visited AI Cards, keep that section mounted (just hidden)
-  // so its internal state — picked talent, fetched stories, drafted headline,
-  // chosen photo — survives navigating away and back via the media-tab back
-  // arrow. Without this, AiCardsSection unmounts and resets to step 1.
-  const [aiEverVisited, setAiEverVisited] = useState(false);
-  useEffect(() => { if (activeSection === 'ai') setAiEverVisited(true); }, [activeSection]);
+  // Once the user has visited the Carousel section, keep it mounted (just
+  // hidden) so its wizard progress and page canvases survive navigating away
+  // and back.
+  const [carouselEverVisited, setCarouselEverVisited] = useState(false);
+  useEffect(() => { if (activeSection === 'carousel') setCarouselEverVisited(true); }, [activeSection]);
 
   // Same keep-mounted trick for Pricer: once visited, stay mounted (hidden) so the
   // in-memory full-res photos a batch is cropping aren't lost on tab switch (only
@@ -231,51 +223,11 @@ export function StudioShell() {
   const [pricerEverVisited, setPricerEverVisited] = useState(false);
   useEffect(() => { if (activeSection === 'pricer') setPricerEverVisited(true); }, [activeSection]);
 
-  useEffect(() => {
-    const raw = sessionStorage.getItem('ai-card-seed');
-    if (!raw) return;
-    sessionStorage.removeItem('ai-card-seed');
-    try {
-      const seed = JSON.parse(raw) as { imageSrc: string; headline: string; subheadline: string; subheadline2?: string; articleUrl?: string };
-      setPendingAiSeed(seed);
-      // Drop into carousel mode so savedSlides loads before we apply content.
-      setEntries(prev => prev.map(e => ({ ...e, mode: 'carousel' as const })));
-      setTimeout(() => router.push(pathForSection('media')), 400);
-    } catch { /* malformed seed — ignore */ }
-  }, []); // eslint-disable-line react-hooks/exhaustive-deps
-
-  function handleBuildCard(seed: { imageSrc: string; headline: string; subheadline: string; subheadline2?: string; articleUrl?: string }) {
-    setPendingAiSeed(seed);
-    setEntries(prev => prev.map(e => ({ ...e, mode: 'carousel' as const })));
-    setTimeout(() => router.push(pathForSection('media')), 400);
-  }
-
-  // "Trending (auto)" → build a whole multi-page carousel at once. Replace the
-  // current rows with one entry per AI page (main first, then supporting_1s),
-  // each carrying its headline/subheadline. Per-page settings come from the
-  // saved template via CanvasGrid (which has access to savedSlides); we pass the
-  // pages as pendingCarouselSeed so it can stamp settingsMap once they load.
-  function handleBuildCarousel(pages: CarouselPage[]) {
-    if (pages.length === 0) return;
-    const stamp = Date.now();
-    const built = pages.map((p, i) => ({
-      ...makeEmptyEntry(`${stamp}-${i}`, 'carousel' as const, p.slideType),
-      headline: p.headline,
-      subheadline: p.subheadline,
-      ...(p.imageSrc ? { imageSrc: p.imageSrc } : {}),
-      ...(p.articleUrl ? { articleUrl: p.articleUrl } : {}),
-    }));
-    setEntries(built);
-    setPendingCarouselSeed(pages);
-    setTimeout(() => router.push(pathForSection('media')), 400);
-  }
-
   // Board widget → generator. Replace the current rows with a single fresh entry
   // carrying this row's link/caption/context, then hand its id to CanvasGrid via
-  // pendingBoardSend so it auto-fetches and advances to cropping. Carousel mode
-  // can't crop a raw video, so we fall back to a video mode.
+  // pendingBoardSend so it auto-fetches and advances to cropping.
   function handleSendBoardRow(row: BoardRow) {
-    const mode: VideoMode = entries[0]?.mode && entries[0].mode !== 'carousel' ? entries[0].mode : 'twitter';
+    const mode: VideoMode = entries[0]?.mode ?? 'twitter';
     const id = Date.now().toString();
     setEntries([{ ...makeEmptyEntry(id, mode), url: row.url, caption: row.vidCaption, context: row.context }]);
     setBoardOrigins(prev => ({ ...prev, [id]: { table: board.active, id: row.id } }));
@@ -351,16 +303,15 @@ export function StudioShell() {
 
       <main className="flex-1 ml-[72px] min-h-screen">
 
-        {aiEverVisited && (
-          <div style={{ display: activeSection === 'ai' ? undefined : 'none' }}>
-            <Suspense fallback={<SectionLoader />}>
-              <AiCardsSection
-                onBuildCard={handleBuildCard}
-                onBuildCarousel={handleBuildCarousel}
-                brandCategory={brand.category}
-                onCancel={() => router.push(pathForSection('brandkit'))}
-              />
-            </Suspense>
+        {carouselEverVisited && (
+          <div style={{ display: activeSection === 'carousel' ? undefined : 'none' }}>
+            <ErrorBoundary>
+              <GridSection>
+                <Suspense fallback={<SectionLoader />}>
+                  <CarouselSection userId={userId} brand={brand} />
+                </Suspense>
+              </GridSection>
+            </ErrorBoundary>
           </div>
         )}
 
@@ -375,6 +326,7 @@ export function StudioShell() {
             onUploadLogo={uploadLogo}
             onDeleteLogo={deleteLogo}
             onSelectLogo={selectLogo}
+            onSelectFullLogo={selectFullLogo}
             onClearError={() => setError(null)}
           />
         )}
@@ -386,7 +338,6 @@ export function StudioShell() {
                 active={activeSection === 'media'}
                 entries={entries}
                 canvasRefsMap={canvasRefsMap}
-                carouselRefsMap={carouselRefsMap}
                 brand={brand}
                 onAddRow={addRow}
                 onRemoveRow={(id) => {
@@ -401,24 +352,14 @@ export function StudioShell() {
                 onDownloadAll={downloadAll}
                 onHandleVideoError={handleVideoError}
                 onUpdateEntry={updateEntry}
-                onUpdateCarouselEntry={updateCarouselEntry}
                 onUpdateLocalVideo={updateLocalVideo}
                 onFetchVideo={fetchVideo}
-                onSetCarouselSubMode={setCarouselSubMode}
                 userId={userId}
                 format={currentFormat}
                 onSetFormat={handleSetFormat}
-                settingsMap={carouselSettingsMap}
-                setSettingsMap={setCarouselSettingsMap}
-                pendingAiSeed={pendingAiSeed}
-                onAiSeedConsumed={() => setPendingAiSeed(null)}
-                pendingCarouselSeed={pendingCarouselSeed}
-                onCarouselSeedConsumed={() => setPendingCarouselSeed(null)}
                 pendingBoardSend={pendingBoardSend}
                 onBoardSendConsumed={() => setPendingBoardSend(null)}
                 onEntryExported={handleEntryExported}
-                onBackToAi={() => router.push(pathForSection('ai'))}
-                onOpenAiTrending={() => router.push(`${pathForSection('ai')}?flow=trending`)}
               />
             </GridSection>
           </div>

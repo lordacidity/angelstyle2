@@ -9,12 +9,12 @@ export const SECTION_PATHS: Record<AppSection, string> = {
   brandkit: '/brand-kit',
   deck: '/deck',
   media: '/media',
+  carousel: '/carousel',
   builder: '/builder',
   trending: '/trending',
   images: '/images',
   board: '/board',
   schedule: '/schedule',
-  ai: '/ai-cards', // '/ai' is taken by the standalone legacy page
   prompts: '/ai-prompts',
   pricer: '/pricer',
 };

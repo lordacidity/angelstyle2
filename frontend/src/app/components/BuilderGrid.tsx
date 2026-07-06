@@ -538,6 +538,10 @@ function makeDragHandlers(data: SidebarElementData, setDragging: (v: boolean) =>
 }
 
 export function BuilderGrid({ brand, onSelectLogo, userId }: { brand: BrandProps; onSelectLogo: (url: string) => void; userId: string | null }) {
+  // The Builder's draggable element is the active favicon logo (brand.logoSrc),
+  // so its picker only lists favicon-kind logos — the separate full "Logo" isn't
+  // wired into posts.
+  const faviconLogos = brand.logos.filter(l => (l.kind ?? 'favicon') === 'favicon');
   const [selectedId, setSelectedId] = useState<SlideId>('slide-1');
   const [hoveredLogo, setHoveredLogo] = useState<string | null>(null);
   const [viewScale, setViewScale] = useState(0.9);
@@ -652,13 +656,13 @@ export function BuilderGrid({ brand, onSelectLogo, userId }: { brand: BrandProps
         <div className="flex flex-col gap-5 p-3 overflow-y-auto [&::-webkit-scrollbar]:hidden" style={{ scrollbarWidth: 'none' }}>
 
           {/* Brand Kit — logo picker + draggable active logo */}
-          {brand.logos.length > 0 && (
+          {faviconLogos.length > 0 && (
             <div className="flex flex-col gap-2">
               <span className="text-[9px] font-semibold text-zinc-600 uppercase tracking-wider">Brand Kit</span>
 
               {/* Logo grid — click to select, drag active logo to canvas */}
               <div className="flex flex-wrap gap-2">
-                {brand.logos.map((logo: BrandLogo) => {
+                {faviconLogos.map((logo: BrandLogo) => {
                   const isActive = brand.logoSrc === logo.url;
                   return (
                     <div
