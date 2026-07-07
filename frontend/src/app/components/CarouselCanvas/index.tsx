@@ -18,8 +18,8 @@ import { LayersPanel } from '../CarouselSettingsPanel';
 import { SwipePreviewMini } from '../SwipePreviewMini';
 
 import {
-  CAROUSEL_W as W, CAROUSEL_H as H,
-  CAROUSEL_PREVIEW_W, CAROUSEL_PREVIEW_H,
+  CAROUSEL_W as W, CAROUSEL_H, CAROUSEL_X_H,
+  CAROUSEL_PREVIEW_W, CAROUSEL_PREVIEW_H, CAROUSEL_X_PREVIEW_H,
   DISPLAY_SCALE,
   LOGO_PH, LOGO_CW, LOGO_CH,
 } from './constants';
@@ -99,12 +99,19 @@ interface CarouselCanvasProps {
   invertedSlots?: boolean;
   onSlotDrop?: (slotIndex: number, data: SidebarElementData) => void;
   staticMode?: boolean;
+  // Frame aspect: 'ig' = 4:5 (1080×1350), 'x' = 15:17 (1080×1224). Fixed per
+  // mount — parents must remount (key) the canvas when the platform changes.
+  platform?: 'ig' | 'x';
 }
 
 // ── CarouselCanvas (canvas + pan/zoom only) ──────────────────────────────────
 
 const CarouselCanvas = forwardRef<CarouselCanvasRef, CarouselCanvasProps>(
-  function CarouselCanvas({ imageSrc, videoSrc, chartBg = null, headline, subheadline, settings, onScaleChange, onSettingsChange, onBgLayerStateChange, brandLogoSrc, onRecordingStateChange, onHeadlineChange, onSubheadlineChange, rectMode = false, isDraggingElement = false, invertedSlots = false, onSlotDrop, staticMode = false }, ref) {
+  function CarouselCanvas({ imageSrc, videoSrc, chartBg = null, headline, subheadline, settings, onScaleChange, onSettingsChange, onBgLayerStateChange, brandLogoSrc, onRecordingStateChange, onHeadlineChange, onSubheadlineChange, rectMode = false, isDraggingElement = false, invertedSlots = false, onSlotDrop, staticMode = false, platform = 'ig' }, ref) {
+    // Per-instance frame height (width is always 1080 so DISPLAY_SCALE holds).
+    // Closures below capture these — safe because platform is fixed per mount.
+    const H         = platform === 'x' ? CAROUSEL_X_H         : CAROUSEL_H;
+    const PREVIEW_H = platform === 'x' ? CAROUSEL_X_PREVIEW_H : CAROUSEL_PREVIEW_H;
     const canvasRef    = useRef<HTMLCanvasElement>(null);
     const wrapperRef   = useRef<HTMLDivElement>(null);
     const cachedImgRef = useRef<HTMLImageElement | null>(null);
@@ -152,13 +159,13 @@ const CarouselCanvas = forwardRef<CarouselCanvasRef, CarouselCanvasProps>(
     const [imgScale,   setImgScale]   = useState(1);
     const [isDragging, setIsDragging] = useState(false);
     const [isCropMode, setIsCropMode] = useState(false);
-    const [cropRect,   setCropRect]   = useState({ x: 0, y: 0, w: CAROUSEL_PREVIEW_W, h: CAROUSEL_PREVIEW_H });
+    const [cropRect,   setCropRect]   = useState({ x: 0, y: 0, w: CAROUSEL_PREVIEW_W, h: PREVIEW_H });
     const [cropLock,   setCropLock]   = useState<'free' | '4:5'>('free');
     const dragStartRef     = useRef({ mx: 0, my: 0, ox: 0, oy: 0 });
     const cropOverlayRef   = useRef<HTMLCanvasElement>(null);
     const cropActiveHandle = useRef<string | null>(null);
     const cropDragStart    = useRef({ mx: 0, my: 0, rect: { x: 0, y: 0, w: 0, h: 0 } });
-    const cropRectRef      = useRef({ x: 0, y: 0, w: CAROUSEL_PREVIEW_W, h: CAROUSEL_PREVIEW_H });
+    const cropRectRef      = useRef({ x: 0, y: 0, w: CAROUSEL_PREVIEW_W, h: PREVIEW_H });
     const cropLockRef      = useRef<'free' | '4:5'>('free');
     useEffect(() => { cropRectRef.current = cropRect; }, [cropRect]);
     useEffect(() => { cropLockRef.current = cropLock; }, [cropLock]);
@@ -985,7 +992,7 @@ const CarouselCanvas = forwardRef<CarouselCanvasRef, CarouselCanvasProps>(
       if (!vc) return;
       const ctx = vc.getContext('2d');
       if (!ctx) return;
-      const PW = CAROUSEL_PREVIEW_W, PH = CAROUSEL_PREVIEW_H;
+      const PW = CAROUSEL_PREVIEW_W, PH = PREVIEW_H;
       ctx.clearRect(0, 0, PW, PH);
       // Dim the 4 strips outside the crop rect
       ctx.fillStyle = 'rgba(0,0,0,0.55)';
@@ -1557,7 +1564,7 @@ const CarouselCanvas = forwardRef<CarouselCanvasRef, CarouselCanvasProps>(
         const dy = e.clientY - circleDragStart.current.my;
         const r = circleRadsArr.current[idx];
         const newX = Math.max(r, Math.min(CAROUSEL_PREVIEW_W - r, circleDragStart.current.cx + dx));
-        const newY = Math.max(r, Math.min(CAROUSEL_PREVIEW_H - r, circleDragStart.current.cy + dy));
+        const newY = Math.max(r, Math.min(PREVIEW_H - r, circleDragStart.current.cy + dy));
         circlePosRefsArr.current[idx] = { x: newX, y: newY };
         setCirclePoses(prev => { const n = [...prev]; n[idx] = { x: newX, y: newY }; return n; });
         redraw(cachedImgRef.current);
@@ -1579,7 +1586,7 @@ const CarouselCanvas = forwardRef<CarouselCanvasRef, CarouselCanvasProps>(
         const my = e.clientY - bounds.top;
         const { cx, cy } = circleResizeStart.current;
         const dist = Math.sqrt((mx - cx) ** 2 + (my - cy) ** 2);
-        const maxR = Math.min(CAROUSEL_PREVIEW_W, CAROUSEL_PREVIEW_H) / 2;
+        const maxR = Math.min(CAROUSEL_PREVIEW_W, PREVIEW_H) / 2;
         const newR = Math.max(20, Math.min(maxR, Math.round(dist)));
         circleRadsArr.current[idx] = newR;
         setCircleRadii(prev => { const n = [...prev]; n[idx] = newR; return n; });
@@ -1680,14 +1687,14 @@ const CarouselCanvas = forwardRef<CarouselCanvasRef, CarouselCanvasProps>(
     // Draw overlay on enter; clear on exit
     useEffect(() => {
       if (isCropMode) { drawCropOverlay(cropRectRef.current); }
-      else { cropOverlayRef.current?.getContext('2d')?.clearRect(0, 0, CAROUSEL_PREVIEW_W, CAROUSEL_PREVIEW_H); }
+      else { cropOverlayRef.current?.getContext('2d')?.clearRect(0, 0, CAROUSEL_PREVIEW_W, PREVIEW_H); }
     }, [isCropMode, drawCropOverlay]);
 
     // Crop handle drag
     useEffect(() => {
       if (!isCropMode) return;
-      const MIN = 40, PW = CAROUSEL_PREVIEW_W, PH = CAROUSEL_PREVIEW_H;
-      const AR  = 4 / 5; // width / height for 4:5
+      const MIN = 40, PW = CAROUSEL_PREVIEW_W, PH = PREVIEW_H;
+      const AR  = W / H; // width / height — the frame's own aspect
 
       function computeRect(
         handle: string, dx: number, dy: number,
@@ -2261,12 +2268,12 @@ const CarouselCanvas = forwardRef<CarouselCanvasRef, CarouselCanvasProps>(
         const px  = Math.max(0, (renderX + savedCrop.sx * baseScale) * DISPLAY_SCALE);
         const py  = Math.max(0, (renderY + savedCrop.sy * baseScale) * DISPLAY_SCALE);
         const pw  = Math.min(CAROUSEL_PREVIEW_W - px, savedCrop.sw * baseScale * DISPLAY_SCALE);
-        const ph  = Math.min(CAROUSEL_PREVIEW_H - py, savedCrop.sh * baseScale * DISPLAY_SCALE);
+        const ph  = Math.min(PREVIEW_H - py, savedCrop.sh * baseScale * DISPLAY_SCALE);
         const nr  = { x: px, y: py, w: Math.max(10, pw), h: Math.max(10, ph) };
         cropRectRef.current = nr;
         setCropRect(nr);
       } else {
-        const full = { x: 0, y: 0, w: CAROUSEL_PREVIEW_W, h: CAROUSEL_PREVIEW_H };
+        const full = { x: 0, y: 0, w: CAROUSEL_PREVIEW_W, h: PREVIEW_H };
         cropRectRef.current = full;
         setCropRect(full);
       }
@@ -2329,7 +2336,7 @@ const CarouselCanvas = forwardRef<CarouselCanvasRef, CarouselCanvasProps>(
       setImgScale(newImgSc);
       onScaleChange?.(newImgSc);
 
-      const full = { x: 0, y: 0, w: CAROUSEL_PREVIEW_W, h: CAROUSEL_PREVIEW_H };
+      const full = { x: 0, y: 0, w: CAROUSEL_PREVIEW_W, h: PREVIEW_H };
       cropRectRef.current = full;
       setCropRect(full);
       setCropLock('free');
@@ -2341,7 +2348,7 @@ const CarouselCanvas = forwardRef<CarouselCanvasRef, CarouselCanvasProps>(
     const padXPv      = Math.round((32 + settings.contentPadding * 0.64) * DISPLAY_SCALE);
     const slotFwPv    = CAROUSEL_PREVIEW_W - 2 * padXPv;
     const aboveHLTop  = Math.max(0, blockTopPv - LOGO_PH - settings.aboveLogoGap);
-    const subSlotTop  = CAROUSEL_PREVIEW_H - LOGO_PH - padXPv;
+    const subSlotTop  = PREVIEW_H - LOGO_PH - padXPv;
     const slotPosArr: React.CSSProperties[] = [
       { top: padXPv,     left: padXPv },
       { top: aboveHLTop, left: padXPv },
@@ -2381,7 +2388,7 @@ const CarouselCanvas = forwardRef<CarouselCanvasRef, CarouselCanvasProps>(
       <div
         ref={wrapperRef}
         style={{
-          width: CAROUSEL_PREVIEW_W, height: CAROUSEL_PREVIEW_H,
+          width: CAROUSEL_PREVIEW_W, height: PREVIEW_H,
           position: 'relative', flexShrink: 0, overflow: 'hidden',
           cursor: (imageSrc || videoSrc) ? (isDragging ? 'grabbing' : 'grab') : 'default',
         }}
@@ -2404,7 +2411,7 @@ const CarouselCanvas = forwardRef<CarouselCanvasRef, CarouselCanvasProps>(
 
         <canvas
           ref={canvasRef} width={W} height={H}
-          style={{ width: CAROUSEL_PREVIEW_W, height: CAROUSEL_PREVIEW_H, display: 'block', pointerEvents: 'none' }}
+          style={{ width: CAROUSEL_PREVIEW_W, height: PREVIEW_H, display: 'block', pointerEvents: 'none' }}
         />
 
         {/* Hidden video element — only mounted in video mode for frame capture.
@@ -3059,7 +3066,7 @@ const CarouselCanvas = forwardRef<CarouselCanvasRef, CarouselCanvasProps>(
         <canvas
           ref={cropOverlayRef}
           width={CAROUSEL_PREVIEW_W}
-          height={CAROUSEL_PREVIEW_H}
+          height={PREVIEW_H}
           style={{ position: 'absolute', inset: 0, pointerEvents: 'none', zIndex: 4, display: isCropMode ? 'block' : 'none' }}
         />
 
@@ -3107,15 +3114,15 @@ const CarouselCanvas = forwardRef<CarouselCanvasRef, CarouselCanvasProps>(
             data-crop-handle=""
             style={{ position: 'absolute', bottom: 8, left: 0, right: 0, display: 'flex', justifyContent: 'center', gap: 5, zIndex: 16 }}
           >
-            {/* 4:5 snap + lock */}
+            {/* Frame-aspect snap + lock (4:5 on IG, 15:17 on X) */}
             <button
               onMouseDown={e => e.stopPropagation()}
               onClick={() => {
                 if (cropLock === '4:5') { setCropLock('free'); return; }
                 const { x, y, w, h } = cropRectRef.current;
-                const AR = 4 / 5;
+                const AR = W / H;
                 let nx = x, ny = y, nw = w, nh = w / AR;
-                if (nh > CAROUSEL_PREVIEW_H) { nh = h; nw = h * AR; nx = x + (w - nw) / 2; }
+                if (nh > PREVIEW_H) { nh = h; nw = h * AR; nx = x + (w - nw) / 2; }
                 else { ny = y + (h - nh) / 2; }
                 const nr = { x: Math.round(Math.max(0, nx)), y: Math.round(Math.max(0, ny)), w: Math.round(nw), h: Math.round(nh) };
                 cropRectRef.current = nr; setCropRect(nr); drawCropOverlay(nr);
@@ -3129,7 +3136,7 @@ const CarouselCanvas = forwardRef<CarouselCanvasRef, CarouselCanvasProps>(
                 color: cropLock === '4:5' ? '#000' : 'rgba(255,255,255,0.85)',
                 fontSize: 10, fontWeight: 700, cursor: 'pointer', letterSpacing: 0.3,
               }}
-            >4:5</button>
+            >{platform === 'x' ? '15:17' : '4:5'}</button>
             {/* Reset */}
             <button
               onMouseDown={e => e.stopPropagation()}
@@ -3141,7 +3148,7 @@ const CarouselCanvas = forwardRef<CarouselCanvasRef, CarouselCanvasProps>(
                 setImgScale(1);
                 onScaleChange?.(1);
                 redraw(cachedImgRef.current);
-                const full = { x: 0, y: 0, w: CAROUSEL_PREVIEW_W, h: CAROUSEL_PREVIEW_H };
+                const full = { x: 0, y: 0, w: CAROUSEL_PREVIEW_W, h: PREVIEW_H };
                 cropRectRef.current = full; setCropRect(full); drawCropOverlay(full);
               }}
               style={{

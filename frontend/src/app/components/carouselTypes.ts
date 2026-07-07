@@ -3,6 +3,10 @@
 export const MAX_FONT = 88;
 export const SUB_MAX  = 52;
 
+// Target platform for a carousel. IG cards are 4:5; X posts are a 2-card pair
+// (story slide + chart) at 15:17 with no swipe stamp.
+export type CarouselPlatform = 'ig' | 'x';
+
 export interface CarouselCanvasRef {
   startDownload: () => Promise<void>;
   cancelExport: () => void;

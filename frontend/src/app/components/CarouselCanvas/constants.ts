@@ -1,7 +1,10 @@
 export const CAROUSEL_W = 1080;
 export const CAROUSEL_H = 1350;
+// X (Twitter) cards render at 15:17 — same width, shorter frame.
+export const CAROUSEL_X_H = Math.round(CAROUSEL_W * 17 / 15);
 export const CAROUSEL_PREVIEW_W = 410;
 export const CAROUSEL_PREVIEW_H = Math.round(CAROUSEL_PREVIEW_W * CAROUSEL_H / CAROUSEL_W);
+export const CAROUSEL_X_PREVIEW_H = Math.round(CAROUSEL_PREVIEW_W * CAROUSEL_X_H / CAROUSEL_W);
 export const DISPLAY_SCALE = CAROUSEL_PREVIEW_W / CAROUSEL_W;
 export const LOGO_PW = 100;
 export const LOGO_PH = 28;

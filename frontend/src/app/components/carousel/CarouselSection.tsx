@@ -12,6 +12,7 @@ import type { CarouselModuleSeed } from './CarouselStudio';
 import { CarouselWizard } from './CarouselWizard';
 import type { BuiltCarouselModule } from './CarouselWizard';
 import { makeEmptyEntry } from '@/lib/entry';
+import type { CarouselPlatform } from '../carouselTypes';
 import type { BrandProps } from '../../types';
 
 type View = 'home' | 'wizard' | 'editor';
@@ -20,6 +21,9 @@ type WizardFlow = 'name' | 'trending';
 export function CarouselSection({ userId, brand }: { userId: string | null; brand: BrandProps }) {
   const [view,          setView]          = useState<View>('home');
   const [wizardFlow,    setWizardFlow]    = useState<WizardFlow>('name');
+  // IG: 4:5 cards, 3 story cards + chart, SWIPE stamps. X: 15:17 cards, one
+  // story card + chart, no swipe. Applies to all three entry flows.
+  const [platform,      setPlatform]      = useState<CarouselPlatform>('ig');
   const [editorVisited, setEditorVisited] = useState(false);
   const [pendingSeed,   setPendingSeed]   = useState<CarouselModuleSeed | null>(null);
   const pagesApi = useCarouselPages();
@@ -34,9 +38,9 @@ export function CarouselSection({ userId, brand }: { userId: string | null; bran
     setView('wizard');
   }
 
-  // Wizard result → the fixed 4-card module: cards 1–3 are photo pages (main +
-  // two supporting) with the pauv logo + swipe stamped on, card 4 is the
-  // market's bare chart page (no text — configured via seed).
+  // Wizard result → the module pages: photo cards first (3 on IG, 1 on X) with
+  // the pauv logo (+ swipe on IG) stamped on, then the market's bare chart page
+  // (no text — configured via seed) as the last card.
   function handleBuild(module: BuiltCarouselModule) {
     const stamp = Date.now();
     const photoEntries = module.pages.map((p, i) => ({
@@ -69,10 +73,13 @@ export function CarouselSection({ userId, brand }: { userId: string | null; bran
     openEditor();
   }
 
+  const isX = platform === 'x';
   const tiles: Array<{ title: string; desc: string; onClick: () => void; icon: React.ReactNode }> = [
     {
       title: 'From scratch',
-      desc: 'Open the editor with a blank carousel — add Main and Supporting pages yourself.',
+      desc: isX
+        ? 'Open the editor with a blank X post — add pages yourself at 15:17.'
+        : 'Open the editor with a blank carousel — add Main and Supporting pages yourself.',
       onClick: openEditor,
       icon: (
         <svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
@@ -84,7 +91,9 @@ export function CarouselSection({ userId, brand }: { userId: string | null; bran
     },
     {
       title: 'From a name',
-      desc: 'Pick a Pauv market, choose the news, choose 3 photos — DeepSeek writes the 4-card module, ending on their chart as a video.',
+      desc: isX
+        ? 'Pick a Pauv market, choose the news, choose a photo — DeepSeek writes the story card; card 2 is their chart.'
+        : 'Pick a Pauv market, choose the news, choose 3 photos — DeepSeek writes the 4-card module, ending on their chart as a video.',
       onClick: () => openWizard('name'),
       icon: (
         <svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
@@ -95,7 +104,9 @@ export function CarouselSection({ userId, brand }: { userId: string | null; bran
     },
     {
       title: 'Trending',
-      desc: 'AI finds the Pauv-listed figure trending right now and builds the same 4-card module automatically.',
+      desc: isX
+        ? 'AI finds the Pauv-listed figure trending right now and builds the same 2-card X post automatically.'
+        : 'AI finds the Pauv-listed figure trending right now and builds the same 4-card module automatically.',
       onClick: () => openWizard('trending'),
       icon: (
         <svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
@@ -111,9 +122,25 @@ export function CarouselSection({ userId, brand }: { userId: string | null; bran
       {/* ── Home — the three entry flows ── */}
       {view === 'home' && (
         <div className="flex flex-col items-center justify-center h-full min-h-[60vh] gap-8 px-6">
+          {/* Platform toggle — applies to all three flows below */}
+          <div className="flex items-center rounded-full border border-zinc-700 bg-zinc-900 p-0.5" title="Which platform the cards are built for">
+            {([['ig', 'Instagram'], ['x', 'X']] as const).map(([p, label]) => (
+              <button
+                key={p}
+                onClick={() => setPlatform(p)}
+                className={`rounded-full px-4 py-1.5 text-xs font-semibold transition-colors ${
+                  platform === p ? 'bg-white text-black' : 'text-zinc-400 hover:text-zinc-200'
+                }`}
+              >{label}</button>
+            ))}
+          </div>
           <div className="text-center">
             <h1 className="text-lg font-semibold text-zinc-100">Carousel</h1>
-            <p className="text-sm text-zinc-500 mt-1">Multi-page swipe posts — 3 story cards + their live chart as a video.</p>
+            <p className="text-sm text-zinc-500 mt-1">
+              {isX
+                ? 'Two-image X posts at 15:17 — one story card + their live chart.'
+                : 'Multi-page swipe posts — 3 story cards + their live chart as a video.'}
+            </p>
           </div>
           <div className="flex flex-wrap items-stretch justify-center gap-4">
             {tiles.map(t => (
@@ -145,6 +172,7 @@ export function CarouselSection({ userId, brand }: { userId: string | null; bran
       {view === 'wizard' && (
         <CarouselWizard
           flow={wizardFlow}
+          platform={platform}
           brandCategory={brand.category}
           onBuild={handleBuild}
           onCancel={() => setView('home')}
@@ -155,9 +183,11 @@ export function CarouselSection({ userId, brand }: { userId: string | null; bran
       {editorVisited && (
         <div className="h-full" style={{ display: view === 'editor' ? undefined : 'none' }}>
           <CarouselStudio
+            key={platform} // remount on toggle — canvases fix their frame size at mount
             pagesApi={pagesApi}
             userId={userId}
             brand={brand}
+            platform={platform}
             onBackHome={() => setView('home')}
             pendingSeed={pendingSeed}
             onSeedConsumed={() => setPendingSeed(null)}

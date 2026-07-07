@@ -10,7 +10,7 @@ import CarouselCanvas, { CAROUSEL_PREVIEW_W } from '../CarouselCanvas';
 import type { CarouselChartBg } from '../CarouselCanvas';
 import { CarouselSettingsPanel } from '../CarouselSettingsPanel';
 import { defaultCarouselSettings, defaultSwipeStyle } from '../carouselTypes';
-import type { CarouselCanvasRef, CarouselSettings, CarouselBgLayerState } from '../carouselTypes';
+import type { CarouselCanvasRef, CarouselSettings, CarouselBgLayerState, CarouselPlatform } from '../carouselTypes';
 import { useCarouselTemplates } from '../../hooks/useCarouselTemplates';
 import { ChartsImageInputCard } from '../ChartsImageInputCard';
 import type { ChartsMarket } from '../ChartsCanvas';
@@ -67,6 +67,9 @@ interface CarouselStudioProps {
   pagesApi: CarouselPagesApi;
   userId: string | null;
   brand: BrandProps;
+  // IG (4:5 cards, swipe stamps) or X (15:17 cards, no swipe). The parent keys
+  // this component by platform so canvases remount at the right frame size.
+  platform: CarouselPlatform;
   onBackHome: () => void;
   pendingSeed: CarouselModuleSeed | null;
   onSeedConsumed: () => void;
@@ -174,7 +177,7 @@ function CarouselBgControls({
 }
 
 export function CarouselStudio({
-  pagesApi, userId, brand, onBackHome, pendingSeed, onSeedConsumed,
+  pagesApi, userId, brand, platform, onBackHome, pendingSeed, onSeedConsumed,
 }: CarouselStudioProps) {
   const { pages } = pagesApi;
 
@@ -255,6 +258,27 @@ export function CarouselStudio({
       });
     }
   }, [preloadedAudios]);
+
+  // IG post caption — one caption for the whole carousel (it's a single IG
+  // post). Same generator and rules as /media's Post caption card: the on-card
+  // text is the caption signal, /api/ai/social-caption picks the topic from
+  // the brand kit's AI-Prompts pool and writes the 3-paragraph long-form
+  // caption. Auto-copy shares /media's persisted setting.
+  const [igCaption,          setIgCaption]          = useState<{ text: string; loading: boolean; error: string | null; copied: boolean } | null>(null);
+  const [igCaptionContext,   setIgCaptionContext]   = useState('');
+  const [igCaptionCollapsed, setIgCaptionCollapsed] = useState(false);
+  // Story text the auto-generator already ran for — one attempt per distinct
+  // text, so an API failure doesn't retry in a loop (Regenerate still works).
+  const igCaptionAutoRanRef = useRef('');
+  const [autoCopyCaption,    setAutoCopyCaption]    = useState(false);
+  const autoCopyCaptionRef = useRef(autoCopyCaption);
+  autoCopyCaptionRef.current = autoCopyCaption;
+  useEffect(() => {
+    try { setAutoCopyCaption(window.localStorage.getItem('studio.autoCopyCaption') === 'true'); } catch { /* ignore */ }
+  }, []);
+  useEffect(() => {
+    try { window.localStorage.setItem('studio.autoCopyCaption', String(autoCopyCaption)); } catch { /* ignore */ }
+  }, [autoCopyCaption]);
 
   // Talent roster — lazy-loaded for the chart page's market search.
   const [allTalents,     setAllTalents]     = useState<Talent[] | null>(null);
@@ -363,6 +387,12 @@ export function CarouselStudio({
     setChartsImageMarketMap(prev => ({ ...prev, [chartEntryId]: mk }));
     loadChartTrends(chartEntryId, mk, market.name);
 
+    // Fresh module → fresh caption; the auto-generator below drafts the new
+    // one as soon as it sees the new pages' text.
+    setIgCaption(null);
+    setIgCaptionContext('');
+    igCaptionAutoRanRef.current = '';
+
     setModulePhotoPool(photoPool);
     setModulePhotoPageIds(photoPageIds);
     setModuleCircleQuery(circleQuery ?? '');
@@ -397,7 +427,8 @@ export function CarouselStudio({
         // carries the pauv mark, so no logo up top there.
         zoneLogoSlots[0] = id === pending.thirdId ? null : '/pauvlogo.png';
         const swipeZoneSlots = [...(base.swipeZoneSlots ?? Array(9).fill(null))];
-        swipeZoneSlots[2] = defaultSwipeStyle();            // top-right zone — white SWIPE →
+        // Top-right white SWIPE → — IG only; X posts don't swipe.
+        swipeZoneSlots[2] = platform === 'ig' ? defaultSwipeStyle() : null;
         next[id] = {
           ...base,
           zoneLogoSlots,
@@ -548,6 +579,93 @@ export function CarouselStudio({
   }, [bgSourceOf, chartsImageMarketMap, chartsImageNameOverrideMap, chartsImageIndustryOverrideMap,
       chartsImageDirectionMap, chartsImageNoiseLevelMap, chartsImageSubModeMap, chartsImageSpeedMap, chartsImageAudioMap]);
 
+  // Port of /media's generateSocialCaption, minus the CTA/market-widget sync
+  // (the carousel has no market widget). Signals: the story cards' headlines +
+  // sublines stand in for the on-card caption, the chart card's market name
+  // rides along in context, and any fetched video title is a light extra
+  // signal. All output rules (3 paragraphs, 1750–2000 chars, no dashes, no
+  // CTA) are enforced by the /api/ai/social-caption route itself.
+  const generateIgCaption = useCallback(async () => {
+    const storyText = pages
+      .filter(p => bgSourceOf(p) !== 'chart')
+      .map(p => [p.headline?.trim(), p.subheadline?.trim()].filter(Boolean).join(' '))
+      .filter(Boolean)
+      .join('\n');
+    const marketName = pages
+      .map(p => (bgSourceOf(p) === 'chart' ? (chartsImageNameOverrideMap[p.id] || chartsImageMarketMap[p.id]?.name) : null))
+      .find(Boolean);
+    const context = [igCaptionContext.trim(), marketName ? `The post is about ${marketName}.` : '']
+      .filter(Boolean).join(' ');
+    const videoTitle = pages.map(p => p.data?.title).find(Boolean);
+    if (!storyText && !context && !videoTitle) {
+      setIgCaption({ text: '', loading: false, error: 'Write the cards’ headlines (or add context) first.', copied: false });
+      return;
+    }
+    setIgCaption(prev => ({ text: prev?.text ?? '', loading: true, error: null, copied: false }));
+    try {
+      // Category drives which AI-Prompts topic pool we draw from — same brand
+      // kit mapping as /media (athletes→athlete, gamers→gamer, else artist).
+      const promptCategory: 'athlete' | 'artist' | 'gamer' =
+        brand.category === 'athletes' ? 'athlete' :
+        brand.category === 'gamers'   ? 'gamer'   :
+        'artist';
+      const r = await fetch('/api/ai/social-caption', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          caption:    storyText || undefined,
+          context:    context || undefined,
+          videoTitle: videoTitle || undefined,
+          category:   promptCategory,
+        }),
+      });
+      const data = await r.json().catch(() => ({})) as { caption?: string; error?: string };
+      if (!r.ok || data.error || !data.caption) throw new Error(data.error || `caption failed (${r.status})`);
+      const finalText = data.caption;
+      setIgCaption({ text: finalText, loading: false, error: null, copied: false });
+      if (autoCopyCaptionRef.current && finalText) {
+        try {
+          await navigator.clipboard.writeText(finalText);
+          setIgCaption(prev => (prev ? { ...prev, copied: true } : prev));
+          setTimeout(() => setIgCaption(prev => (prev ? { ...prev, copied: false } : prev)), 1800);
+        } catch { /* clipboard blocked — the Copy button still works */ }
+      }
+    } catch (e) {
+      setIgCaption(prev => ({ text: prev?.text ?? '', loading: false, error: String(e), copied: false }));
+    }
+  }, [pages, bgSourceOf, chartsImageMarketMap, chartsImageNameOverrideMap, igCaptionContext, brand.category]);
+
+  const copyIgCaption = useCallback(async () => {
+    const text = igCaption?.text;
+    if (!text) return;
+    try {
+      await navigator.clipboard.writeText(text);
+      setIgCaption(prev => (prev ? { ...prev, copied: true } : prev));
+      setTimeout(() => setIgCaption(prev => (prev ? { ...prev, copied: false } : prev)), 1500);
+    } catch { /* ignore */ }
+  }, [igCaption]);
+
+  // Auto-generate the caption once the cards carry story text — no button
+  // press needed. Debounced so manual typing settles first; a wizard module's
+  // pages arrive complete, so its caption starts drafting right after landing
+  // in the editor. Runs once per distinct text: an existing caption is never
+  // overwritten (Regenerate covers that), and a failed attempt doesn't loop.
+  useEffect(() => {
+    if (platform !== 'ig') return;
+    if (igCaption?.loading || igCaption?.text) return;
+    const storyText = pages
+      .filter(p => bgSourceOf(p) !== 'chart')
+      .map(p => [p.headline?.trim(), p.subheadline?.trim()].filter(Boolean).join(' '))
+      .filter(Boolean)
+      .join('\n');
+    if (!storyText || igCaptionAutoRanRef.current === storyText) return;
+    const t = setTimeout(() => {
+      igCaptionAutoRanRef.current = storyText;
+      void generateIgCaption();
+    }, 2000);
+    return () => clearTimeout(t);
+  }, [platform, pages, bgSourceOf, igCaption, generateIgCaption]);
+
   const selectedEntry = pages.find(p => p.id === selectedId) ?? pages[0];
   const showPanels = !!selectedEntry;
   const selectedBgSource = selectedEntry ? bgSourceOf(selectedEntry) : 'photo';
@@ -584,6 +702,9 @@ export function CarouselStudio({
     pagesApi.clearAll();
     setSelectedId('');
     setSettingsMap({});
+    setIgCaption(null);
+    setIgCaptionContext('');
+    igCaptionAutoRanRef.current = '';
   }
 
   return (
@@ -711,6 +832,7 @@ export function CarouselStudio({
                       ? (entry.localVideoSrc ?? (entry.data ? bestVideoUrl(entry.data) : undefined))
                       : undefined}
                     chartBg={chartBgOf(entry)}
+                    platform={platform}
                     headline={entry.headline ?? ''}
                     subheadline={entry.subheadline ?? ''}
                     settings={getSettings(entry.id)}
@@ -953,6 +1075,111 @@ export function CarouselStudio({
               </div>
             )}
           </div>
+
+          {/* Post caption — IG only. Same card as /media: one long-form caption
+              for the whole carousel post, generated from the cards' text. */}
+          {platform === 'ig' && (
+            <div className="rounded-lg bg-zinc-950 border border-zinc-800 overflow-hidden" style={{ width: CARD_W }}>
+              <div className={`flex items-center justify-between gap-3 px-3 py-2 ${igCaptionCollapsed ? '' : 'border-b border-zinc-800'}`}>
+                <div className="flex items-center gap-2 min-w-0">
+                  <button
+                    onClick={() => setIgCaptionCollapsed(v => !v)}
+                    title={igCaptionCollapsed ? 'Expand caption' : 'Collapse caption'}
+                    className="flex items-center justify-center w-4 h-4 text-zinc-500 hover:text-zinc-200 transition-colors shrink-0"
+                  >
+                    <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                      {igCaptionCollapsed
+                        ? <polyline points="6 9 12 15 18 9"/>
+                        : <polyline points="18 15 12 9 6 15"/>}
+                    </svg>
+                  </button>
+                  <span className="text-[11px] font-semibold text-zinc-300 uppercase tracking-wider">Post caption</span>
+                </div>
+                <div className="flex items-center gap-1.5 shrink-0">
+                  <button
+                    onClick={() => setAutoCopyCaption(v => !v)}
+                    title={autoCopyCaption
+                      ? 'Auto-copy is ON — captions are copied to the clipboard as soon as they finish generating'
+                      : 'Auto-copy is OFF — turn on to copy each caption automatically when it finishes generating'}
+                    className={`flex items-center gap-1 h-7 px-2 rounded-md border transition-colors text-[10px] font-medium ${
+                      autoCopyCaption
+                        ? 'bg-emerald-600/15 border-emerald-700 text-emerald-300'
+                        : 'bg-zinc-950 border-zinc-800 text-zinc-500 hover:text-zinc-300 hover:border-zinc-600'
+                    }`}
+                  >
+                    <span className={`w-1.5 h-1.5 rounded-full shrink-0 ${autoCopyCaption ? 'bg-emerald-400' : 'bg-zinc-600'}`} />
+                    Auto-copy
+                  </button>
+                  {igCaption?.text && (
+                    <button
+                      onClick={() => void copyIgCaption()}
+                      className="flex items-center gap-1.5 h-7 px-2.5 rounded-md bg-zinc-950 border border-zinc-800 text-zinc-400 hover:text-zinc-200 hover:border-zinc-600 transition-colors text-[10px] font-medium"
+                      title="Copy to clipboard"
+                    >
+                      {igCaption.copied ? (
+                        <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                          <polyline points="20 6 9 17 4 12"/>
+                        </svg>
+                      ) : (
+                        <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                          <rect x="9" y="9" width="13" height="13" rx="2" ry="2"/>
+                          <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/>
+                        </svg>
+                      )}
+                      {igCaption.copied ? 'Copied' : 'Copy'}
+                    </button>
+                  )}
+                  <button
+                    onClick={() => void generateIgCaption()}
+                    disabled={igCaption?.loading}
+                    className="flex items-center gap-1.5 h-7 px-2.5 rounded-md bg-white text-black hover:bg-zinc-100 disabled:opacity-40 disabled:cursor-not-allowed transition-colors text-[10px] font-semibold"
+                    title="Generate caption with AI"
+                  >
+                    {igCaption?.loading ? (
+                      <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" style={{ animation: 'spin 1s linear infinite' }}>
+                        <path d="M21 12a9 9 0 1 1-6.219-8.56"/>
+                      </svg>
+                    ) : (
+                      <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                        <polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/>
+                      </svg>
+                    )}
+                    {igCaption?.loading ? 'Generating…' : igCaption?.text ? 'Regenerate' : 'Generate'}
+                  </button>
+                </div>
+              </div>
+              {!igCaptionCollapsed && (
+                <>
+                  {/* Free-form context — carousel pages have no Context field,
+                      so it lives here; steers the topic pick like /media's. */}
+                  <div className="px-3 py-1.5 border-b border-zinc-800">
+                    <input
+                      value={igCaptionContext}
+                      onChange={e => setIgCaptionContext(e.target.value)}
+                      placeholder="Context to steer the caption (optional)…"
+                      className="w-full bg-transparent text-[11px] text-zinc-400 placeholder-zinc-700 outline-none"
+                    />
+                  </div>
+                  <div className="px-3 py-2.5">
+                    {igCaption?.error ? (
+                      <span className="text-xs text-red-400">{igCaption.error}</span>
+                    ) : igCaption?.text ? (
+                      <textarea
+                        value={igCaption.text}
+                        onChange={e => setIgCaption(prev => (prev ? { ...prev, text: e.target.value, copied: false } : prev))}
+                        rows={Math.min(8, Math.max(4, igCaption.text.split('\n').length + Math.ceil(igCaption.text.length / 90)))}
+                        className="w-full bg-transparent text-[12px] text-zinc-200 placeholder-zinc-700 outline-none resize-y leading-relaxed"
+                      />
+                    ) : (
+                      <span className="text-[11px] text-zinc-600">
+                        The long-form caption drafts itself once the cards have headlines. Add context above to steer it, then Regenerate.
+                      </span>
+                    )}
+                  </div>
+                </>
+              )}
+            </div>
+          )}
         </div>
       )}
 

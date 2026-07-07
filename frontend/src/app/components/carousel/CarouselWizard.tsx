@@ -10,6 +10,7 @@
 
 import { useEffect, useState } from 'react';
 import type { BrandCategory } from '../../types';
+import type { CarouselPlatform } from '../carouselTypes';
 import { resolvePhotoSrc } from './photoSrc';
 
 interface Talent {
@@ -51,9 +52,12 @@ const PAGE_LABELS = ['Main · News hook', 'Supporting · What happened', 'Suppor
 const PHOTO_BATCH = 5;
 
 export function CarouselWizard({
-  flow, brandCategory, onBuild, onCancel,
+  flow, platform, brandCategory, onBuild, onCancel,
 }: {
   flow: 'name' | 'trending';
+  // IG builds the 4-card module (3 photo cards + chart); X builds a 2-card
+  // post (one story card + chart) — copy generation is shared, X keeps page 1.
+  platform: CarouselPlatform;
   brandCategory?: BrandCategory;
   onBuild: (module: BuiltCarouselModule) => void;
   onCancel: () => void;
@@ -61,6 +65,8 @@ export function CarouselWizard({
   type Step = 'person' | 'news' | 'photos';
   const [step,  setStep]  = useState<Step>('person');
   const [error, setError] = useState<string | null>(null);
+  const photosNeeded = platform === 'x' ? 1 : 3;
+  const moduleLabel  = platform === 'x' ? '2-card X post' : '4-card module';
 
   // Roster — the 'name' flow picks from it; 'trending' resolves the AI pick
   // against it (trending is restricted to Pauv-listed figures).
@@ -193,7 +199,7 @@ export function CarouselWizard({
     setSelectedPhotos(cur => {
       const idx = cur.findIndex(s => s.url === p.url);
       if (idx !== -1) return cur.filter(s => s.url !== p.url);
-      if (cur.length >= 3) return cur;
+      if (cur.length >= photosNeeded) return cur;
       return [...cur, p];
     });
   };
@@ -321,14 +327,15 @@ export function CarouselWizard({
   // ── Build ───────────────────────────────────────────────────────────────────
 
   const build = async () => {
-    if (!selectedTalent || !copyPages || selectedPhotos.length !== 3 || building) return;
+    if (!selectedTalent || !copyPages || selectedPhotos.length !== photosNeeded || building) return;
     setBuilding(true);
     try {
       const photoUrls: string[] = [];
       for (const p of selectedPhotos) photoUrls.push(await resolvePhotoSrc(p.url, p.thumbnail));
       const circlePhotoUrl = selectedCircle ? await resolvePhotoSrc(selectedCircle.url, selectedCircle.thumbnail) : undefined;
       onBuild({
-        pages: copyPages,
+        // X keeps only the hook page — its card 2 is the chart.
+        pages: platform === 'x' ? copyPages.slice(0, 1) : copyPages,
         photoUrls,
         photoPool: photoPoolAll,
         circlePhotoUrl,
@@ -350,7 +357,7 @@ export function CarouselWizard({
   const stepLabels: Array<{ key: Step; label: string }> = [
     { key: 'person', label: flow === 'name' ? '1. Market' : '1. Trending pick' },
     { key: 'news',   label: '2. News & copy' },
-    { key: 'photos', label: '3. Photos (3 of 9)' },
+    { key: 'photos', label: photosNeeded === 1 ? '3. Photo (1 of 9)' : '3. Photos (3 of 9)' },
   ];
   // Trending has no separate news step — the pick screen shows the copy too.
   const visibleSteps = flow === 'trending' ? stepLabels.filter(s => s.key !== 'news') : stepLabels;
@@ -394,10 +401,12 @@ export function CarouselWizard({
     </>
   );
 
-  // Shared 4-page copy editor + continue button
-  const copyEditor = copyPages && !copyLoading && (
+  // Shared copy editor + continue button. X uses only card 1 (hook headline +
+  // subline) — the other two pages exist but stay hidden and unused.
+  const visibleCopyPages = copyPages ? (platform === 'x' ? copyPages.slice(0, 1) : copyPages) : null;
+  const copyEditor = visibleCopyPages && !copyLoading && (
     <>
-      {copyPages.map((p, i) => (
+      {visibleCopyPages.map((p, i) => (
         <div key={i} className="bg-zinc-950 rounded-lg border border-zinc-800 p-5">
           <div className="flex items-center gap-2 mb-3">
             <span className="text-xs font-semibold text-zinc-500">Card {i + 1}</span>
@@ -419,7 +428,7 @@ export function CarouselWizard({
       ))}
       <button onClick={goToPhotos}
         className="self-start px-4 py-2 rounded-md bg-white text-black hover:bg-zinc-100 text-sm font-semibold transition-colors">
-        Next: pick 3 photos
+        {photosNeeded === 1 ? 'Next: pick a photo' : 'Next: pick 3 photos'}
       </button>
     </>
   );
@@ -458,7 +467,7 @@ export function CarouselWizard({
         {step === 'person' && flow === 'name' && (
           <div className="bg-zinc-950 rounded-lg border border-zinc-800 p-6">
             <h2 className="text-sm font-semibold mb-1">Pick a Pauv market</h2>
-            <p className="text-xs text-zinc-600 mb-4">Search by name or ticker. AI fetches the news, DeepSeek writes the 4 cards.</p>
+            <p className="text-xs text-zinc-600 mb-4">Search by name or ticker. AI fetches the news, DeepSeek writes the {moduleLabel}.</p>
             <div className="flex items-center gap-2 border border-zinc-700 rounded-md px-2.5 h-9 mb-3">
               <input
                 autoFocus
@@ -517,7 +526,7 @@ export function CarouselWizard({
             <div className="bg-zinc-950 rounded-lg border border-zinc-800 p-6">
               <h2 className="text-sm font-semibold mb-1">Trending on Pauv</h2>
               <p className="text-xs text-zinc-600 mb-4">
-                Gemini searches the web for the Pauv-listed figure who&rsquo;s trending right now, then DeepSeek writes the 4-card module. Leave the name blank to let it pick.
+                Gemini searches the web for the Pauv-listed figure who&rsquo;s trending right now, then DeepSeek writes the {moduleLabel}. Leave the name blank to let it pick.
               </p>
               <label className="block text-xs text-zinc-500 mb-1.5">Name hint (optional)</label>
               <div className="flex items-center border border-zinc-700 rounded-md px-2.5 h-9 mb-3">
@@ -582,7 +591,7 @@ export function CarouselWizard({
             <div className="bg-zinc-950 rounded-lg border border-zinc-800 p-5">
               <h2 className="text-sm font-semibold mb-1">Choose the news</h2>
               <p className="text-xs text-zinc-600 mb-4">
-                {lookupLoading ? `Fetching news about ${selectedTalent.name}…` : `${stories.length} stories found. Picking one rewrites the 4 cards.`}
+                {lookupLoading ? `Fetching news about ${selectedTalent.name}…` : `${stories.length} stories found. Picking one rewrites the ${platform === 'x' ? 'card' : '4 cards'}.`}
               </p>
               {lookupLoading && <div className="flex flex-col gap-2">{[1,2,3].map(i => <div key={i} className="h-14 bg-zinc-800 rounded-md animate-pulse" />)}</div>}
               {!lookupLoading && stories.length === 0 && <p className="text-sm text-zinc-600">No recent news found. Try another market.</p>}
@@ -614,10 +623,11 @@ export function CarouselWizard({
         {/* ── STEP: photos — pick exactly 3 of 9 (order = cards 1–3) ── */}
         {step === 'photos' && selectedTalent && (
           <div className="bg-zinc-950 rounded-lg border border-zinc-800 p-5">
-            <h2 className="text-sm font-semibold mb-1">Pick 3 photos</h2>
+            <h2 className="text-sm font-semibold mb-1">{photosNeeded === 1 ? 'Pick 1 photo' : 'Pick 3 photos'}</h2>
             <p className="text-xs text-zinc-600 mb-4">
-              Pick from both searches — the person AND the story. Selection order maps to cards 1–3.
-              Card 4 uses {selectedTalent.name}&rsquo;s live chart — no photo needed.
+              {photosNeeded === 1
+                ? <>Pick from either search — the person or the story. It becomes the story card; card 2 is {selectedTalent.name}&rsquo;s live chart — no photo needed.</>
+                : <>Pick from both searches — the person AND the story. Selection order maps to cards 1–3. Card 4 uses {selectedTalent.name}&rsquo;s live chart — no photo needed.</>}
             </p>
 
             {/* Search 1 — the person */}
@@ -702,11 +712,11 @@ export function CarouselWizard({
 
             <div className="flex items-center gap-3">
               <span className="text-xs text-zinc-500">
-                {selectedPhotos.length}/3 selected{selectedCircle ? ' · circle photo ✓' : ' · no circle photo'}
+                {selectedPhotos.length}/{photosNeeded} selected{selectedCircle ? ' · circle photo ✓' : ' · no circle photo'}
               </span>
-              <button onClick={build} disabled={selectedPhotos.length !== 3 || building}
+              <button onClick={build} disabled={selectedPhotos.length !== photosNeeded || building}
                 className="ml-auto px-4 py-2 rounded-md bg-white text-black hover:bg-zinc-100 disabled:opacity-30 disabled:cursor-not-allowed text-sm font-semibold transition-colors">
-                {building ? 'Downloading photos…' : 'Build 4-card module'}
+                {building ? 'Downloading photos…' : `Build ${moduleLabel}`}
               </button>
             </div>
           </div>
