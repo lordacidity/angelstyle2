@@ -14,7 +14,7 @@ import type { CarouselCanvasRef, CarouselSettings, CarouselBgLayerState, Carouse
 import { useCarouselTemplates } from '../../hooks/useCarouselTemplates';
 import { ChartsImageInputCard } from '../ChartsImageInputCard';
 import type { ChartsMarket } from '../ChartsCanvas';
-import type { ChartsImageMarket, ChartsImageDirection, ChartsImageNoiseLevel, ChartsImageSubMode } from '../ChartsImageCanvas';
+import type { ChartsImageMarket, ChartsImageSubMode } from '../ChartsImageCanvas';
 import type { PreloadedAudio } from '../ChartsInputCard';
 import type { RecordingState } from '../TikTokCanvas/types';
 import { VideoControlsBar } from '../VideoControlsBar';
@@ -205,8 +205,8 @@ export function CarouselStudio({
   const [chartsImageTrendsLoadedMap,     setChartsImageTrendsLoadedMap]     = useState<Record<string, boolean>>({});
   const [chartsImageTrendsErrorMap,      setChartsImageTrendsErrorMap]      = useState<Record<string, string | null>>({});
   const [chartsImageIndustryOverrideMap, setChartsImageIndustryOverrideMap] = useState<Record<string, string>>({});
-  const [chartsImageDirectionMap,        setChartsImageDirectionMap]        = useState<Record<string, ChartsImageDirection>>({});
-  const [chartsImageNoiseLevelMap,       setChartsImageNoiseLevelMap]       = useState<Record<string, ChartsImageNoiseLevel>>({});
+  const [chartsImageStrengthMap,         setChartsImageStrengthMap]         = useState<Record<string, number>>({});
+  const [chartsImageNoiseMap,            setChartsImageNoiseMap]            = useState<Record<string, number>>({});
   const [chartsImageSubModeMap,          setChartsImageSubModeMap]          = useState<Record<string, ChartsImageSubMode>>({});
   const [chartsImageSpeedMap,            setChartsImageSpeedMap]            = useState<Record<string, number>>({});
   const [chartsImageAudioMap,            setChartsImageAudioMap]            = useState<Record<string, { label: string; url: string; durationMs: number } | null>>({});
@@ -570,14 +570,14 @@ export function CarouselStudio({
       market:           market as ChartsImageMarket,
       overrideName:     chartsImageNameOverrideMap[entry.id] ?? '',
       overrideIndustry: chartsImageIndustryOverrideMap[entry.id] ?? '',
-      direction:        chartsImageDirectionMap[entry.id] ?? 'up',
-      noiseLevel:       chartsImageNoiseLevelMap[entry.id] ?? 'none',
+      strength:         chartsImageStrengthMap[entry.id] ?? 0,
+      noise:            chartsImageNoiseMap[entry.id] ?? 0,
       subMode:          chartsImageSubModeMap[entry.id] ?? 'image',
       speed:            chartsImageSpeedMap[entry.id] ?? 1,
       audioUrl:         chartsImageAudioMap[entry.id]?.url,
     };
   }, [bgSourceOf, chartsImageMarketMap, chartsImageNameOverrideMap, chartsImageIndustryOverrideMap,
-      chartsImageDirectionMap, chartsImageNoiseLevelMap, chartsImageSubModeMap, chartsImageSpeedMap, chartsImageAudioMap]);
+      chartsImageStrengthMap, chartsImageNoiseMap, chartsImageSubModeMap, chartsImageSpeedMap, chartsImageAudioMap]);
 
   // Port of /media's generateSocialCaption, minus the CTA/market-widget sync
   // (the carousel has no market widget). Signals: the story cards' headlines +
@@ -987,11 +987,11 @@ export function CarouselStudio({
               onRemove={() => setCarouselBgSourceMap(prev => ({ ...prev, [selectedEntry.id]: 'photo' }))}
               onOpenPhotoPicker={query => openPhotoPicker(selectedEntry.id, query)}
               overrideIndustry={chartsImageIndustryOverrideMap[selectedEntry.id] ?? ''}
-              direction={chartsImageDirectionMap[selectedEntry.id] ?? 'up'}
-              noiseLevel={chartsImageNoiseLevelMap[selectedEntry.id] ?? 'none'}
+              strength={chartsImageStrengthMap[selectedEntry.id] ?? 0}
+              noise={chartsImageNoiseMap[selectedEntry.id] ?? 0}
               onUpdateOverrideIndustry={v => setChartsImageIndustryOverrideMap(prev => ({ ...prev, [selectedEntry.id]: v }))}
-              onUpdateDirection={v => setChartsImageDirectionMap(prev => ({ ...prev, [selectedEntry.id]: v }))}
-              onUpdateNoiseLevel={v => setChartsImageNoiseLevelMap(prev => ({ ...prev, [selectedEntry.id]: v }))}
+              onUpdateStrength={v => setChartsImageStrengthMap(prev => ({ ...prev, [selectedEntry.id]: v }))}
+              onUpdateNoise={v => setChartsImageNoiseMap(prev => ({ ...prev, [selectedEntry.id]: v }))}
               subMode={chartsImageSubModeMap[selectedEntry.id] ?? 'image'}
               preloadedAudios={preloadedAudios}
               audioTrack={chartsImageAudioMap[selectedEntry.id] ?? null}

@@ -2,10 +2,23 @@
 // be rendered both by the standalone ChartsImageCanvas component AND as a carousel
 // background layer (CarouselCanvas). Everything here is `(ctx, …)` → no React.
 
-import type { ChartsImageMarket, ChartsImageDirection, ChartsImageNoiseLevel, SparkPoint } from './types';
+import type { ChartsImageMarket, ChartsImageStrength, ChartsImageNoise, SparkPoint } from './types';
 
-// Noise amplitude per level, as a fraction of the chart's plot height. 0 = off.
-export const NOISE_SCALE: Record<ChartsImageNoiseLevel, number> = { none: 0, small: 0.035, med: 0.075, large: 0.13 };
+// Max noise amplitude as a fraction of the chart's plot height, reached when the
+// 0–100 noise slider sits at 100. (The old 'small'/'med'/'large' presets mapped
+// to 0.035/0.075/0.13, so full slide is ~3× the old maximum.)
+export const MAX_NOISE_SCALE = 0.4;
+
+// 0–100 slider value → internal noise fraction fed to drawStepChart.
+export function noiseToScale(noise: ChartsImageNoise): number {
+  return (Math.min(100, Math.max(0, noise)) / 100) * MAX_NOISE_SCALE;
+}
+
+// Slider bounds for the signed strength (± percent). The strength drives both
+// the headline change % AND how far the end of the line visibly moves: at ±100
+// the fabricated end move swings the chart's full value range (a pump to the
+// top / crash toward zero); it shrinks linearly down to nothing at 0.
+export const MAX_CHART_STRENGTH = 100;
 
 // Stable per-ticker seed so each market's noise shape is consistent across redraws.
 function tickerSeed(ticker: string): number {
@@ -33,15 +46,6 @@ export const HOLD_MS = 2500;
 export const PULSE_MS = 1400;
 
 // ── Helpers ─────────────────────────────────────────────────────────────────
-
-// Deterministic, believable change% in [5, 15] seeded by ticker. Must be stable
-// across redraws (the canvas repaints every animation frame) — no Math.random().
-// Exported so the caption generator shows the same magnitude as the rendered card.
-export function seededChangePct(ticker: string): number {
-  let seed = ticker.split('').reduce((a, c) => (a * 31 + c.charCodeAt(0)) | 0, 7) >>> 0;
-  seed = (seed * 1664525 + 1013904223) >>> 0;
-  return 5 + (seed / 0xffffffff) * 10; // 5.0 – 15.0
-}
 
 function sparkToSeries(spark: SparkPoint[] | null | undefined): { t: number; price: number }[] {
   if (!spark?.length) return [];
@@ -163,11 +167,11 @@ function drawStepChart(
   }
 
   // Insert seeded sub-points between each pair for organic fluctuations. The noise
-  // level controls BOTH how many sub-points we add (more = more jagged) and how far
-  // they jitter; level 'none' keeps the original subtle baseline (1 pt, 10px).
+  // slider controls BOTH how many sub-points we add (more = more jagged) and how far
+  // they jitter; 0 keeps the original subtle baseline (1 pt, 10px).
   const noiseOn  = noiseScale > 0;
-  const SUB_PTS  = noiseOn ? Math.round(2 + noiseScale * 32) : 1; // small≈3, med≈4, large≈6
-  const JITTER   = noiseOn ? 10 + noiseScale * 130 : 10;          // px amplitude per sub-point
+  const SUB_PTS  = noiseOn ? Math.round(2 + noiseScale * 32) : 1; // ≈15 at full slide
+  const JITTER   = noiseOn ? 10 + noiseScale * 130 : 10;          // px amplitude; ≈62 at full slide
   const yTopJ    = ry + V_PAD_T;
   const yBotJ    = ry + V_PAD_T + chartAreaH;
   const pts: { x: number; y: number }[] = [];
@@ -284,7 +288,7 @@ function drawHeader(
   overrideName:    string,
   cH:              number,
   overrideIndustry?: string,
-  direction:       ChartsImageDirection = 'up',
+  strength:        ChartsImageStrength = 0,
 ): HeaderResult {
   const displayName = overrideName || market.name;
   const SANS        = '-apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif';
@@ -299,44 +303,52 @@ function drawHeader(
 
   const lastSpark = rawSeries[rawSeries.length - 1]?.price ?? 0;
   const minSpark  = rawSeries.length ? Math.min(...rawSeries.map(p => p.price)) : 0;
+  const maxSpark  = rawSeries.length ? Math.max(...rawSeries.map(p => p.price)) : 0;
 
   // Displayed value = NPSI index from API.
   const realPrice = market.price?.usd ?? null;
   const lastPrice = realPrice != null && realPrice > 0 ? realPrice : Math.max(0.01, lastSpark);
 
-  // Normalise: minSpark → 0.01, lastSpark → NPSI. Shape is scaled proportionally,
-  // all values ≥ 0.01, last point = NPSI.
-  const sparkRange = lastSpark - minSpark;
+  // Normalise the trends shape onto the displayed price: the last point anchors
+  // exactly at NPSI and the shape's FULL range (max−min) spans ~90% of it. Scaling
+  // by the full range (not last−min) keeps real vertical structure even when the
+  // current value sits AT its historical min/max — the old min→0.01 / last→NPSI
+  // mapping collapsed to a flat line whenever last == min, and the y-axis then
+  // auto-scaled ANY end move to fill the whole chart regardless of strength.
+  const sparkFull = maxSpark - minSpark;
+  const scale     = sparkFull > 0 ? (lastPrice * 0.9) / sparkFull : 0;
   const series = rawSeries.map(p => ({
     t:     p.t,
-    price: sparkRange > 0
-      ? 0.01 + ((p.price - minSpark) / sparkRange) * (lastPrice - 0.01)
-      : lastPrice,
+    price: Math.max(0.01, lastPrice + (p.price - lastSpark) * scale),
   }));
 
-  // Headline change: magnitude is a seeded random 5–15% per ticker (stable across
-  // redraws), sign comes from the up/down toggle. Raw $ change is derived from the
-  // pct applied to the displayed price, so the two always agree.
-  const isPositive = direction !== 'down';
-  const pct        = seededChangePct(market.ticker);
+  // Headline change: the signed strength slider IS the displayed change %.
+  // Raw $ change is derived from the pct applied to the displayed price, so the
+  // two always agree. Strength 0 = flat: neutral color, no arrow, 0.0% / $0.00.
+  const pct        = Math.min(Math.abs(strength), MAX_CHART_STRENGTH);
+  const isFlat     = pct === 0;
+  const isPositive = strength > 0;
   const signedPct  = isPositive ? pct : -pct;
-  const startPrice = lastPrice / (1 + signedPct / 100);
-  const rawChange  = lastPrice - startPrice; // +ve when up, −ve when down
-  const color      = isPositive ? '#0CDF9D' : '#FF4B4B';
+  const rawChange  = lastPrice * (signedPct / 100); // pct of the displayed price
+  const color      = isFlat ? '#A1A1AA' : isPositive ? '#0CDF9D' : '#FF4B4B';
 
-  // Append a short fabricated move at the very end: a sharp up/down spike that swings
-  // ~20% of the data's value range but spans only ~1–2% of the chart width — so the
-  // line clearly ends up or down without overwriting any of the real history.
-  if (series.length >= 3) {
+  // Append a fabricated move at the very end so the line VISIBLY ends up or down
+  // in proportion to the strength: the vertical swing is (strength/100) of the
+  // data's value range — at ±100 the line pumps a full range up / crashes toward
+  // zero, at ±1 it's a barely-visible tick, at 0 nothing is appended. The move's
+  // width also grows with strength (~1% → ~6% of the chart) so big moves read as
+  // a real rally/crash without overwriting the real history.
+  if (series.length >= 3 && !isFlat) {
+    const frac = pct / MAX_CHART_STRENGTH; // 0..1 slider fraction
     let sMin = Infinity, sMax = -Infinity;
     for (const p of series) { if (p.price < sMin) sMin = p.price; if (p.price > sMax) sMax = p.price; }
-    const sRange   = Math.max(lastPrice * 0.5, sMax - sMin); // floor so flat charts still spike
-    const MOVE     = sRange * 0.2;
+    const sRange   = Math.max(lastPrice * 0.5, sMax - sMin); // floor so flat charts still move
+    const MOVE     = sRange * frac;
     const endPrice = Math.max(0.01, isPositive ? lastPrice + MOVE : lastPrice - MOVE);
     const tStart   = series[0].t;
     const tEnd     = series[series.length - 1].t;
     const stepT    = (tEnd - tStart) / Math.max(1, series.length - 1);
-    const N        = Math.max(2, Math.round(series.length * 0.015)); // ~1.5% of the width
+    const N        = Math.max(2, Math.round(series.length * (0.01 + 0.05 * frac)));
     for (let k = 1; k <= N; k++) {
       const f = k / N;
       series.push({ t: tEnd + stepT * k, price: lastPrice + (endPrice - lastPrice) * f });
@@ -411,8 +423,8 @@ function drawHeader(
   const pointsX = LEFT + priceW + PRICE_POINTS_GAP;
   ctx.fillText('points', pointsX, priceBaseY - 1);
 
-  const pctStr   = `${Math.abs(pct).toFixed(1)}%`;
-  const rawStr   = `${isPositive ? '+' : '-'}$${Math.abs(rawChange).toFixed(2)}`;
+  const pctStr   = `${pct.toFixed(1)}%`;
+  const rawStr   = `${isFlat ? '' : isPositive ? '+' : '-'}$${Math.abs(rawChange).toFixed(2)}`;
   const ARROW_W  = 28;
   const ARROW_H  = Math.round(ARROW_W * (18 / 24));
   const ARROW_GAP = 10;
@@ -428,25 +440,28 @@ function drawHeader(
     const arrowTopBase = priceBaseY - Math.round(30 * 0.35) - Math.round(ARROW_H / 2) + 3;
     const arrowTop     = isPositive ? arrowTopBase : arrowTopBase - 5;
 
-    ctx.fillStyle = color;
-    ctx.beginPath();
-    if (isPositive) {
-      ctx.moveTo(arrowLeft + ARROW_W * 0.5,   arrowTop);
-      ctx.lineTo(arrowLeft + ARROW_W * 0.933, arrowTop + ARROW_H * 0.792);
-      ctx.lineTo(arrowLeft + ARROW_W * 0.067, arrowTop + ARROW_H * 0.792);
-    } else {
-      ctx.moveTo(arrowLeft + ARROW_W * 0.5,   arrowTop + ARROW_H);
-      ctx.lineTo(arrowLeft + ARROW_W * 0.067, arrowTop + ARROW_H * 0.208);
-      ctx.lineTo(arrowLeft + ARROW_W * 0.933, arrowTop + ARROW_H * 0.208);
+    // Flat (strength 0): no arrow — the % starts where the arrow would have been.
+    if (!isFlat) {
+      ctx.fillStyle = color;
+      ctx.beginPath();
+      if (isPositive) {
+        ctx.moveTo(arrowLeft + ARROW_W * 0.5,   arrowTop);
+        ctx.lineTo(arrowLeft + ARROW_W * 0.933, arrowTop + ARROW_H * 0.792);
+        ctx.lineTo(arrowLeft + ARROW_W * 0.067, arrowTop + ARROW_H * 0.792);
+      } else {
+        ctx.moveTo(arrowLeft + ARROW_W * 0.5,   arrowTop + ARROW_H);
+        ctx.lineTo(arrowLeft + ARROW_W * 0.067, arrowTop + ARROW_H * 0.208);
+        ctx.lineTo(arrowLeft + ARROW_W * 0.933, arrowTop + ARROW_H * 0.208);
+      }
+      ctx.closePath();
+      ctx.fill();
     }
-    ctx.closePath();
-    ctx.fill();
 
     ctx.font         = CHANGE_FONT;
     ctx.fillStyle    = color;
     ctx.textAlign    = 'left';
     ctx.textBaseline = 'alphabetic';
-    const pctX    = arrowLeft + ARROW_W + ARROW_GAP;
+    const pctX    = isFlat ? arrowLeft : arrowLeft + ARROW_W + ARROW_GAP;
     ctx.fillText(pctStr, pctX, priceBaseY);
     const pctTextW = ctx.measureText(pctStr).width;
     ctx.fillText(rawStr, pctX + pctTextW + 24, priceBaseY);
@@ -459,25 +474,28 @@ function drawHeader(
     const arrowTopBase = changeBaseY - Math.round(30 * 0.35) - Math.round(ARROW_H / 2) + 3;
     const arrowTop     = isPositive ? arrowTopBase : arrowTopBase - 5;
 
-    ctx.fillStyle = color;
-    ctx.beginPath();
-    if (isPositive) {
-      ctx.moveTo(arrowLeft + ARROW_W * 0.5,   arrowTop);
-      ctx.lineTo(arrowLeft + ARROW_W * 0.933, arrowTop + ARROW_H * 0.792);
-      ctx.lineTo(arrowLeft + ARROW_W * 0.067, arrowTop + ARROW_H * 0.792);
-    } else {
-      ctx.moveTo(arrowLeft + ARROW_W * 0.5,   arrowTop + ARROW_H);
-      ctx.lineTo(arrowLeft + ARROW_W * 0.067, arrowTop + ARROW_H * 0.208);
-      ctx.lineTo(arrowLeft + ARROW_W * 0.933, arrowTop + ARROW_H * 0.208);
+    // Flat (strength 0): no arrow — the % starts where the arrow would have been.
+    if (!isFlat) {
+      ctx.fillStyle = color;
+      ctx.beginPath();
+      if (isPositive) {
+        ctx.moveTo(arrowLeft + ARROW_W * 0.5,   arrowTop);
+        ctx.lineTo(arrowLeft + ARROW_W * 0.933, arrowTop + ARROW_H * 0.792);
+        ctx.lineTo(arrowLeft + ARROW_W * 0.067, arrowTop + ARROW_H * 0.792);
+      } else {
+        ctx.moveTo(arrowLeft + ARROW_W * 0.5,   arrowTop + ARROW_H);
+        ctx.lineTo(arrowLeft + ARROW_W * 0.067, arrowTop + ARROW_H * 0.208);
+        ctx.lineTo(arrowLeft + ARROW_W * 0.933, arrowTop + ARROW_H * 0.208);
+      }
+      ctx.closePath();
+      ctx.fill();
     }
-    ctx.closePath();
-    ctx.fill();
 
     ctx.font         = CHANGE_FONT;
     ctx.fillStyle    = color;
     ctx.textAlign    = 'left';
     ctx.textBaseline = 'alphabetic';
-    const pctX     = arrowLeft + ARROW_W + ARROW_GAP;
+    const pctX     = isFlat ? arrowLeft : arrowLeft + ARROW_W + ARROW_GAP;
     ctx.fillText(pctStr, pctX, changeBaseY);
     const pctTextW = ctx.measureText(pctStr).width;
     ctx.fillText(rawStr, pctX + pctTextW + 24, changeBaseY);
@@ -524,8 +542,8 @@ export interface ChartFrameOpts {
   market:            ChartsImageMarket;
   overrideName?:     string;
   overrideIndustry?: string;
-  direction?:        ChartsImageDirection;
-  noiseLevel?:       ChartsImageNoiseLevel;
+  strength?:         ChartsImageStrength;
+  noise?:            ChartsImageNoise;
   avatarImg?:        HTMLImageElement | null;
   pauvLogo?:         HTMLImageElement | null;
   revealT?:          number;  // 0..1 line-draw progress; default 1 (full)
@@ -546,7 +564,7 @@ export function drawChartImageFrame(
 
   const { series, color, changeBaseY } = drawHeader(
     ctx, mk, opts.avatarImg ?? null, opts.overrideName ?? '', h,
-    opts.overrideIndustry ?? '', opts.direction ?? 'up',
+    opts.overrideIndustry ?? '', opts.strength ?? 0,
   );
 
   const CHART_TOP  = changeBaseY + 56;
@@ -554,7 +572,7 @@ export function drawChartImageFrame(
   if (CHART_H_PX > 60) {
     drawStepChart(
       ctx, series, PAD, CHART_TOP, w - PAD * 2, CHART_H_PX, color, h > 1100 ? 4 : 7,
-      tickerSeed(mk.ticker), NOISE_SCALE[opts.noiseLevel ?? 'none'] ?? 0,
+      tickerSeed(mk.ticker), noiseToScale(opts.noise ?? 0),
       opts.revealT ?? 1, opts.tipPulseT ?? -1,
     );
   }

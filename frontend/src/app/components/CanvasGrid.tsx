@@ -7,8 +7,8 @@ import { TikTokCanvas } from './TikTokCanvas';
 import type { TikTokCanvasRef, MarketData, SparkPoint } from './TikTokCanvas';
 import { ChartsCanvas } from './ChartsCanvas';
 import type { ChartsCanvasRef, ChartsMarket } from './ChartsCanvas';
-import { ChartsImageCanvas, seededChangePct } from './ChartsImageCanvas';
-import type { ChartsImageCanvasRef, ChartsImageMarket, CanvasAspectRatio, ChartsImageDirection, ChartsImageNoiseLevel, ChartsImageSubMode } from './ChartsImageCanvas';
+import { ChartsImageCanvas } from './ChartsImageCanvas';
+import type { ChartsImageCanvasRef, ChartsImageMarket, CanvasAspectRatio, ChartsImageSubMode } from './ChartsImageCanvas';
 import { ChartsInputCard } from './ChartsInputCard';
 import type { PreloadedAudio } from './ChartsInputCard';
 import { AudioPicker } from './AudioPicker';
@@ -495,8 +495,8 @@ export function CanvasGrid({
   const [chartsImageTrendsErrorMap,  setChartsImageTrendsErrorMap]  = useState<Record<string, string | null>>({});
   const [chartsImageAspectRatioMap,  setChartsImageAspectRatioMap]  = useState<Record<string, CanvasAspectRatio>>({});
   const [chartsImageIndustryOverrideMap, setChartsImageIndustryOverrideMap] = useState<Record<string, string>>({});
-  const [chartsImageDirectionMap,        setChartsImageDirectionMap]        = useState<Record<string, ChartsImageDirection>>({});
-  const [chartsImageNoiseLevelMap,       setChartsImageNoiseLevelMap]       = useState<Record<string, ChartsImageNoiseLevel>>({});
+  const [chartsImageStrengthMap,         setChartsImageStrengthMap]         = useState<Record<string, number>>({});
+  const [chartsImageNoiseMap,            setChartsImageNoiseMap]            = useState<Record<string, number>>({});
   // Charts Image video mode: 'image' (PNG) vs 'video' (animated MP4), animation
   // speed, chosen audio track, and live recording state (mirrors the Charts maps).
   const [chartsImageSubModeMap,          setChartsImageSubModeMap]          = useState<Record<string, ChartsImageSubMode>>({});
@@ -811,11 +811,11 @@ export function CanvasGrid({
         onRemove={onRemove}
         onOpenPhotoPicker={query => openPhotoPicker(`chartsimage:${entry.id}`, query)}
         overrideIndustry={chartsImageIndustryOverrideMap[entry.id] ?? ''}
-        direction={chartsImageDirectionMap[entry.id] ?? 'up'}
-        noiseLevel={chartsImageNoiseLevelMap[entry.id] ?? 'none'}
+        strength={chartsImageStrengthMap[entry.id] ?? 0}
+        noise={chartsImageNoiseMap[entry.id] ?? 0}
         onUpdateOverrideIndustry={v => setChartsImageIndustryOverrideMap(prev => ({ ...prev, [entry.id]: v }))}
-        onUpdateDirection={v => setChartsImageDirectionMap(prev => ({ ...prev, [entry.id]: v }))}
-        onUpdateNoiseLevel={v => setChartsImageNoiseLevelMap(prev => ({ ...prev, [entry.id]: v }))}
+        onUpdateStrength={v => setChartsImageStrengthMap(prev => ({ ...prev, [entry.id]: v }))}
+        onUpdateNoise={v => setChartsImageNoiseMap(prev => ({ ...prev, [entry.id]: v }))}
         subMode={chartsImageSubModeMap[entry.id] ?? 'image'}
         preloadedAudios={preloadedAudios}
         audioTrack={chartsImageAudioMap[entry.id] ?? null}
@@ -993,8 +993,8 @@ export function CanvasGrid({
             market={(chartsImageMarketMap[entry.id] ?? null) as ChartsImageMarket | null}
             overrideName={chartsImageNameOverrideMap[entry.id] ?? ''}
             overrideIndustry={chartsImageIndustryOverrideMap[entry.id] ?? ''}
-            direction={chartsImageDirectionMap[entry.id] ?? 'up'}
-            noiseLevel={chartsImageNoiseLevelMap[entry.id] ?? 'none'}
+            strength={chartsImageStrengthMap[entry.id] ?? 0}
+            noise={chartsImageNoiseMap[entry.id] ?? 0}
             aspectRatio={chartsImageAspectRatioMap[entry.id] ?? 'portrait'}
             subMode={chartsImageSubModeMap[entry.id] ?? 'image'}
             speed={chartsImageSpeedMap[entry.id] ?? 1}
@@ -1392,8 +1392,8 @@ export function CanvasGrid({
   }, [chartsMarketsMap, chartsNameOverrideMap]);
 
   // Charts Image caption: auto-built (no button, no AI) from the values shown on the
-  // card — name, up/down toggle, seeded % — with a blank left at the end for the user
-  // to type the reason. It stays in sync as those change and is always ready to copy.
+  // card — name, strength slider — with a blank left at the end for the user to type
+  // the reason. It stays in sync as those change and is always ready to copy.
   // Any text the user appends after the template is preserved across changes.
   const chartsImageCaptionBaseRef = useRef<Record<string, string>>({});
   useEffect(() => {
@@ -1402,10 +1402,12 @@ export function CanvasGrid({
     for (const entryId of Object.keys(chartsImageMarketMap)) {
       const mk = chartsImageMarketMap[entryId];
       if (!mk) continue;
-      const name = (chartsImageNameOverrideMap[entryId] || mk.name).trim();
-      const pct  = seededChangePct(mk.ticker);
-      const dir  = (chartsImageDirectionMap[entryId] ?? 'up') === 'down' ? 'down' : 'up';
-      const base = `${name}'s public sentiment on Pauv is ${dir} ${pct.toFixed(1)}% after `;
+      const name     = (chartsImageNameOverrideMap[entryId] || mk.name).trim();
+      const strength = chartsImageStrengthMap[entryId] ?? 0;
+      const move     = strength === 0
+        ? 'flat'
+        : `${strength < 0 ? 'down' : 'up'} ${Math.abs(strength).toFixed(1)}%`;
+      const base = `${name}'s public sentiment on Pauv is ${move} after `;
 
       // Preserve whatever the user typed after the previous template.
       const prevBase = chartsImageCaptionBaseRef.current[entryId];
@@ -1423,7 +1425,7 @@ export function CanvasGrid({
       });
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [chartsImageMarketMap, chartsImageNameOverrideMap, chartsImageDirectionMap]);
+  }, [chartsImageMarketMap, chartsImageNameOverrideMap, chartsImageStrengthMap]);
 
   // "Next" in the media tab: fetch the video, then auto-run the caption
   // generator. One action instead of two. If the fetch fails, the error is

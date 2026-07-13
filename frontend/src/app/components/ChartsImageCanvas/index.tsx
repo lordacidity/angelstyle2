@@ -4,15 +4,15 @@ import { useRef, useEffect, useCallback, forwardRef, useImperativeHandle } from 
 import { CANVAS_W, CANVAS_H, DISPLAY_SCALE, PPT_W, PPT_H, PPT_DISPLAY_SCALE } from './constants';
 import type { ChartsImageCanvasProps, ChartsImageCanvasRef } from './types';
 import { muxClientSide, safeExportName, PHONEDECK_URL } from '@/lib/canvasVideoExport';
-import { drawChartImageFrame, seededChangePct, GROW_MS, HOLD_MS, PULSE_MS } from './render';
+import { drawChartImageFrame, MAX_CHART_STRENGTH, GROW_MS, HOLD_MS, PULSE_MS } from './render';
 
-export type { ChartsImageCanvasRef, ChartsImageMarket, CanvasAspectRatio, ChartsImageDirection, ChartsImageNoiseLevel, ChartsImageSubMode } from './types';
-export { seededChangePct };
+export type { ChartsImageCanvasRef, ChartsImageMarket, CanvasAspectRatio, ChartsImageStrength, ChartsImageNoise, ChartsImageSubMode } from './types';
+export { MAX_CHART_STRENGTH };
 
 // ── Component ─────────────────────────────────────────────────────────────────
 
 export const ChartsImageCanvas = forwardRef<ChartsImageCanvasRef, ChartsImageCanvasProps>(
-  function ChartsImageCanvas({ market, overrideName = '', overrideIndustry = '', direction = 'up', noiseLevel = 'none', aspectRatio = 'portrait', subMode = 'image', speed = 1, audioUrl, onRecordingStateChange }, ref) {
+  function ChartsImageCanvas({ market, overrideName = '', overrideIndustry = '', strength = 0, noise = 0, aspectRatio = 'portrait', subMode = 'image', speed = 1, audioUrl, onRecordingStateChange }, ref) {
     const cW     = aspectRatio === 'ppt' ? PPT_W     : CANVAS_W;
     const cH     = aspectRatio === 'ppt' ? PPT_H     : CANVAS_H;
     const dScale = aspectRatio === 'ppt' ? PPT_DISPLAY_SCALE : DISPLAY_SCALE;
@@ -24,8 +24,8 @@ export const ChartsImageCanvas = forwardRef<ChartsImageCanvasRef, ChartsImageCan
     const marketRef          = useRef(market);
     const overrideNameRef    = useRef(overrideName);
     const overrideIndustryRef = useRef(overrideIndustry);
-    const directionRef       = useRef(direction);
-    const noiseLevelRef      = useRef(noiseLevel);
+    const strengthRef        = useRef(strength);
+    const noiseRef           = useRef(noise);
     const dimensionsRef      = useRef({ cW, cH });
 
     // Video mode
@@ -39,8 +39,8 @@ export const ChartsImageCanvas = forwardRef<ChartsImageCanvasRef, ChartsImageCan
     useEffect(() => { marketRef.current          = market;          }, [market]);
     useEffect(() => { overrideNameRef.current    = overrideName;    }, [overrideName]);
     useEffect(() => { overrideIndustryRef.current = overrideIndustry; }, [overrideIndustry]);
-    useEffect(() => { directionRef.current       = direction;       }, [direction]);
-    useEffect(() => { noiseLevelRef.current      = noiseLevel;      }, [noiseLevel]);
+    useEffect(() => { strengthRef.current        = strength;        }, [strength]);
+    useEffect(() => { noiseRef.current           = noise;           }, [noise]);
     useEffect(() => { dimensionsRef.current      = { cW, cH };     }, [cW, cH]);
     useEffect(() => { speedRef.current   = Math.min(3, Math.max(1, speed || 1)); }, [speed]);
     useEffect(() => { audioUrlRef.current = audioUrl ?? null; }, [audioUrl]);
@@ -109,8 +109,8 @@ export const ChartsImageCanvas = forwardRef<ChartsImageCanvasRef, ChartsImageCan
         market: mk,
         overrideName:     overrideNameRef.current,
         overrideIndustry: overrideIndustryRef.current,
-        direction:        directionRef.current,
-        noiseLevel:       noiseLevelRef.current,
+        strength:         strengthRef.current,
+        noise:            noiseRef.current,
         avatarImg:        imgRef.current,
         pauvLogo:         pauvLogoRef.current,
         revealT,
@@ -153,8 +153,8 @@ export const ChartsImageCanvas = forwardRef<ChartsImageCanvasRef, ChartsImageCan
             market: mk,
             overrideName:     overrideNameRef.current,
             overrideIndustry: overrideIndustryRef.current,
-            direction:        directionRef.current,
-            noiseLevel:       noiseLevelRef.current,
+            strength:         strengthRef.current,
+            noise:            noiseRef.current,
             avatarImg:        imgRef.current,
             pauvLogo:         pauvLogoRef.current,
           });

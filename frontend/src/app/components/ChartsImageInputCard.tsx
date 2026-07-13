@@ -10,7 +10,8 @@ import { useState, useRef, useEffect } from 'react';
 import { createPortal } from 'react-dom';
 import { CAROUSEL_PREVIEW_W } from './CarouselCanvas';
 import type { ChartsMarket } from './ChartsCanvas';
-import type { ChartsImageDirection, ChartsImageNoiseLevel, ChartsImageSubMode } from './ChartsImageCanvas';
+import { MAX_CHART_STRENGTH } from './ChartsImageCanvas';
+import type { ChartsImageSubMode } from './ChartsImageCanvas';
 import type { PreloadedAudio } from './ChartsInputCard';
 import { AudioPicker } from './AudioPicker';
 import type { VideoEntry } from '../types';
@@ -33,11 +34,11 @@ export function ChartsImageInputCard({
   onRemove,
   onOpenPhotoPicker,
   overrideIndustry,
-  direction,
-  noiseLevel,
+  strength,
+  noise,
   onUpdateOverrideIndustry,
-  onUpdateDirection,
-  onUpdateNoiseLevel,
+  onUpdateStrength,
+  onUpdateNoise,
   subMode,
   preloadedAudios,
   audioTrack,
@@ -61,11 +62,11 @@ export function ChartsImageInputCard({
   onRemove: () => void;
   onOpenPhotoPicker: (query: string) => void;
   overrideIndustry: string;
-  direction: ChartsImageDirection;
-  noiseLevel: ChartsImageNoiseLevel;
+  strength: number;
+  noise: number;
   onUpdateOverrideIndustry: (v: string) => void;
-  onUpdateDirection: (v: ChartsImageDirection) => void;
-  onUpdateNoiseLevel: (v: ChartsImageNoiseLevel) => void;
+  onUpdateStrength: (v: number) => void;
+  onUpdateNoise: (v: number) => void;
   subMode: ChartsImageSubMode;
   preloadedAudios: PreloadedAudio[];
   audioTrack: { label: string; url: string; durationMs: number } | null;
@@ -230,9 +231,9 @@ export function ChartsImageInputCard({
             </>
           )}
 
-          {/* Industry override + up/down direction toggle. The change % is a seeded
-              random 5–15% and the raw $ is derived from it; this toggle only flips the
-              sign (and colour) of both. */}
+          {/* Industry override + sentiment strength slider. The slider value IS the
+              signed change % shown on the card: 0 (center, default) = flat neutral,
+              right = green up move, left = red down move. The raw $ derives from it. */}
           {market && (
             <div className="flex flex-col gap-1.5">
               <input
@@ -241,36 +242,51 @@ export function ChartsImageInputCard({
                 placeholder={market.industry ?? 'Industry…'}
                 className="w-full bg-zinc-900 border border-zinc-800 rounded-md px-2.5 py-1.5 text-xs text-zinc-200 placeholder-zinc-600 outline-none focus:border-zinc-600"
               />
-              <button
-                type="button"
-                onClick={() => onUpdateDirection(direction === 'up' ? 'down' : 'up')}
-                title="Toggle the sentiment direction up or down"
-                className={`w-full flex items-center justify-center gap-1.5 rounded-md px-2.5 py-1.5 text-xs font-semibold border transition-colors ${
-                  direction === 'down'
-                    ? 'bg-[#FF4B4B]/10 border-[#FF4B4B]/40 text-[#FF4B4B]'
-                    : 'bg-[#0CDF9D]/10 border-[#0CDF9D]/40 text-[#0CDF9D]'
-                }`}
-              >
-                {direction === 'down' ? '▼ Down' : '▲ Up'}
-              </button>
-              {/* Noise level — how much synthetic volatility to add to the line */}
-              <div className="flex items-center gap-1">
-                <span className="text-[10px] text-zinc-500 select-none shrink-0 mr-1">Noise</span>
-                {(['none', 'small', 'med', 'large'] as const).map(lvl => (
-                  <button
-                    key={lvl}
-                    type="button"
-                    onClick={() => onUpdateNoiseLevel(lvl)}
-                    title={`${lvl[0].toUpperCase()}${lvl.slice(1)} chart noise`}
-                    className={`flex-1 min-w-0 rounded-md px-1.5 py-1.5 text-[11px] font-medium border capitalize transition-colors ${
-                      noiseLevel === lvl
-                        ? 'bg-zinc-700 border-zinc-500 text-zinc-100'
-                        : 'bg-zinc-900 border-zinc-800 text-zinc-400 hover:border-zinc-600'
-                    }`}
-                  >
-                    {lvl}
-                  </button>
-                ))}
+              <div className="flex items-center gap-2 rounded-md border border-zinc-800 bg-zinc-900 px-2.5 py-1.5">
+                <span className="text-[10px] text-zinc-500 select-none shrink-0">Move</span>
+                <input
+                  type="range"
+                  min={-MAX_CHART_STRENGTH}
+                  max={MAX_CHART_STRENGTH}
+                  step={0.5}
+                  value={strength}
+                  onChange={e => onUpdateStrength(parseFloat(e.target.value))}
+                  onDoubleClick={() => onUpdateStrength(0)}
+                  title="Drag right for an up move, left for a down move. Double-click to reset to flat."
+                  className="flex-1 min-w-0 h-1 cursor-pointer"
+                  style={{ accentColor: strength === 0 ? '#71717a' : strength > 0 ? '#0CDF9D' : '#FF4B4B' }}
+                />
+                <span
+                  className={`text-[11px] font-semibold tabular-nums w-16 text-right shrink-0 select-none ${
+                    strength === 0 ? 'text-zinc-500' : strength > 0 ? 'text-[#0CDF9D]' : 'text-[#FF4B4B]'
+                  }`}
+                >
+                  {strength === 0 ? 'Flat' : `${strength > 0 ? '▲' : '▼'} ${Math.abs(strength).toFixed(1)}%`}
+                </span>
+              </div>
+              {/* Noise — 0–100 slider for how much synthetic volatility to add to
+                  the line. 0 (default) = clean; 100 = way past the old presets. */}
+              <div className="flex items-center gap-2 rounded-md border border-zinc-800 bg-zinc-900 px-2.5 py-1.5">
+                <span className="text-[10px] text-zinc-500 select-none shrink-0">Noise</span>
+                <input
+                  type="range"
+                  min={0}
+                  max={100}
+                  step={1}
+                  value={noise}
+                  onChange={e => onUpdateNoise(parseFloat(e.target.value))}
+                  onDoubleClick={() => onUpdateNoise(0)}
+                  title="How much synthetic volatility to add to the line. Double-click to reset."
+                  className="flex-1 min-w-0 h-1 cursor-pointer"
+                  style={{ accentColor: noise === 0 ? '#71717a' : '#e4e4e7' }}
+                />
+                <span
+                  className={`text-[11px] font-semibold tabular-nums w-16 text-right shrink-0 select-none ${
+                    noise === 0 ? 'text-zinc-500' : 'text-zinc-200'
+                  }`}
+                >
+                  {noise === 0 ? 'Off' : noise}
+                </span>
               </div>
             </div>
           )}

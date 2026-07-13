@@ -30,7 +30,7 @@ import { ensureFontLoaded, wrapText, drawAligned, hexToRgba, roundRectPath, draw
 import { drawSwipeArrow, drawSwipeOnCanvas } from './drawing/swipe';
 import { wrapTextOffsets, getLineSpanSegs, drawSpanLine, spansToHtml, rgbToHex, htmlToSpans } from './drawing/spans';
 import { drawChartImageFrame, GROW_MS, HOLD_MS, PULSE_MS } from '../ChartsImageCanvas/render';
-import type { ChartsImageMarket, ChartsImageDirection, ChartsImageNoiseLevel } from '../ChartsImageCanvas/types';
+import type { ChartsImageMarket, ChartsImageStrength, ChartsImageNoise } from '../ChartsImageCanvas/types';
 import { muxClientSide } from '@/lib/canvasVideoExport';
 
 // A chart used as the carousel background (alternative to a photo/video). Renders
@@ -39,8 +39,8 @@ export interface CarouselChartBg {
   market:            ChartsImageMarket;
   overrideName?:     string;
   overrideIndustry?: string;
-  direction?:        ChartsImageDirection;
-  noiseLevel?:       ChartsImageNoiseLevel;
+  strength?:         ChartsImageStrength;
+  noise?:            ChartsImageNoise;
   subMode:           'image' | 'video'; // static card vs animated draw-in
   speed?:            number;            // 1/2/3 — line-draw speed (video)
   audioUrl?:         string;            // optional narration muxed into the MP4
@@ -282,8 +282,8 @@ const CarouselCanvas = forwardRef<CarouselCanvasRef, CarouselCanvasProps>(
           market:           _chartBg.market,
           overrideName:     _chartBg.overrideName,
           overrideIndustry: _chartBg.overrideIndustry,
-          direction:        _chartBg.direction,
-          noiseLevel:       _chartBg.noiseLevel,
+          strength:         _chartBg.strength,
+          noise:            _chartBg.noise,
           avatarImg:        chartAvatarRef.current,
           pauvLogo:         chartPauvLogoRef.current,
           revealT, tipPulseT,
@@ -1442,7 +1442,7 @@ const CarouselCanvas = forwardRef<CarouselCanvasRef, CarouselCanvasProps>(
       chartAnimStartRef.current = 0;
       redraw(cachedImgRef.current);
     }, [chartBg?.market?.id, chartBg?.market?.sparkline?.length, chartBg?.subMode,
-        chartBg?.direction, chartBg?.noiseLevel, chartBg?.overrideName,
+        chartBg?.strength, chartBg?.noise, chartBg?.overrideName,
         chartBg?.overrideIndustry, chartBg?.speed, redraw]);
 
     // Animation loop for an animated chart background (line draws in + tip pulses).

@@ -12,12 +12,14 @@ export interface ChartsImageMarket {
 
 export type CanvasAspectRatio = 'portrait' | 'ppt';
 
-// Direction of the headline change. 'up' = green / positive, 'down' = red / negative.
-// The magnitude is a seeded random 5–15% per ticker; the raw $ change is derived from it.
-export type ChartsImageDirection = 'up' | 'down';
+// Signed strength of the headline change, in percent: the slider value IS the
+// displayed change %. > 0 = green up move, < 0 = red down move, 0 = flat /
+// neutral (gray, no arrow). The raw $ change is derived from it.
+export type ChartsImageStrength = number;
 
-// How much synthetic volatility to add to the chart line. 'none' = clean (default).
-export type ChartsImageNoiseLevel = 'none' | 'small' | 'med' | 'large';
+// How much synthetic volatility to add to the chart line, as a 0–100 slider
+// value. 0 = clean (default); 100 = a ton (~3× the old 'large' preset).
+export type ChartsImageNoise = number;
 
 // 'image' = static PNG card. 'video' = the line animates in (drawing left→right
 // with a leading head dot) and exports as an MP4 with the same animation, the
@@ -28,8 +30,8 @@ export interface ChartsImageCanvasProps {
   market: ChartsImageMarket | null;
   overrideName?: string;
   overrideIndustry?: string;
-  direction?: ChartsImageDirection;
-  noiseLevel?: ChartsImageNoiseLevel;
+  strength?: ChartsImageStrength;
+  noise?: ChartsImageNoise;
   aspectRatio?: CanvasAspectRatio;
   // Video mode
   subMode?: ChartsImageSubMode;
