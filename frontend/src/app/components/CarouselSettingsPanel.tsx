@@ -47,6 +47,65 @@ import { SwipePreviewMini } from './SwipePreviewMini';
 
 // ── Shared settings UI components ────────────────────────────────────────────
 
+// The slider's value label, but click-to-type like the Media page zoom controls.
+// Handles any unit ('%', 'px', '') and negative ranges (offsets, lift). Commits on
+// Enter/blur, clamped to [min, max]; Escape reverts.
+function EditableNum({ value, min, max, unit, onCommit }: {
+  value: number; min: number; max: number; unit: string; onCommit: (v: number) => void;
+}) {
+  const [editing, setEditing] = useState(false);
+  const [draft, setDraft] = useState(String(value));
+  const inputRef = useRef<HTMLInputElement>(null);
+
+  useEffect(() => { if (!editing) setDraft(String(value)); }, [value, editing]);
+  useEffect(() => { if (editing) { inputRef.current?.focus(); inputRef.current?.select(); } }, [editing]);
+
+  function commit() {
+    const parsed = parseInt(draft, 10);
+    if (Number.isFinite(parsed)) {
+      const clamped = Math.max(min, Math.min(max, parsed));
+      onCommit(clamped);
+      setDraft(String(clamped));
+    } else {
+      setDraft(String(value));
+    }
+    setEditing(false);
+  }
+
+  if (editing) {
+    return (
+      <span className="text-[11px] text-zinc-300 tabular-nums inline-flex items-baseline gap-0.5">
+        <input
+          ref={inputRef}
+          type="text"
+          inputMode="numeric"
+          value={draft}
+          onChange={e => setDraft(e.target.value.replace(/[^0-9-]/g, ''))}
+          onBlur={commit}
+          onKeyDown={e => {
+            if (e.key === 'Enter') { e.preventDefault(); commit(); }
+            else if (e.key === 'Escape') { setDraft(String(value)); setEditing(false); }
+          }}
+          className="w-9 rounded border border-zinc-600 bg-zinc-800 px-1 py-0 text-right tabular-nums text-zinc-100 outline-none"
+        />
+        {unit}
+      </span>
+    );
+  }
+  return (
+    <span
+      role="button"
+      tabIndex={0}
+      onClick={() => setEditing(true)}
+      onKeyDown={e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); setEditing(true); } }}
+      title="Click to type a value"
+      className="text-[11px] text-zinc-500 tabular-nums cursor-text select-none hover:text-zinc-300 transition-colors"
+    >
+      {value}{unit}
+    </span>
+  );
+}
+
 function Slider({ label, value, min = 0, max = 100, unit = '%', onChange }: {
   label: string; value: number; min?: number; max?: number; unit?: string; onChange: (v: number) => void;
 }) {
@@ -54,7 +113,7 @@ function Slider({ label, value, min = 0, max = 100, unit = '%', onChange }: {
     <div className="flex flex-col gap-1">
       <div className="flex items-center justify-between">
         <span className="text-[11px] text-zinc-400">{label}</span>
-        <span className="text-[11px] text-zinc-500">{value}{unit}</span>
+        <EditableNum value={value} min={min} max={max} unit={unit} onCommit={onChange} />
       </div>
       <input type="range" min={min} max={max} value={value} onChange={e => onChange(Number(e.target.value))}
         className="w-full h-1 accent-white cursor-pointer" />

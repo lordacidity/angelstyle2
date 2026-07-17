@@ -106,6 +106,11 @@ interface CarouselCanvasProps {
 
 // ── CarouselCanvas (canvas + pan/zoom only) ──────────────────────────────────
 
+// How far a circle may be dragged past the post edge, as a fraction of its radius.
+// 0 = must stay fully inside (old behaviour); 0.6 lets ~60% of the circle hang off
+// any edge for creative framing without letting it drift out of frame.
+const CIRCLE_DRAG_BLEED_RATIO = 0.6;
+
 const CarouselCanvas = forwardRef<CarouselCanvasRef, CarouselCanvasProps>(
   function CarouselCanvas({ imageSrc, videoSrc, chartBg = null, headline, subheadline, settings, onScaleChange, onSettingsChange, onBgLayerStateChange, brandLogoSrc, onRecordingStateChange, onHeadlineChange, onSubheadlineChange, rectMode = false, isDraggingElement = false, invertedSlots = false, onSlotDrop, staticMode = false, platform = 'ig' }, ref) {
     // Per-instance frame height (width is always 1080 so DISPLAY_SCALE holds).
@@ -1563,8 +1568,12 @@ const CarouselCanvas = forwardRef<CarouselCanvasRef, CarouselCanvasProps>(
         const dx = e.clientX - circleDragStart.current.mx;
         const dy = e.clientY - circleDragStart.current.my;
         const r = circleRadsArr.current[idx];
-        const newX = Math.max(r, Math.min(CAROUSEL_PREVIEW_W - r, circleDragStart.current.cx + dx));
-        const newY = Math.max(r, Math.min(PREVIEW_H - r, circleDragStart.current.cy + dy));
+        // Boundary parameter: allow the circle to bleed slightly off the post
+        // edges for creative framing, capped at a fraction of its radius so it can
+        // hang off the border a touch without drifting out of frame.
+        const bleed = Math.round(r * CIRCLE_DRAG_BLEED_RATIO);
+        const newX = Math.max(r - bleed, Math.min(CAROUSEL_PREVIEW_W - r + bleed, circleDragStart.current.cx + dx));
+        const newY = Math.max(r - bleed, Math.min(PREVIEW_H - r + bleed, circleDragStart.current.cy + dy));
         circlePosRefsArr.current[idx] = { x: newX, y: newY };
         setCirclePoses(prev => { const n = [...prev]; n[idx] = { x: newX, y: newY }; return n; });
         redraw(cachedImgRef.current);
@@ -2952,8 +2961,13 @@ const CarouselCanvas = forwardRef<CarouselCanvasRef, CarouselCanvasProps>(
           const isImgDragging   = activeImgDragCircle === ci;
           const defaultX        = rectMode ? Math.round(CAROUSEL_PREVIEW_W / 2 + 50) : (ci === 0 ? Math.round(CAROUSEL_PREVIEW_W / 4) : Math.round(CAROUSEL_PREVIEW_W * 3 / 4));
           const defaultCy       = rectMode ? Math.round((_bandTop + _bandBottom) / 2) : (padXPv + LOGO_PH + aboveHLTop) / 2;
+          // When the background-blur layer is active, the canvas draws an
+          // un-positioned circle at the canvas vertical center (H/2), NOT the
+          // upper slot midpoint the overlay uses elsewhere. Match that here so the
+          // dashed drag outline lines up with the drawn circle before it's moved.
+          const defaultCyForMode = (blurLayerActive && !rectMode) ? Math.round(PREVIEW_H / 2) : defaultCy;
           const circleCxPv      = circlePos?.x ?? defaultX;
-          const circleCyPv      = circlePos?.y ?? defaultCy;
+          const circleCyPv      = circlePos?.y ?? defaultCyForMode;
           const r               = circleRadius;
           const d               = r * 2;
           const bw              = ci === 0 ? settings.circleBorderWidth   : settings.circle2BorderWidth;
@@ -3474,4 +3488,22 @@ const CarouselCanvas = forwardRef<CarouselCanvasRef, CarouselCanvasProps>(
   }
 );
 
-export default CarouselCanvas;
+// Memoized so one card's state change (or an unrelated parent setState during the
+// mount burst — scale / bg-layer / recording-state / another card's settings)
+// doesn't re-render (and redraw) all four canvases. Only DATA props are compared;
+// the callback props are intentionally ignored — the component mirrors them into
+// refs (or they close over a constant entry id + stable setters), so a changed
+// callback identity never needs a re-render. This is the main fix for the
+// several-seconds jank when the editor first opens.
+const CANVAS_DATA_PROPS: (keyof CarouselCanvasProps)[] = [
+  'imageSrc', 'videoSrc', 'chartBg', 'headline', 'subheadline', 'settings',
+  'brandLogoSrc', 'invertedSlots', 'platform', 'rectMode', 'isDraggingElement', 'staticMode',
+];
+function canvasPropsEqual(a: CarouselCanvasProps, b: CarouselCanvasProps): boolean {
+  for (const k of CANVAS_DATA_PROPS) {
+    if (!Object.is(a[k], b[k])) return false;
+  }
+  return true;
+}
+
+export default React.memo(CarouselCanvas, canvasPropsEqual);

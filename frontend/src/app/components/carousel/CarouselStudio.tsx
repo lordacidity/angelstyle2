@@ -6,7 +6,7 @@
 // CarouselSection so wizard → editor seeding is a plain state handoff).
 
 import { useState, useRef, useEffect, useCallback, memo } from 'react';
-import CarouselCanvas, { CAROUSEL_PREVIEW_W } from '../CarouselCanvas';
+import CarouselCanvas, { CAROUSEL_PREVIEW_W, CAROUSEL_PREVIEW_H } from '../CarouselCanvas';
 import type { CarouselChartBg } from '../CarouselCanvas';
 import { CarouselSettingsPanel } from '../CarouselSettingsPanel';
 import { defaultCarouselSettings, defaultSwipeStyle } from '../carouselTypes';
@@ -113,6 +113,40 @@ const CarouselAddRow = memo(function CarouselAddRow({ onAdd }: { onAdd: (type: S
   );
 });
 
+// Shown over the canvas column while a freshly-opened module decodes its photos
+// and the canvases do their first draws — unavoidable CPU work that's janky to
+// scroll/edit through. Mirrors the real card stack (same width/height/zoom) so
+// the reveal isn't a layout jump.
+const CarouselSkeleton = memo(function CarouselSkeleton({ count, viewScale }: { count: number; viewScale: number }) {
+  return (
+    <div className="absolute inset-0 z-10 flex justify-center overflow-hidden bg-[#0a0a0a]">
+      <div className="flex flex-col items-center gap-8 pt-4 pb-6 px-4" style={{ zoom: viewScale }}>
+        {Array.from({ length: Math.max(1, count) }).map((_, i) => (
+          <div
+            key={i}
+            className="rounded-xl bg-zinc-900 ring-1 ring-zinc-800 overflow-hidden animate-pulse"
+            style={{ width: CARD_W, height: CAROUSEL_PREVIEW_H }}
+          >
+            <div className="flex items-center justify-between px-5 pt-5">
+              <div className="h-4 w-20 rounded bg-zinc-800" />
+              <div className="h-4 w-12 rounded bg-zinc-800" />
+            </div>
+            <div className="mx-5 mt-4 rounded-lg bg-zinc-800" style={{ height: CAROUSEL_PREVIEW_H * 0.52 }} />
+            <div className="px-5 mt-5 space-y-2.5">
+              <div className="h-5 w-4/5 rounded bg-zinc-800" />
+              <div className="h-3 w-3/5 rounded bg-zinc-800" />
+            </div>
+          </div>
+        ))}
+      </div>
+      <div className="pointer-events-none absolute bottom-6 left-1/2 -translate-x-1/2 flex items-center gap-2 text-[11px] font-medium text-zinc-500">
+        <span className="inline-block h-3.5 w-3.5 rounded-full border-2 border-zinc-600 border-t-transparent animate-spin" />
+        Preparing your carousel…
+      </div>
+    </div>
+  );
+});
+
 function CarouselBgControls({
   entry,
   bgState,
@@ -185,6 +219,14 @@ export function CarouselStudio({
   const [scaleMap,   setScaleMap]   = useState<Record<string, number>>({});
   const [bgStateMap, setBgStateMap] = useState<Record<string, CarouselBgLayerState>>({});
   const [viewScale,  setViewScale]  = useState(0.9);
+
+  // Skeleton gate for the canvas column. A freshly-opened module has to decode its
+  // (large) background photos and let the canvases do their first draws before
+  // scrolling/editing is smooth — so we cover the column with a skeleton until that
+  // settles, then reveal. `revealedModulesRef` keys off the first page id so we only
+  // skeleton a brand-new module, never re-skeleton on incidental edits.
+  const [editorReady, setEditorReady] = useState(true);
+  const revealedModulesRef = useRef<Set<string>>(new Set());
 
   const [settingsMap, setSettingsMap] = useState<Record<string, CarouselSettings>>({});
   const { savedSlides, loading: templatesLoading } = useCarouselTemplates(userId);
@@ -423,9 +465,9 @@ export function CarouselStudio({
         const slideType = pages.find(p => p.id === id)?.carouselSlideType ?? 'main';
         const base = prev[id] ?? savedSlidesRef.current?.[slideType]?.settings ?? defaultCarouselSettings();
         const zoneLogoSlots = [...(base.zoneLogoSlots ?? Array(9).fill(null))];
-        // Top-left pauv logo on cards 1–2 only — card 3's circle already
-        // carries the pauv mark, so no logo up top there.
-        zoneLogoSlots[0] = id === pending.thirdId ? null : '/pauvlogo.png';
+        // Top-left pauv logo on every card (cards 1–3), so the brand mark is
+        // consistent across the whole carousel.
+        zoneLogoSlots[0] = '/pauvlogo.png';
         const swipeZoneSlots = [...(base.swipeZoneSlots ?? Array(9).fill(null))];
         // Top-right white SWIPE → — IG only; X posts don't swipe.
         swipeZoneSlots[2] = platform === 'ig' ? defaultSwipeStyle() : null;
@@ -561,6 +603,45 @@ export function CarouselStudio({
   const bgSourceOf = useCallback((entry: VideoEntry): 'photo' | 'video' | 'chart' =>
     carouselBgSourceMap[entry.id] ?? (entry.carouselSubMode === 'video' ? 'video' : 'photo'),
   [carouselBgSourceMap]);
+
+  // Drive the skeleton gate: when a brand-new module's pages appear, hold the
+  // skeleton until every photo page has a resolved src AND those photos have
+  // decoded (preloaded here so the canvases then draw from cache), then reveal.
+  // A failsafe timer guarantees we never get stuck if a photo never loads.
+  const moduleKey = pages[0]?.id ?? '';
+  useEffect(() => {
+    if (!moduleKey) { setEditorReady(true); return; }
+    if (revealedModulesRef.current.has(moduleKey)) return; // already revealed this module
+    if (templatesLoading) { setEditorReady(false); return; }
+
+    // Every photo page must have its src resolved before we can judge decode
+    // readiness; video/chart pages don't gate.
+    const photoPages = pages.filter(p => bgSourceOf(p) === 'photo');
+    const allResolved = photoPages.every(p => !!p.imageSrc);
+    if (!allResolved) { setEditorReady(false); return; } // still resolving — keep skeleton
+
+    setEditorReady(false);
+    let cancelled = false;
+    const reveal = () => {
+      if (cancelled) return;
+      revealedModulesRef.current.add(moduleKey);
+      // Let the decoded images land + canvases paint one frame before the reveal.
+      requestAnimationFrame(() => requestAnimationFrame(() => { if (!cancelled) setEditorReady(true); }));
+    };
+    const srcs = photoPages.map(p => p.imageSrc!).filter(Boolean);
+    let remaining = srcs.length;
+    if (remaining === 0) { reveal(); }
+    else {
+      srcs.forEach(src => {
+        const im = new Image();
+        const tick = () => { if (cancelled) return; remaining -= 1; if (remaining === 0) reveal(); };
+        im.onload = tick; im.onerror = tick; im.src = src;
+      });
+    }
+    const failsafe = setTimeout(() => { if (!cancelled) { revealedModulesRef.current.add(moduleKey); setEditorReady(true); } }, 6000);
+    return () => { cancelled = true; clearTimeout(failsafe); };
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [moduleKey, templatesLoading, pages, bgSourceOf]);
 
   const chartBgOf = useCallback((entry: VideoEntry): CarouselChartBg | null => {
     if (bgSourceOf(entry) !== 'chart') return null;
@@ -791,9 +872,15 @@ export function CarouselStudio({
       {/* ── Vertical scroll column ── */}
       <div
         ref={scrollRef}
-        className="flex-1 overflow-y-auto overflow-x-hidden scroll-smooth"
-        style={{ paddingLeft: showPanels ? 450 : 0, paddingRight: showPanels ? 360 : 0 }}
+        className={`relative flex-1 overflow-x-hidden scroll-smooth ${editorReady ? 'overflow-y-auto' : 'overflow-y-hidden'}`}
+        // marginRight (not padding) so this scroll column's box ENDS at the left
+        // edge of the fixed 360px settings panel — otherwise its vertical
+        // scrollbar renders at the viewport edge, underneath (and bleeding
+        // through) the transparent panel. Card centering is unchanged: left
+        // padding 450, right boundary still 360px in.
+        style={{ paddingLeft: showPanels ? 450 : 0, marginRight: showPanels ? 360 : 0 }}
       >
+        {!editorReady && <CarouselSkeleton count={pages.length || 4} viewScale={viewScale} />}
         <div className="flex flex-col items-center gap-8 pt-4 pb-6 px-4" style={{ zoom: viewScale }}>
           {pages.map(entry => {
             const isSelected = entry.id === (selectedEntry?.id ?? '');
