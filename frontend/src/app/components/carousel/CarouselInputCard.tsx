@@ -87,6 +87,18 @@ export function CarouselInputCard({
     onUpdateCarousel('imageSrc', URL.createObjectURL(blob));
   }
 
+  // Paste an image straight from the clipboard (e.g. copied off Google) — the
+  // fast path alongside drag-and-drop. Switches the slide to Photo and loads it.
+  async function pasteImageFromClipboard() {
+    if (typeof navigator === 'undefined' || !navigator.clipboard?.read) return;
+    try {
+      for (const item of await navigator.clipboard.read()) {
+        const type = item.types.find(t => t.startsWith('image/'));
+        if (type) { onSetBgSource('photo'); setImageFromBlob(await item.getType(type)); return; }
+      }
+    } catch { /* clipboard blocked / no image — ignore */ }
+  }
+
   return (
     <div
       className={`relative rounded-lg bg-zinc-950 border overflow-hidden transition-colors ${dragOver ? 'border-white ring-2 ring-white/40' : 'border-zinc-800'}`}
@@ -117,11 +129,24 @@ export function CarouselInputCard({
         </button>
       </div>
 
-      {/* Discoverability hint for the drag-and-drop drop zone above. */}
+      {/* Drop-zone hint + a quick Paste button (photo mode) — paste an image copied
+          off Google straight in, alongside drag-and-drop. */}
       {bgSource !== 'chart' && (
-        <div className="flex items-center justify-center gap-1.5 px-3 py-1.5 border-b border-zinc-800 text-[11px] text-zinc-600">
+        <div className="flex items-center justify-center gap-2 px-3 py-1.5 border-b border-zinc-800 text-[11px] text-zinc-600">
           <UploadIcon size={12} />
-          Drag &amp; drop a photo or video here
+          <span>Drag &amp; drop a photo or video here</span>
+          {bgSource === 'photo' && (
+            <>
+              <span className="text-zinc-700">·</span>
+              <button
+                onClick={pasteImageFromClipboard}
+                title="Paste an image from your clipboard"
+                className="rounded bg-white px-2 py-0.5 text-[10px] font-medium text-black hover:bg-zinc-100 transition-colors"
+              >
+                Paste
+              </button>
+            </>
+          )}
         </div>
       )}
 
