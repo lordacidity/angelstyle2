@@ -5,7 +5,7 @@
 // and the main slide's source-article link. Moved out of CanvasGrid when the
 // carousel got its own Studio section.
 
-import { useRef } from 'react';
+import { useRef, useState, useEffect } from 'react';
 import { CAROUSEL_PREVIEW_W } from '../CarouselCanvas';
 import type { VideoEntry } from '../../types';
 import {
@@ -34,16 +34,46 @@ export function CarouselInputCard({
   onSetBgSource: (source: 'photo' | 'video' | 'chart') => void;
   onRemove: () => void;
 }) {
-  const fileRef = useRef<HTMLInputElement>(null);
   const videoFileRef = useRef<HTMLInputElement>(null);
   const hasLocalVideo = !!entry.localVideoSrc;
+  const [dragOver, setDragOver] = useState(false);
+
+  // Headline / subheadline auto-grow so the full (often long, AI-written) copy is
+  // visible instead of being clipped inside a fixed-height box.
+  const headlineRef = useRef<HTMLTextAreaElement>(null);
+  const subRef = useRef<HTMLTextAreaElement>(null);
+  const grow = (el: HTMLTextAreaElement | null) => {
+    if (!el) return;
+    el.style.height = 'auto';
+    el.style.height = `${el.scrollHeight}px`;
+  };
+  useEffect(() => { grow(headlineRef.current); }, [entry.headline]);
+  useEffect(() => { grow(subRef.current); }, [entry.subheadline]);
 
   function handleVideoFile(e: React.ChangeEvent<HTMLInputElement>) {
     const file = e.target.files?.[0];
     if (!file) return;
+    loadVideoFile(file);
+    if (videoFileRef.current) videoFileRef.current.value = '';
+  }
+
+  // Load a video file as this slide's background, flipping the source to Video.
+  function loadVideoFile(file: File) {
+    onSetBgSource('video');
+    if (entry.localVideoSrc?.startsWith('blob:')) URL.revokeObjectURL(entry.localVideoSrc);
     onUpdateLocalVideo(URL.createObjectURL(file), file.name);
     onUpdateUrl('');
-    if (videoFileRef.current) videoFileRef.current.value = '';
+  }
+
+  // Drag a photo OR video file straight onto the card — auto-switches the source
+  // so adding a short clip is a single drop, no need to toggle to Video first.
+  function handleDrop(e: React.DragEvent) {
+    e.preventDefault();
+    setDragOver(false);
+    const file = e.dataTransfer?.files?.[0];
+    if (!file) return;
+    if (file.type.startsWith('video/')) loadVideoFile(file);
+    else if (file.type.startsWith('image/')) { onSetBgSource('photo'); setImageFromBlob(file); }
   }
 
   function clearLocalVideo() {
@@ -51,35 +81,27 @@ export function CarouselInputCard({
     onUpdateLocalVideo('', '');
   }
 
-  // Set the photo from a pasted/blob image, revoking any previous blob URL first.
+  // Set the photo from a dropped/blob image, revoking any previous blob URL first.
   function setImageFromBlob(blob: Blob) {
     if (entry.imageSrc?.startsWith('blob:')) URL.revokeObjectURL(entry.imageSrc);
     onUpdateCarousel('imageSrc', URL.createObjectURL(blob));
   }
 
-  // Ctrl/⌘+V inside the image input.
-  function handleImagePaste(e: React.ClipboardEvent) {
-    for (const it of Array.from(e.clipboardData?.items ?? [])) {
-      if (it.type.startsWith('image/')) {
-        const f = it.getAsFile();
-        if (f) { e.preventDefault(); setImageFromBlob(f); return; }
-      }
-    }
-  }
-
-  // Explicit "Paste" button — reads the clipboard directly (needs the click gesture).
-  async function pasteImageFromClipboard() {
-    if (typeof navigator === 'undefined' || !navigator.clipboard?.read) return;
-    try {
-      for (const item of await navigator.clipboard.read()) {
-        const type = item.types.find(t => t.startsWith('image/'));
-        if (type) { setImageFromBlob(await item.getType(type)); return; }
-      }
-    } catch { /* clipboard blocked / no image — ignore */ }
-  }
-
   return (
-    <div className="rounded-lg bg-zinc-950 border border-zinc-800 overflow-hidden" style={{ width: CARD_W }}>
+    <div
+      className={`relative rounded-lg bg-zinc-950 border overflow-hidden transition-colors ${dragOver ? 'border-white ring-2 ring-white/40' : 'border-zinc-800'}`}
+      style={{ width: CARD_W }}
+      onDragOver={e => { if (e.dataTransfer?.types?.includes('Files')) { e.preventDefault(); setDragOver(true); } }}
+      onDragLeave={e => { if (e.currentTarget === e.target) setDragOver(false); }}
+      onDrop={handleDrop}
+    >
+      {dragOver && (
+        <div className="pointer-events-none absolute inset-0 z-20 flex flex-col items-center justify-center gap-1 bg-black/70 text-center">
+          <VideoIcon className="text-white" size={20} />
+          <span className="text-sm font-medium text-white">Drop photo or video</span>
+          <span className="text-[11px] text-zinc-400">Video switches this slide to Video automatically</span>
+        </div>
+      )}
 
       {/* Source toggle row — Photo / Video / Chart background */}
       <div className="flex items-center gap-2 px-3 py-2 border-b border-zinc-800">
@@ -95,44 +117,19 @@ export function CarouselInputCard({
         </button>
       </div>
 
-      {/* Image / Video input row — hidden for Chart (the chart card below picks the market) */}
+      {/* Discoverability hint for the drag-and-drop drop zone above. */}
       {bgSource !== 'chart' && (
+        <div className="flex items-center justify-center gap-1.5 px-3 py-1.5 border-b border-zinc-800 text-[11px] text-zinc-600">
+          <UploadIcon size={12} />
+          Drag &amp; drop a photo or video here
+        </div>
+      )}
+
+      {/* Video input row — photo mode uses drag-and-drop + the Swap Photo grid
+          below instead of a dedicated upload/paste bar. Hidden for Chart. */}
+      {bgSource === 'video' && (
       <div className="flex items-center gap-2 px-3 py-3 border-b border-zinc-800">
-        {bgSource === 'photo' ? (
-          <>
-            {entry.imageSrc ? (
-              // eslint-disable-next-line @next/next/no-img-element
-              <img src={entry.imageSrc} alt="" className="w-9 h-9 rounded object-cover shrink-0" />
-            ) : (
-              // Focusable so the user can click it and paste (Ctrl/⌘+V) an image straight in.
-              <div
-                tabIndex={0}
-                onPaste={handleImagePaste}
-                title="Click then paste (⌘/Ctrl+V), or use the Paste button"
-                className="flex items-center gap-2 flex-1 min-w-0 border border-zinc-700 rounded-md px-2.5 h-9 text-zinc-500 outline-none focus:border-zinc-500 cursor-text"
-              >
-                <ImagePlaceholderIcon />
-                <span className="text-sm text-zinc-600">Upload or paste image…</span>
-              </div>
-            )}
-            <button onClick={pasteImageFromClipboard} title="Paste image from clipboard"
-              className="flex items-center justify-center h-9 px-2.5 rounded-md bg-white hover:bg-zinc-100 transition-colors shrink-0 text-[11px] font-medium text-black">
-              Paste
-            </button>
-            <button onClick={() => fileRef.current?.click()} title="Upload image"
-              className="flex items-center justify-center w-9 h-9 rounded-md bg-white hover:bg-zinc-100 transition-colors shrink-0">
-              <UploadIcon stroke="black" />
-            </button>
-            <input ref={fileRef} type="file" accept="image/*" className="hidden"
-              onChange={e => {
-                const f = e.target.files?.[0];
-                if (!f) return;
-                if (entry.imageSrc?.startsWith('blob:')) URL.revokeObjectURL(entry.imageSrc);
-                onUpdateCarousel('imageSrc', URL.createObjectURL(f));
-              }}
-            />
-          </>
-        ) : hasLocalVideo ? (
+        {hasLocalVideo ? (
           <>
             <VideoIcon className="text-zinc-400 shrink-0" size={13} />
             <span className="text-sm text-zinc-300 truncate flex-1 min-w-0">{entry.localVideoName || 'Uploaded video'}</span>
@@ -214,29 +211,22 @@ export function CarouselInputCard({
 
       {/* Headline */}
       <div className="px-3 py-2 border-b border-zinc-800">
-        <textarea value={entry.headline ?? ''} onChange={e => onUpdateCarousel('headline', e.target.value)}
+        <textarea ref={headlineRef} value={entry.headline ?? ''}
+          onChange={e => { onUpdateCarousel('headline', e.target.value); grow(e.currentTarget); }}
           placeholder="Headline…" rows={2}
-          className="w-full bg-transparent text-sm text-white placeholder-zinc-600 outline-none resize-none leading-relaxed"
+          className="w-full bg-transparent text-sm text-white placeholder-zinc-600 outline-none resize-none overflow-hidden leading-relaxed"
         />
       </div>
 
       {/* Sub-headline */}
       <div className="px-3 py-2">
-        <textarea value={entry.subheadline ?? ''} onChange={e => onUpdateCarousel('subheadline', e.target.value)}
+        <textarea ref={subRef} value={entry.subheadline ?? ''}
+          onChange={e => { onUpdateCarousel('subheadline', e.target.value); grow(e.currentTarget); }}
           placeholder="Sub-headline (optional)…" rows={1}
-          className="w-full bg-transparent text-sm text-zinc-400 placeholder-zinc-700 outline-none resize-none leading-relaxed"
+          className="w-full bg-transparent text-sm text-zinc-400 placeholder-zinc-700 outline-none resize-none overflow-hidden leading-relaxed"
         />
       </div>
 
     </div>
-  );
-}
-
-// Small inline SVG used only inside this file — not exported
-function ImagePlaceholderIcon() {
-  return (
-    <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" className="shrink-0">
-      <rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="8.5" cy="8.5" r="1.5"/><polyline points="21 15 16 10 5 21"/>
-    </svg>
   );
 }

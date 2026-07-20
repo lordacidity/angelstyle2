@@ -983,7 +983,7 @@ export function CarouselStudio({
                 ) : (
                   <div className="w-11 h-11 rounded-full bg-zinc-900 border border-dashed border-zinc-700 shrink-0" />
                 )}
-                <span className="flex-1 min-w-0 text-xs text-zinc-500 truncate">{moduleCircleQuery || 'Context image for the story'}</span>
+                <span className="flex-1 min-w-0 text-xs text-zinc-500 break-words leading-snug">{moduleCircleQuery || 'Context image for the story'}</span>
                 <button
                   onClick={() => openPhotoPicker(`circle:${selectedEntry.id}`, moduleCircleQuery)}
                   className="shrink-0 px-2.5 py-1.5 rounded-md bg-white text-black hover:bg-zinc-100 text-[11px] font-medium transition-colors"

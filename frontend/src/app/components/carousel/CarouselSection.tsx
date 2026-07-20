@@ -16,7 +16,7 @@ import type { CarouselPlatform } from '../carouselTypes';
 import type { BrandProps } from '../../types';
 
 type View = 'home' | 'wizard' | 'editor';
-type WizardFlow = 'name' | 'trending';
+type WizardFlow = 'name' | 'trending' | 'article';
 
 export function CarouselSection({ userId, brand }: { userId: string | null; brand: BrandProps }) {
   const [view,          setView]          = useState<View>('home');
@@ -24,12 +24,19 @@ export function CarouselSection({ userId, brand }: { userId: string | null; bran
   // IG: 4:5 cards, 3 story cards + chart, SWIPE stamps. X: 15:17 cards, one
   // story card + chart, no swipe. Applies to all three entry flows.
   const [platform,      setPlatform]      = useState<CarouselPlatform>('ig');
+  // The platform the (kept-mounted) editor was last opened with. Separate from
+  // `platform` so toggling Instagram/X on the home screen only re-renders the
+  // lightweight home UI — it does NOT remount the hidden editor + its four heavy
+  // canvases every toggle (which was the source of the IG↔X jank). The editor
+  // resyncs to the current platform only when it's actually opened.
+  const [editorPlatform, setEditorPlatform] = useState<CarouselPlatform>('ig');
   const [editorVisited, setEditorVisited] = useState(false);
   const [pendingSeed,   setPendingSeed]   = useState<CarouselModuleSeed | null>(null);
   const pagesApi = useCarouselPages();
 
   function openEditor() {
     setEditorVisited(true);
+    setEditorPlatform(platform); // resync the editor to the chosen platform on entry
     setView('editor');
   }
 
@@ -73,13 +80,9 @@ export function CarouselSection({ userId, brand }: { userId: string | null; bran
     openEditor();
   }
 
-  const isX = platform === 'x';
-  const tiles: Array<{ title: string; desc: string; onClick: () => void; icon: React.ReactNode }> = [
+  const tiles: Array<{ title: string; onClick: () => void; icon: React.ReactNode }> = [
     {
       title: 'From scratch',
-      desc: isX
-        ? 'Open the editor with a blank X post — add pages yourself at 15:17.'
-        : 'Open the editor with a blank carousel — add Main and Supporting pages yourself.',
       onClick: openEditor,
       icon: (
         <svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
@@ -91,9 +94,6 @@ export function CarouselSection({ userId, brand }: { userId: string | null; bran
     },
     {
       title: 'From a name',
-      desc: isX
-        ? 'Pick a Pauv market, choose the news, choose a photo — DeepSeek writes the story card; card 2 is their chart.'
-        : 'Pick a Pauv market, choose the news, choose 3 photos — DeepSeek writes the 4-card module, ending on their chart as a video.',
       onClick: () => openWizard('name'),
       icon: (
         <svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
@@ -103,15 +103,15 @@ export function CarouselSection({ userId, brand }: { userId: string | null; bran
       ),
     },
     {
-      title: 'Trending',
-      desc: isX
-        ? 'AI finds the Pauv-listed figure trending right now and builds the same 2-card X post automatically.'
-        : 'AI finds the Pauv-listed figure trending right now and builds the same 4-card module automatically.',
-      onClick: () => openWizard('trending'),
+      title: 'From an article',
+      onClick: () => openWizard('article'),
       icon: (
         <svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
-          <polyline points="23 6 13.5 15.5 8.5 10.5 1 18"/>
-          <polyline points="17 6 23 6 23 12"/>
+          <path d="M4 3h11l5 5v13a0 0 0 0 1 0 0H4a0 0 0 0 1 0 0V3z"/>
+          <polyline points="14 3 14 8 19 8"/>
+          <line x1="8" y1="13" x2="16" y2="13"/>
+          <line x1="8" y1="17" x2="16" y2="17"/>
+          <line x1="8" y1="9" x2="10" y2="9"/>
         </svg>
       ),
     },
@@ -137,9 +137,7 @@ export function CarouselSection({ userId, brand }: { userId: string | null; bran
           <div className="text-center">
             <h1 className="text-lg font-semibold text-zinc-100">Carousel</h1>
             <p className="text-sm text-zinc-500 mt-1">
-              {isX
-                ? 'Two-image X posts at 15:17 — one story card + their live chart.'
-                : 'Multi-page swipe posts — 3 story cards + their live chart as a video.'}
+              Build multi-page swipe posts with story cards and a live chart.
             </p>
           </div>
           <div className="flex flex-wrap items-stretch justify-center gap-4">
@@ -147,13 +145,12 @@ export function CarouselSection({ userId, brand }: { userId: string | null; bran
               <button
                 key={t.title}
                 onClick={t.onClick}
-                className="flex flex-col items-start gap-3 w-[240px] p-5 rounded-xl bg-zinc-950 border border-zinc-800 hover:border-zinc-600 text-left transition-colors group"
+                className="flex flex-col items-center justify-center gap-4 w-[200px] py-8 px-5 rounded-xl bg-zinc-950 border border-zinc-800 hover:border-zinc-600 hover:bg-zinc-900/40 text-center transition-colors group"
               >
-                <div className="flex items-center justify-center w-11 h-11 rounded-lg bg-zinc-900 border border-zinc-800 text-zinc-400 group-hover:text-zinc-100 transition-colors">
+                <div className="flex items-center justify-center w-12 h-12 rounded-lg bg-zinc-900 border border-zinc-800 text-zinc-400 group-hover:text-zinc-100 transition-colors">
                   {t.icon}
                 </div>
                 <span className="text-sm font-semibold text-zinc-100">{t.title}</span>
-                <span className="text-xs text-zinc-500 leading-relaxed">{t.desc}</span>
               </button>
             ))}
           </div>
@@ -162,7 +159,7 @@ export function CarouselSection({ userId, brand }: { userId: string | null; bran
               onClick={openEditor}
               className="text-xs text-zinc-500 hover:text-zinc-200 underline underline-offset-4 transition-colors"
             >
-              Continue editing ({pagesApi.pages.length} page{pagesApi.pages.length === 1 ? '' : 's'})
+              Continue editing{pagesApi.lastEditedAt ? ` · ${new Date(pagesApi.lastEditedAt).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })}` : ''}
             </button>
           )}
         </div>
@@ -183,11 +180,11 @@ export function CarouselSection({ userId, brand }: { userId: string | null; bran
       {editorVisited && (
         <div className="h-full" style={{ display: view === 'editor' ? undefined : 'none' }}>
           <CarouselStudio
-            key={platform} // remount on toggle — canvases fix their frame size at mount
+            key={editorPlatform} // remount only when the editor is (re)opened at a new platform — canvases fix their frame size at mount
             pagesApi={pagesApi}
             userId={userId}
             brand={brand}
-            platform={platform}
+            platform={editorPlatform}
             onBackHome={() => setView('home')}
             pendingSeed={pendingSeed}
             onSeedConsumed={() => setPendingSeed(null)}

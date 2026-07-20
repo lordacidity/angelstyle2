@@ -1,8 +1,10 @@
 'use client';
 
-// Guided builder for the 4-card carousel module. Two flows share it:
+// Guided builder for the 4-card carousel module. Three flows share it:
 //   'name'     — pick a Pauv market manually → choose the news → choose photos
 //   'trending' — Gemini picks the Pauv-listed figure who's trending right now
+//   'article'  — paste an article URL; we read it + match its subject to a Pauv
+//                market (required), then write the module from the story
 // Both end the same way: DeepSeek writes the 4 pages of copy
 // (2 news beats → the Pauv angle → a chart CTA), the user picks 3 of 9 photos
 // (cards 1–3; card 4 is always the market's chart video), and onBuild hands the
@@ -48,13 +50,18 @@ export interface BuiltCarouselModule {
 }
 
 const PAGE_LABELS = ['Main · News hook', 'Supporting · What happened', 'Supporting · Pauv transition'];
-// Per-search batch size — two searches (person + story context) of 5 each.
-const PHOTO_BATCH = 5;
+// Photo grid batch sizes. The grid is 5 columns wide and the "+ More" tile counts
+// as one cell, so we seed the FIRST search with 4 photos (4 + the tile = a full
+// row of 5) and load 5 per "More" click after that. Because 4 + 5·n keeps the
+// photo count ≡ 4 (mod 5), the "+" tile always lands in the last column of a row —
+// never stranded alone on its own line.
+const PHOTO_BATCH_INITIAL = 4;
+const PHOTO_BATCH_MORE = 5;
 
 export function CarouselWizard({
   flow, platform, brandCategory, onBuild, onCancel,
 }: {
-  flow: 'name' | 'trending';
+  flow: 'name' | 'trending' | 'article';
   // IG builds the 4-card module (3 photo cards + chart); X builds a 2-card
   // post (one story card + chart) — copy generation is shared, X keeps page 1.
   platform: CarouselPlatform;
@@ -84,6 +91,11 @@ export function CarouselWizard({
   const [trLoading,    setTrLoading]    = useState(false);
   const [trStory,      setTrStory]      = useState<{ figure: string; ticker: string; storySummary: string; articleUrl?: string } | null>(null);
 
+  // Article flow — paste a URL, we read it + resolve its subject to a Pauv market.
+  const [arUrl,        setArUrl]        = useState('');
+  const [arLoading,    setArLoading]    = useState(false);
+  const [arSummary,    setArSummary]    = useState<{ figure: string; ticker: string; storySummary: string; siteName?: string; url: string } | null>(null);
+
   // DeepSeek copy
   const [copyPages,   setCopyPages]   = useState<CopyPage[] | null>(null);
   const [copyLoading, setCopyLoading] = useState(false);
@@ -111,8 +123,6 @@ export function CarouselWizard({
   const [ctxLoading,    setCtxLoading]    = useState(false);
   const [ctxMore,       setCtxMore]       = useState(false);
   const [selectedPhotos,      setSelectedPhotos]      = useState<Photo[]>([]);
-  const [photoQueryHistory,   setPhotoQueryHistory]   = useState<string[]>([]);
-  const [photoQueryRewriting, setPhotoQueryRewriting] = useState(false);
   const [building,            setBuilding]            = useState(false);
   // Master pool — EVERY background-photo search result fetched this run
   // (person + context, replaced grids included), deduped. The editor's Swap
@@ -142,19 +152,18 @@ export function CarouselWizard({
 
   // ── Photos ──────────────────────────────────────────────────────────────────
 
-  const fetchPhotoBatch = async (query: string, offset: number): Promise<Photo[]> => {
-    const r = await fetch('/api/ai/photos/search', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ query, count: PHOTO_BATCH, offset }) });
+  const fetchPhotoBatch = async (query: string, offset: number, count: number): Promise<Photo[]> => {
+    const r = await fetch('/api/ai/photos/search', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ query, count, offset }) });
     if (!r.ok) throw new Error(await r.text());
     return await r.json() as Photo[];
   };
 
-  const loadPersonPhotos = async (query: string, offset: number, append: boolean, recordHistory = false) => {
+  const loadPersonPhotos = async (query: string, offset: number, append: boolean) => {
     if (!query.trim()) return;
     (append ? setPersonMore : setPersonLoading)(true);
     setPersonQuery(query);
-    if (recordHistory) setPhotoQueryHistory(h => h.includes(query) ? h : [...h, query]);
     try {
-      const fresh = await fetchPhotoBatch(query, offset);
+      const fresh = await fetchPhotoBatch(query, offset, append ? PHOTO_BATCH_MORE : PHOTO_BATCH_INITIAL);
       setPersonOffset(offset + fresh.length);
       addToPool(fresh);
       setPersonPhotos(cur => {
@@ -171,7 +180,7 @@ export function CarouselWizard({
     (append ? setCtxMore : setCtxLoading)(true);
     setCtxQuery(query);
     try {
-      const fresh = await fetchPhotoBatch(query, offset);
+      const fresh = await fetchPhotoBatch(query, offset, append ? PHOTO_BATCH_MORE : PHOTO_BATCH_INITIAL);
       setCtxOffset(offset + fresh.length);
       addToPool(fresh);
       setCtxPhotos(cur => {
@@ -183,17 +192,6 @@ export function CarouselWizard({
     finally { (append ? setCtxMore : setCtxLoading)(false); }
   };
 
-  const rewritePhotoQuery = async () => {
-    if (!selectedTalent) return;
-    setPhotoQueryRewriting(true);
-    try {
-      const r = await fetch('/api/ai/photos/rewrite-query', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ personName: selectedTalent.name, personSummary: selectedItem?.caption ?? trStory?.storySummary ?? '', previousQueries: photoQueryHistory }) });
-      if (!r.ok) throw new Error(await r.text());
-      const { query } = await r.json() as { query: string };
-      await loadPersonPhotos(query, 0, false, true);
-    } catch (e) { setError(String(e)); }
-    finally { setPhotoQueryRewriting(false); }
-  };
 
   const togglePhoto = (p: Photo) => {
     setSelectedPhotos(cur => {
@@ -245,7 +243,7 @@ export function CarouselWizard({
   const runLookup = async () => {
     if (!selectedTalent) return;
     setError(null); setLookupLoading(true); setStories([]); setSelectedItem(null); setCopyPages(null);
-    setPersonPhotos([]); setCtxPhotos([]); setSelectedPhotos([]); setPhotoQueryHistory([]); setPhotoPoolAll([]);
+    setPersonPhotos([]); setCtxPhotos([]); setSelectedPhotos([]); setPhotoPoolAll([]);
     setStep('news');
     try {
       const r = await fetch('/api/ai/news-lookup', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ ticker: selectedTalent.ticker }) });
@@ -297,12 +295,54 @@ export function CarouselWizard({
     finally { setTrLoading(false); }
   };
 
+  // ── 'article' flow: read a URL, require a Pauv-listed subject ───────────────
+
+  const generateFromArticle = async () => {
+    const url = arUrl.trim();
+    if (!url) return;
+    setError(null); setArLoading(true); setArSummary(null); setCopyPages(null); setSelectedTalent(null);
+    setPersonPhotos([]); setCtxPhotos([]); setSelectedPhotos([]); setPhotoPoolAll([]);
+    try {
+      const ar = await fetch('/api/ai/article/extract', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ url }),
+      });
+      const article = await ar.json() as { url?: string; title?: string; description?: string; siteName?: string; text?: string; images?: string[]; error?: string };
+      if (!ar.ok || article.error) throw new Error(article.error ?? `Couldn't read the article (${ar.status})`);
+
+      // Identify the subject + match to the Pauv roster (title + a slice of body).
+      const ep = await fetch('/api/ai/extract-person', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ title: article.title ?? '', description: (article.description || article.text || '').slice(0, 1500) }),
+      });
+      const person = await ep.json() as { person?: { name: string; matchedTicker: string | null; summary: string }; talent?: { ticker: string } | null; error?: string };
+      if (!ep.ok || person.error) throw new Error(person.error ?? 'Could not analyze the article');
+
+      const matchedTicker = person.talent?.ticker ?? person.person?.matchedTicker ?? null;
+      if (!matchedTicker) {
+        throw new Error(`This article isn't about a Pauv-listed figure${person.person?.name ? ` — it reads as being about ${person.person.name}` : ''}. Try an article about someone listed on Pauv.`);
+      }
+      const talent = talents.find(t => t.ticker.toLowerCase() === matchedTicker.toLowerCase());
+      if (!talent) throw new Error(`"${matchedTicker}" isn't in the loaded Pauv roster.`);
+
+      const summary = person.person?.summary || article.description || article.title || '';
+      setSelectedTalent(talent);
+      setArSummary({ figure: talent.name, ticker: talent.ticker, storySummary: summary, siteName: article.siteName ?? undefined, url: article.url ?? url });
+      void generateCopy(talent, {
+        headline: article.title || summary,
+        rawText: article.text || article.description || summary,
+        sourceName: article.siteName ?? '',
+        url: article.url ?? url,
+      });
+    } catch (e) { setError(String(e)); }
+    finally { setArLoading(false); }
+  };
+
   const loadCirclePhotos = async (query: string, offset: number, append: boolean) => {
     if (!query.trim()) return;
     (append ? setCircleMore : setCircleLoading)(true);
     setCircleQuery(query);
     try {
-      const r = await fetch('/api/ai/photos/search', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ query, count: PHOTO_BATCH, offset }) });
+      const r = await fetch('/api/ai/photos/search', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ query, count: append ? PHOTO_BATCH_MORE : PHOTO_BATCH_INITIAL, offset }) });
       if (!r.ok) throw new Error(await r.text());
       const fresh = await r.json() as Photo[];
       setCircleOffset(offset + fresh.length);
@@ -319,7 +359,7 @@ export function CarouselWizard({
   const goToPhotos = () => {
     if (!selectedTalent || !copyPages) return;
     setStep('photos');
-    if (personPhotos.length === 0) void loadPersonPhotos(personQuery.trim() || selectedTalent.name, 0, false, true);
+    if (personPhotos.length === 0) void loadPersonPhotos(personQuery.trim() || selectedTalent.name, 0, false);
     if (ctxPhotos.length === 0 && ctxQuery.trim()) void loadCtxPhotos(ctxQuery, 0, false);
     if (circlePhotos.length === 0 && circleQuery.trim()) void loadCirclePhotos(circleQuery, 0, false);
   };
@@ -341,7 +381,7 @@ export function CarouselWizard({
         circlePhotoUrl,
         circleQuery,
         talent: selectedTalent,
-        articleUrl: flow === 'name' ? selectedItem?.url : trStory?.articleUrl,
+        articleUrl: flow === 'name' ? selectedItem?.url : flow === 'article' ? arSummary?.url : trStory?.articleUrl,
       });
     } finally { setBuilding(false); }
   };
@@ -350,17 +390,18 @@ export function CarouselWizard({
     setStep('person'); setSelectedTalent(null); setSearch(''); setStories([]); setSelectedItem(null);
     setCopyPages(null); setPersonPhotos([]); setCtxPhotos([]); setSelectedPhotos([]); setPhotoPoolAll([]); setError(null);
     setTrStory(null); setTrNameHint('');
+    setArUrl(''); setArSummary(null); setArLoading(false);
     setCircleQuery(''); setCirclePhotos([]); setSelectedCircle(null); setCircleOffset(0);
     setCtxQuery(''); setPersonQuery(''); setPersonOffset(0); setCtxOffset(0);
   };
 
   const stepLabels: Array<{ key: Step; label: string }> = [
-    { key: 'person', label: flow === 'name' ? '1. Market' : '1. Trending pick' },
+    { key: 'person', label: flow === 'name' ? '1. Market' : flow === 'article' ? '1. Article' : '1. Trending pick' },
     { key: 'news',   label: '2. News & copy' },
     { key: 'photos', label: photosNeeded === 1 ? '3. Photo (1 of 9)' : '3. Photos (3 of 9)' },
   ];
   // Trending has no separate news step — the pick screen shows the copy too.
-  const visibleSteps = flow === 'trending' ? stepLabels.filter(s => s.key !== 'news') : stepLabels;
+  const visibleSteps = flow === 'name' ? stepLabels : stepLabels.filter(s => s.key !== 'news');
   const stepIdx = visibleSteps.findIndex(s => s.key === step);
 
   // Selectable photo grid shared by the person + context sections. Selection
@@ -390,11 +431,10 @@ export function CarouselWizard({
         {more ? (
           <div className="rounded-md bg-zinc-800 animate-pulse" style={{ width: 170, height: 170 }} />
         ) : pool.length > 0 ? (
-          <button onClick={onMore} disabled={loading}
-            className="flex flex-col items-center justify-center gap-1 rounded-md border-2 border-dashed border-zinc-700 hover:border-zinc-500 hover:bg-zinc-900 disabled:opacity-40 disabled:cursor-not-allowed transition-colors text-zinc-600 hover:text-zinc-300"
+          <button onClick={onMore} disabled={loading} title="More photos"
+            className="flex items-center justify-center rounded-md border-2 border-dashed border-zinc-700 hover:border-zinc-500 hover:bg-zinc-900 disabled:opacity-40 disabled:cursor-not-allowed transition-colors text-zinc-600 hover:text-zinc-300"
             style={{ width: 170, height: 170 }}>
             <span className="text-2xl leading-none">+</span>
-            <span className="text-xs">More</span>
           </button>
         ) : null}
       </div>
@@ -439,7 +479,7 @@ export function CarouselWizard({
       <div className="flex items-center gap-4 px-4 py-3 bg-[#0f0f0f] border-b border-zinc-800 shrink-0">
         <button onClick={onCancel} className="text-zinc-500 hover:text-zinc-200 text-sm transition-colors">Back</button>
         <div className="w-px h-4 bg-zinc-800" />
-        <span className="text-sm font-semibold text-zinc-100">{flow === 'name' ? 'Carousel · From a name' : 'Carousel · Trending'}</span>
+        <span className="text-sm font-semibold text-zinc-100">{flow === 'name' ? 'Carousel · From a name' : flow === 'article' ? 'Carousel · From an article' : 'Carousel · Trending'}</span>
         <div className="flex gap-2">
           {visibleSteps.map((s, i) => (
             <div key={s.key} className={`px-3 py-1 rounded-md text-xs font-medium border transition-colors ${
@@ -570,6 +610,57 @@ export function CarouselWizard({
           </div>
         )}
 
+        {/* ── STEP: person — paste an article ('article' flow) ── */}
+        {step === 'person' && flow === 'article' && (
+          <div className="flex flex-col gap-4">
+            <div className="bg-zinc-950 rounded-lg border border-zinc-800 p-6">
+              <h2 className="text-sm font-semibold mb-1">Paste an article</h2>
+              <p className="text-xs text-zinc-600 mb-4">
+                Drop in a news article link. We read it and confirm it&rsquo;s about a Pauv-listed figure, then DeepSeek writes the {moduleLabel} — ending on their live chart.
+              </p>
+              <label className="block text-xs text-zinc-500 mb-1.5">Article URL</label>
+              <div className="flex items-center border border-zinc-700 rounded-md px-2.5 h-9 mb-3">
+                <input value={arUrl} onChange={e => setArUrl(e.target.value)}
+                  onKeyDown={e => { if (e.key === 'Enter' && !arLoading) generateFromArticle(); }}
+                  autoFocus
+                  placeholder="https://…"
+                  className="flex-1 bg-transparent text-sm text-white placeholder-zinc-600 outline-none min-w-0" />
+              </div>
+              <div className="flex items-center gap-3">
+                {brandCategory && <span className="text-xs text-zinc-600">Steering toward <span className="text-zinc-400">{brandCategory}</span></span>}
+                <button onClick={generateFromArticle} disabled={arLoading || talentsLoading || !arUrl.trim()}
+                  className="ml-auto px-4 py-2 rounded-md bg-white text-black hover:bg-zinc-100 disabled:opacity-30 disabled:cursor-not-allowed text-sm font-semibold transition-colors">
+                  {arLoading ? 'Reading & writing…' : arSummary ? 'Re-read article' : 'Read article'}
+                </button>
+              </div>
+            </div>
+
+            {(arLoading || copyLoading) && (
+              <div className="flex flex-col gap-2">
+                {[1, 2, 3, 4].map(i => <div key={i} className="h-24 bg-zinc-900 rounded-lg animate-pulse" />)}
+              </div>
+            )}
+
+            {arSummary && !arLoading && (
+              <div className="bg-zinc-950 rounded-lg border border-zinc-800 p-5">
+                <div className="flex items-center gap-3">
+                  {selectedTalent?.photo_url && (
+                    // eslint-disable-next-line @next/next/no-img-element
+                    <img src={selectedTalent.photo_url} alt={arSummary.figure} className="w-9 h-9 rounded-full object-cover shrink-0" />
+                  )}
+                  <div>
+                    <div className="text-sm font-semibold text-zinc-100">{arSummary.figure} <span className="text-zinc-600 font-normal">${arSummary.ticker}</span></div>
+                    <a href={arSummary.url} target="_blank" rel="noreferrer" className="text-xs text-zinc-500 hover:text-zinc-300 underline">{arSummary.siteName || 'source'}</a>
+                  </div>
+                </div>
+                <p className="mt-3 text-sm text-zinc-400 leading-relaxed">{arSummary.storySummary}</p>
+              </div>
+            )}
+
+            {copyEditor}
+          </div>
+        )}
+
         {/* ── STEP: news ('name' flow) — stories + DeepSeek copy ── */}
         {step === 'news' && flow === 'name' && selectedTalent && (
           <div className="flex flex-col gap-4">
@@ -623,12 +714,7 @@ export function CarouselWizard({
         {/* ── STEP: photos — pick exactly 3 of 9 (order = cards 1–3) ── */}
         {step === 'photos' && selectedTalent && (
           <div className="bg-zinc-950 rounded-lg border border-zinc-800 p-5">
-            <h2 className="text-sm font-semibold mb-1">{photosNeeded === 1 ? 'Pick 1 photo' : 'Pick 3 photos'}</h2>
-            <p className="text-xs text-zinc-600 mb-4">
-              {photosNeeded === 1
-                ? <>Pick from either search — the person or the story. It becomes the story card; card 2 is {selectedTalent.name}&rsquo;s live chart — no photo needed.</>
-                : <>Pick from both searches — the person AND the story. Selection order maps to cards 1–3. Card 4 uses {selectedTalent.name}&rsquo;s live chart — no photo needed.</>}
-            </p>
+            <h2 className="text-sm font-semibold mb-4">{photosNeeded === 1 ? 'Pick 1 photo across person and context' : 'Pick 3 photos across person and context'}</h2>
 
             {/* Search 1 — the person */}
             <div className="mb-5">
@@ -636,24 +722,19 @@ export function CarouselWizard({
               <div className="flex gap-2 mb-2">
                 <div className="flex items-center gap-2 flex-1 border border-zinc-700 rounded-md px-2.5 h-9">
                   <input value={personQuery} onChange={e => setPersonQuery(e.target.value)}
-                    onKeyDown={e => { if (e.key === 'Enter') loadPersonPhotos(personQuery, 0, false, true); }}
+                    onKeyDown={e => { if (e.key === 'Enter') loadPersonPhotos(personQuery, 0, false); }}
                     placeholder={`${selectedTalent.name}…`}
                     className="flex-1 bg-transparent text-sm text-white placeholder-zinc-600 outline-none min-w-0" />
                 </div>
-                <button onClick={() => loadPersonPhotos(personQuery, 0, false, true)} disabled={!personQuery.trim() || personLoading}
-                  className="px-3 py-2 rounded-md bg-zinc-950 border border-zinc-800 text-zinc-400 hover:text-zinc-200 hover:border-zinc-600 disabled:opacity-40 text-sm transition-colors">Search</button>
-                <button onClick={rewritePhotoQuery} disabled={photoQueryRewriting || personLoading}
-                  className="px-2.5 py-1.5 rounded-md bg-zinc-950 border border-zinc-800 text-zinc-500 hover:text-zinc-200 hover:border-zinc-600 disabled:opacity-40 text-xs transition-colors">
-                  {photoQueryRewriting ? 'Rewriting…' : 'AI rewrite'}
-                </button>
+                <button onClick={() => loadPersonPhotos(personQuery, 0, false)} disabled={!personQuery.trim() || personLoading}
+                  className="px-4 py-2 rounded-md bg-white text-black hover:bg-zinc-100 disabled:opacity-30 disabled:cursor-not-allowed text-sm font-medium transition-colors">Search</button>
               </div>
               {photoGrid(personPhotos, personLoading, personMore, () => void loadPersonPhotos(personQuery, personOffset, true))}
             </div>
 
             {/* Search 2 — context photos of the story itself */}
-            <div className="mb-5 border-t border-zinc-800 pt-4">
-              <h3 className="text-xs font-semibold text-zinc-400 uppercase tracking-wider mb-1">Context — the story</h3>
-              <p className="text-xs text-zinc-600 mb-2">The event, venue, or moment — not just portraits.</p>
+            <div className="mb-5">
+              <h3 className="text-xs font-semibold text-zinc-400 uppercase tracking-wider mb-2">Context</h3>
               <div className="flex gap-2 mb-2">
                 <div className="flex items-center gap-2 flex-1 border border-zinc-700 rounded-md px-2.5 h-9">
                   <input value={ctxQuery} onChange={e => setCtxQuery(e.target.value)}
@@ -662,7 +743,7 @@ export function CarouselWizard({
                     className="flex-1 bg-transparent text-sm text-white placeholder-zinc-600 outline-none min-w-0" />
                 </div>
                 <button onClick={() => loadCtxPhotos(ctxQuery, 0, false)} disabled={!ctxQuery.trim() || ctxLoading}
-                  className="px-3 py-2 rounded-md bg-zinc-950 border border-zinc-800 text-zinc-400 hover:text-zinc-200 hover:border-zinc-600 disabled:opacity-40 text-sm transition-colors">Search</button>
+                  className="px-4 py-2 rounded-md bg-white text-black hover:bg-zinc-100 disabled:opacity-30 disabled:cursor-not-allowed text-sm font-medium transition-colors">Search</button>
               </div>
               {photoGrid(ctxPhotos, ctxLoading, ctxMore, () => void loadCtxPhotos(ctxQuery, ctxOffset, true))}
             </div>
@@ -670,10 +751,7 @@ export function CarouselWizard({
                 tying the person to the story, NOT the person). AI suggested the
                 query; edit it and re-search if the results miss. */}
             <div className="border-t border-zinc-800 pt-4 mb-5">
-              <h3 className="text-sm font-semibold mb-1">Additional photo — card 1 circle</h3>
-              <p className="text-xs text-zinc-600 mb-3">
-                Goes in the circle behind {selectedTalent.name} on the first card. A logo or symbol for the story — not the person.
-              </p>
+              <h3 className="text-sm font-semibold mb-3">Additional circle photo (logo or symbol)</h3>
               <div className="flex gap-2 mb-3">
                 <div className="flex items-center gap-2 flex-1 border border-zinc-700 rounded-md px-2.5 h-9">
                   <input value={circleQuery} onChange={e => setCircleQuery(e.target.value)}
@@ -682,7 +760,7 @@ export function CarouselWizard({
                     className="flex-1 bg-transparent text-sm text-white placeholder-zinc-600 outline-none min-w-0" />
                 </div>
                 <button onClick={() => loadCirclePhotos(circleQuery, 0, false)} disabled={!circleQuery.trim() || circleLoading}
-                  className="px-3 py-2 rounded-md bg-zinc-950 border border-zinc-800 text-zinc-400 hover:text-zinc-200 hover:border-zinc-600 disabled:opacity-40 text-sm transition-colors">Search</button>
+                  className="px-4 py-2 rounded-md bg-white text-black hover:bg-zinc-100 disabled:opacity-30 disabled:cursor-not-allowed text-sm font-medium transition-colors">Search</button>
               </div>
               {circleLoading && <p className="text-sm text-zinc-600 animate-pulse mb-3">Searching…</p>}
               {!circleLoading && circlePhotos.length === 0 && circleQuery.trim() !== '' && (
@@ -700,11 +778,10 @@ export function CarouselWizard({
                 {circleMore ? (
                   <div className="rounded-full bg-zinc-800 animate-pulse" style={{ width: 110, height: 110 }} />
                 ) : circlePhotos.length > 0 ? (
-                  <button onClick={() => loadCirclePhotos(circleQuery, circleOffset, true)} disabled={circleLoading}
-                    className="flex flex-col items-center justify-center gap-1 rounded-full border-2 border-dashed border-zinc-700 hover:border-zinc-500 hover:bg-zinc-900 disabled:opacity-40 transition-colors text-zinc-600 hover:text-zinc-300"
+                  <button onClick={() => loadCirclePhotos(circleQuery, circleOffset, true)} disabled={circleLoading} title="More photos"
+                    className="flex items-center justify-center rounded-full border-2 border-dashed border-zinc-700 hover:border-zinc-500 hover:bg-zinc-900 disabled:opacity-40 transition-colors text-zinc-600 hover:text-zinc-300"
                     style={{ width: 110, height: 110 }}>
                     <span className="text-2xl leading-none">+</span>
-                    <span className="text-xs">More</span>
                   </button>
                 ) : null}
               </div>

@@ -6,12 +6,20 @@
 // Unlike the media grid there is no forced "always one row" — an empty section
 // just shows the add-page picker.
 
-import { useState, useRef } from 'react';
+import { useState, useRef, useEffect } from 'react';
 import type { VideoEntry, SlideType, VideoData } from '../../types';
 import { makeEmptyEntry } from '@/lib/entry';
 
 export function useCarouselPages() {
   const [pages, setPages] = useState<VideoEntry[]>([]);
+
+  // When the current draft was last touched — shown on the "Continue editing"
+  // prompt so a draft is identified by its time, not a page count. Stamped on any
+  // change to the pages; cleared when the draft is emptied.
+  const [lastEditedAt, setLastEditedAt] = useState<number | null>(null);
+  useEffect(() => {
+    setLastEditedAt(pages.length > 0 ? Date.now() : null);
+  }, [pages]);
 
   // Always-current snapshot used inside async callbacks to avoid stale closures
   const pagesRef = useRef(pages);
@@ -89,7 +97,7 @@ export function useCarouselPages() {
   }
 
   return {
-    pages, addPage, removePage, replacePages, clearAll,
+    pages, lastEditedAt, addPage, removePage, replacePages, clearAll,
     updatePage, updateUrl, setSubMode, updateLocalVideo, fetchVideo, handleVideoError,
   };
 }
