@@ -1452,13 +1452,19 @@ export function CanvasGrid({
   useEffect(() => {
     if (!pendingBoardSend) return;
     const entry = entries.find(e => e.id === pendingBoardSend);
+    // Don't consume the flag until the entry has actually landed in `entries`.
+    // Previously this cleared it unconditionally on the first run, so if the
+    // entries prop hadn't propagated yet the fetch never fired — the caption /
+    // context populated (they come from the board row) but the video stayed
+    // black forever. Depending on `entries` lets it retry on the next render.
+    if (!entry) return;
     onBoardSendConsumed?.();
-    if (entry && entry.url.trim()) {
+    if (entry.url.trim()) {
       setSelectedId(entry.id);
       void handleFetchThenGenerate(entry);
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [pendingBoardSend]);
+  }, [pendingBoardSend, entries]);
 
   const copySocialCaption = useCallback(async (entryId: string) => {
     const text = socialCaptionMap[entryId]?.text;
