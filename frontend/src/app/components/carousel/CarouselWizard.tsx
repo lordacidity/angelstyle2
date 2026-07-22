@@ -26,6 +26,10 @@ interface LookupItem {
   rawText: string; sourceName: string; likeCount?: number;
 }
 interface Photo { url: string; thumbnail: string; title?: string; source?: string }
+interface TrendingHeadline {
+  title: string; url: string; sourceName: string; publishedAt: string | null;
+  imageUrl: string | null; personName: string; ticker: string; photoUrl: string | null;
+}
 
 export interface CopyPage {
   slideType: 'main' | 'supporting_1';
@@ -57,6 +61,18 @@ const PAGE_LABELS = ['Main · News hook', 'Supporting · What happened', 'Suppor
 // never stranded alone on its own line.
 const PHOTO_BATCH_INITIAL = 4;
 const PHOTO_BATCH_MORE = 5;
+
+// "2h ago" / "3d ago" for trending headline freshness. Empty when unparseable.
+function timeAgo(iso: string | null): string {
+  if (!iso) return '';
+  const t = Date.parse(iso);
+  if (!Number.isFinite(t)) return '';
+  const mins = Math.max(0, Math.round((Date.now() - t) / 60_000));
+  if (mins < 60) return `${mins}m ago`;
+  const hrs = Math.round(mins / 60);
+  if (hrs < 24) return `${hrs}h ago`;
+  return `${Math.round(hrs / 24)}d ago`;
+}
 
 export function CarouselWizard({
   flow, platform, brandCategory, onBuild, onCancel,
@@ -95,6 +111,9 @@ export function CarouselWizard({
   const [arUrl,        setArUrl]        = useState('');
   const [arLoading,    setArLoading]    = useState(false);
   const [arSummary,    setArSummary]    = useState<{ figure: string; ticker: string; storySummary: string; siteName?: string; url: string } | null>(null);
+  // Recent headlines about Pauv-listed people — pick one instead of pasting a URL.
+  const [trendingItems,   setTrendingItems]   = useState<TrendingHeadline[]>([]);
+  const [trendingLoading, setTrendingLoading] = useState(false);
 
   // DeepSeek copy
   const [copyPages,   setCopyPages]   = useState<CopyPage[] | null>(null);
@@ -141,6 +160,22 @@ export function CarouselWizard({
       })
       .catch(e => setError(String(e))).finally(() => setTalentsLoading(false));
   }, []);
+
+  // Article flow: pull recent headlines about Pauv-listed people so the user can
+  // pick a story instead of hunting down a URL. Best-effort — a failure just
+  // leaves the list empty and the paste field still works.
+  useEffect(() => {
+    if (flow !== 'article') return;
+    setTrendingLoading(true);
+    fetch('/api/ai/trending-headlines', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ category: brandCategory }),
+    })
+      .then(r => r.json())
+      .then((d: { items?: TrendingHeadline[] }) => setTrendingItems(d.items ?? []))
+      .catch(() => setTrendingItems([]))
+      .finally(() => setTrendingLoading(false));
+  }, [flow, brandCategory]);
 
   const filteredTalents = search.trim()
     ? talents.filter(t => {
@@ -297,9 +332,10 @@ export function CarouselWizard({
 
   // ── 'article' flow: read a URL, require a Pauv-listed subject ───────────────
 
-  const generateFromArticle = async () => {
-    const url = arUrl.trim();
+  const generateFromArticle = async (overrideUrl?: string) => {
+    const url = (overrideUrl ?? arUrl).trim();
     if (!url) return;
+    if (overrideUrl) setArUrl(overrideUrl); // reflect a picked headline in the field
     setError(null); setArLoading(true); setArSummary(null); setCopyPages(null); setSelectedTalent(null);
     setPersonPhotos([]); setCtxPhotos([]); setSelectedPhotos([]); setPhotoPoolAll([]);
     try {
@@ -628,12 +664,55 @@ export function CarouselWizard({
               </div>
               <div className="flex items-center gap-3">
                 {brandCategory && <span className="text-xs text-zinc-600">Steering toward <span className="text-zinc-400">{brandCategory}</span></span>}
-                <button onClick={generateFromArticle} disabled={arLoading || talentsLoading || !arUrl.trim()}
+                <button onClick={() => generateFromArticle()} disabled={arLoading || talentsLoading || !arUrl.trim()}
                   className="ml-auto px-4 py-2 rounded-md bg-white text-black hover:bg-zinc-100 disabled:opacity-30 disabled:cursor-not-allowed text-sm font-semibold transition-colors">
                   {arLoading ? 'Reading & writing…' : arSummary ? 'Re-read article' : 'Read article'}
                 </button>
               </div>
             </div>
+
+            {/* Or skip the hunt for a link — pick a recent story about a listed figure. */}
+            {!arSummary && !arLoading && (
+              <div className="bg-zinc-950 rounded-lg border border-zinc-800 p-5">
+                <h3 className="text-sm font-semibold mb-1">Or pick a trending headline</h3>
+                <p className="text-xs text-zinc-600 mb-3">Recent stories about Pauv-listed people. Choosing one builds straight from it.</p>
+
+                {trendingLoading && (
+                  <div className="flex flex-col gap-2">
+                    {[1, 2, 3].map(i => <div key={i} className="h-14 bg-zinc-800 rounded-md animate-pulse" />)}
+                  </div>
+                )}
+
+                {!trendingLoading && trendingItems.length === 0 && (
+                  <p className="text-sm text-zinc-600">No recent headlines found right now — paste a link above instead.</p>
+                )}
+
+                <div className="flex flex-col gap-1.5">
+                  {trendingItems.map(item => (
+                    <button
+                      key={item.url}
+                      onClick={() => generateFromArticle(item.url)}
+                      disabled={arLoading || talentsLoading}
+                      className="flex items-center gap-3 text-left p-3 rounded-md border border-zinc-800 bg-zinc-900 hover:border-zinc-600 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+                    >
+                      {item.photoUrl
+                        // eslint-disable-next-line @next/next/no-img-element
+                        ? <img src={item.photoUrl} alt={item.personName} className="w-8 h-8 rounded-full object-cover shrink-0" />
+                        : <div className="w-8 h-8 rounded-full bg-zinc-800 border border-zinc-700 shrink-0" />}
+                      <div className="min-w-0 flex-1">
+                        <div className="text-sm font-medium text-zinc-100 leading-snug">{item.title}</div>
+                        <div className="mt-1 flex items-center gap-2 text-xs text-zinc-600">
+                          <span className="text-zinc-500">{item.personName}</span>
+                          <span>${item.ticker}</span>
+                          <span>· {item.sourceName}</span>
+                          {timeAgo(item.publishedAt) && <span>· {timeAgo(item.publishedAt)}</span>}
+                        </div>
+                      </div>
+                    </button>
+                  ))}
+                </div>
+              </div>
+            )}
 
             {(arLoading || copyLoading) && (
               <div className="flex flex-col gap-2">

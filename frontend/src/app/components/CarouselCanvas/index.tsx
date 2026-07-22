@@ -107,9 +107,10 @@ interface CarouselCanvasProps {
 // ── CarouselCanvas (canvas + pan/zoom only) ──────────────────────────────────
 
 // How far a circle may be dragged past the post edge, as a fraction of its radius.
-// 0 = must stay fully inside (old behaviour); 0.6 lets ~60% of the circle hang off
-// any edge for creative framing without letting it drift out of frame.
-const CIRCLE_DRAG_BLEED_RATIO = 0.6;
+// 0 = must stay fully inside (old behaviour); 0.9 lets ~90% of the circle hang off
+// any edge for maximum creative framing, while keeping a sliver anchored on-canvas
+// so it can always be grabbed and dragged back.
+const CIRCLE_DRAG_BLEED_RATIO = 0.9;
 
 const CarouselCanvas = forwardRef<CarouselCanvasRef, CarouselCanvasProps>(
   function CarouselCanvas({ imageSrc, videoSrc, chartBg = null, headline, subheadline, settings, onScaleChange, onSettingsChange, onBgLayerStateChange, brandLogoSrc, onRecordingStateChange, onHeadlineChange, onSubheadlineChange, rectMode = false, isDraggingElement = false, invertedSlots = false, onSlotDrop, staticMode = false, platform = 'ig' }, ref) {
