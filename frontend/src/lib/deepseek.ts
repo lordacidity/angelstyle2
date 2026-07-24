@@ -16,7 +16,10 @@ export async function deepseekChat(messages: ChatMessage[], opts: ChatOpts = {})
     method: 'POST',
     headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${key}` },
     body: JSON.stringify({
-      model: 'deepseek-chat',
+      // deepseek-chat was retired — the API now only accepts deepseek-v4-pro /
+      // deepseek-v4-flash (both reasoning models). Default to flash (fast/cheap);
+      // set DEEPSEEK_MODEL to override (e.g. deepseek-v4-pro for higher quality).
+      model: process.env.DEEPSEEK_MODEL || 'deepseek-v4-flash',
       messages,
       temperature: opts.temperature ?? 0.2,
       ...(opts.json && { response_format: { type: 'json_object' } }),
