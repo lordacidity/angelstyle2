@@ -25,12 +25,46 @@ export function useCarouselPages() {
   const pagesRef = useRef(pages);
   pagesRef.current = pages;
 
-  function addPage(slideType: SlideType) {
-    setPages(prev => [...prev, makeEmptyEntry(Date.now().toString(), 'carousel', slideType)]);
+  function addPage(slideType: SlideType): string {
+    const id = Date.now().toString();
+    setPages(prev => [...prev, makeEmptyEntry(id, 'carousel', slideType)]);
+    return id; // caller can seed the new page's settings (styling) off this id
   }
 
   function removePage(id: string) {
     setPages(prev => prev.filter(p => p.id !== id));
+  }
+
+  // Duplicate a page: clone its entry (text, url, image/video, mode, slide type)
+  // under a new id and drop it right AFTER the source. Returns the new id so the
+  // caller can also clone the page's settings / per-slide state. Content-identical
+  // by design — a literal copy the user then tweaks.
+  function duplicatePage(srcId: string): string | null {
+    const src = pagesRef.current.find(p => p.id === srcId);
+    if (!src) return null;
+    const id = Date.now().toString();
+    const clone: VideoEntry = { ...src, id };
+    setPages(prev => {
+      const i = prev.findIndex(p => p.id === srcId);
+      const next = [...prev];
+      next.splice(i === -1 ? prev.length : i + 1, 0, clone);
+      return next;
+    });
+    return id;
+  }
+
+  // Reorder: swap a page with its neighbour (dir -1 = up/earlier, +1 = down/later).
+  // No-op at the ends. Lets a slide added at the end be moved in between others.
+  function movePage(id: string, dir: -1 | 1) {
+    setPages(prev => {
+      const i = prev.findIndex(p => p.id === id);
+      if (i === -1) return prev;
+      const j = i + dir;
+      if (j < 0 || j >= prev.length) return prev;
+      const next = [...prev];
+      [next[i], next[j]] = [next[j], next[i]];
+      return next;
+    });
   }
 
   function replacePages(next: VideoEntry[]) {
@@ -97,7 +131,7 @@ export function useCarouselPages() {
   }
 
   return {
-    pages, lastEditedAt, addPage, removePage, replacePages, clearAll,
+    pages, lastEditedAt, addPage, duplicatePage, removePage, movePage, replacePages, clearAll,
     updatePage, updateUrl, setSubMode, updateLocalVideo, fetchVideo, handleVideoError,
   };
 }

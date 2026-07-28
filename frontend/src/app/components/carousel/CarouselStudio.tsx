@@ -154,6 +154,9 @@ function CarouselBgControls({
   carouselRef,
   onRemoveRow,
   isCarouselVideo,
+  onMove,
+  canMoveUp,
+  canMoveDown,
 }: {
   entry: VideoEntry;
   bgState: CarouselBgLayerState;
@@ -161,12 +164,27 @@ function CarouselBgControls({
   carouselRef: CarouselCanvasRef | undefined;
   onRemoveRow: (id: string) => void;
   isCarouselVideo: boolean;
+  onMove: (dir: -1 | 1) => void;
+  canMoveUp: boolean;
+  canMoveDown: boolean;
 }) {
   const splitActive = settings.bgBlurEnabled && settings.bgBlurAmount === 0 && bgState.fgMaskReady;
   const blurActive  = settings.bgBlurEnabled && settings.bgBlurAmount > 0 && bgState.fgMaskReady;
   return (
-    <div className="flex items-center gap-1.5 ml-8">
-      <button onClick={() => carouselRef?.enterCropMode()} className={BTN_ICON} title="Crop">
+    <div className="flex items-center gap-1.5 shrink-0">
+      {/* Reorder this slide earlier / later — compact vertical stepper so it doesn't
+          crowd the crop / split / blur / delete controls. */}
+      <div className="flex flex-col shrink-0 rounded-md border border-zinc-800 overflow-hidden">
+        <button onClick={() => onMove(-1)} disabled={!canMoveUp} title="Move slide earlier"
+          className="flex items-center justify-center w-6 h-[17px] bg-zinc-950 text-zinc-400 hover:text-zinc-200 hover:bg-zinc-900 disabled:opacity-30 disabled:cursor-not-allowed transition-colors">
+          <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round"><polyline points="18 15 12 9 6 15" /></svg>
+        </button>
+        <button onClick={() => onMove(1)} disabled={!canMoveDown} title="Move slide later"
+          className="flex items-center justify-center w-6 h-[17px] border-t border-zinc-800 bg-zinc-950 text-zinc-400 hover:text-zinc-200 hover:bg-zinc-900 disabled:opacity-30 disabled:cursor-not-allowed transition-colors">
+          <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round"><polyline points="6 9 12 15 18 9" /></svg>
+        </button>
+      </div>
+      <button onClick={() => carouselRef?.enterCropMode()} className={`${BTN_ICON} shrink-0`} title="Crop">
         <CropIcon size={12} />
       </button>
 
@@ -176,7 +194,7 @@ function CarouselBgControls({
             onClick={() => carouselRef?.toggleSplit()}
             disabled={bgState.isBgProcessing}
             title="Split layers"
-            className={`${BTN_TEXT} ${
+            className={`${BTN_TEXT} shrink-0 whitespace-nowrap ${
               splitActive  ? 'bg-white text-black border-white' :
               bgState.bgProcessError ? 'bg-red-900/50 text-red-400 border-red-800 hover:bg-red-900' :
               'bg-zinc-950 border-zinc-800 text-zinc-400 hover:text-zinc-200 hover:border-zinc-600'
@@ -191,7 +209,7 @@ function CarouselBgControls({
             <button
               onClick={() => carouselRef?.toggleBlur()}
               title="Blur background"
-              className={`${BTN_TEXT} ${
+              className={`${BTN_TEXT} shrink-0 whitespace-nowrap ${
                 blurActive
                   ? 'bg-white text-black border-white'
                   : 'bg-zinc-950 border-zinc-800 text-zinc-400 hover:text-zinc-200 hover:border-zinc-600'
@@ -203,7 +221,7 @@ function CarouselBgControls({
         </>
       )}
 
-      <button onClick={() => onRemoveRow(entry.id)} className={BTN_ICON} title="Delete row">
+      <button onClick={() => onRemoveRow(entry.id)} className={`${BTN_ICON} shrink-0`} title="Delete row">
         <TrashIcon size={15} />
       </button>
     </div>
@@ -237,6 +255,10 @@ export function CarouselStudio({
   const carouselRefsMap       = useRef(new Map<string, CarouselCanvasRef>());
   const carouselRefRegistered = useRef(new Set<string>());
   const [refVersion, setRefVersion] = useState(0);
+  // Bumped by the header "Refresh" button — folded into each canvas key so the
+  // slide canvases re-mount (clearing rendering glitches) WITHOUT a full page
+  // reload, so the draft (pages, settings, text, photos) is all preserved.
+  const [refreshKey, setRefreshKey] = useState(0);
 
   // Background source per page. 'chart' binds the page to the chartsImage* maps
   // below (same state shape the media Charts Image mode uses).
@@ -591,6 +613,35 @@ export function CarouselStudio({
     return saved?.settings ?? defaultCarouselSettings();
   }, [settingsMap, pages, savedSlides]);
 
+  // Add a slide that already LOOKS like its template instead of a bare black card.
+  // Seed the new page's settings off a slide of the same type already in the module
+  // (exact style match), else the saved template, else defaults — then stamp the
+  // standard module overlays (pauv logo top-left, SWIPE top-right on IG) so it reads
+  // as a proper card awaiting a photo. A person/context circle is NOT carried over
+  // (that's content); the fixed pauv-circle brand mark is kept.
+  const addSlide = useCallback((type: SlideType) => {
+    // Resolve the template to clone: an existing slide of the same type (its
+    // EFFECTIVE settings via getSettings, so this works even if they were never
+    // written to settingsMap), else the saved template, else defaults. Compute the
+    // seed BEFORE adding so the new page mounts already styled.
+    const twin = pages.find(p => (p.carouselSlideType ?? 'main') === type)
+      ?? pages[0]; // fall back to any existing slide so a new card still inherits the look
+    const base = twin
+      ? getSettings(twin.id)
+      : (savedSlidesRef.current?.[type]?.settings ?? defaultCarouselSettings());
+    const zoneLogoSlots = [...(base.zoneLogoSlots ?? Array(9).fill(null))];
+    zoneLogoSlots[0] = '/pauvlogo.png';                                  // pauv logo top-left
+    const swipeZoneSlots = [...(base.swipeZoneSlots ?? Array(9).fill(null))];
+    swipeZoneSlots[2] = platform === 'ig' ? defaultSwipeStyle() : null;  // SWIPE top-right (IG)
+    // Don't carry a person/context circle into a blank slide; keep the pauv mark.
+    const circleImageSrc = base.circleImageSrc?.includes('pauv-circle') ? base.circleImageSrc : null;
+    const seeded: CarouselSettings = { ...base, zoneLogoSlots, swipeZoneSlots, circleImageSrc };
+
+    const id = pagesApi.addPage(type);
+    setSettingsMap(prev => ({ ...prev, [id]: seeded }));
+    setSelectedId(id);
+  }, [pages, getSettings, pagesApi, platform]);
+
   const updateSettings = useCallback((id: string, partial: Partial<CarouselSettings>) => {
     setSettingsMap(prev => {
       const slideType = pages.find(p => p.id === id)?.carouselSlideType ?? 'main';
@@ -603,6 +654,30 @@ export function CarouselStudio({
   const bgSourceOf = useCallback((entry: VideoEntry): 'photo' | 'video' | 'chart' =>
     carouselBgSourceMap[entry.id] ?? (entry.carouselSubMode === 'video' ? 'video' : 'photo'),
   [carouselBgSourceMap]);
+
+  // Duplicate a slide as a literal copy — clone its entry (via pagesApi) plus all
+  // its per-slide state: styling (settings), background source, and, for a chart
+  // slide, its chart config. Guaranteed to match because nothing is reconstructed.
+  const duplicateSlide = useCallback((srcId: string) => {
+    const src = pages.find(p => p.id === srcId);
+    if (!src) return;
+    const newId = pagesApi.duplicatePage(srcId);
+    if (!newId) return;
+    const srcBg = bgSourceOf(src);
+    setSettingsMap(prev => ({ ...prev, [newId]: { ...getSettings(srcId) } }));
+    setCarouselBgSourceMap(prev => ({ ...prev, [newId]: srcBg }));
+    if (srcBg === 'chart') {
+      setChartsImageMarketMap(prev => ({ ...prev, [newId]: prev[srcId] ?? null }));
+      setChartsImageNameOverrideMap(prev => ({ ...prev, [newId]: prev[srcId] ?? '' }));
+      setChartsImageIndustryOverrideMap(prev => ({ ...prev, [newId]: prev[srcId] ?? '' }));
+      setChartsImageStrengthMap(prev => ({ ...prev, [newId]: prev[srcId] ?? 0 }));
+      setChartsImageNoiseMap(prev => ({ ...prev, [newId]: prev[srcId] ?? 0 }));
+      setChartsImageSubModeMap(prev => ({ ...prev, [newId]: prev[srcId] ?? 'image' }));
+      setChartsImageSpeedMap(prev => ({ ...prev, [newId]: prev[srcId] ?? 1 }));
+      setChartsImageAudioMap(prev => ({ ...prev, [newId]: prev[srcId] ?? null }));
+    }
+    setSelectedId(newId);
+  }, [pages, pagesApi, getSettings, bgSourceOf]);
 
   // Drive the skeleton gate: when a brand-new module's pages appear, hold the
   // skeleton until every photo page has a resolved src AND those photos have
@@ -816,6 +891,26 @@ export function CarouselStudio({
 
         {/* Right actions */}
         <div className="flex items-center gap-3">
+          {pages.length > 0 && (
+            <button
+              onClick={() => setRefreshKey(k => k + 1)}
+              title="Re-render the slides — clears visual glitches without a full page reload (keeps all your work)"
+              className="flex items-center gap-1.5 rounded-full border border-zinc-700 bg-zinc-900 px-3 py-1.5 text-xs font-medium text-zinc-200 hover:bg-zinc-800 transition-colors shrink-0"
+            >
+              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polyline points="23 4 23 10 17 10"/><polyline points="1 20 1 14 7 14"/><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/></svg>
+              Refresh
+            </button>
+          )}
+          {selectedEntry && (
+            <button
+              onClick={() => duplicateSlide(selectedEntry.id)}
+              title="Duplicate this slide — an exact copy (photo, text, styling) inserted right after it"
+              className="flex items-center gap-1.5 rounded-full border border-zinc-700 bg-zinc-900 px-3 py-1.5 text-xs font-medium text-zinc-200 hover:bg-zinc-800 transition-colors shrink-0"
+            >
+              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>
+              Duplicate
+            </button>
+          )}
           {selectedEntry && (() => {
             const src = selectedBgSource;
             const chartSub = chartsImageSubModeMap[selectedEntry.id] ?? 'image';
@@ -886,7 +981,7 @@ export function CarouselStudio({
             const isSelected = entry.id === (selectedEntry?.id ?? '');
             return (
               <div
-                key={entry.id}
+                key={`${entry.id}:${refreshKey}`}
                 ref={el => { cardRefs.current[entry.id] = el; }}
                 className="flex flex-col items-center"
                 style={{ width: CARD_W }}
@@ -937,7 +1032,7 @@ export function CarouselStudio({
             );
           })}
 
-          <CarouselAddRow onAdd={type => pagesApi.addPage(type)} />
+          <CarouselAddRow onAdd={addSlide} />
         </div>
       </div>
 
@@ -1130,7 +1225,7 @@ export function CarouselStudio({
                 );
               })()
             ) : (
-              <div className="flex items-center justify-between gap-4">
+              <div className="flex items-center justify-between gap-3 flex-wrap gap-y-2">
                 {/* Zoom */}
                 <div className="flex items-center gap-2 shrink-0">
                   <span className="text-[10px] text-zinc-600 select-none shrink-0">Zoom</span>
@@ -1158,6 +1253,9 @@ export function CarouselStudio({
                   carouselRef={carouselRefsMap.current.get(selectedEntry.id)}
                   onRemoveRow={id => pagesApi.removePage(id)}
                   isCarouselVideo={selectedBgSource === 'video'}
+                  onMove={dir => pagesApi.movePage(selectedEntry.id, dir)}
+                  canMoveUp={pages.findIndex(p => p.id === selectedEntry.id) > 0}
+                  canMoveDown={(() => { const i = pages.findIndex(p => p.id === selectedEntry.id); return i >= 0 && i < pages.length - 1; })()}
                 />
               </div>
             )}

@@ -950,10 +950,19 @@ const CarouselCanvas = forwardRef<CarouselCanvasRef, CarouselCanvasProps>(
       redraw(cachedImgRef.current);
     }, [headline, subheadline]); // eslint-disable-line react-hooks/exhaustive-deps
 
-    // Rich text edit mode — sync ref, redraw (hides canvas text), then init contentEditable
+    // Rich text edit mode — sync ref + redraw (hides canvas text). Kept separate
+    // from the contentEditable init below so redraws don't touch the live DOM.
     useEffect(() => {
       richEditTargetRef.current = richEditTarget;
       redraw(cachedImgRef.current);
+    }, [richEditTarget, redraw]);
+
+    // Initialize the contentEditable ONCE when entering edit mode. This must NOT
+    // depend on redraw: re-running it mid-edit would reset innerHTML back to the
+    // last-saved spans, wiping live formatting (e.g. a colour just clicked, which
+    // only persists to spans on blur) — so the colour appeared to "not apply until
+    // you leave the slide". Now the DOM keeps live edits until blur.
+    useEffect(() => {
       if (!richEditTarget || !richEditRef.current) return;
       const s = settingsRef.current;
       const isHead = richEditTarget === 'headline';
@@ -971,7 +980,8 @@ const CarouselCanvas = forwardRef<CarouselCanvasRef, CarouselCanvasProps>(
       const sel = window.getSelection();
       sel?.removeAllRanges();
       sel?.addRange(range);
-    }, [richEditTarget, redraw]); // eslint-disable-line react-hooks/exhaustive-deps
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [richEditTarget]);
 
     // Track text selection inside contentEditable to show floating toolbar
     useEffect(() => {
@@ -2404,6 +2414,9 @@ const CarouselCanvas = forwardRef<CarouselCanvasRef, CarouselCanvasProps>(
         }}
         onMouseDown={e => {
           if (!imageSrc && !videoSrc) return;
+          // While editing text, don't let a click on the photo pan the background —
+          // the slide should stay put so you can work on the text.
+          if (richEditTargetRef.current) return;
           if ((e.target as Element).closest('[data-carousel-slot]')) return;
           if ((e.target as Element).closest('[data-crop-handle]')) return;
           e.preventDefault();
