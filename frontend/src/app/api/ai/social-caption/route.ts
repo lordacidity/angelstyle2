@@ -109,7 +109,7 @@ async function pickTopicIndex(
         ].filter(Boolean).join('\n'),
       },
     ],
-    { json: true, temperature: 0.2 },
+    { json: true, temperature: 0.2, timeoutMs: 90_000 },
   );
   try {
     const idx = Number(parseJson<{ index?: number }>(raw).index);
@@ -201,7 +201,10 @@ export async function POST(req: NextRequest) {
     const MAX_ATTEMPTS = 4;
     let best = '';
     for (let attempt = 0; attempt < MAX_ATTEMPTS; attempt++) {
-      const raw = await deepseekChat(messages, { temperature: 0.7 });
+      // This is a long-form ~1900-char generation on the slower v4 reasoning model,
+      // so it legitimately runs well past the default 45s timeout — give it room
+      // (the timeout is only a safety net against a truly stalled request).
+      const raw = await deepseekChat(messages, { temperature: 0.7, timeoutMs: 120_000 });
       let candidate = normalizeParagraphs(cleanText(raw), TARGET_PARAGRAPHS);
       if (candidate.length > MAX_CHARS) {
         candidate = normalizeParagraphs(clampRange(candidate, MIN_CHARS, MAX_CHARS), TARGET_PARAGRAPHS);

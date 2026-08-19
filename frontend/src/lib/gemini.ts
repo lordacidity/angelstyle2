@@ -24,8 +24,10 @@ const sleep = (ms: number) => new Promise(r => setTimeout(r, ms));
 
 // generateContent with a hard per-attempt timeout so a single stalled request
 // can't hold a route open. Aborts and surfaces as a normal fetch failure, which
-// the callers' retry loops treat as transient.
-const GEMINI_TIMEOUT_MS = 45_000;
+// the callers' retry loops treat as transient. Generous by default — grounded
+// generation and (especially) video analysis legitimately run long; callers that
+// want a tighter bound pass timeoutMs.
+const GEMINI_TIMEOUT_MS = 90_000;
 async function fetchGemini(url: string, init: RequestInit, timeoutMs = GEMINI_TIMEOUT_MS): Promise<Response> {
   const ctrl = new AbortController();
   const timer = setTimeout(() => ctrl.abort(), timeoutMs);
@@ -66,6 +68,7 @@ function whyEmpty(data: GeminiResponse, cand?: GeminiCandidate): string {
 export async function geminiGenerate(parts: GeminiPart[], opts: {
   temperature?: number;
   maxOutputTokens?: number;
+  timeoutMs?: number;
 } = {}): Promise<string> {
   const apiKey = process.env.GEMINI_API_KEY ?? '';
   if (!apiKey) throw new Error('GEMINI_API_KEY is not set');
@@ -88,7 +91,7 @@ export async function geminiGenerate(parts: GeminiPart[], opts: {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body,
-      });
+      }, opts.timeoutMs);
       if (res.ok) return res.json() as Promise<GeminiResponse>;
       const txt = await res.text();
       const transient = res.status === 503 || res.status === 429 || res.status === 500;
@@ -127,7 +130,7 @@ export async function geminiGenerate(parts: GeminiPart[], opts: {
 // is unreliable alongside the search tool, so callers ask for JSON in the prompt
 // and parse it out with extractGeminiJson.
 
-export async function geminiWithSearch(prompt: string, opts: { temperature?: number; maxOutputTokens?: number } = {}): Promise<string> {
+export async function geminiWithSearch(prompt: string, opts: { temperature?: number; maxOutputTokens?: number; timeoutMs?: number } = {}): Promise<string> {
   const apiKey = process.env.GEMINI_API_KEY ?? '';
   if (!apiKey) throw new Error('GEMINI_API_KEY is not set');
   const model = process.env.GEMINI_MODEL || 'gemini-2.5-flash';
@@ -147,7 +150,7 @@ export async function geminiWithSearch(prompt: string, opts: { temperature?: num
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body,
-    });
+    }, opts.timeoutMs);
     if (res.ok) {
       const data = await res.json() as GeminiResponse;
       const { text } = extractText(data);
