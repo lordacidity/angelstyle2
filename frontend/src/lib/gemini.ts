@@ -22,6 +22,23 @@ interface GeminiResponse {
 
 const sleep = (ms: number) => new Promise(r => setTimeout(r, ms));
 
+// generateContent with a hard per-attempt timeout so a single stalled request
+// can't hold a route open. Aborts and surfaces as a normal fetch failure, which
+// the callers' retry loops treat as transient.
+const GEMINI_TIMEOUT_MS = 45_000;
+async function fetchGemini(url: string, init: RequestInit, timeoutMs = GEMINI_TIMEOUT_MS): Promise<Response> {
+  const ctrl = new AbortController();
+  const timer = setTimeout(() => ctrl.abort(), timeoutMs);
+  try {
+    return await fetch(url, { ...init, signal: ctrl.signal });
+  } catch (e) {
+    if (e instanceof Error && e.name === 'AbortError') throw new Error(`Gemini request timed out after ${timeoutMs}ms`);
+    throw e;
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
 function extractText(data: GeminiResponse): { cand?: GeminiCandidate; text: string } {
   const cand = data?.candidates?.[0];
   const text = (cand?.content?.parts ?? []).map(p => p.text).filter(Boolean).join(' ').trim();
@@ -67,7 +84,7 @@ export async function geminiGenerate(parts: GeminiPart[], opts: {
 
     const MAX_TRIES = 4;
     for (let attempt = 1; ; attempt++) {
-      const res = await fetch(url, {
+      const res = await fetchGemini(url, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body,
@@ -126,7 +143,7 @@ export async function geminiWithSearch(prompt: string, opts: { temperature?: num
   });
 
   for (let attempt = 1; attempt <= 4; attempt++) {
-    const res = await fetch(`${API_BASE}/v1beta/models/${model}:generateContent?key=${apiKey}`, {
+    const res = await fetchGemini(`${API_BASE}/v1beta/models/${model}:generateContent?key=${apiKey}`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body,
@@ -135,6 +152,10 @@ export async function geminiWithSearch(prompt: string, opts: { temperature?: num
       const data = await res.json() as GeminiResponse;
       const { text } = extractText(data);
       if (text) return text;
+      // A 200 with no text part happens intermittently with google_search
+      // grounding (the model returns only grounding metadata, or nothing). Treat
+      // it as transient and retry instead of failing the whole request outright.
+      if (attempt < 4) { await sleep(Math.min(8000, 800 * 2 ** (attempt - 1))); continue; }
       throw new Error('Gemini returned empty response');
     }
     const txt = await res.text();

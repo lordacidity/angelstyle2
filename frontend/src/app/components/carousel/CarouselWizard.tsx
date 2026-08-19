@@ -206,6 +206,9 @@ export function CarouselWizard({
         const seen = new Set(cur.map(p => p.url));
         return [...cur, ...fresh.filter(p => !seen.has(p.url))];
       });
+      // Pre-select the required photos on the FIRST load so the user can just hit
+      // Build — only when nothing is chosen yet, so we never clobber their picks.
+      if (!append) setSelectedPhotos(cur => (cur.length > 0 ? cur : fresh.slice(0, photosNeeded)));
     } catch (e) { setError(String(e)); }
     finally { (append ? setPersonMore : setPersonLoading)(false); }
   };
@@ -387,7 +390,9 @@ export function CarouselWizard({
         const seen = new Set(cur.map(p => p.url));
         return [...cur, ...fresh.filter(p => !seen.has(p.url))];
       });
-      if (!append) setSelectedCircle(cur => cur && fresh.some(p => p.url === cur.url) ? cur : null);
+      // Keep the current pick if it's still in the results; otherwise pre-select the
+      // first circle photo so the whole slide comes pre-filled and ready to build.
+      if (!append) setSelectedCircle(cur => (cur && fresh.some(p => p.url === cur.url)) ? cur : (fresh[0] ?? null));
     } catch (e) { setError(String(e)); }
     finally { (append ? setCircleMore : setCircleLoading)(false); }
   };

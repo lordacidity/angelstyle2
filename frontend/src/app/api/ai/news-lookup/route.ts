@@ -158,13 +158,24 @@ export async function POST(req: NextRequest) {
 
     const curator = buildPersonAboutQuery(curatorHandles, personName);
 
-    // Fire Twitter, Newsdata, and Google News in parallel.
+    // Fire Twitter, Newsdata, and Google News in parallel — but cap each source so
+    // one slow provider (the X/Twitter API is the usual laggard, 20-30s) can't hold
+    // up the whole lookup. A source that overruns is treated as an empty/failed
+    // result and we proceed with whatever the others returned.
+    const SOURCE_TIMEOUT_MS = 8000;
+    const withTimeout = <T,>(p: Promise<T>, label: string): Promise<T> =>
+      Promise.race([
+        p,
+        new Promise<T>((_, reject) =>
+          setTimeout(() => reject(new Error(`${label} timed out after ${SOURCE_TIMEOUT_MS}ms`)), SOURCE_TIMEOUT_MS),
+        ),
+      ]);
     const [tweetsResult, newsdataResult, gnewsResult] = await Promise.allSettled([
       curator.used > 0
-        ? searchTweets({ query: curator.query, queryType: 'Latest', maxItems: 20 })
+        ? withTimeout(searchTweets({ query: curator.query, queryType: 'Latest', maxItems: 12 }), 'twitter')
         : Promise.resolve<Tweet[]>([]),
-      fetchNewsdata(`"${personName}"`),
-      searchGoogleNews({ q: `"${personName}"`, timeframeHours: 48 }),
+      withTimeout(fetchNewsdata(`"${personName}"`), 'newsdata'),
+      withTimeout(searchGoogleNews({ q: `"${personName}"`, timeframeHours: 48 }), 'google-news'),
     ]);
 
     // Merge results — tweets first (freshest), then dedupe articles by title.
@@ -247,9 +258,19 @@ export async function POST(req: NextRequest) {
     type Pick = { i: number; caption: string; newsworthy?: boolean };
     let picks: Pick[] = [];
     try {
-      const raw = await deepseekChat(messages, { json: true, temperature: 0.2 });
+      // Bound the confirm/caption/rank call: the v4 reasoning model can spend
+      // 40s+ over a big candidate list. Cap the wait and fall back to raw headlines
+      // so the feed never hangs on it.
+      const DEEPSEEK_TIMEOUT_MS = 14000;
+      const raw = await Promise.race([
+        deepseekChat(messages, { json: true, temperature: 0.2 }),
+        new Promise<string>((_, reject) =>
+          setTimeout(() => reject(new Error(`deepseek confirm timed out after ${DEEPSEEK_TIMEOUT_MS}ms`)), DEEPSEEK_TIMEOUT_MS),
+        ),
+      ]);
       picks = parseJson<{ picks: Pick[] }>(raw).picks ?? [];
     } catch {
+      // Fallback: keep the first few candidates with their raw headline as caption.
       picks = eligible.slice(0, 6).map((r, i) => ({ i, caption: r.rawText.slice(0, 120), newsworthy: true }));
     }
 
