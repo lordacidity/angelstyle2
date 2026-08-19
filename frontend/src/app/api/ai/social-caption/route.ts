@@ -20,6 +20,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { z } from 'zod';
 import { deepseekChat, parseJson, type ChatMessage } from '@/lib/deepseek';
+import { geminiGenerate } from '@/lib/gemini';
 import { listPrompts, type AiPromptRow, type PromptCategory } from '@/lib/ai-prompts-db';
 
 export const runtime = 'nodejs';
@@ -126,10 +127,11 @@ export async function POST(req: NextRequest) {
       videoTitle: z.string().optional(),  // scraped VideoData.title
       author:     z.string().optional(),  // scraped VideoData.author.nickname
       category:   z.enum(['athlete', 'artist', 'gamer']).optional(),  // from the brand kit
+      provider:   z.enum(['deepseek', 'gemini']).optional(),  // per-request override of CAPTION_PROVIDER
     });
     const parsed = Schema.safeParse(await req.json().catch(() => ({})));
     if (!parsed.success) return NextResponse.json({ error: 'invalid body' }, { status: 400 });
-    const { caption, context, videoTitle, author, category } = parsed.data;
+    const { caption, context, videoTitle, author, category, provider } = parsed.data;
 
     if (!caption?.trim() && !context?.trim() && !videoTitle?.trim()) {
       return NextResponse.json({ error: 'need at least caption, context, or fetched video title' }, { status: 400 });
@@ -198,13 +200,31 @@ export async function POST(req: NextRequest) {
       { role: 'system', content: sys },
       { role: 'user', content: user },
     ];
+
+    // Caption model, toggled by CAPTION_PROVIDER:
+    //   (default) 'deepseek' — deepseek-v4-flash: a reasoning model, high quality but
+    //             slow (~60s for the retry loop).
+    //   'gemini'  — gemini-2.5-flash with thinking disabled: much faster (~10s), ~same
+    //             cost, quality to be compared. Gemini takes a single turn, so we
+    //             flatten the retry conversation (prior draft + feedback) into one
+    //             prompt each attempt.
+    const useGemini = (provider ?? process.env.CAPTION_PROVIDER) === 'gemini';
+    const generateDraft = (msgs: ChatMessage[]): Promise<string> => {
+      if (useGemini) {
+        const prompt = msgs
+          .map(m => (m.role === 'assistant' ? `Your previous draft:\n${m.content}` : m.content))
+          .join('\n\n');
+        return geminiGenerate([{ text: prompt }], { temperature: 0.7, maxOutputTokens: 1200, timeoutMs: 60_000 });
+      }
+      // Long-form generation on the v4 reasoning model runs well past the default
+      // 45s timeout, so give it room (the timeout only guards a truly stalled call).
+      return deepseekChat(msgs, { temperature: 0.7, timeoutMs: 120_000 });
+    };
+
     const MAX_ATTEMPTS = 4;
     let best = '';
     for (let attempt = 0; attempt < MAX_ATTEMPTS; attempt++) {
-      // This is a long-form ~1900-char generation on the slower v4 reasoning model,
-      // so it legitimately runs well past the default 45s timeout — give it room
-      // (the timeout is only a safety net against a truly stalled request).
-      const raw = await deepseekChat(messages, { temperature: 0.7, timeoutMs: 120_000 });
+      const raw = await generateDraft(messages);
       let candidate = normalizeParagraphs(cleanText(raw), TARGET_PARAGRAPHS);
       if (candidate.length > MAX_CHARS) {
         candidate = normalizeParagraphs(clampRange(candidate, MIN_CHARS, MAX_CHARS), TARGET_PARAGRAPHS);
