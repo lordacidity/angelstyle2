@@ -159,6 +159,23 @@ export function Sidebar({
           <span className="text-[9px] font-medium leading-none">Emojis</span>
         </button>
 
+        {/* X Photo — long thin price strip for posting on X. A real route, placed
+            right after Emojis so it reads as the next tool in the list. */}
+        <Link
+          href={pathForSection('xphoto')}
+          title="X Photo — downloadable price strip"
+          className={`w-full flex flex-col items-center gap-2 py-2.5 px-1 rounded-lg transition-colors ${
+            active === 'xphoto' ? 'text-white' : 'text-zinc-700 hover:text-zinc-200'
+          }`}
+        >
+          <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+            <rect x="2" y="6" width="20" height="12" rx="4"/>
+            <circle cx="7" cy="12" r="2.2"/>
+            <path d="M11.5 12.5l2-1.5 1.5 2 2.5-3 2 2.5"/>
+          </svg>
+          <span className="text-[9px] font-medium leading-none">X Photo</span>
+        </Link>
+
       </nav>
 
       {/* Bottom */}

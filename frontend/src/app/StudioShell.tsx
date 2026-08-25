@@ -46,6 +46,10 @@ const PricerSection = lazy(() =>
   import('./components/PricerSection').then(m => ({ default: m.PricerSection }))
 );
 
+const XPhotoSection = lazy(() =>
+  import('./components/xphoto/XPhotoSection').then(m => ({ default: m.XPhotoSection }))
+);
+
 function SectionLoader() {
   return (
     <div className="flex items-center justify-center h-full min-h-[200px]">
@@ -407,6 +411,14 @@ export function StudioShell() {
               </Suspense>
             </ErrorBoundary>
           </div>
+        )}
+
+        {activeSection === 'xphoto' && (
+          <ErrorBoundary>
+            <Suspense fallback={<SectionLoader />}>
+              <XPhotoSection />
+            </Suspense>
+          </ErrorBoundary>
         )}
 
         {activeSection === 'schedule' && (
