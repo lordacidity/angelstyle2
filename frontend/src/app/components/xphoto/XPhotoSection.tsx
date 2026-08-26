@@ -23,6 +23,22 @@ interface Talent {
 
 const MAX_RESULTS = 40;
 const FONT_LINK_ID = 'gfont-Inter-xphoto';
+// No scheme on purpose — the copied text is the bare "pauv.com/profile/<ticker>".
+const PROFILE_URL_BASE = 'pauv.com/profile/';
+const COPIED_TOAST_MS = 2500;
+
+function profileUrl(t: { ticker: string }): string {
+  return PROFILE_URL_BASE + t.ticker.toLowerCase();
+}
+
+async function copyText(text: string): Promise<boolean> {
+  try {
+    await navigator.clipboard.writeText(text);
+    return true;
+  } catch {
+    return false;
+  }
+}
 
 // The canvas draws with "Inter" by family name; next/font registers it under a
 // hashed name, so pull the real face from Google Fonts and wait for it.
@@ -91,12 +107,13 @@ export function XPhotoSection() {
   const [series, setSeries] = useState<XPhotoPoint[]>([]);
   const [seriesLoading, setSeriesLoading] = useState(false);
   const [avatar, setAvatar] = useState<HTMLImageElement | null>(null);
-  // The PNG itself has rounded corners (see-through outside the card) unless
-  // the user asks for black behind them.
-  const [transparent, setTransparent] = useState(true);
+  const [logo, setLogo] = useState<HTMLImageElement | null>(null);
   const [exportScale, setExportScale] = useState<XPhotoExportScale>(4);
   const [fontsReady, setFontsReady] = useState(false);
   const [exporting, setExporting] = useState(false);
+  // Transient "Copied …" / "Couldn't copy" notice next to the Download button.
+  const [copyNotice, setCopyNotice] = useState<{ ok: boolean; text: string } | null>(null);
+  const copyTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
@@ -124,6 +141,16 @@ export function XPhotoSection() {
   useEffect(() => { void loadTalents(); }, [loadTalents]);
   useEffect(() => { let on = true; loadInter().then(() => { if (on) setFontsReady(true); }); return () => { on = false; }; }, []);
   useEffect(() => { inputRef.current?.focus(); }, []);
+
+  // Same-origin wordmark for the strip's top-right corner.
+  useEffect(() => {
+    let on = true;
+    const img = new Image();
+    img.onload = () => { if (on) setLogo(img); };
+    img.onerror = () => { if (on) setLogo(null); };
+    img.src = '/pauvlogo.png';
+    return () => { on = false; };
+  }, []);
 
   // Deep link: /x-photo?t=<ticker> preselects that person once the roster is in.
   const deepLinked = useRef(false);
@@ -210,16 +237,27 @@ export function XPhotoSection() {
       changePct,
       series,
       avatar,
-      transparent,
+      logo,
     });
-  }, [selected, series, avatar, transparent, changePct]);
+  }, [selected, series, avatar, logo, changePct]);
 
   // exportScale is a dep because changing the canvas size wipes its bitmap.
   useEffect(() => { if (fontsReady) draw(); }, [draw, fontsReady, exportScale]);
 
+  const copyProfileLink = useCallback(async (t: Talent) => {
+    const url = profileUrl(t);
+    const ok = await copyText(url);
+    setCopyNotice(ok ? { ok, text: `Copied ${url}` } : { ok, text: "Couldn't copy profile link" });
+    if (copyTimer.current) clearTimeout(copyTimer.current);
+    copyTimer.current = setTimeout(() => setCopyNotice(null), COPIED_TOAST_MS);
+  }, []);
+  useEffect(() => () => { if (copyTimer.current) clearTimeout(copyTimer.current); }, []);
+
   const handleDownload = () => {
     const canvas = canvasRef.current;
     if (!canvas || !selected || exporting) return;
+    // Copy first, while the click's user activation still covers the clipboard.
+    void copyProfileLink(selected);
     setExporting(true);
     draw();
     canvas.toBlob(blob => {
@@ -248,15 +286,24 @@ export function XPhotoSection() {
             <h1 className="text-lg font-semibold">X Photo</h1>
             <p className="text-xs text-zinc-500">Search anyone on Pauv, pick them, download a long thin price strip for X.</p>
           </div>
-          <button
-            type="button"
-            onClick={handleDownload}
-            disabled={!canDownload}
-            className="flex items-center gap-2 h-9 px-4 rounded-md text-xs font-semibold bg-emerald-500 text-black hover:bg-emerald-400 transition-colors disabled:opacity-30 disabled:cursor-not-allowed"
-          >
-            {exporting ? <SpinnerIcon size={14} className="animate-spin" /> : <DownloadIcon size={14} />}
-            Download PNG
-          </button>
+          <div className="flex items-center gap-3">
+            {copyNotice && (
+              <span className={`text-[11px] tabular-nums ${copyNotice.ok ? 'text-emerald-400' : 'text-red-400'}`}>
+                {copyNotice.text}
+              </span>
+            )}
+            <button
+              type="button"
+              data-xphoto-download=""
+              onClick={handleDownload}
+              disabled={!canDownload}
+              title={selected ? `Downloads the PNG and copies ${profileUrl(selected)}` : undefined}
+              className="flex items-center gap-2 h-9 px-4 rounded-md text-xs font-semibold bg-emerald-500 text-black hover:bg-emerald-400 transition-colors disabled:opacity-30 disabled:cursor-not-allowed"
+            >
+              {exporting ? <SpinnerIcon size={14} className="animate-spin" /> : <DownloadIcon size={14} />}
+              Download PNG
+            </button>
+          </div>
         </div>
       </div>
 
@@ -356,6 +403,18 @@ export function XPhotoSection() {
                 <div className="flex items-center gap-3 min-w-0">
                   <span className="text-zinc-300 truncate">{selected.name}</span>
                   <span className="font-mono text-zinc-500">{selected.ticker.toUpperCase()}</span>
+                  <button
+                    type="button"
+                    onClick={() => void copyProfileLink(selected)}
+                    title="Copy profile link"
+                    className="flex items-center gap-1 text-zinc-400 hover:text-zinc-200 transition-colors"
+                  >
+                    <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                      <rect x="9" y="9" width="13" height="13" rx="2" />
+                      <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1" />
+                    </svg>
+                    <span className="font-mono">{profileUrl(selected)}</span>
+                  </button>
                   <span className="tabular-nums">
                     {seriesLoading
                       ? 'Loading lifetime history…'
@@ -364,7 +423,7 @@ export function XPhotoSection() {
                         : 'No price history yet — synthesized line'}
                   </span>
                 </div>
-                <div className="flex items-center gap-4 shrink-0">
+                <div className="flex items-center shrink-0">
                   <div className="flex items-center gap-1.5">
                     <span>Size</span>
                     <div className="flex rounded-md border border-zinc-800 overflow-hidden">
@@ -382,15 +441,6 @@ export function XPhotoSection() {
                       ))}
                     </div>
                   </div>
-                  <label className="flex items-center gap-2 cursor-pointer select-none">
-                    <input
-                      type="checkbox"
-                      checked={!transparent}
-                      onChange={e => setTransparent(!e.target.checked)}
-                      className="accent-emerald-500"
-                    />
-                    <span>Black behind corners</span>
-                  </label>
                 </div>
               </div>
             </div>

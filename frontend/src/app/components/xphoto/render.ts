@@ -14,8 +14,8 @@ export interface XPhotoData {
   series: XPhotoPoint[];
   /** Pre-loaded, CORS-clean avatar. null → initials fallback. */
   avatar: HTMLImageElement | null;
-  /** Leave the area outside the rounded corners see-through instead of black. */
-  transparent: boolean;
+  /** Pre-loaded /pauvlogo.png (white wordmark on transparent). null → no logo. */
+  logo: HTMLImageElement | null;
 }
 
 // The deliverable is 610×120 px including the border (a 5.08:1 strip). Layout
@@ -29,8 +29,8 @@ export const XPHOTO_H = XPHOTO_EXPORT_H * 2;
 export const XPHOTO_EXPORT_SCALES = [1, 2, 4] as const;
 export type XPhotoExportScale = typeof XPHOTO_EXPORT_SCALES[number];
 
-const COLOR_OUTSIDE = '#000000';
 const COLOR_CARD = '#0A0A0A';
+const COLOR_LOGO = '#A1A1AA';
 const COLOR_WHITE = '#FFFFFF';
 const COLOR_MUTED = '#71717A';
 const COLOR_UP = '#0CDF9D';
@@ -41,17 +41,19 @@ const COLOR_AVATAR_BORDER = '#2A2A2A';
 const COLOR_AVATAR_INITIALS = '#52525B';
 const SANS = '"Inter", "Geist", system-ui, -apple-system, "Segoe UI", sans-serif';
 
-// Layout, in design px (1220×240). No border: the rounded card is the image
-// edge, so the only see-through pixels are the corners.
-const CARD_INSET = 0;
-const CARD_RADIUS = 34;
+// Layout, in design px (1220×240). Square, opaque card that is the whole image.
 const AVATAR_D = 152;
 const AVATAR_X = 40;
 const TEXT_GAP = 28;
 const TEXT_MAX_W = 420;
 const CHART_GAP = 44;
 const CHART_RIGHT_PAD = 48;
-const CHART_PAD_Y = 46;
+// Chart sits below the logo so a rising line's end marker can't run into it.
+const CHART_TOP = 74;
+const CHART_BOTTOM_PAD = 40;
+const LOGO_H = 30;
+const LOGO_TOP = 24;
+const LOGO_RIGHT_PAD = 40;
 const NAME_SIZE = 50;
 const NAME_MIN_SIZE = 34;
 const LINE2_SIZE = 36;
@@ -157,19 +159,22 @@ function dressSeries(series: XPhotoPoint[], key: string, pct: number): XPhotoPoi
   });
 }
 
-function roundRect(ctx: CanvasRenderingContext2D, x: number, y: number, w: number, h: number, r: number) {
-  const rr = Math.min(r, w / 2, h / 2);
-  ctx.beginPath();
-  ctx.moveTo(x + rr, y);
-  ctx.lineTo(x + w - rr, y);
-  ctx.arcTo(x + w, y, x + w, y + rr, rr);
-  ctx.lineTo(x + w, y + h - rr);
-  ctx.arcTo(x + w, y + h, x + w - rr, y + h, rr);
-  ctx.lineTo(x + rr, y + h);
-  ctx.arcTo(x, y + h, x, y + h - rr, rr);
-  ctx.lineTo(x, y + rr);
-  ctx.arcTo(x, y, x + rr, y, rr);
-  ctx.closePath();
+// Recolour the white wordmark: draw it on an offscreen canvas at the target
+// pixel size, then 'source-in' fill so only the logo's own pixels take the tint.
+function drawTintedLogo(ctx: CanvasRenderingContext2D, logo: HTMLImageElement, x: number, y: number, w: number, h: number, color: string) {
+  const s = ctx.getTransform().a || 1;
+  const pw = Math.max(1, Math.round(w * s));
+  const ph = Math.max(1, Math.round(h * s));
+  const off = document.createElement('canvas');
+  off.width = pw;
+  off.height = ph;
+  const octx = off.getContext('2d');
+  if (!octx) return;
+  octx.drawImage(logo, 0, 0, pw, ph);
+  octx.globalCompositeOperation = 'source-in';
+  octx.fillStyle = color;
+  octx.fillRect(0, 0, pw, ph);
+  ctx.drawImage(off, x, y, w, h);
 }
 
 function font(weight: number, size: number) {
@@ -284,11 +289,12 @@ function drawChart(ctx: CanvasRenderingContext2D, seriesIn: XPhotoPoint[], x: nu
   };
 
   // Soft fill under the line so the strip reads as a chart, not a squiggle.
+  const fillBottom = y + h + CHART_BOTTOM_PAD;
   tracePath();
-  ctx.lineTo(pts[pts.length - 1].x, y + h + CHART_PAD_Y);
-  ctx.lineTo(pts[0].x, y + h + CHART_PAD_Y);
+  ctx.lineTo(pts[pts.length - 1].x, fillBottom);
+  ctx.lineTo(pts[0].x, fillBottom);
   ctx.closePath();
-  const grad = ctx.createLinearGradient(0, y, 0, y + h + CHART_PAD_Y);
+  const grad = ctx.createLinearGradient(0, y, 0, fillBottom);
   grad.addColorStop(0, `${color}38`);
   grad.addColorStop(1, `${color}00`);
   ctx.fillStyle = grad;
@@ -324,15 +330,15 @@ export function drawXPhoto(ctx: CanvasRenderingContext2D, data: XPhotoData) {
   ctx.clearRect(0, 0, canvas.width, canvas.height);
   ctx.setTransform(s, 0, 0, s, 0, 0);
 
-  if (!data.transparent) {
-    ctx.fillStyle = COLOR_OUTSIDE;
-    ctx.fillRect(0, 0, W, H);
-  }
-
-  // Card
-  roundRect(ctx, CARD_INSET, CARD_INSET, W - CARD_INSET * 2, H - CARD_INSET * 2, CARD_RADIUS);
+  // Card — the whole image, square and opaque.
   ctx.fillStyle = COLOR_CARD;
-  ctx.fill();
+  ctx.fillRect(0, 0, W, H);
+
+  // Pauv wordmark, top right, light grey.
+  if (data.logo && data.logo.naturalWidth > 0 && data.logo.naturalHeight > 0) {
+    const logoW = LOGO_H * (data.logo.naturalWidth / data.logo.naturalHeight);
+    drawTintedLogo(ctx, data.logo, W - LOGO_RIGHT_PAD - logoW, LOGO_TOP, logoW, LOGO_H, COLOR_LOGO);
+  }
 
   // Avatar
   const cy = H / 2;
@@ -374,16 +380,12 @@ export function drawXPhoto(ctx: CanvasRenderingContext2D, data: XPhotoData) {
     lx += ctx.measureText(sg.text).width + LINE2_GAP;
   }
 
-  // Lifetime chart fills whatever is left on the right, clipped to the card.
+  // Lifetime chart fills whatever is left on the right, under the logo.
   const chartX = textX + TEXT_MAX_W + CHART_GAP;
   const chartW = W - CHART_RIGHT_PAD - chartX;
   if (chartW > 40) {
-    ctx.save();
-    roundRect(ctx, CARD_INSET, CARD_INSET, W - CARD_INSET * 2, H - CARD_INSET * 2, CARD_RADIUS);
-    ctx.clip();
     const clean = thin(data.series.filter(p => Number.isFinite(p.value)), CHART_MAX_POINTS);
-    drawChart(ctx, dressSeries(clean, data.ticker, pct), chartX, CHART_PAD_Y, chartW, H - CHART_PAD_Y * 2, color);
-    ctx.restore();
+    drawChart(ctx, dressSeries(clean, data.ticker, pct), chartX, CHART_TOP, chartW, H - CHART_BOTTOM_PAD - CHART_TOP, color);
   }
 
   ctx.restore();
