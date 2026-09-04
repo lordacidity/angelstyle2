@@ -1,6 +1,7 @@
 'use client';
 
-import { useRef, useEffect, useState, forwardRef, useImperativeHandle } from 'react';
+import { useRef, useEffect, useState, forwardRef, useImperativeHandle, memo } from 'react';
+import { canvasPropsEqual } from '@/lib/canvasMemo';
 
 import {
   CANVAS_W, CANVAS_H, VIDEO_TARGET_W, DISPLAY_SCALE, MIN_DIM,
@@ -27,7 +28,7 @@ export type { TikTokCanvasRef, MarketData, SparkPoint } from './types';
 // the controls bar can override it per video by writing into blockTopPctRef.
 // 0.5 = block centred in the frame.
 
-export const TikTokCanvas = forwardRef<TikTokCanvasRef, TikTokCanvasProps>(function TikTokCanvas({
+const TikTokCanvasBase = forwardRef<TikTokCanvasRef, TikTokCanvasProps>(function TikTokCanvas({
   videoSrc,
   videoId,
   rowNumber = 0,
@@ -493,3 +494,5 @@ export const TikTokCanvas = forwardRef<TikTokCanvasRef, TikTokCanvasProps>(funct
     </div>
   );
 });
+
+export const TikTokCanvas = memo(TikTokCanvasBase, canvasPropsEqual);

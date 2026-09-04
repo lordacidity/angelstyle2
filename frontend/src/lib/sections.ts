@@ -17,6 +17,7 @@ export const SECTION_PATHS: Record<AppSection, string> = {
   schedule: '/schedule',
   prompts: '/ai-prompts',
   pricer: '/pricer',
+  xphoto: '/x-photo',
 };
 
 export function pathForSection(s: AppSection): string {

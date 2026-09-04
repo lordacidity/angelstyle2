@@ -168,7 +168,9 @@ export async function POST(request: NextRequest) {
   ];
 
   try {
-    const text = (await geminiGenerate(parts, { temperature: 0.2, maxOutputTokens: 100 })).trim();
+    // Video analysis (Gemini watches the whole clip) legitimately runs long, so
+    // give it a generous ceiling rather than the default — it's not a stall.
+    const text = (await geminiGenerate(parts, { temperature: 0.2, maxOutputTokens: 100, timeoutMs: 180_000 })).trim();
     if (!text) return unsure();
     return NextResponse.json({ context: text, commentsUsed: comments.length });
   } catch (e) {

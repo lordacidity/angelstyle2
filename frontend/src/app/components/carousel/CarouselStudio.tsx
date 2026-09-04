@@ -497,6 +497,12 @@ export function CarouselStudio({
           ...base,
           zoneLogoSlots,
           swipeZoneSlots,
+          // Default top fade on every photo card (the chart card isn't in pageIds):
+          // 0% floor, 15% reach, 40% intensity — keeps the top logo/swipe legible.
+          showTopFade: true,
+          topFadeFloor: 0,
+          topFadeReach: 15,
+          topFadeIntensity: 40,
           ...(id === pending.mainId && pending.circleUrl ? { circleImageSrc: pending.circleUrl } : {}),
           // Card 2 is the meaty explainer — the text sits in a solid black band
           // at the bottom (no fade over the photo), sized between head + sub.

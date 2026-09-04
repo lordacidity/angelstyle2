@@ -7,28 +7,44 @@ interface ChatOpts {
   json?: boolean;
   temperature?: number;
   maxTokens?: number;
+  timeoutMs?: number;
 }
+
+// The v4 reasoning models are slower and can occasionally stall; without a bound a
+// single hung request would hold a whole route open indefinitely. 45s is a generous
+// ceiling for even long generations — callers that want to fail faster pass timeoutMs.
+const DEEPSEEK_TIMEOUT_MS = 45_000;
 
 export async function deepseekChat(messages: ChatMessage[], opts: ChatOpts = {}): Promise<string> {
   const key = process.env.DEEPSEEK_API_KEY ?? '';
   if (!key) throw new Error('DEEPSEEK_API_KEY not set');
-  const res = await fetch('https://api.deepseek.com/v1/chat/completions', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${key}` },
-    body: JSON.stringify({
-      // deepseek-chat was retired — the API now only accepts deepseek-v4-pro /
-      // deepseek-v4-flash (both reasoning models). Default to flash (fast/cheap);
-      // set DEEPSEEK_MODEL to override (e.g. deepseek-v4-pro for higher quality).
-      model: process.env.DEEPSEEK_MODEL || 'deepseek-v4-flash',
-      messages,
-      temperature: opts.temperature ?? 0.2,
-      ...(opts.json && { response_format: { type: 'json_object' } }),
-      ...(opts.maxTokens && { max_tokens: opts.maxTokens }),
-    }),
-  });
-  if (!res.ok) throw new Error(`deepseek ${res.status}: ${await res.text()}`);
-  const json = await res.json() as { choices?: Array<{ message?: { content?: string } }> };
-  return json.choices?.[0]?.message?.content ?? '';
+  const ctrl = new AbortController();
+  const timer = setTimeout(() => ctrl.abort(), opts.timeoutMs ?? DEEPSEEK_TIMEOUT_MS);
+  try {
+    const res = await fetch('https://api.deepseek.com/v1/chat/completions', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${key}` },
+      signal: ctrl.signal,
+      body: JSON.stringify({
+        // deepseek-chat was retired — the API now only accepts deepseek-v4-pro /
+        // deepseek-v4-flash (both reasoning models). Default to flash (fast/cheap);
+        // set DEEPSEEK_MODEL to override (e.g. deepseek-v4-pro for higher quality).
+        model: process.env.DEEPSEEK_MODEL || 'deepseek-v4-flash',
+        messages,
+        temperature: opts.temperature ?? 0.2,
+        ...(opts.json && { response_format: { type: 'json_object' } }),
+        ...(opts.maxTokens && { max_tokens: opts.maxTokens }),
+      }),
+    });
+    if (!res.ok) throw new Error(`deepseek ${res.status}: ${await res.text()}`);
+    const json = await res.json() as { choices?: Array<{ message?: { content?: string } }> };
+    return json.choices?.[0]?.message?.content ?? '';
+  } catch (e) {
+    if (e instanceof Error && e.name === 'AbortError') throw new Error('deepseek request timed out');
+    throw e;
+  } finally {
+    clearTimeout(timer);
+  }
 }
 
 export function parseJson<T>(text: string): T {

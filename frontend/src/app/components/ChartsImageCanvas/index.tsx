@@ -1,6 +1,7 @@
 'use client';
 
-import { useRef, useEffect, useCallback, forwardRef, useImperativeHandle } from 'react';
+import { useRef, useEffect, useCallback, forwardRef, useImperativeHandle, memo } from 'react';
+import { canvasPropsEqual } from '@/lib/canvasMemo';
 import { CANVAS_W, CANVAS_H, DISPLAY_SCALE, PPT_W, PPT_H, PPT_DISPLAY_SCALE } from './constants';
 import type { ChartsImageCanvasProps, ChartsImageCanvasRef } from './types';
 import { muxClientSide, safeExportName, PHONEDECK_URL } from '@/lib/canvasVideoExport';
@@ -11,7 +12,7 @@ export { MAX_CHART_STRENGTH };
 
 // ── Component ─────────────────────────────────────────────────────────────────
 
-export const ChartsImageCanvas = forwardRef<ChartsImageCanvasRef, ChartsImageCanvasProps>(
+const ChartsImageCanvasBase = forwardRef<ChartsImageCanvasRef, ChartsImageCanvasProps>(
   function ChartsImageCanvas({ market, overrideName = '', overrideIndustry = '', strength = 0, noise = 0, aspectRatio = 'portrait', subMode = 'image', speed = 1, audioUrl, onRecordingStateChange }, ref) {
     const cW     = aspectRatio === 'ppt' ? PPT_W     : CANVAS_W;
     const cH     = aspectRatio === 'ppt' ? PPT_H     : CANVAS_H;
@@ -347,3 +348,5 @@ export const ChartsImageCanvas = forwardRef<ChartsImageCanvasRef, ChartsImageCan
     );
   },
 );
+
+export const ChartsImageCanvas = memo(ChartsImageCanvasBase, canvasPropsEqual);

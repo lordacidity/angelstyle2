@@ -57,7 +57,9 @@ Return ONLY valid JSON, no explanation:
 
     const raw = await deepseekChat(
       [{ role: 'user', content: prompt }],
-      { json: true, temperature: 0.4, maxTokens: 4000 },
+      // Large 4000-token grouping pass over the roster — give it room past the
+      // default so a legitimately long generation isn't cut off.
+      { json: true, temperature: 0.4, maxTokens: 4000, timeoutMs: 120_000 },
     );
 
     const parsed = parseJson<{ groups: Array<{ a_id: string; b_id: string; reason: string }> }>(raw);

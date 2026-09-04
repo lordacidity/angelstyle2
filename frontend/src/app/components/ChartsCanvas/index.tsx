@@ -1,6 +1,7 @@
 'use client';
 
-import { useRef, useEffect, useCallback, forwardRef, useImperativeHandle } from 'react';
+import { useRef, useEffect, useCallback, forwardRef, useImperativeHandle, memo } from 'react';
+import { canvasPropsEqual } from '@/lib/canvasMemo';
 import { CANVAS_W, CANVAS_H, DISPLAY_SCALE, CAPTION_LINE_HEIGHT, HEADER_PADDING_X } from './constants';
 import type { ChartsCanvasProps, ChartsCanvasRef, ChartsMarket, SparkPoint } from './types';
 import { wrapRichText, drawRichLine } from '@/lib/emoji';
@@ -729,7 +730,7 @@ function drawProfiles(
 // ── Component ─────────────────────────────────────────────────────────────────
 
 
-export const ChartsCanvas = forwardRef<ChartsCanvasRef, ChartsCanvasProps>(function ChartsCanvas(
+const ChartsCanvasBase = forwardRef<ChartsCanvasRef, ChartsCanvasProps>(function ChartsCanvas(
   { overlayCaption = '', markets, overrideNames = ['', ''], onRecordingStateChange, audioUrl, audioDurationMs, speed = 1, startTrimPct = 0 },
   ref,
 ) {
@@ -1088,3 +1089,5 @@ export const ChartsCanvas = forwardRef<ChartsCanvasRef, ChartsCanvasProps>(funct
     </div>
   );
 });
+
+export const ChartsCanvas = memo(ChartsCanvasBase, canvasPropsEqual);
