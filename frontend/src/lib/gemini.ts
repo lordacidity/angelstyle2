@@ -69,10 +69,14 @@ export async function geminiGenerate(parts: GeminiPart[], opts: {
   temperature?: number;
   maxOutputTokens?: number;
   timeoutMs?: number;
+  model?: string;   // per-call override of GEMINI_MODEL (e.g. the caption model)
+  // 3.x only. 'minimal' is the floor and is right for trivial work (classification,
+  // picking an index); leave unset for prose, where 'low' is worth the extra seconds.
+  thinkingLevel?: 'minimal' | 'low' | 'high';
 } = {}): Promise<string> {
   const apiKey = process.env.GEMINI_API_KEY ?? '';
   if (!apiKey) throw new Error('GEMINI_API_KEY is not set');
-  const primary = process.env.GEMINI_MODEL || 'gemini-2.5-flash';
+  const primary = opts.model || process.env.GEMINI_MODEL || 'gemini-2.5-flash';
   const maxOutputTokens = opts.maxOutputTokens ?? 800;
 
   async function call(modelName: string): Promise<GeminiResponse> {
@@ -81,8 +85,20 @@ export async function geminiGenerate(parts: GeminiPart[], opts: {
       temperature: opts.temperature ?? 0.4,
       maxOutputTokens,
     };
-    // Only 2.5 Flash lets us fully disable "thinking" (budget 0) — keeps it fast.
-    if (/2\.5-flash/.test(modelName)) generationConfig.thinkingConfig = { thinkingBudget: 0 };
+    // Keep "thinking" down — it is the difference between seconds and a minute. The
+    // two families spell it differently and each 400s on the other's key:
+    //   2.5 Flash / Flash-Lite → thinkingBudget: 0
+    //   3.x                    → thinkingLevel (there is no zero level; 'low' is the
+    //                            default here, 'minimal' is a rung below it)
+    if (/^gemini-[3-9]/.test(modelName)) {
+      // 'minimal' is rejected by the Pro models ("not supported for this model"), so
+      // it only survives on Flash / Flash-Lite; anything else falls back to 'low'.
+      const want = opts.thinkingLevel ?? 'low';
+      const level = want === 'minimal' && !/flash/.test(modelName) ? 'low' : want;
+      generationConfig.thinkingConfig = { thinkingLevel: level };
+    } else if (/2\.5-flash/.test(modelName)) {
+      generationConfig.thinkingConfig = { thinkingBudget: 0 };
+    }
     const body = JSON.stringify({ contents: [{ role: 'user', parts }], generationConfig });
 
     const MAX_TRIES = 4;
@@ -105,7 +121,9 @@ export async function geminiGenerate(parts: GeminiPart[], opts: {
     }
   }
 
-  const queue = [primary, 'gemini-2.5-flash-lite', 'gemini-2.0-flash']
+  // Fall-up chain. Both alternates are current: gemini-2.0-flash was retired and
+  // would only ever have 404'd here.
+  const queue = [primary, 'gemini-2.5-flash-lite', 'gemini-flash-lite-latest']
     .filter((m, i, a) => m && a.indexOf(m) === i);
   let lastWhy = '';
   for (const m of queue) {

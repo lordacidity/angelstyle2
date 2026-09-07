@@ -23,9 +23,15 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { z } from 'zod';
 import { createClient } from '@supabase/supabase-js';
-import { deepseekChat, parseJson } from '@/lib/deepseek';
+import { geminiGenerate, extractGeminiJson } from '@/lib/gemini';
 
 export const runtime = 'nodejs';
+
+// Same fast model as the caption route. This pick runs in parallel with the
+// caption write but gates the Post caption card's spinner, so on deepseek-v4-flash
+// (a reasoning model, ~9.5s measured) it became the visible wait as soon as the
+// caption itself got fast. It is roster lookup + matching, not reasoning work.
+const CTA_MODEL = 'gemini-3.5-flash-lite';
 
 // Built lazily — see /api/ai/talents for why module-scope construction breaks the
 // build. Uses the MAIN read-only price-data project.
@@ -149,16 +155,19 @@ export async function POST(req: NextRequest) {
       rosterByIndustry,
     });
 
-    const rawAi = await deepseekChat(
-      [{ role: 'system', content: sys }, { role: 'user', content: user }],
-      { json: true, temperature: 0.3 },
-    );
+    const rawAi = await geminiGenerate([{ text: `${sys}\n\n${user}` }], {
+      model: CTA_MODEL,
+      thinkingLevel: 'minimal',
+      temperature: 0.3,
+      maxOutputTokens: 1500,
+      timeoutMs: 30_000,
+    });
 
-    const result = parseJson<{
+    const result = JSON.parse(extractGeminiJson(rawAi)) as {
       subjectName?: string; subjectIndustry?: string; subjectSubcategory?: string;
       ticker?: string; ticker2?: string | null;
       matchType?: string; matchType2?: string | null; reason?: string;
-    }>(rawAi);
+    };
 
     // Resolve a ticker against the roster — exact, then case-insensitive — so a
     // capitalization slip from the model still lands.
