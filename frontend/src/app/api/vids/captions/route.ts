@@ -41,7 +41,10 @@
 // Emoji come from the app's own set: the ones pinned in the Emojis drawer are
 // handed over as the palette to pick from, and every line is drawn from that
 // set's Apple images (lib/emoji), so any emoji the model writes that has no
-// image there is taken back out.
+// image there is taken back out. The hook is the one line that never takes a
+// laughing face: it is delivered straight, and a laugh on the end does the
+// reacting for the viewer. That is asked for in the prompt and taken back out
+// of Start afterwards, since the palette is whatever the writer pinned.
 //
 // Every line is kept to a few words: text-speak shortens it ("bc", "rn"), and
 // a moment that needs more than one short line is written as two captions
@@ -60,6 +63,15 @@ export const dynamic = 'force-dynamic';
 /** Fast and cheap — these are a handful of short lines, not an essay. */
 const MODEL = 'gemini-3.1-flash-lite';
 
+/** The laughing faces the hook may not end on. The hook works by saying he is
+ *  making money and naming the absurd thing happening to him in one breath, said
+ *  straight — a face laughing at it tells the viewer it was a joke instead of
+ *  letting it land. The screen lines and the pay-off may still take one, where a
+ *  laugh reads as him reacting to what he pulled off. Compared without the
+ *  U+FE0F presentation selector, since the same face arrives both ways. */
+const LAUGHING = new Set(['😂', '🤣', '😹', '😆', '😅']);
+const isLaughing = (char: string) => LAUGHING.has(char.replace(/\uFE0F/g, ''));
+
 const style = (emojis: boolean, palette: string[]) => `Every caption:
 - SHORT. A screen line is 3 to 7 words and never more than 8 — it is read in a second while the screen moves on. Not a sentence. No full stop at the end. The hook may run a little longer; it wraps.
 - all lower case.
@@ -67,6 +79,7 @@ const style = (emojis: boolean, palette: string[]) => `Every caption:
 - text-speak, the way ppl actually type: "bc" for because, "rn" for right now, "ppl", "tbh", "ngl", "fr", "w/", "ur". Shorten with these before cutting meaning — "trade down on him bc ppl hate him rn". A few across the set, where they land naturally — never one in every line, never forced, never at the cost of being clear.
 ${emojis
   ? `- EMOJI: put two or three across the set, always — one on the START hook and at least one on a BOTTOM A or BOTTOM B line, each at the end of its line. Never two in one caption, never a row of them, never one standing in for a word. The comment line at the END is fixed and never gets one; the pay-off line before it may take one if it fits.
+  The START hook NEVER takes a laughing face — not ${[...LAUGHING].join(', ')}, nor any other face laughing or crying with laughter. The hook is said straight; a face laughing at it does the joke for the viewer and kills it. Give the hook one that points at what he is doing — the money, the thing he is doing on camera — or leave it without one.
 ${palette.length
     ? `  Pick from THESE, the app's own saved emoji, and only these: ${palette.join(' ')} — whichever fits what that caption is saying. If none of them fits a line, leave that line without one.`
     : `  Pick whatever emoji actually fits what that caption is saying — a plain standard one. No skin tones, no flags, no joined sequences.`}`
@@ -151,6 +164,15 @@ interface Drafted { start: string; bottomA: string[]; bottomB: string[]; payoff:
 /** One written line as it comes back: trimmed, and any emoji the app has no
  *  image for taken out — see keepKnownEmoji. */
 const cleanLine = (v: unknown): string => keepKnownEmoji(typeof v === 'string' ? v.trim() : '');
+/** The hook as it goes back: any laughing face the writer put on it taken out,
+ *  whatever the prompt asked for — see LAUGHING. The rest of the line, other
+ *  emoji included, is left as written. */
+const dropLaughing = (text: string): string => splitEmojiTokens(text)
+  .filter((t) => !(t.type === 'emoji' && isLaughing(t.value)))
+  .map((t) => t.value)
+  .join('')
+  .replace(/ {2,}/g, ' ')
+  .trim();
 const asText = (x: unknown): string => {
   if (typeof x === 'string') return cleanLine(x);
   if (!Array.isArray(x)) return '';
@@ -276,6 +298,10 @@ function buildPrompt(input: z.infer<typeof Schema>): string {
   /** An emoji for the worked example: from the palette when there is one, so
    *  the example is made of the same set the real lines are picked from. */
   const ex = (i: number, fallback: string) => (emojis ? ` ${emojiPalette[i] ?? fallback}` : '');
+  /** The same for the hook's line of the example, past any laughing face in the
+   *  palette — an example that laughs on the hook teaches the opposite of the
+   *  rule above it. */
+  const hookEx = () => (emojis ? ` ${emojiPalette.find((e) => !isLaughing(e)) ?? '💰'}` : '');
 
   /** A marked clip is a numbered list of moments; an unmarked one is a sentence. */
   const describe = (label: string, clip: typeof bottomA, onPauv = false): string => {
@@ -342,7 +368,7 @@ bottom b — 2 moments (the clip overall: finding ronaldo on pauv and trading up
   1. searched ronaldo
   2. traded up on him
 ->
-start: making bands off ronaldo with a can of velo in my mouth${ex(0, '💰')}
+start: making bands off ronaldo with a can of velo in my mouth${hookEx()}
 bottomA: ["go to chatgpt / see who's trending rn${ex(1, '👀')}", ${mergeSeam ? '"go to pauv.com, search ronaldo"' : '"go to pauv.com"'}]
 bottomB: [${mergeSeam ? '""' : '"search ronaldo on pauv"'}, "trade up on him bc he's trending${ex(2, '📈')}"]
 payoff: just made bands off ronaldo
@@ -390,7 +416,7 @@ export async function POST(req: NextRequest) {
 
     const parsed = JSON.parse(extractGeminiJson(raw)) as Record<string, unknown>;
     const drafted: Drafted = {
-      start: wantStart ? cleanLine(parsed.start) : '',
+      start: wantStart ? dropLaughing(cleanLine(parsed.start)) : '',
       bottomA: asLines(parsed.bottomA, bottomA?.count ?? 0, !!bottomA?.marks.length),
       bottomB: asLines(parsed.bottomB, bottomB?.count ?? 0, !!bottomB?.marks.length),
       ...(wantEnd ? closing(parsed.payoff, parsed.end) : { payoff: '', end: '' }),
