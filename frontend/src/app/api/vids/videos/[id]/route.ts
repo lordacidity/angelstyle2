@@ -1,14 +1,15 @@
 // /api/vids/videos/:id — rename / move / say what the clip is showing, as a
 // whole or stretch by stretch (PATCH { name?, folderId?, context?, marks? }),
-// swap the bytes an edit produced in over the original (PATCH { media, name? }),
-// or delete
-// (DELETE: row + the bucket objects).
+// swap the bytes an edit produced in over the last render (PATCH { media,
+// name?, marks? } — `media.edit` is the edit they were rendered with, and the
+// recording itself is kept, see replaceVideoMedia), or delete (DELETE: row +
+// the bucket objects, recording included).
 import { NextRequest, NextResponse } from 'next/server';
 import {
   deleteVideo, errMessage, isUuid, replaceVideoMedia, updateVideo,
   type VideoMedia, type VideoPatch,
 } from '@/lib/vids-db';
-import { cleanMarks, readContextPatch } from '@/lib/vids-types';
+import { cleanEdit, cleanMarks, readContextPatch } from '@/lib/vids-types';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -52,6 +53,7 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
       width: num(m.width) === null ? null : Math.round(num(m.width) as number),
       height: num(m.height) === null ? null : Math.round(num(m.height) as number),
       hasSfx: m.hasSfx === true,
+      edit: cleanEdit(m.edit),
     };
     // An edit moves every mark, so the editor re-times them and sends them with
     // the new bytes. Absent means nothing moved — leave them alone.

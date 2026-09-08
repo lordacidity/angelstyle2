@@ -28,8 +28,12 @@
 //
 // Save renders the edit in the browser (lib/vidsEdit) and puts the result back
 // over the clip it came from: the row keeps its id, so the folder it is filed in
-// and any persona part pointing at it come through untouched. Editing a clip
-// changes that clip — it never leaves a second copy behind to tidy up.
+// and any persona part pointing at it come through untouched. The recording is
+// kept beside the render and the edit is written down with it (VidEdit), so
+// the editor always works on the recording: open the clip again and the same
+// handles, cuts, keys and speed are there to change or take off, and the next
+// save renders from the recording — nothing stacks, and Original puts the
+// whole recording back.
 //
 // mode="trim" strips all of that back to the in / out points and Save, which is
 // the whole job for the three clips of a persona: they are one performance
@@ -37,12 +41,13 @@
 
 import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { PointerEvent as ReactPointerEvent } from 'react';
-import type { VidContext, VidContextPatch, VidMark, VidRow } from '@/lib/vids-types';
+import type { VidContext, VidContextPatch, VidEdit, VidMark, VidRow } from '@/lib/vids-types';
 import { MAX_MARK_TEXT } from '@/lib/vids-types';
 import {
   AUTO_CUT_COUNT, AUTO_CUT_MAX, AUTO_CUT_MIN, DEFAULT_EDIT, MAX_SFX_GAIN, MIN_PIECE, MIN_SFX_GAIN,
-  autoCuts, clampSfxGain, isEdited, keptAt, keptLength, keptSegments, nextKept, normaliseRanges,
-  renderEditedClip, segmentAt, sfxSpans, type ClipEdit, type Cut, type Segment,
+  autoCuts, clampSfxGain, fromStoredEdit, keptLength, keptSegments, marksToRendered, marksToSource,
+  nextKept, normaliseRanges, renderEditedClip, sameEdit, segmentAt, sfxSpans, toStoredEdit,
+  type ClipEdit, type Cut,
 } from '@/lib/vidsEdit';
 import { DEFAULT_SPEED, MAX_SPEED, MIN_SPEED, SPEED_PRESETS, clampSpeed, trimmedRange } from '@/lib/vidsPlan';
 import { decodeAudio, SFX_URL } from '@/lib/vidsAudio';
@@ -70,22 +75,6 @@ function downloadBlob(blob: Blob, name: string) {
   a.click();
   a.remove();
   setTimeout(() => URL.revokeObjectURL(url), 10_000);
-}
-
-/** Marks live in clip seconds, so an edit moves them: cuts pull everything after
- *  them earlier, the trim re-bases the start, and speed compresses the lot. Map
- *  each one through the very edit being rendered. A mark the edit removed —
- *  wholly inside a cut, or outside the trim — collapses to nothing and is
- *  dropped rather than left pointing at footage that no longer exists. */
-function retimeMarks(marks: readonly VidMark[], segs: readonly Segment[], speed: number): VidMark[] {
-  const out: VidMark[] = [];
-  for (const m of marks) {
-    const start = keptAt(segs, m.start) / speed;
-    const end = keptAt(segs, m.end) / speed;
-    if (end - start < 0.05) continue;
-    out.push({ start, end, text: m.text });
-  }
-  return out;
 }
 
 // ── Small bits ────────────────────────────────────────────────────────────────
@@ -329,8 +318,11 @@ interface Props {
    *  on it, which is what lets the builder hear it. Rejects with a readable
    *  message. */
   /** `blob` null means nothing about the footage changed — save the name and
-   *  leave the file alone. */
-  onSave: (blob: Blob | null, name: string, hasSfx: boolean, marks: VidMark[], videoId: string) => Promise<void>;
+   *  leave the file alone. `edit` is what the bytes were rendered with, in the
+   *  stored form, for the row to keep beside them. */
+  onSave: (
+    blob: Blob | null, name: string, hasSfx: boolean, marks: VidMark[], videoId: string, edit: VidEdit | null,
+  ) => Promise<void>;
   /** Prep page is on screen — the preview pauses whenever it isn't. */
   active: boolean;
   onClose: () => void;
@@ -352,13 +344,13 @@ interface Props {
    *  'full'  the lot (default).
    */
   mode?: 'full' | 'cut' | 'trim';
-  /** The rate the clip opens at, 1x unless something outside says otherwise:
-   *  the intake opens a bottom clip at INTAKE_SPEED, since a screen recording
-   *  always wants that nudge and this is the one pass where it can be given.
-   *  The save bakes it into the footage, so this is only ever the *opening*
-   *  rate — what Start over goes back to, and what counts as untouched. A clip
-   *  opened again later comes in at 1x like everything else, which is what
-   *  stops a re-edit speeding up what is already sped up. */
+  /** The rate a clip with no saved edit opens at, 1x unless something outside
+   *  says otherwise: the intake opens a bottom clip at INTAKE_SPEED, since a
+   *  screen recording always wants that nudge and this is the one pass where
+   *  it can be given. It is the *opening* rate — what Start over goes back to,
+   *  and what counts as untouched. A clip that has been saved opens with its
+   *  saved edit instead, speed included, on the recording — so the nudge shows
+   *  as itself and can be taken off, and never stacks. */
   startSpeed?: number;
   /** What Save says, when something outside is driving the run. */
   saveLabel?: string;
@@ -380,13 +372,13 @@ export function VidsClipEditor({
   const trackRef = useRef<HTMLDivElement>(null);
 
   const [edit, setEdit] = useState<ClipEdit>({ ...DEFAULT_EDIT, cuts: [], sfx: [] });
-  // The rate this clip opened at, or the one the last save left it at. Every
-  // question of the form "has anything been touched since?" is asked against
-  // it rather than against 1x, so a bottom clip that opens at INTAKE_SPEED
+  // The edit this clip opened with, or the one the last save left it at: its
+  // saved edit, or — for a clip that has none — nothing done, at the rate the
+  // intake asked for. Every question of the form "has anything been touched
+  // since?" is asked against it, so a bottom clip that opens at INTAKE_SPEED
   // reads as untouched until you actually change something — and Start over
-  // puts it back there. A save bakes the speed in, so the baseline after one
-  // is 1x again.
-  const [baseSpeed, setBaseSpeed] = useState(DEFAULT_SPEED);
+  // puts it back there.
+  const [openEdit, setOpenEdit] = useState<ClipEdit>({ ...DEFAULT_EDIT, cuts: [], sfx: [] });
   // Read in the open effect below, which runs off the clip's id alone — the
   // ref is what makes sure it is this render's value and not an older one.
   const startSpeedRef = useRef(startSpeed);
@@ -504,16 +496,28 @@ export function VidsClipEditor({
   const liveIdRef = useRef<string | null>(null);
   liveIdRef.current = videoId;
   const startName = video?.name ?? '';
-  const startDuration = video?.duration ?? 0;
+  // The recording's length is read off the footage itself once it loads; the
+  // row's own length is the render's, which is only the same thing while the
+  // clip has never been edited.
+  const startDuration = video?.sourcePath ? 0 : (video?.duration ?? 0);
   // A clip that already carries the keyboard opens un-muted, so re-editing it
   // carries that sound through instead of rendering it away. Footage that was
   // never through Prep opens muted, as everything in this section does.
   const startHasSfx = video?.hasSfx ?? false;
-  /** Whether saving would change the footage at all. Nothing trimmed, cut, sped
-   *  or newly keyed, and the clip's own sound still where it opened, means the
-   *  renderer would write back exactly what is already in the bucket — so a save
-   *  from here is a rename and nothing more. */
-  const untouched = !isEdited(edit, duration) && edit.muted === !startHasSfx;
+  /** The edit the clip's file was rendered with — what its marks are timed
+   *  against, and what a save has to differ from to be worth a render. A clip
+   *  that has never been through Prep has none: its file is its recording,
+   *  opening un-muted only when it carries the keyboard. */
+  const savedEdit = video?.edit ?? null;
+  const fileEdit = useMemo<ClipEdit>(
+    () => (savedEdit ? fromStoredEdit(savedEdit) : { ...DEFAULT_EDIT, cuts: [], sfx: [], muted: !startHasSfx }),
+    [savedEdit, startHasSfx],
+  );
+  /** Whether saving would change the footage at all. The same trim, cuts, keys,
+   *  speed and muting the file was rendered with means the renderer would write
+   *  back exactly what is already in the bucket — so a save from here is a
+   *  rename and nothing more. */
+  const untouched = sameEdit(edit, fileEdit, duration);
   useEffect(() => {
     // A download belongs to this panel and goes with it; a save belongs to the
     // clip it is writing to and is left alone to finish. Cancelling a save is
@@ -522,9 +526,14 @@ export function VidsClipEditor({
     undoRef.current = [];
     lastPushRef.current = null;
     skipRecordRef.current = true;
+    // A saved edit opens as it was saved, on the recording. Nothing saved
+    // means nothing done to it yet, at the rate the intake asked for.
     const opensAt = clampSpeed(startSpeedRef.current);
-    setEdit({ ...DEFAULT_EDIT, cuts: [], sfx: [], muted: !startHasSfx, speed: opensAt });
-    setBaseSpeed(opensAt);
+    const opening: ClipEdit = video?.edit
+      ? fromStoredEdit(video.edit)
+      : { ...DEFAULT_EDIT, cuts: [], sfx: [], muted: !startHasSfx, speed: opensAt };
+    setEdit(opening);
+    setOpenEdit(opening);
     setMarksAtOpen(video?.marks ?? []);
     setDuration(startDuration);
     setPlayhead(0);
@@ -711,8 +720,13 @@ export function VidsClipEditor({
 
   // Marks are the clip's own, not the edit's — they describe the footage rather
   // than what this session is doing to it, so they save the moment you press
-  // Enter instead of waiting for a render.
-  const marks = useMemo(() => video?.marks ?? [], [video]);
+  // Enter instead of waiting for a render. The row keeps them on the render's
+  // clock, which is what the builder plays; the timeline here is the
+  // recording's, so they are read through the edit the render was made with
+  // and written back through it (changeMarks). `rowMarks` is the row's own
+  // copy, which is what Start over and Ctrl+Z put back.
+  const rowMarks = useMemo(() => video?.marks ?? [], [video]);
+  const marks = useMemo(() => marksToSource(rowMarks, fileEdit, duration), [rowMarks, fileEdit, duration]);
 
   // ── Undo ──
   // Ctrl+Z puts back the last change — a cut, a stretch of keys, a mark, a
@@ -741,15 +755,16 @@ export function VidsClipEditor({
     // The same handle or slider, still moving: the step already on record is
     // the one to go back to.
     if (last && field !== 'other' && last.field === field && now - last.at < UNDO_MERGE_MS) return;
-    pushUndo({ edit: prev, marks });
-  }, [edit, marks, pushUndo]);
+    pushUndo({ edit: prev, marks: rowMarks });
+  }, [edit, rowMarks, pushUndo]);
 
-  /** Every change to the marks goes through here, so Ctrl+Z has it. */
+  /** Every change to the marks goes through here, so Ctrl+Z has it. `next` is
+   *  on the recording's clock; the row takes it on the render's. */
   const changeMarks = useCallback((next: VidMark[]) => {
-    pushUndo({ edit, marks });
+    pushUndo({ edit, marks: rowMarks });
     lastPushRef.current = null;
-    onMarksChange(next);
-  }, [edit, marks, onMarksChange, pushUndo]);
+    onMarksChange(marksToRendered(next, fileEdit, duration));
+  }, [edit, rowMarks, fileEdit, duration, onMarksChange, pushUndo]);
 
   const undo = useCallback(() => {
     const snap = undoRef.current.pop();
@@ -758,30 +773,50 @@ export function VidsClipEditor({
       skipRecordRef.current = true;
       setEdit(snap.edit);
     }
-    if (!sameMarks(snap.marks, marks)) onMarksChange(snap.marks);
+    if (!sameMarks(snap.marks, rowMarks)) onMarksChange(snap.marks);
     setSelection(null);
     setMarkDraft(null);
     setNote(null);
     lastPushRef.current = null;
-  }, [edit, marks, onMarksChange]);
+  }, [edit, rowMarks, onMarksChange]);
 
   /** Everything since the clip opened or was last saved, put back in one go —
    *  the trim, cuts, keys, speed and marks. One Ctrl+Z brings it all back. */
-  // Against the speed it opened at, not against 1x: a clip the intake opened
-  // at INTAKE_SPEED has had nothing done to it yet.
-  const dirty = isEdited(edit, duration, baseSpeed) || edit.muted !== !startHasSfx
-    || !sameMarks(marks, marksAtOpen);
+  // Against the edit it opened with, not against nothing: a clip the intake
+  // opened at INTAKE_SPEED has had nothing done to it yet, and a clip opened on
+  // its saved edit is untouched until that edit is changed.
+  const dirty = !sameEdit(edit, openEdit, duration) || !sameMarks(rowMarks, marksAtOpen);
   const startOver = useCallback(() => {
-    pushUndo({ edit, marks });
+    pushUndo({ edit, marks: rowMarks });
     lastPushRef.current = null;
     skipRecordRef.current = true;
-    setEdit({ ...DEFAULT_EDIT, cuts: [], sfx: [], muted: !startHasSfx, speed: baseSpeed });
-    if (!sameMarks(marks, marksAtOpen)) onMarksChange(marksAtOpen);
+    setEdit(openEdit);
+    if (!sameMarks(rowMarks, marksAtOpen)) onMarksChange(marksAtOpen);
     setSelection(null);
     setMarkDraft(null);
     stopKeys();
     setNote(null);
-  }, [baseSpeed, edit, marks, marksAtOpen, onMarksChange, pushUndo, startHasSfx, stopKeys]);
+  }, [openEdit, edit, rowMarks, marksAtOpen, onMarksChange, pushUndo, stopKeys]);
+
+  /** The recording as it was uploaded: no trim, no cuts, no keys, as shot.
+   *  Only its muting is carried over — a source that is an earlier render may
+   *  hold the keyboard already, and that sound rides through. Offered once
+   *  there is a saved edit to take off; Save is what makes it stick. */
+  const originalEdit = useMemo<ClipEdit>(
+    () => ({ ...DEFAULT_EDIT, cuts: [], sfx: [], muted: fileEdit.muted }),
+    [fileEdit.muted],
+  );
+  const atOriginal = sameEdit(edit, originalEdit, duration);
+  const backToOriginal = useCallback(() => {
+    pushUndo({ edit, marks: rowMarks });
+    lastPushRef.current = null;
+    skipRecordRef.current = true;
+    setEdit(originalEdit);
+    setSelection(null);
+    setMarkDraft(null);
+    stopKeys();
+    setNote(null);
+  }, [edit, rowMarks, originalEdit, pushUndo, stopKeys]);
 
   const markSelection = useCallback(() => {
     if (!selection || selection.end - selection.start < MIN_PIECE) return;
@@ -934,13 +969,14 @@ export function VidsClipEditor({
     if (kind === 'save' && untouched) {
       setBusy({ frac: 1, label: 'Renaming…' });
       try {
-        await onSave(null, rowName, startHasSfx, marks, myId);
+        await onSave(null, rowName, startHasSfx, rowMarks, myId, savedEdit);
         if (!mine()) return;
-        // Saved as it stands: the marks as they are now are what Start over
-        // goes back to, and there is nothing before this to undo to.
+        // Saved as it stands: the edit and marks as they are now are what
+        // Start over goes back to, and there is nothing before this to undo to.
         undoRef.current = [];
         lastPushRef.current = null;
-        setMarksAtOpen(marks);
+        setOpenEdit(edit);
+        setMarksAtOpen(rowMarks);
         setNote(`Renamed to “${rowName}”. The footage is untouched.`);
       } catch (e) {
         if (mine()) setError(e instanceof Error ? e.message : String(e));
@@ -958,7 +994,8 @@ export function VidsClipEditor({
         // No fps: the clip is written back at its own frame rate. Pinning it to
         // 30 resampled 60 and 24fps footage onto a grid it was never shot on,
         // every single save, and the judder that leaves never comes back out.
-        url: video.url,
+        // From the recording, never from the last render — see VidEdit.
+        url: video.sourceUrl ?? video.url,
         file: video.file,
         edit,
         duration,
@@ -978,21 +1015,18 @@ export function VidsClipEditor({
         // The marks describe the footage, and the footage just changed — carry
         // them onto the rendered timeline so they still point at the right
         // moments in the clip that comes back.
-        const carried = retimeMarks(marks, segs, speed);
-        await onSave(blob, rowName, hadKeys, carried, myId);
+        const carried = marksToRendered(marks, edit, duration);
+        await onSave(blob, rowName, hadKeys, carried, myId, toStoredEdit(edit, duration));
         if (!mine()) return;
-        // The edit is in the file now — start clean against the new footage,
-        // with nothing to undo back past this point.
+        // The edit is in the file and on the row now. The recording stays on
+        // screen with the same handles on it — this is the point Start over
+        // goes back to, with nothing to undo back past.
         undoRef.current = [];
         lastPushRef.current = null;
-        skipRecordRef.current = true;
-        setEdit({ ...DEFAULT_EDIT, cuts: [], sfx: [], muted: !hadKeys });
-        // The speed went into the file — from here it is footage, not an edit.
-        setBaseSpeed(DEFAULT_SPEED);
+        setOpenEdit(edit);
         setMarksAtOpen(carried);
         setSelection(null);
-        setPlayhead(0);
-        setNote(`Saved. “${rowName}” is the clip now — wherever it was filed, it stays.`);
+        setNote(`Saved. “${rowName}” is the clip now — wherever it was filed, it stays. Open it again any time and this edit is here to change.`);
       }
     } catch (e) {
       if (mine() && !(e instanceof DOMException && e.name === 'AbortError')) {
@@ -1039,7 +1073,7 @@ export function VidsClipEditor({
         <div className="flex min-h-0 flex-1 items-center justify-center bg-black p-3">
           <video
             ref={videoRef}
-            src={video.url}
+            src={video.sourceUrl ?? video.url}
             poster={video.thumbUrl ?? undefined}
             crossOrigin="anonymous"
             playsInline
@@ -1289,15 +1323,27 @@ export function VidsClipEditor({
       <div className="flex w-[260px] shrink-0 flex-col overflow-y-auto border-l border-zinc-800">
         {/* Start over — every change since the clip opened or was last saved,
             put back in one go. Ctrl+Z is the one-at-a-time version. */}
-        <div className="border-b border-zinc-800 px-3 py-2">
+        <div className="flex gap-1.5 border-b border-zinc-800 px-3 py-2">
           <button
             onClick={startOver}
             disabled={!dirty}
             title="Put the trim, cuts, keys, marks and speed back to how this clip was when it opened, or when it was last saved. Ctrl+Z puts back one change at a time."
-            className="flex w-full items-center justify-center gap-1.5 rounded border border-zinc-700 px-2 py-1.5 text-[11px] text-zinc-200 transition-colors hover:border-zinc-500 hover:text-white disabled:cursor-default disabled:opacity-30"
+            className="flex flex-1 items-center justify-center gap-1.5 rounded border border-zinc-700 px-2 py-1.5 text-[11px] text-zinc-200 transition-colors hover:border-zinc-500 hover:text-white disabled:cursor-default disabled:opacity-30"
           >
             <StartOverIcon /> Start over
           </button>
+          {/* The recording, untouched — every edit ever saved on this clip
+              taken off. Only there once one has been. */}
+          {savedEdit && (
+            <button
+              onClick={backToOriginal}
+              disabled={atOriginal}
+              title="Take every saved edit off and show the recording as it was uploaded — no trim, no cuts, no keys, as shot. Save to make it stick; Ctrl+Z or Start over to think again."
+              className="flex flex-1 items-center justify-center gap-1.5 rounded border border-zinc-700 px-2 py-1.5 text-[11px] text-zinc-200 transition-colors hover:border-zinc-500 hover:text-white disabled:cursor-default disabled:opacity-30"
+            >
+              Original
+            </button>
+          )}
         </div>
 
         {fullKit && (

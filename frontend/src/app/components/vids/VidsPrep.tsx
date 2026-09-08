@@ -43,7 +43,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { DragEvent } from 'react';
-import type { PersonaPart, VidContext, VidFolder, VidMark, VidPersona, VidRow } from '@/lib/vids-types';
+import type { PersonaPart, VidContext, VidEdit, VidFolder, VidMark, VidPersona, VidRow } from '@/lib/vids-types';
 import { PERSONA_PARTS, PERSONA_PART_LABEL, isPhoto } from '@/lib/vids-types';
 import { MEDIA_ONLY, isMediaFile, isVideoFile, type VidsLib } from '../../hooks/useVidsLibrary';
 import {
@@ -581,6 +581,9 @@ export function VidsPrep({ lib, active }: { lib: VidsLib; active: boolean }) {
       context: '',
       marks: [],
       hasSfx: false,
+      sourcePath: null,
+      sourceUrl: null,
+      edit: null,
     };
   }, []);
 
@@ -809,11 +812,11 @@ export function VidsPrep({ lib, active }: { lib: VidsLib; active: boolean }) {
   // takes long enough that another clip can be open by the time it lands, and the
   // bytes belong to the clip they were made from.
   const saveEdited = useCallback(async (
-    blob: Blob | null, name: string, hasSfx: boolean, marks: VidMark[], videoId: string,
+    blob: Blob | null, name: string, hasSfx: boolean, marks: VidMark[], videoId: string, edit: VidEdit | null,
   ) => {
     if (!isLocalId(videoId)) {
       if (blob) {
-        const row = await lib.replaceVideo(videoId, blob, name, hasSfx, marks);
+        const row = await lib.replaceVideo(videoId, blob, name, hasSfx, marks, edit);
         if (!row) throw new Error('Saving failed — see the message on the left.');
       } else {
         await lib.renameVideo(videoId, name);
@@ -825,8 +828,13 @@ export function VidsPrep({ lib, active }: { lib: VidsLib; active: boolean }) {
     const at = cur ? cur.local.findIndex((r) => r.id === videoId) : -1;
     if (!cur || at < 0) throw new Error('This clip is no longer part of a run — drop it again to file it.');
     const token = runRef.current;
-    const row = await lib.uploadBlob(blob ?? cur.local[at].file, name, cur.folderId, {
+    // A render goes up with the recording it was made from and the edit that
+    // made it, so the clip can be re-edited from the recording later. The file
+    // as dropped goes up on its own: it is the recording.
+    const file = cur.local[at].file;
+    const row = await lib.uploadBlob(blob ?? file, name, cur.folderId, {
       context: cur.local[at].context, marks, hasSfx,
+      ...(blob ? { source: file, sourceName: file.name, edit } : {}),
     });
     if (!row) throw new Error('Saving failed — see the message on the left.');
     // The run was called off while this went up. The clip is saved either way —
@@ -1153,11 +1161,13 @@ export function VidsPrep({ lib, active }: { lib: VidsLib; active: boolean }) {
                   : PERSONA_PARTS[run.index] === 'topAId' ? 'cut' : 'trim'}
                 // A Bottom A or Bottom B being walked in opens at 1.25x — the
                 // nudge every screen recording wants, given once, on the one
-                // pass where the footage is still being made. The save bakes it
-                // in, so opening that clip again later starts at 1x and a
-                // re-edit doesn't speed up what is already sped up. A clip
-                // opened on its own (not through the pipeline) has no run, so it
-                // opens as shot too.
+                // pass where the footage is still being made. The save writes
+                // it down beside the recording, so opening that clip again
+                // shows the 1.25x as itself, on the recording, where it can be
+                // taken off — and it never stacks, since every render starts
+                // from the recording. A clip opened on its own (not through
+                // the pipeline) has no run, so it opens as shot, or on whatever
+                // edit it was saved with.
                 startSpeed={run ? intakeSpeed(slotForFolderName(run.folderName)) : undefined}
                 saveLabel={run
                   ? (run.index >= run.files.length - 1 ? 'Save · finish' : 'Save · next clip')

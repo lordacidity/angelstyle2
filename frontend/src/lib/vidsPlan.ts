@@ -182,6 +182,14 @@ export const SPEED_PRESETS = [1, 1.1, 1.25, 1.5] as const;
 export const isDefaultSpeed = (v: number) => Math.abs(v - DEFAULT_SPEED) < 1e-6;
 export const clampSpeed = (v: number) =>
   Number.isFinite(v) ? clamp(v, MIN_SPEED, MAX_SPEED) : DEFAULT_SPEED;
+/** The rate a clip's file was rendered at, when that is not as shot — what the
+ *  picker and the library show beside the length, so a clip that has been
+ *  sped up says so. Null for as shot, or a clip that has never been through
+ *  Prep (whose file is its recording). */
+export const renderedSpeed = (v: Pick<VidRow, 'edit'>): number | null =>
+  (v.edit && !isDefaultSpeed(v.edit.speed) ? v.edit.speed : null);
+/** "1.25×", "2×". */
+export const fmtSpeed = (s: number) => `${s.toFixed(2).replace(/\.?0+$/, '')}×`;
 
 /** What a bottom clip opens at the first time it is edited — on its way in
  *  through the upload pipeline, before it has ever been saved. Screen
@@ -189,9 +197,10 @@ export const clampSpeed = (v: number) =>
  *  nudge, so the intake starts them there rather than leaving it to be
  *  remembered clip by clip.
  *
- *  It is baked into the footage the save writes, so opening that clip again
- *  later starts at 1x: the speed-up happens once, not every time it is
- *  edited. */
+ *  The save renders it into the footage and writes it down beside the
+ *  recording (VidEdit), so opening that clip again shows it at 1.25x on the
+ *  recording — there to take off — and it never stacks: every render starts
+ *  from the recording. */
 export const INTAKE_SPEED = 1.25;
 /** The slots that get it — the two screen recordings. Start, Top A and Top B
  *  are a person talking and play as shot; End is the pay-off and does too. */

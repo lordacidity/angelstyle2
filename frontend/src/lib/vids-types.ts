@@ -60,6 +60,78 @@ export function readContextPatch(body: Record<string, unknown>, patch: VidContex
   if (body.context !== undefined) patch.context = cleanContext(body.context);
 }
 
+// ── Edits ─────────────────────────────────────────────────────────────────────
+// What Prep did to a clip, written down beside the footage rather than only
+// baked into it. The recording that was uploaded is kept as the clip's SOURCE;
+// the file everything else plays is rendered from that source with this edit
+// applied. So opening the clip again shows the same trim handles, cuts, keys
+// and speed it was saved with — loosen one, put a cut back, drop the speed —
+// and the next save renders from the recording again, never from the last
+// render. Nothing compounds and nothing is lost.
+//
+// Every number is in SOURCE seconds (the recording's own clock), which is what
+// makes the record stable: the source never changes. Same shape as the
+// editor's ClipEdit (lib/vidsEdit), kept here so the server can check it.
+
+export interface VidEditRange { start: number; end: number }
+
+export interface VidEdit {
+  /** In / out points. `end` null means the end of the recording. */
+  trim: { start: number; end: number | null };
+  /** Ranges inside the trim that are removed. */
+  cuts: VidEditRange[];
+  /** Stretches the keyboard sound plays over. */
+  sfx: VidEditRange[];
+  sfxGain: number;
+  /** Playback rate; 1.25 plays a quarter faster and lands shorter. */
+  speed: number;
+  /** The source's own sound dropped — true for every recording. False only
+   *  when the source is an earlier render that already carries the keyboard,
+   *  so that sound rides through. */
+  muted: boolean;
+}
+
+/** Bounds a stored edit is held to. Wide on purpose: the editor decides what
+ *  is sensible, this only stops a row holding garbage. */
+const MAX_EDIT_RANGES = 200;
+const MIN_EDIT_SPEED = 0.25;
+const MAX_EDIT_SPEED = 4;
+
+const finite = (v: unknown): v is number => typeof v === 'number' && Number.isFinite(v);
+
+function cleanRanges(v: unknown): VidEditRange[] {
+  if (!Array.isArray(v)) return [];
+  const out: VidEditRange[] = [];
+  for (const raw of v) {
+    const r = raw as Partial<VidEditRange> | null;
+    if (!finite(r?.start) || !finite(r?.end)) continue;
+    const start = Math.max(0, Math.min(r.start, r.end));
+    const end = Math.max(0, Math.max(r.start, r.end));
+    if (end > start) out.push({ start, end });
+  }
+  return out.sort((a, b) => a.start - b.start).slice(0, MAX_EDIT_RANGES);
+}
+
+/** A stored edit out of whatever came over the wire or up from the row, or
+ *  null when there is none (or it is not one). */
+export function cleanEdit(v: unknown): VidEdit | null {
+  if (!v || typeof v !== 'object') return null;
+  const e = v as Partial<VidEdit>;
+  const trim = (e.trim ?? {}) as Partial<VidEdit['trim']>;
+  const start = finite(trim.start) ? Math.max(0, trim.start) : 0;
+  const end = finite(trim.end) ? Math.max(start, trim.end) : null;
+  const speed = finite(e.speed) ? Math.min(MAX_EDIT_SPEED, Math.max(MIN_EDIT_SPEED, e.speed)) : 1;
+  const sfxGain = finite(e.sfxGain) ? Math.max(0, e.sfxGain) : 0.8;
+  return {
+    trim: { start, end },
+    cuts: cleanRanges(e.cuts),
+    sfx: cleanRanges(e.sfx),
+    sfxGain,
+    speed,
+    muted: e.muted !== false,
+  };
+}
+
 export interface VidFolder {
   id: string;
   parentId: string | null;   // null = top level
@@ -91,6 +163,15 @@ export interface VidRow {
    *  track holds typing and nothing else — Prep always drops the footage's own
    *  sound. It is the one reason the builder lets a slot be heard. */
   hasSfx: boolean;
+  /** The recording as it was uploaded, kept once the clip has been edited so
+   *  every later edit renders from it — see VidEdit. Null while the clip has
+   *  never been through Prep: the file at `url` IS the recording then, and the
+   *  first save keeps it as the source rather than throwing it away. */
+  sourcePath: string | null;
+  sourceUrl: string | null;
+  /** The edit the file at `url` was rendered with, or null when it is the
+   *  recording untouched. What Prep opens the clip with. */
+  edit: VidEdit | null;
 }
 
 /** A still filed among the footage. End takes photos as well as clips — every
@@ -152,6 +233,9 @@ export interface SignUploadResponse {
   id: string;
   video: { path: string; url: string };
   thumb: { path: string; url: string } | null;
+  /** The recording's own home, when the upload is a render and brings the
+   *  recording it was made from along — the intake run's save. */
+  source: { path: string; url: string } | null;
 }
 
 /** POST /api/vids/videos — registers a clip once its bytes are in the bucket. */
@@ -174,6 +258,11 @@ export interface CreateVideoInput {
   context?: string;
   marks?: VidMark[];
   hasSfx?: boolean;
+  /** The recording the uploaded render was made from, and the edit that made
+   *  it — the intake run edits before it ever uploads, so both arrive together.
+   *  Left off when the file going up is the recording itself. */
+  sourcePath?: string | null;
+  edit?: VidEdit | null;
 }
 
 /** Browser-side metadata read off a file before upload. */

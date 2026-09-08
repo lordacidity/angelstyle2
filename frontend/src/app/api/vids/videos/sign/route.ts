@@ -1,5 +1,7 @@
-// POST /api/vids/videos/sign { name, mime, withThumb, id? } — mint the id +
-// signed bucket URLs for one clip. The browser PUTs the bytes straight to
+// POST /api/vids/videos/sign { name, mime, withThumb, withSource, id? } — mint
+// the id + signed bucket URLs for one clip. `withSource` adds a target for the
+// recording the uploaded render was made from (`sources/<id>.<ext>`), which the
+// intake run sends up beside the render so the clip can be re-edited from it. The browser PUTs the bytes straight to
 // Supabase Storage, then registers the row with POST /api/vids/videos using the
 // same id.
 //
@@ -33,7 +35,7 @@ function extFor(name: string, mime: string): string {
 
 export async function POST(req: NextRequest) {
   const body = (await req.json().catch(() => ({}))) as {
-    name?: unknown; mime?: unknown; withThumb?: unknown; id?: unknown;
+    name?: unknown; mime?: unknown; withThumb?: unknown; withSource?: unknown; sourceName?: unknown; id?: unknown;
   };
   const name = typeof body.name === 'string' ? body.name : 'clip.mp4';
   const mime = typeof body.mime === 'string' && /^(video|image)\//.test(body.mime) ? body.mime : 'video/mp4';
@@ -47,7 +49,13 @@ export async function POST(req: NextRequest) {
     const suffix = isUuid(body.id) ? `-${randomBytes(4).toString('hex')}` : '';
     const video = await signUpload(`videos/${id}${suffix}.${extFor(name, mime)}`);
     const thumb = body.withThumb ? await signUpload(`thumbs/${id}${suffix}.jpg`) : null;
-    const res: SignUploadResponse = { id, video, thumb };
+    // The recording keeps its own extension: it is whatever was dropped in,
+    // not the MP4 the render came out as.
+    const sourceName = typeof body.sourceName === 'string' ? body.sourceName : name;
+    const source = body.withSource
+      ? await signUpload(`sources/${id}${suffix}.${extFor(sourceName, 'video/mp4')}`)
+      : null;
+    const res: SignUploadResponse = { id, video, thumb, source };
     return NextResponse.json(res);
   } catch (err) {
     console.error('[vids sign POST]', err);

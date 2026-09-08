@@ -15,9 +15,9 @@
 import { randomInt } from 'node:crypto';
 import pg from 'pg';
 import { createClient, type SupabaseClient } from '@supabase/supabase-js';
-import { RECIPE_CODE_ALPHABET, RECIPE_CODE_LENGTH, cleanMarks, recipeName } from '@/lib/vids-types';
+import { RECIPE_CODE_ALPHABET, RECIPE_CODE_LENGTH, cleanEdit, cleanMarks, recipeName } from '@/lib/vids-types';
 import type {
-  CreateVideoInput, VidBuildSpec, VidContextPatch, VidFolder, VidLink, VidMark, VidPersona, VidRecipe,
+  CreateVideoInput, VidBuildSpec, VidContextPatch, VidEdit, VidFolder, VidLink, VidMark, VidPersona, VidRecipe,
   VidRow, VidsLibraryPayload,
 } from '@/lib/vids-types';
 
@@ -35,7 +35,7 @@ export const errMessage = (e: unknown) => (e instanceof Error ? e.message : 'une
 // reload in dev, or a long-lived server between deploys. Comparing the version
 // makes such a process re-run the (idempotent) DDL instead of trusting a
 // promise that was resolved against the older schema.
-const SCHEMA_VERSION = 7;
+const SCHEMA_VERSION = 8;
 
 const g = globalThis as unknown as {
   __vidsPool?: pg.Pool;
@@ -177,6 +177,12 @@ function ensureSchema(): Promise<void> {
     await pool.query(
       `ALTER TABLE vids_videos ADD COLUMN IF NOT EXISTS marks JSONB NOT NULL DEFAULT '[]'::jsonb`,
     );
+    // The recording a clip was edited from, and the edit its file was rendered
+    // with — see VidEdit. Both null until the clip has been through Prep, which
+    // is right for every clip from before: their file is their recording, and
+    // the first edit keeps it rather than replacing it.
+    await pool.query('ALTER TABLE vids_videos ADD COLUMN IF NOT EXISTS source_path TEXT NULL');
+    await pool.query('ALTER TABLE vids_videos ADD COLUMN IF NOT EXISTS edit JSONB NULL');
     // A recipe is one finished build written down under a short code — see
     // VidBuildSpec. The build itself is one JSON document: it is only ever read
     // back whole, onto the stage, and keeping it in one piece means a new knob
@@ -221,7 +227,8 @@ interface VideoDb {
   id: string; folder_id: string | null; name: string; storage_path: string;
   thumb_path: string | null; mime_type: string; size_bytes: string | number;
   duration_s: number | null; width: number | null; height: number | null;
-  has_sfx: boolean; context: string; marks: unknown; created_at: Date;
+  has_sfx: boolean; context: string; marks: unknown; source_path: string | null; edit: unknown;
+  created_at: Date;
 }
 
 interface PersonaDb {
@@ -241,7 +248,7 @@ const RECIPE_COLS = 'code, title, video_id, build, created_at';
 const PERSONA_COLS = 'id, name, start_id, top_a_id, top_b_id, context, created_at';
 const VIDEO_COLS =
   'id, folder_id, name, storage_path, thumb_path, mime_type, size_bytes, duration_s, width, height, '
-  + 'has_sfx, context, marks, created_at';
+  + 'has_sfx, context, marks, source_path, edit, created_at';
 
 const toFolder = (r: FolderDb): VidFolder => ({
   id: r.id, parentId: r.parent_id, name: r.name, createdAt: r.created_at.toISOString(),
@@ -282,6 +289,9 @@ const toVideo = (r: VideoDb): VidRow => ({
   hasSfx: r.has_sfx,
   context: r.context ?? '',
   marks: cleanMarks(r.marks),
+  sourcePath: r.source_path ?? null,
+  sourceUrl: r.source_path ? publicUrl(r.source_path) : null,
+  edit: cleanEdit(r.edit),
   createdAt: r.created_at.toISOString(),
   url: publicUrl(r.storage_path),
   thumbUrl: r.thumb_path ? publicUrl(r.thumb_path) : null,
@@ -456,19 +466,24 @@ export async function createVideo(input: CreateVideoInput): Promise<VidRow> {
     const r = await getPool().query<VideoDb>(
       `INSERT INTO vids_videos
          (id, folder_id, name, storage_path, thumb_path, mime_type, size_bytes, duration_s, width, height,
-          has_sfx, context, marks)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13::jsonb)
+          has_sfx, context, marks, source_path, edit)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13::jsonb, $14, $15::jsonb)
        RETURNING ${VIDEO_COLS}`,
       [
         input.id, input.folderId, input.name, input.storagePath, input.thumbPath, input.mimeType,
         input.sizeBytes, input.duration, input.width, input.height,
         input.hasSfx ?? false, input.context ?? '', JSON.stringify(cleanMarks(input.marks ?? [])),
+        input.sourcePath ?? null, input.edit ? JSON.stringify(input.edit) : null,
       ],
     );
     return toVideo(r.rows[0]);
   } catch (e) {
     // The bytes are already in the bucket — don't leave them orphaned.
-    await removeObjects([input.storagePath, ...(input.thumbPath ? [input.thumbPath] : [])]);
+    await removeObjects([
+      input.storagePath,
+      ...(input.thumbPath ? [input.thumbPath] : []),
+      ...(input.sourcePath ? [input.sourcePath] : []),
+    ]);
     throw e;
   }
 }
@@ -508,6 +523,9 @@ export interface VideoMedia {
   /** Whether these bytes carry the keyboard sound. A property of the file, so it
    *  is replaced along with the file — re-saving without keys clears it. */
   hasSfx: boolean;
+  /** The edit these bytes were rendered with, against the clip's source. Null
+   *  means they are the recording as it stands. */
+  edit: VidEdit | null;
 }
 
 /** Point an existing row at freshly uploaded bytes, keeping its id — so the
@@ -515,50 +533,62 @@ export interface VideoMedia {
  *  `marks` comes along because an edit moves them: the caller re-times them
  *  against the footage it just rendered, and omitting them leaves them as they
  *  are (a save that changed no timing).
- *  The objects it used to hold are dropped afterwards (best effort: a leftover
- *  file is harmless, and the row is already correct). */
+ *
+ *  The recording is never lost. A row with no source yet is holding its
+ *  recording as its file, so the first edit keeps that file as the source and
+ *  only the render changes hands; a row with a source drops the render it used
+ *  to hold (best effort: a leftover file is harmless, and the row is already
+ *  correct). Later edits render from the source, so it stays put. */
 export async function replaceVideoMedia(
   id: string, media: VideoMedia, name?: string, marks?: VidMark[],
 ): Promise<VidRow | null> {
   await ensureSchema();
   const pool = getPool();
-  const before = await pool.query<Pick<VideoDb, 'storage_path' | 'thumb_path'>>(
-    'SELECT storage_path, thumb_path FROM vids_videos WHERE id = $1',
+  const before = await pool.query<Pick<VideoDb, 'storage_path' | 'thumb_path' | 'source_path'>>(
+    'SELECT storage_path, thumb_path, source_path FROM vids_videos WHERE id = $1',
     [id],
   );
   if (!before.rows[0]) return null;
+  const old = before.rows[0];
+  // First edit: the file being replaced is the recording — keep it.
+  const source = old.source_path ?? old.storage_path;
 
   const r = await pool.query<VideoDb>(
     `UPDATE vids_videos
         SET storage_path = $1, thumb_path = $2, mime_type = $3, size_bytes = $4,
             duration_s = $5, width = $6, height = $7, has_sfx = $8,
-            name = COALESCE($9, name), marks = COALESCE($10::jsonb, marks), updated_at = now()
-      WHERE id = $11
+            name = COALESCE($9, name), marks = COALESCE($10::jsonb, marks),
+            source_path = $11, edit = $12::jsonb, updated_at = now()
+      WHERE id = $13
       RETURNING ${VIDEO_COLS}`,
     [
       media.storagePath, media.thumbPath, media.mimeType, media.sizeBytes,
       media.duration, media.width, media.height, media.hasSfx, name ?? null,
-      marks === undefined ? null : JSON.stringify(marks), id,
+      marks === undefined ? null : JSON.stringify(marks),
+      source, media.edit ? JSON.stringify(media.edit) : null, id,
     ],
   );
   if (!r.rows[0]) return null;
 
-  const old = before.rows[0];
   const stale = [old.storage_path, ...(old.thumb_path ? [old.thumb_path] : [])]
-    .filter((p) => p !== media.storagePath && p !== media.thumbPath);
+    .filter((p) => p !== media.storagePath && p !== media.thumbPath && p !== source);
   await removeObjects(stale);
   return toVideo(r.rows[0]);
 }
 
 export async function deleteVideo(id: string): Promise<boolean> {
   await ensureSchema();
-  const r = await getPool().query<Pick<VideoDb, 'storage_path' | 'thumb_path'>>(
-    'DELETE FROM vids_videos WHERE id = $1 RETURNING storage_path, thumb_path',
+  const r = await getPool().query<Pick<VideoDb, 'storage_path' | 'thumb_path' | 'source_path'>>(
+    'DELETE FROM vids_videos WHERE id = $1 RETURNING storage_path, thumb_path, source_path',
     [id],
   );
   const row = r.rows[0];
   if (!row) return false;
-  await removeObjects([row.storage_path, ...(row.thumb_path ? [row.thumb_path] : [])]);
+  await removeObjects([
+    row.storage_path,
+    ...(row.thumb_path ? [row.thumb_path] : []),
+    ...(row.source_path ? [row.source_path] : []),
+  ]);
   return true;
 }
 

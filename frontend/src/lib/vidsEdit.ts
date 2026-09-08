@@ -35,6 +35,7 @@ import {
   DEFAULT_SPEED, DEFAULT_TRIM, type Trim,
 } from '@/lib/vidsPlan';
 import { decodeAudio, scheduleLoop, SFX_URL } from '@/lib/vidsAudio';
+import type { VidEdit, VidMark } from '@/lib/vids-types';
 
 /** A removed range, in source seconds. */
 export interface Cut { start: number; end: number }
@@ -80,6 +81,89 @@ export function isEdited(e: ClipEdit, duration: number, baseSpeed = DEFAULT_SPEE
   const r = trimmedRange(e.trim, duration);
   return r.start > 0.001 || r.end < duration - 0.001 || e.cuts.length > 0
     || e.sfx.length > 0 || Math.abs(e.speed - baseSpeed) > 1e-6;
+}
+
+/** Whether two edits would render the same footage. Ranges are compared after
+ *  normalising, so a cut dragged and put back exactly is not a change, and
+ *  the gain only counts while there are keys for it to apply to. */
+export function sameEdit(a: ClipEdit, b: ClipEdit, duration: number, eps = 1e-3): boolean {
+  const full = Math.max(0, duration);
+  const ra = trimmedRange(a.trim, full);
+  const rb = trimmedRange(b.trim, full);
+  const near = (x: number, y: number) => Math.abs(x - y) <= eps;
+  const sameRanges = (x: readonly Cut[], y: readonly Cut[]) =>
+    x.length === y.length && x.every((c, i) => near(c.start, y[i].start) && near(c.end, y[i].end));
+  const sa = normaliseRanges(a.sfx, ra);
+  const sb = normaliseRanges(b.sfx, rb);
+  return near(ra.start, rb.start) && near(ra.end, rb.end)
+    && sameRanges(normaliseRanges(a.cuts, ra), normaliseRanges(b.cuts, rb))
+    && sameRanges(sa, sb)
+    && Math.abs(clampSpeed(a.speed) - clampSpeed(b.speed)) < 1e-6
+    && a.muted === b.muted
+    && (sa.length === 0 || near(clampSfxGain(a.sfxGain), clampSfxGain(b.sfxGain)));
+}
+
+// ── The stored form ───────────────────────────────────────────────────────────
+// A clip's row keeps the recording it was uploaded as and the edit its file was
+// rendered with (vids-types VidEdit) — the same shape as ClipEdit, pinned down
+// here at the boundary. Going out, the ranges are normalised against the trim
+// so the row never holds a cut that hangs outside it.
+
+export function toStoredEdit(e: ClipEdit, duration: number): VidEdit {
+  const range = trimmedRange(e.trim, Math.max(0, duration));
+  return {
+    trim: { start: range.start, end: e.trim.end === null ? null : range.end },
+    cuts: normaliseRanges(e.cuts, range),
+    sfx: normaliseRanges(e.sfx, range),
+    sfxGain: clampSfxGain(e.sfxGain),
+    speed: clampSpeed(e.speed),
+    muted: e.muted,
+  };
+}
+
+export function fromStoredEdit(e: VidEdit): ClipEdit {
+  return {
+    trim: { ...e.trim },
+    cuts: e.cuts.map((c) => ({ ...c })),
+    sfx: e.sfx.map((c) => ({ ...c })),
+    sfxGain: clampSfxGain(e.sfxGain),
+    speed: clampSpeed(e.speed),
+    muted: e.muted,
+  };
+}
+
+// ── Marks across the two clocks ───────────────────────────────────────────────
+// Marks are stored on the clip's RENDERED clock — the file the builder plays,
+// which is what the captions are timed against. The editor works on the SOURCE
+// clock. The edit the current render was made with is the bridge between them.
+
+/** Rendered → source, through the edit that made the render. Before the
+ *  footage has been measured there is nothing to map through, so the marks
+ *  come back as they are. */
+export function marksToSource(marks: readonly VidMark[], edit: ClipEdit, duration: number): VidMark[] {
+  const segs = duration > 0 ? keptSegments(edit, duration) : [];
+  if (!segs.length) return marks.map((m) => ({ ...m }));
+  const speed = clampSpeed(edit.speed);
+  return marks.map((m) => ({ ...m, start: sourceAt(segs, m.start * speed), end: sourceAt(segs, m.end * speed) }));
+}
+
+/** Source → rendered, through the edit being rendered. Cuts pull everything
+ *  after them earlier, the trim re-bases the start, and speed compresses the
+ *  lot. A mark the edit removed — wholly inside a cut, or outside the trim —
+ *  collapses to nothing and is dropped rather than left pointing at footage
+ *  that no longer exists. */
+export function marksToRendered(marks: readonly VidMark[], edit: ClipEdit, duration: number): VidMark[] {
+  const segs = duration > 0 ? keptSegments(edit, duration) : [];
+  if (!segs.length) return marks.map((m) => ({ ...m }));
+  const speed = clampSpeed(edit.speed);
+  const out: VidMark[] = [];
+  for (const m of marks) {
+    const start = keptAt(segs, m.start) / speed;
+    const end = keptAt(segs, m.end) / speed;
+    if (end - start < 0.05) continue;
+    out.push({ start, end, text: m.text });
+  }
+  return out;
 }
 
 /** Clamp ranges into the trim, drop slivers, sort, and merge anything touching.

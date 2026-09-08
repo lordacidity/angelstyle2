@@ -12,6 +12,7 @@
 import { useEffect, useState } from 'react';
 import type { PersonaPart, VidPersona, VidRow } from '@/lib/vids-types';
 import { PERSONA_PARTS, PERSONA_PART_LABEL, isPhoto } from '@/lib/vids-types';
+import { fmtSpeed, renderedSpeed } from '@/lib/vidsPlan';
 import { fmtTime } from '@/lib/utils';
 import { CloseIcon, LinkIcon, VideoIcon } from '@/lib/icons';
 
@@ -88,6 +89,9 @@ export function ClipTile({ video, current, badge = 'In use', tag, links, title, 
   onChoose: () => void;
 }) {
   const [playing, setPlaying] = useState(false);
+  // The rate the clip was saved at, when it was sped up in Prep — so which
+  // screen recordings have had their 1.25x can be read off the tile.
+  const speed = renderedSpeed(video);
 
   return (
     <div
@@ -120,6 +124,9 @@ export function ClipTile({ video, current, badge = 'In use', tag, links, title, 
         <p className="truncate text-[10px] text-zinc-200" title={video.name}>{video.name}</p>
         <p className="text-[9px] text-zinc-500">
           {isPhoto(video) ? 'Photo' : video.duration != null ? fmtTime(video.duration) : '–:––'}
+          {speed != null && (
+            <span className="text-sky-300" title={`Saved at ${fmtSpeed(speed)} in Prep`}> · {fmtSpeed(speed)}</span>
+          )}
           {tag && <span className="text-emerald-400"> · {tag}</span>}
         </p>
       </div>

@@ -6,7 +6,7 @@
 // (so Vercel's request-body cap is irrelevant and we get real progress).
 
 import type {
-  CreateVideoInput, SignUploadResponse, VidContextPatch, VidFolder, VidLink, VidMark, VidPersona, VidRow,
+  CreateVideoInput, SignUploadResponse, VidContextPatch, VidEdit, VidFolder, VidLink, VidMark, VidPersona, VidRow,
   CreateRecipeInput, VideoProbe, VidRecipe, VidsLibraryPayload,
 } from '@/lib/vids-types';
 
@@ -260,6 +260,12 @@ export interface UploadVideoOptions {
   context?: string;
   marks?: VidMark[];
   hasSfx?: boolean;
+  /** When the file going up is a render: the recording it was made from, and
+   *  the edit that made it. Both go up with it, so the clip can be re-edited
+   *  from the recording later — see VidEdit. */
+  source?: Blob;
+  sourceName?: string;
+  edit?: VidEdit | null;
   onProgress?: (frac: number) => void;
 }
 
@@ -270,7 +276,14 @@ export interface UploadVideoOptions {
 export async function replaceVideo(
   id: string,
   file: Blob,
-  opts: { name?: string; hasSfx?: boolean; marks?: VidMark[]; onProgress?: (frac: number) => void },
+  opts: {
+    name?: string; hasSfx?: boolean; marks?: VidMark[];
+    /** The edit these bytes were rendered with — kept on the row so the clip
+     *  opens with it next time. The recording it was rendered from is kept
+     *  server side (see replaceVideoMedia). */
+    edit?: VidEdit | null;
+    onProgress?: (frac: number) => void;
+  },
 ): Promise<VidRow> {
   const probe = await probeVideoFile(file);
   const mime = file.type || 'video/mp4';
@@ -305,21 +318,39 @@ export async function replaceVideo(
         width: probe.width,
         height: probe.height,
         hasSfx: !!opts.hasSfx,
+        edit: opts.edit ?? null,
       },
     }),
   });
 }
 
-// Upload one clip: probe → sign → PUT video (+ poster) → register the row.
+// Upload one clip: probe → sign → PUT video (+ poster, + the recording it was
+// rendered from) → register the row.
 export async function uploadVideo(file: Blob, opts: UploadVideoOptions): Promise<VidRow> {
   const probe = await probeFile(file);
   const mime = file.type || 'video/mp4';
+  const source = opts.source ?? null;
   const sign = await api<SignUploadResponse>('/videos/sign', {
     method: 'POST',
-    body: JSON.stringify({ name: opts.name, mime, withThumb: !!probe.thumb }),
+    body: JSON.stringify({
+      name: opts.name, mime, withThumb: !!probe.thumb,
+      withSource: !!source, sourceName: opts.sourceName,
+    }),
   });
 
-  await putWithProgress(sign.video.url, file, mime, opts.onProgress);
+  // One bar across both files, weighted by size — the recording is the bigger
+  // of the two, so it is most of the wait.
+  const total = file.size + (source?.size ?? 0);
+  const part = (offset: number, size: number) => (frac: number) => {
+    if (opts.onProgress && total > 0) opts.onProgress((offset + frac * size) / total);
+  };
+  await putWithProgress(sign.video.url, file, mime, part(0, file.size));
+
+  let sourcePath: string | null = null;
+  if (source && sign.source) {
+    await putWithProgress(sign.source.url, source, source.type || 'video/mp4', part(file.size, source.size));
+    sourcePath = sign.source.path;
+  }
 
   let thumbPath: string | null = null;
   if (probe.thumb && sign.thumb) {
@@ -347,6 +378,7 @@ export async function uploadVideo(file: Blob, opts: UploadVideoOptions): Promise
     context: opts.context,
     marks: opts.marks,
     hasSfx: opts.hasSfx,
+    ...(sourcePath ? { sourcePath, edit: opts.edit ?? null } : {}),
   };
   return api<VidRow>('/videos', { method: 'POST', body: JSON.stringify(row) });
 }

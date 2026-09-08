@@ -3,7 +3,7 @@
 // can't point a row at somebody else's object.
 import { NextRequest, NextResponse } from 'next/server';
 import { createVideo, errMessage, isUuid } from '@/lib/vids-db';
-import { cleanMarks, readContextPatch, type CreateVideoInput, type VidContextPatch } from '@/lib/vids-types';
+import { cleanEdit, cleanMarks, readContextPatch, type CreateVideoInput, type VidContextPatch } from '@/lib/vids-types';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -28,6 +28,12 @@ export async function POST(req: NextRequest) {
   if (folderId !== null && !isUuid(folderId)) {
     return NextResponse.json({ error: 'folderId must be a folder id' }, { status: 400 });
   }
+  // The recording behind a render, when one came up with it — at the path
+  // /sign mints for this id, like the other two.
+  const sourcePath = b.sourcePath == null ? null : String(b.sourcePath);
+  if (sourcePath !== null && !new RegExp(`^sources/${id}\\.[a-z0-9]{2,5}$`).test(sourcePath)) {
+    return NextResponse.json({ error: 'sourcePath does not match this id' }, { status: 400 });
+  }
 
   const input: CreateVideoInput = {
     id,
@@ -48,6 +54,8 @@ export async function POST(req: NextRequest) {
   if (context.context !== undefined) input.context = context.context;
   if (b.marks !== undefined) input.marks = cleanMarks(b.marks);
   if (b.hasSfx === true) input.hasSfx = true;
+  if (sourcePath !== null) input.sourcePath = sourcePath;
+  if (b.edit !== undefined) input.edit = cleanEdit(b.edit);
   try {
     return NextResponse.json(await createVideo(input));
   } catch (err) {

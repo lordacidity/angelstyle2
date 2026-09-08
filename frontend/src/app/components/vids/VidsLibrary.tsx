@@ -21,7 +21,8 @@ import { isPhoto } from '@/lib/vids-types';
 import type { VidFolder, VidPersona, VidRow } from '@/lib/vids-types';
 import type { VidsLib } from '../../hooks/useVidsLibrary';
 import {
-  LIBRARY_FOLDERS, SLOT_META, VID_DRAG_MIME, folderGroupIds, isPersonaFolderName, slotForFolderName,
+  LIBRARY_FOLDERS, SLOT_META, VID_DRAG_MIME, fmtSpeed, folderGroupIds, isPersonaFolderName, renderedSpeed,
+  slotForFolderName,
 } from '@/lib/vidsPlan';
 import { VidsPersonas } from './VidsPersonas';
 import { VidPreview, fmtBytes } from './VidPreview';
@@ -141,7 +142,13 @@ function VideoCard({ v, inEditor, onOpen, onDelete }: {
       <div className="px-2 py-1">
         <p className="truncate text-[10px] text-zinc-200" title={v.name}>{v.name}</p>
         <p className="text-[9px] text-zinc-500">
-          {isPhoto(v) ? 'Photo' : v.duration != null ? fmtTime(v.duration) : '–:––'} · {fmtBytes(v.sizeBytes)}
+          {isPhoto(v) ? 'Photo' : v.duration != null ? fmtTime(v.duration) : '–:––'}
+          {renderedSpeed(v) != null && (
+            <span className="text-sky-300" title={`Saved at ${fmtSpeed(renderedSpeed(v) as number)} in Prep`}>
+              {' · '}{fmtSpeed(renderedSpeed(v) as number)}
+            </span>
+          )}
+          {' · '}{fmtBytes(v.sizeBytes)}
         </p>
       </div>
       <button

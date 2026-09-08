@@ -16,7 +16,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import * as client from '@/lib/vids-client';
 import type { PersonaParts } from '@/lib/vids-client';
-import type { VidContextPatch, VidFolder, VidLink, VidMark, VidPersona, VidRow } from '@/lib/vids-types';
+import type { VidContextPatch, VidEdit, VidFolder, VidLink, VidMark, VidPersona, VidRow } from '@/lib/vids-types';
 
 export interface UploadItem {
   id: string;
@@ -51,6 +51,10 @@ export interface UploadExtras {
   context?: string;
   marks?: VidMark[];
   hasSfx?: boolean;
+  /** A render's recording and the edit that made it — see CreateVideoInput. */
+  source?: Blob;
+  sourceName?: string;
+  edit?: VidEdit | null;
 }
 
 export function useVidsLibrary(active: boolean) {
@@ -393,14 +397,16 @@ export function useVidsLibrary(active: boolean) {
   // an edit changes the clip, it doesn't make a second one. Rides the same
   // progress list as a fresh upload.
   const replaceVideo = useCallback(
-    async (id: string, blob: Blob, name?: string, hasSfx?: boolean, marks?: VidMark[]): Promise<VidRow | null> => {
+    async (
+      id: string, blob: Blob, name?: string, hasSfx?: boolean, marks?: VidMark[], edit?: VidEdit | null,
+    ): Promise<VidRow | null> => {
       const jobId = crypto.randomUUID();
       const label = name ?? videos.find((v) => v.id === id)?.name ?? 'clip';
       setUploads((u) => [...u, { id: jobId, name: label, progress: 0, error: null, done: false }]);
       const patch = (p: Partial<UploadItem>) => setUploads((u) => u.map((x) => (x.id === jobId ? { ...x, ...p } : x)));
       try {
         const row = await tracked(client.replaceVideo(id, blob, {
-          name, hasSfx, marks, onProgress: (progress) => patch({ progress }),
+          name, hasSfx, marks, edit, onProgress: (progress) => patch({ progress }),
         }));
         setVideos((prev) => prev.map((v) => (v.id === row.id ? row : v)));
         patch({ progress: 1, done: true });
