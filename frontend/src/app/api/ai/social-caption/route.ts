@@ -3,9 +3,9 @@
 // Flow (per Angel's spec):
 //   1. The category comes from the brand kit (athlete | artist) and filters the
 //      AI-Prompts topic pool to that vertical.
-//   2. DeepSeek reads the on-card caption + editor context (plus the fetched
-//      video title as light video signal) and picks the single best-fitting
-//      topic from that pool.
+//   2. The caption model reads the on-card caption + editor context (plus the
+//      fetched video title as light video signal) and picks the single
+//      best-fitting topic from that pool.
 //   3. We hand the model that topic's freshly generated news overview and have it
 //      write the caption AROUND that news.
 //
@@ -19,8 +19,8 @@
 
 import { NextRequest, NextResponse } from 'next/server';
 import { z } from 'zod';
-import { deepseekChat, parseJson, type ChatMessage } from '@/lib/deepseek';
-import { geminiGenerate } from '@/lib/gemini';
+import { type ChatMessage } from '@/lib/deepseek';
+import { geminiGenerate, extractGeminiJson } from '@/lib/gemini';
 import { listPrompts, type AiPromptRow, type PromptCategory } from '@/lib/ai-prompts-db';
 
 export const runtime = 'nodejs';
@@ -28,6 +28,10 @@ export const runtime = 'nodejs';
 const MIN_CHARS = 1750;
 const MAX_CHARS = 2000;
 const TARGET_PARAGRAPHS = 3;
+
+// Hard-coded, NOT env-driven, so every environment behaves the same with no .env
+// setup. Both AI steps in this route run on it.
+const CAPTION_MODEL = 'gemini-3.5-flash-lite';
 
 // Strip wrapping quotes, stray markdown, and (critically) every em / en dash —
 // the caption must never contain one. Dashes become commas; any double comma
@@ -81,39 +85,43 @@ function clampRange(s: string, min: number, max: number): string {
 // Ask the model which single topic best fits the video (judged by the on-card
 // caption + context). Returns an index into `candidates`; defaults to 0 on any
 // ambiguity so we always have a topic.
+//
+// This is a one-number classification over a handful of topics, so it runs on the
+// caption model at the FLOOR thinking level. It used to be a deepseek-v4-flash
+// reasoning call, which sat on the critical path in front of the caption write and
+// cost ~8s on its own for an answer like {"index": 2}.
 async function pickTopicIndex(
   candidates: AiPromptRow[],
   video: { caption?: string; context?: string; videoTitle?: string },
 ): Promise<number> {
   if (candidates.length === 1) return 0;
   const list = candidates.map((c, i) => `${i}. ${c.topic}: ${c.overview}`).join('\n');
-  const raw = await deepseekChat(
-    [
-      {
-        role: 'system',
-        content:
-          'You match a video to the SINGLE most relevant topic from a numbered list. ' +
-          'Judge by which topic best fits what the video is about. If none fit well, pick the closest. ' +
-          'Return only JSON: {"index": <number>}.',
-      },
-      {
-        role: 'user',
-        content: [
-          video.caption ? `Video caption: ${video.caption}` : '',
-          video.context ? `Context: ${video.context}` : '',
-          video.videoTitle ? `Video title: ${video.videoTitle}` : '',
-          '',
-          'Topics:',
-          list,
-          '',
-          'Return {"index": N} for the best-matching topic.',
-        ].filter(Boolean).join('\n'),
-      },
-    ],
-    { json: true, temperature: 0.2, timeoutMs: 90_000 },
-  );
+  const prompt = [
+    'You match a video to the SINGLE most relevant topic from a numbered list. ' +
+    'Judge by which topic best fits what the video is about. If none fit well, pick the closest. ' +
+    'Return only JSON: {"index": <number>}.',
+    '',
+    video.caption ? `Video caption: ${video.caption}` : '',
+    video.context ? `Context: ${video.context}` : '',
+    video.videoTitle ? `Video title: ${video.videoTitle}` : '',
+    '',
+    'Topics:',
+    list,
+    '',
+    'Return {"index": N} for the best-matching topic.',
+  ].filter(Boolean).join('\n');
+
+  // Never let the topic pick fail the whole caption: any error falls through to
+  // candidate 0, which is a valid topic with a fresh overview.
   try {
-    const idx = Number(parseJson<{ index?: number }>(raw).index);
+    const raw = await geminiGenerate([{ text: prompt }], {
+      model: CAPTION_MODEL,
+      thinkingLevel: 'minimal',
+      temperature: 0.2,
+      maxOutputTokens: 200,
+      timeoutMs: 20_000,
+    });
+    const idx = Number(JSON.parse(extractGeminiJson(raw)).index);
     if (Number.isInteger(idx) && idx >= 0 && idx < candidates.length) return idx;
   } catch { /* fall through to default */ }
   return 0;
@@ -127,11 +135,10 @@ export async function POST(req: NextRequest) {
       videoTitle: z.string().optional(),  // scraped VideoData.title
       author:     z.string().optional(),  // scraped VideoData.author.nickname
       category:   z.enum(['athlete', 'artist', 'gamer']).optional(),  // from the brand kit
-      provider:   z.enum(['deepseek', 'gemini']).optional(),  // per-request override of CAPTION_PROVIDER
     });
     const parsed = Schema.safeParse(await req.json().catch(() => ({})));
     if (!parsed.success) return NextResponse.json({ error: 'invalid body' }, { status: 400 });
-    const { caption, context, videoTitle, author, category, provider } = parsed.data;
+    const { caption, context, videoTitle, author, category } = parsed.data;
 
     if (!caption?.trim() && !context?.trim() && !videoTitle?.trim()) {
       return NextResponse.json({ error: 'need at least caption, context, or fetched video title' }, { status: 400 });
@@ -201,24 +208,40 @@ export async function POST(req: NextRequest) {
       { role: 'user', content: user },
     ];
 
-    // Caption model, toggled by CAPTION_PROVIDER:
-    //   (default) 'deepseek' — deepseek-v4-flash: a reasoning model, high quality but
-    //             slow (~60s for the retry loop).
-    //   'gemini'  — gemini-2.5-flash with thinking disabled: much faster (~10s), ~same
-    //             cost, quality to be compared. Gemini takes a single turn, so we
-    //             flatten the retry conversation (prior draft + feedback) into one
-    //             prompt each attempt.
-    const useGemini = (provider ?? process.env.CAPTION_PROVIDER) === 'gemini';
+    // Caption model — hard-coded, NOT env-driven, so every environment behaves the
+    // same with no .env setup:
+    //   gemini-3.5-flash-lite at thinkingLevel 'low' — the fast path (~7s vs ~60s),
+    //   which is what this card is judged on. It lands the 1750-2000 char band on the
+    //   first attempt, so the retry loop below usually never runs. Gemini takes a
+    //   single turn, so we flatten the retry conversation (prior draft + feedback)
+    //   into one prompt each attempt.
+    // Pinning the model here also leaves GEMINI_MODEL (shared by every other Gemini
+    // route) untouched.
     const generateDraft = (msgs: ChatMessage[]): Promise<string> => {
-      if (useGemini) {
-        const prompt = msgs
-          .map(m => (m.role === 'assistant' ? `Your previous draft:\n${m.content}` : m.content))
-          .join('\n\n');
-        return geminiGenerate([{ text: prompt }], { temperature: 0.7, maxOutputTokens: 1200, timeoutMs: 60_000 });
-      }
-      // Long-form generation on the v4 reasoning model runs well past the default
-      // 45s timeout, so give it room (the timeout only guards a truly stalled call).
-      return deepseekChat(msgs, { temperature: 0.7, timeoutMs: 120_000 });
+      // Gemini takes a single turn, so flatten the retry conversation (prior draft
+      // + feedback) into one prompt each attempt.
+      const prompt = msgs
+        .map(m => (m.role === 'assistant' ? `Your previous draft:\n${m.content}` : m.content))
+        .join('\n\n');
+      // 'minimal' rather than 'low': measured end to end through this route, a
+      // draft takes ~2s at minimal vs ~10s at low, and the length band is held by
+      // the retry loop below rather than by thinking. Minimal occasionally
+      // under-runs the floor, and the nudge on the next pass fixes it in ~1.4s,
+      // so even a two-attempt run beats a one-attempt 'low' run outright.
+      //
+      // maxOutputTokens has to cover THINKING as well as the caption. Thinking
+      // tokens are billed against this same cap, and at 'low' a draft burns ~3.2k
+      // of them against ~350 of actual caption, so the original 1200 truncated the
+      // reply mid-sentence (finishReason MAX_TOKENS) and every attempt failed the
+      // length floor. 6000 leaves headroom for the longer retry prompts and for
+      // 'low' if this is ever turned back up.
+      return geminiGenerate([{ text: prompt }], {
+        model: CAPTION_MODEL,
+        thinkingLevel: 'minimal',
+        temperature: 0.7,
+        maxOutputTokens: 6000,
+        timeoutMs: 60_000,
+      });
     };
 
     const MAX_ATTEMPTS = 4;

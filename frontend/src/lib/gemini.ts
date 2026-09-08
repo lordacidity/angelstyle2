@@ -61,10 +61,10 @@ function whyEmpty(data: GeminiResponse, cand?: GeminiCandidate): string {
   ].filter(Boolean).join(' · ') || 'empty response';
 }
 
-/** How hard a Gemini 3 model thinks before it answers. Flash-Lite starts at
- *  'minimal' (as good as none); the bigger 3.x models start at 'high'. The 2.x
- *  models have no levels, so the fallbacks below keep their own settings. */
-export type ThinkingLevel = 'minimal' | 'low' | 'medium' | 'high';
+/** How hard a Gemini 3 model thinks before it answers. 'minimal' is the floor
+ *  and only the Flash models take it; the 2.x models have no levels at all and
+ *  keep their own thinkingBudget setting below. */
+export type ThinkingLevel = 'minimal' | 'low' | 'high';
 
 /**
  * One Gemini generateContent call against `parts`, with transient-error backoff
@@ -74,12 +74,10 @@ export async function geminiGenerate(parts: GeminiPart[], opts: {
   temperature?: number;
   maxOutputTokens?: number;
   timeoutMs?: number;
-  /** Pin this call to one model, whatever GEMINI_MODEL says — for a route that
-   *  wants a particular one rather than the project default. */
-  model?: string;
-  /** Thinking level for a Gemini 3 model; left unset, the model uses its own
-   *  default. Thinking tokens count against maxOutputTokens, so leave room. */
-  thinking?: ThinkingLevel;
+  model?: string;   // per-call override of GEMINI_MODEL (e.g. the caption model)
+  // 3.x only. 'minimal' is the floor and is right for trivial work (classification,
+  // picking an index); leave unset for prose, where 'low' is worth the extra seconds.
+  thinkingLevel?: ThinkingLevel;
 } = {}): Promise<string> {
   const apiKey = process.env.GEMINI_API_KEY ?? '';
   if (!apiKey) throw new Error('GEMINI_API_KEY is not set');
@@ -92,10 +90,20 @@ export async function geminiGenerate(parts: GeminiPart[], opts: {
       temperature: opts.temperature ?? 0.4,
       maxOutputTokens,
     };
-    // Only 2.5 Flash lets us fully disable "thinking" (budget 0) — keeps it fast.
-    // Gemini 3 has levels instead, and never takes a budget alongside one.
-    if (/2\.5-flash/.test(modelName)) generationConfig.thinkingConfig = { thinkingBudget: 0 };
-    else if (opts.thinking && /gemini-3/.test(modelName)) generationConfig.thinkingConfig = { thinkingLevel: opts.thinking };
+    // Keep "thinking" down — it is the difference between seconds and a minute. The
+    // two families spell it differently and each 400s on the other's key:
+    //   2.5 Flash / Flash-Lite → thinkingBudget: 0
+    //   3.x                    → thinkingLevel (there is no zero level; 'low' is the
+    //                            default here, 'minimal' is a rung below it)
+    if (/^gemini-[3-9]/.test(modelName)) {
+      // 'minimal' is rejected by the Pro models ("not supported for this model"), so
+      // it only survives on Flash / Flash-Lite; anything else falls back to 'low'.
+      const want = opts.thinkingLevel ?? 'low';
+      const level = want === 'minimal' && !/flash/.test(modelName) ? 'low' : want;
+      generationConfig.thinkingConfig = { thinkingLevel: level };
+    } else if (/2\.5-flash/.test(modelName)) {
+      generationConfig.thinkingConfig = { thinkingBudget: 0 };
+    }
     const body = JSON.stringify({ contents: [{ role: 'user', parts }], generationConfig });
 
     const MAX_TRIES = 4;
@@ -118,7 +126,9 @@ export async function geminiGenerate(parts: GeminiPart[], opts: {
     }
   }
 
-  const queue = [primary, 'gemini-2.5-flash-lite', 'gemini-2.0-flash']
+  // Fall-up chain. Both alternates are current: gemini-2.0-flash was retired and
+  // would only ever have 404'd here.
+  const queue = [primary, 'gemini-2.5-flash-lite', 'gemini-flash-lite-latest']
     .filter((m, i, a) => m && a.indexOf(m) === i);
   let lastWhy = '';
   for (const m of queue) {

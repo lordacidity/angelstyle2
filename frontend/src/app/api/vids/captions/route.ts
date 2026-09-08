@@ -260,7 +260,7 @@ export async function POST(req: NextRequest) {
       // every line has to be right about the whole video, not only its clip.
       // Thinking tokens count against the output cap, so that sits well above
       // what the reply itself needs.
-      thinking: 'low',
+      thinkingLevel: 'low',
       // Warm enough for the hook to be odd, not so warm it stops following the
       // brief on the how-it-works lines.
       temperature: 0.9,
