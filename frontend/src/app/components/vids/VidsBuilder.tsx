@@ -29,6 +29,17 @@
 // Bars (middle / top+bottom) shrink the sections and every clip re-fits to
 // them; drag/zoom tweaks are relative, so they survive.
 //
+// Two ways to work, switched top right of the page:
+//   Advanced  everything above — the rack, both rails, a stage you can drag.
+//   Simple    two choices and nothing else: a persona, and a vid (the Bottom
+//             A). Bottom B comes off the Link page, End fills itself, and the
+//             song, the room tone, the bars and the captions are all what they
+//             would have been in Advanced anyway — you just don't see them.
+//             Play it, then download it or push it to Phonedeck. Nothing there
+//             can be edited, and nothing needs to be: switching to Advanced
+//             opens that same build with every control on it, so a vid that
+//             wants a nudge is one click from getting one.
+//
 // Every export is written down under a short code (lib/vidsRecipe → the
 // recipes API): a three-word title from the model, plus the persona, every
 // slot's clip and settings, bars, sound, output size and captions. The code
@@ -395,6 +406,51 @@ function SlotCard({ meta, pick, duration, error, selected, onChoose, onClear, on
         </p>
       )}
     </div>
+  );
+}
+
+// ── Simple mode's two cards ───────────────────────────────────────────────────
+
+/** One of the two choices Simple offers. A picture, what is in it, and a click
+ *  to change it — no clear, no drop target, no settings. Everything you might
+ *  otherwise want to do to it lives in Advanced. */
+function SimpleCard({ label, hint, name, thumbUrl, missing, disabled, onChoose }: {
+  label: string;
+  hint: string;
+  /** What is in the slot, or null while nothing is. */
+  name: string | null;
+  thumbUrl: string | null;
+  /** What the card says instead of a name while it is empty. */
+  missing: string;
+  disabled?: boolean;
+  onChoose: () => void;
+}) {
+  return (
+    <button
+      onClick={onChoose}
+      disabled={disabled}
+      title={`Click to choose ${label.toLowerCase()}`}
+      className={`mb-2 flex w-full items-center gap-2.5 rounded-md border p-2.5 text-left transition-colors ${
+        name ? 'border-zinc-800' : 'border-dashed border-zinc-700'
+      } hover:border-zinc-500 disabled:cursor-default disabled:border-zinc-900 disabled:opacity-50`}
+    >
+      <div className="h-12 w-12 shrink-0 overflow-hidden rounded bg-black">
+        {thumbUrl ? (
+          // eslint-disable-next-line @next/next/no-img-element
+          <img src={thumbUrl} alt="" className="h-full w-full object-cover" draggable={false} />
+        ) : (
+          <span className="flex h-full items-center justify-center text-zinc-700"><VideoIcon size={16} /></span>
+        )}
+      </div>
+      <div className="min-w-0 flex-1">
+        <p className="text-[9px] font-semibold uppercase tracking-wider text-zinc-500">{label}</p>
+        <p className={`truncate text-[12px] ${name ? 'text-zinc-100' : 'text-zinc-400'}`} title={name ?? undefined}>
+          {name ?? missing}
+        </p>
+        <p className="truncate text-[9px] text-zinc-600">{hint}</p>
+      </div>
+      <span className="shrink-0 text-[10px] text-zinc-500">{name ? 'Change' : 'Choose'}</span>
+    </button>
   );
 }
 
@@ -822,11 +878,16 @@ interface Props {
   /** The library has arrived. Until it has, a code has nothing to resolve
    *  its clips against, and would come back with every slot empty. */
   libraryLoaded: boolean;
+  /** Simple mode: a persona, a vid, and the finished video. The rails, the
+   *  rack, the code box, Random and every handle on the stage are Advanced's
+   *  — what they set is still set, it just isn't shown or asked about. */
+  simple: boolean;
 }
 
 export function VidsBuilder({
   picks, onPicksChange, onAssign, selectedSlot, onSelectSlot, resolveVideo, clipsForSlot,
   personas, links, appliedPersonaId, onUsePersona, onClearPersona, active, libraryLoaded,
+  simple,
 }: Props) {
   const [presetId, setPresetId] = useState<PresetId>('9:16');
   const preset = OUTPUT_PRESETS.find((p) => p.id === presetId) ?? OUTPUT_PRESETS[0];
@@ -1847,6 +1908,86 @@ export function VidsBuilder({
     if (ids.size) pendingWrite.current = { ids, roll: false };
   };
 
+  /** The clips a set of picks would put on the stage — what the words wait on
+   *  before they are written. A still never reports a length, so it is not
+   *  something to wait for. */
+  const clipIds = (from: Picks): Set<string> => {
+    const ids = new Set<string>();
+    for (const s of SLOTS) {
+      const p = from[s.id];
+      if (p && !isPhoto(p.video)) ids.add(p.video.id);
+    }
+    return ids;
+  };
+
+  /** Hold the captions back until every one of those clips has reported its
+   *  length (or failed), then write them — the same wait a roll makes. Simple
+   *  says so on its own card while it happens, which is what `rolling` is for
+   *  here: there is no Random button in Simple for it to spin. */
+  const queueWrite = (ids: Set<string>) => {
+    if (!ids.size || writing || exporting || recall.busy) return;
+    pendingWrite.current = { ids, roll: true };
+    setRolling(true);
+  };
+
+  /** Simple's vid. It goes to Bottom A, and everything that follows from it is
+   *  filled in without asking: a Bottom B the Link page pairs with it — any of
+   *  them, at random, since Simple has nobody to choose between them — or any
+   *  Bottom B at all while nothing is linked yet; an End, if the stage somehow
+   *  hasn't got one; then the captions, once the clips have loaded. */
+  const chooseSimpleVid = (video: VidRow) => {
+    const next: Picks = { ...picks, bottomA: freshPick('bottomA', video, picks.bottomA) };
+    const linked = linkedPairs.filter((p) => p.a.id === video.id).map((p) => p.b);
+    const b = pickRandom(linked.length ? linked : clipsForSlot('bottomB'));
+    if (b) next.bottomB = freshPick('bottomB', b, picks.bottomB);
+    else delete next.bottomB;
+    if (!next.end) {
+      const end = rollEnd();
+      if (end) next.end = end;
+    }
+    pause();
+    onSelectSlot(null);
+    setPicker(null);
+    // The words were written about the vid that was there — they go with it.
+    setLines(EMPTY_LINES);
+    setCaptionError(null);
+    timeRef.current = 0;
+    setTime(0);
+    onPicksChange(() => next);
+    queueWrite(clipIds(next));
+  };
+
+  /** Simple's persona. The hook is the persona's line, so choosing one over a
+   *  vid that is already on the stage has the captions written again around
+   *  them. With no vid yet there is nothing to write about — choosing one
+   *  will do it. */
+  const chooseSimplePersona = (persona: VidPersona) => {
+    onUsePersona(persona);
+    setPicker(null);
+    if (!picks.bottomA) return;
+    const next: Picks = { ...picks };
+    for (const part of PERSONA_PARTS) {
+      const id = persona[part];
+      const video = id ? resolveVideo(id) : undefined;
+      const slot = PERSONA_PART_SLOT[part];
+      if (video) next[slot] = freshPick(slot, video, picks[slot]);
+      else delete next[slot];
+    }
+    setLines(EMPTY_LINES);
+    setCaptionError(null);
+    queueWrite(clipIds(next));
+  };
+
+  // Coming over to Simple puts down whatever Advanced had open — a selected
+  // clip, its settings popup, a trim — since none of it can be reached from
+  // there to be closed by hand.
+  useEffect(() => {
+    if (!simple) return;
+    onSelectSlot(null);
+    setTrimPopup(null);
+    setPicker(null);
+  }, [simple, onSelectSlot]);
+
   /** Back to an empty stage: every slot cleared and the words written for those
    *  clips gone with them, since a caption is about the clip it was written over.
    *  It lands where a build starts rather than on nothing at all: a fresh End
@@ -1976,9 +2117,26 @@ export function VidsBuilder({
     + `${i.region === 'full' ? '' : ` (${i.region})`}${i.loop ? ' · loops' : ''}`;
   const px = (v: number) => v * k;
 
+  // What Simple has room to say. Advanced says all of this in five places at
+  // once — the rack, the rails, the Random button, the timeline — and Simple
+  // has one line for it.
+  const simpleBusy = rolling || writing;
+  const simpleStatus = (() => {
+    if (simpleBusy) return 'Putting it together — the rest of the clips, the sound and the captions.';
+    if (!appliedPersonaId) {
+      return picks.bottomA
+        ? 'Now choose a persona.'
+        : 'Choose a persona and a vid — everything else fills itself in.';
+    }
+    if (!picks.bottomA) return 'Now choose a vid.';
+    if (broken.length) return 'One of these clips would not load — choose another vid.';
+    return `Ready${total ? ` · ${fmtTime(total)}` : ''} — play it, then push it to the phones or download it.`;
+  })();
+
   // The finish line, built here — where everything it reads from lives — and
-  // rendered at the foot of the captions rail. Reading the words back and
-  // exporting are the last two things you do, so they belong in one column.
+  // rendered at the foot of the captions rail, or of Simple's own. Reading the
+  // words back and exporting are the last two things you do, so they belong in
+  // one column.
   const exportPanel = (
     <>
       {exporting ? (
@@ -2098,63 +2256,77 @@ export function VidsBuilder({
       {/* Stage + transport */}
       <div className="flex min-w-0 flex-1 flex-col">
         <div ref={stageWrapRef} className="relative flex min-h-0 flex-1 items-center justify-center overflow-hidden">
-          <VidsRecall
-            disabled={!libraryLoaded}
-            busy={recall.busy}
-            loaded={recall.loaded}
-            problems={recall.problems}
-            error={recall.error}
-            onLoad={(raw) => void loadRecipe(raw)}
-          />
+          {/* The code box and the Random / Reset buttons are Advanced's: Simple
+              has two cards and a finished video, so there is nothing on the
+              stage to clear and nothing to bring back by hand. */}
+          {!simple && (
+            <>
+              <VidsRecall
+                disabled={!libraryLoaded}
+                busy={recall.busy}
+                loaded={recall.loaded}
+                problems={recall.problems}
+                error={recall.error}
+                onLoad={(raw) => void loadRecipe(raw)}
+              />
 
-          <div className="absolute right-3 top-3 z-30 flex items-center gap-1.5">
-            <button
-              onClick={randomBuild}
-              disabled={!libraryLoaded || !rollable || rolling || writing || !!exporting || recall.busy}
-              title={rollable
-                ? (linkedPairs.length
-                  ? 'Fill every slot at random — a persona, a Bottom A with one of the Bottom Bs linked to it, and End — and write the captions for them'
-                  : 'Fill every slot at random — a persona, Bottom A, Bottom B and End — and write the captions for them. Link Bottom As to Bottom Bs on Edit & file → Link and it will only pick pairs')
-                : 'Nothing to draw from yet — file a persona and some bottom clips first'}
-              className="flex items-center gap-1.5 rounded border border-zinc-700 bg-zinc-950/80 px-2 py-1 text-[10px] text-zinc-400 backdrop-blur transition-colors hover:border-zinc-500 hover:text-white disabled:cursor-default disabled:border-zinc-800 disabled:text-zinc-700 disabled:hover:border-zinc-800 disabled:hover:text-zinc-700"
-            >
-              {(rolling || writing) && <SpinnerIcon size={10} className="animate-spin" />}
-              {rolling ? 'Loading…' : writing ? 'Writing…' : 'Random'}
-            </button>
-            <button
-              onClick={resetBuild}
-              disabled={!filled.length && !hasLines}
-              title="Clear every clip on the stage and the captions written for them, and start again on a fresh End and a fresh song — the library is untouched"
-              className="rounded border border-zinc-700 bg-zinc-950/80 px-2 py-1 text-[10px] text-zinc-400 backdrop-blur transition-colors hover:border-zinc-500 hover:text-white disabled:cursor-default disabled:border-zinc-800 disabled:text-zinc-700 disabled:hover:border-zinc-800 disabled:hover:text-zinc-700"
-            >
-              Reset
-            </button>
-          </div>
+              <div className="absolute right-3 top-3 z-30 flex items-center gap-1.5">
+                <button
+                  onClick={randomBuild}
+                  disabled={!libraryLoaded || !rollable || rolling || writing || !!exporting || recall.busy}
+                  title={rollable
+                    ? (linkedPairs.length
+                      ? 'Fill every slot at random — a persona, a Bottom A with one of the Bottom Bs linked to it, and End — and write the captions for them'
+                      : 'Fill every slot at random — a persona, Bottom A, Bottom B and End — and write the captions for them. Link Bottom As to Bottom Bs on Edit & file → Link and it will only pick pairs')
+                    : 'Nothing to draw from yet — file a persona and some bottom clips first'}
+                  className="flex items-center gap-1.5 rounded border border-zinc-700 bg-zinc-950/80 px-2 py-1 text-[10px] text-zinc-400 backdrop-blur transition-colors hover:border-zinc-500 hover:text-white disabled:cursor-default disabled:border-zinc-800 disabled:text-zinc-700 disabled:hover:border-zinc-800 disabled:hover:text-zinc-700"
+                >
+                  {(rolling || writing) && <SpinnerIcon size={10} className="animate-spin" />}
+                  {rolling ? 'Loading…' : writing ? 'Writing…' : 'Random'}
+                </button>
+                <button
+                  onClick={resetBuild}
+                  disabled={!filled.length && !hasLines}
+                  title="Clear every clip on the stage and the captions written for them, and start again on a fresh End and a fresh song — the library is untouched"
+                  className="rounded border border-zinc-700 bg-zinc-950/80 px-2 py-1 text-[10px] text-zinc-400 backdrop-blur transition-colors hover:border-zinc-500 hover:text-white disabled:cursor-default disabled:border-zinc-800 disabled:text-zinc-700 disabled:hover:border-zinc-800 disabled:hover:text-zinc-700"
+                >
+                  Reset
+                </button>
+              </div>
+            </>
+          )}
           {filled.length === 0 ? (
             <div className="max-w-sm text-center text-zinc-500">
               <VideoIcon size={28} className="mx-auto mb-3 text-zinc-700" />
-              <p className="text-sm text-zinc-400">Choose a persona, then fill the bottom</p>
+              <p className="text-sm text-zinc-400">
+                {simple ? 'Choose a persona and a vid on the right' : 'Choose a persona, then fill the bottom'}
+              </p>
             </div>
           ) : k > 0 && (
+            /* In Simple the stage is a screen, not a workbench: nothing is
+               picked, dragged, zoomed or nudged on it. */
             <div
               ref={stageRef}
               data-vids-stage
-              tabIndex={0}
-              className={`relative select-none touch-none bg-black outline-none ring-1 ring-zinc-800 focus:ring-zinc-600 ${visibleItems.length ? 'cursor-move' : ''}`}
+              tabIndex={simple ? -1 : 0}
+              className={`relative select-none touch-none bg-black outline-none ring-1 ring-zinc-800 ${
+                simple ? '' : `focus:ring-zinc-600 ${visibleItems.length ? 'cursor-move' : ''}`
+              }`}
               style={{ width: dispW, height: dispH }}
-              onPointerDown={onStagePointerDown}
-              onPointerMove={onStagePointerMove}
-              onPointerUp={onStagePointerUp}
-              onPointerCancel={onStagePointerUp}
-              onKeyDown={onStageKeyDown}
+              onPointerDown={simple ? undefined : onStagePointerDown}
+              onPointerMove={simple ? undefined : onStagePointerMove}
+              onPointerUp={simple ? undefined : onStagePointerUp}
+              onPointerCancel={simple ? undefined : onStagePointerUp}
+              onKeyDown={simple ? undefined : onStageKeyDown}
             >
               <canvas ref={canvasRef} data-vids-canvas className="block" style={{ width: dispW, height: dispH }} />
 
               {/* The caption on screen, as something you can take hold of. It
                   covers exactly the words the canvas painted, sits above every
                   clip, and shows its edges when you are on it — nothing here is
-                  drawn into the video. */}
-              {capHandle && (
+                  drawn into the video. Simple's captions are the video's,
+                  not something to move. */}
+              {!simple && capHandle && (
                 <div
                   onPointerDown={startCaptionDrag}
                   title="Drag to move this caption — it stays where you put it"
@@ -2172,8 +2344,9 @@ export function VidsBuilder({
                 </div>
               )}
 
-              {/* Faint outline of every section on screen (bars show up as the gaps) */}
-              {visibleItems.map((i) => {
+              {/* Faint outline of every section on screen (bars show up as the
+                  gaps). Advanced only: they are there to be dragged against. */}
+              {!simple && visibleItems.map((i) => {
                 const r = regionRect(i.region, outW, outH, bars);
                 return (
                   <div
@@ -2296,257 +2469,297 @@ export function VidsBuilder({
         </div>
       </div>
 
-      {/* Right rail */}
-      <aside className="w-[300px] shrink-0 overflow-y-auto border-l border-zinc-800">
-        <Section title="Build">
-          <PersonaRack
-            personas={personas}
-            appliedPersonaId={appliedPersonaId}
-            picks={picks}
-            durations={durations}
-            errors={errors}
-            selectedSlot={selectedSlot}
+      {/* Simple's rail: the two choices, a line on how it is getting on, and the
+          two ways out. Everything else about the build — the bars, the sound,
+          the size, the captions — sits wherever Advanced left it, which is
+          where a Vid wants it anyway. */}
+      {simple && (
+        <aside className="flex w-[320px] shrink-0 flex-col overflow-y-auto border-l border-zinc-800 p-3">
+          <SimpleCard
+            label="Persona"
+            hint="who fronts it — Start, Top A and Top B"
+            name={appliedPersona?.name ?? null}
+            thumbUrl={picks.start?.video.thumbUrl ?? picks.topA?.video.thumbUrl ?? null}
+            missing="No persona yet"
+            disabled={!libraryLoaded || !personas.length}
             onChoose={() => setPicker({ kind: 'persona' })}
-            onUse={onUsePersona}
-            onClear={onClearPersona}
-            onSelectSlot={selectFromRail}
-            onClearSlot={clearSlot}
-            onDropVideoId={(slot, id) => { const v = resolveVideo(id); if (v) chooseClip(slot, v); }}
           />
-          <div className="h-2" />
-          {FOLDER_SLOTS.map((id) => {
-            const meta = SLOT_META[id];
-            const p = picks[id];
-            // A Bottom B the Link page doesn't pair with the Bottom A on the
-            // stage is still allowed — it is only said so, since the whole
-            // point of the links is that the two line up.
-            const unlinked = id === 'bottomB' && !!p && !!linkedBottomBs
-              && !linkedBottomBs.some((v) => v.id === p.video.id);
-            return (
-              <SlotCard
-                key={id}
-                meta={meta}
-                pick={p}
-                duration={p ? slotLength(p) : null}
-                error={p ? (errors[p.video.id] ?? null) : null}
-                warn={unlinked ? `Not linked to “${picks.bottomA?.video.name}” — click to pick one that is` : null}
-                selected={selectedSlot === id}
-                onChoose={() => setPicker({ kind: 'clip', slot: id })}
-                onClear={() => clearSlot(id)}
-                onDropVideoId={(vid) => { const v = resolveVideo(vid); if (v) chooseClip(id, v); }}
-              />
-            );
-          })}
-        </Section>
+          <SimpleCard
+            label="Vid"
+            hint="the recording the video is about"
+            name={picks.bottomA?.video.name ?? null}
+            thumbUrl={picks.bottomA?.video.thumbUrl ?? null}
+            missing="No vid yet"
+            disabled={!libraryLoaded}
+            onChoose={() => setPicker({ kind: 'clip', slot: 'bottomA' })}
+          />
 
-        <Section
-          title="Bars"
-          collapsible
-          defaultOpen={false}
-          summary={
-            bars.middle || bars.outer
-              ? [bars.middle && 'middle', bars.outer && 'top & bottom'].filter(Boolean).join(' · ')
-              : 'off'
-          }
-        >
-          <BarControl
-            label="Middle bar"
-            hint="between the top and bottom halves"
-            on={bars.middle}
-            size={bars.middleSize}
-            max={Math.floor(outH / 3)}
-            onToggle={(on) => setBars((b) => ({ ...b, middle: on }))}
-            onSize={(n) => setBars((b) => ({ ...b, middleSize: n }))}
-          />
-          <BarControl
-            label="Top & bottom bars"
-            hint="across the whole frame, every phase"
-            on={bars.outer}
-            size={bars.outerSize}
-            max={Math.floor(outH / 4)}
-            onToggle={(on) => setBars((b) => ({ ...b, outer: on }))}
-            onSize={(n) => setBars((b) => ({ ...b, outerSize: n }))}
-          />
-        </Section>
-
-        <Section title="Sound">
-          <div className="flex items-center gap-2">
-            <span className="w-10 shrink-0 text-[11px] text-zinc-300">Music</span>
-            <select
-              value={music.url ?? ''}
-              onChange={(e) => {
-                const url = e.target.value || null;
-                musicChosenRef.current = true;
-                setMusic((m) => ({ ...m, url, label: tracks.find((t) => t.url === url)?.label ?? '' }));
-              }}
-              title="A song under the whole video, from the audio library"
-              className="min-w-0 flex-1 rounded-md border border-zinc-700 bg-zinc-950 px-2 py-1 text-[11px] text-zinc-200"
-            >
-              <option value="">None</option>
-              {/* A build brought back by its code may name a track that has since
-                  been deleted. It stays selected and says so, rather than
-                  quietly turning into "None" while the record still says music. */}
-              {music.url && !tracks.some((t) => t.url === music.url) && (
-                <option value={music.url}>{music.label || music.url.split('/').pop()} — missing</option>
-              )}
-              {tracks.map((t) => <option key={t.url} value={t.url}>{t.label}</option>)}
-            </select>
+          <div className="mb-3 mt-1 flex items-start gap-1.5 text-[10px] text-zinc-500">
+            {simpleBusy && <SpinnerIcon size={10} className="mt-px shrink-0 animate-spin" />}
+            <p className="min-w-0 flex-1">{simpleStatus}</p>
           </div>
-          {music.url && (
-            <div className="mt-1 flex items-center gap-2 pl-12">
-              <input
-                type="range"
-                min={MIN_MUSIC_LEVEL}
-                max={MAX_MUSIC_LEVEL}
-                step={0.05}
-                value={music.level}
-                onChange={(e) => setMusic((m) => ({ ...m, level: clampMusicLevel(Number(e.target.value)) }))}
-                className="h-1.5 flex-1"
-                style={{ '--fill': `${(music.level / MAX_MUSIC_LEVEL) * 100}%` } as CSSProperties}
-              />
-              <span className="w-12 text-right font-mono text-[10px] text-zinc-400">
-                {Math.round(music.level * 100)}%
-              </span>
-            </div>
-          )}
-          {!tracks.length && (
-            <p className="mt-1 pl-12 text-[9px] text-zinc-600">
-              {tracksError ? `Couldn't list the audio library: ${tracksError}` : 'No tracks in the audio library yet.'}
-            </p>
-          )}
-          <label className="mt-2 flex cursor-pointer items-center gap-2 text-[11px] text-zinc-300">
-            <input
-              type="checkbox"
-              checked={roomTone.on}
-              onChange={(e) => setRoomTone((r) => ({ ...r, on: e.target.checked }))}
-            />
-            <span>Room tone</span>
-            <span className="truncate text-[9px] text-zinc-600">under the whole video</span>
-          </label>
-          {roomTone.on && (
-            <div className="mt-1 flex items-center gap-2 pl-5">
-              <input
-                type="range"
-                min={MIN_ROOM_LEVEL}
-                max={MAX_ROOM_LEVEL}
-                step={0.05}
-                value={roomTone.level}
-                onChange={(e) => setRoomTone((r) => ({ ...r, level: clampRoomLevel(Number(e.target.value)) }))}
-                className="h-1.5 flex-1"
-                style={{ '--fill': `${(roomTone.level / MAX_ROOM_LEVEL) * 100}%` } as CSSProperties}
-              />
-              <span className="w-12 text-right font-mono text-[10px] text-zinc-400">
-                {Math.round(roomTone.level * 100)}%
-              </span>
-            </div>
-          )}
-          <div className="mt-2 flex items-center gap-2">
-            <span className="w-10 shrink-0 text-[11px] text-zinc-300">Clips</span>
-            <input
-              type="range"
-              min={MIN_CLIP_LEVEL}
-              max={MAX_CLIP_LEVEL}
-              step={0.05}
-              value={clipLevel}
-              onChange={(e) => setClipLevel(clampClipLevel(Number(e.target.value)))}
-              className="h-1.5 flex-1"
-              style={{ '--fill': `${(clipLevel / MAX_CLIP_LEVEL) * 100}%` } as CSSProperties}
-            />
-            <span className="w-12 text-right font-mono text-[10px] text-zinc-400">
-              {Math.round(clipLevel * 100)}%
-            </span>
-          </div>
-          {soundError && (
-            <p className="mt-2 text-[9px] text-red-400">Sound didn&rsquo;t load: {soundError}</p>
-          )}
-        </Section>
+          {captionError && <p className="mb-2 text-[10px] text-red-400">{captionError}</p>}
 
-        <Section title="Timeline">
-          {plan.items.length === 0 ? (
-            <p className="text-[10px] text-zinc-600">Fill a slot to see the sequence.</p>
-          ) : (
-            <>
-              <div className="space-y-1">
-                {rows.map((row) => (
-                  <div key={row.region} className="flex items-center gap-1.5">
-                    <span className="w-10 text-[9px] text-zinc-600">{row.label}</span>
-                    <div
-                      className="relative h-4 flex-1 cursor-col-resize touch-none overflow-hidden rounded bg-zinc-900"
-                      title="Sweep to look — click or drag to scrub there"
-                      onPointerDown={(e) => onTimelinePointerDown(e, row.region)}
-                      onPointerMove={onTimelinePointerMove}
-                      onPointerUp={onTimelinePointerUp}
-                      onPointerCancel={onTimelinePointerUp}
-                      onPointerLeave={() => setHoverTime(null)}
-                    >
-                      {plan.items.filter((i) => i.region === row.region).map((i) => (
-                        <div
-                          key={i.slot}
-                          title={`${describe(i)} — right-click to trim`}
-                          onContextMenu={(e) => { e.preventDefault(); e.stopPropagation(); openTrim(i.slot, e.clientX, e.clientY); }}
-                          className={`absolute inset-y-0 flex items-center overflow-hidden px-1 text-[9px] text-black/80 ${SLOT_COLOR[i.slot]}`}
-                          style={{ left: `${(i.start / total) * 100}%`, width: `${((i.end - i.start) / total) * 100}%` }}
-                        >
-                          <span className="truncate">{SLOT_META[i.slot].label}</span>
-                        </div>
-                      ))}
-                      <div className="pointer-events-none absolute inset-y-0 w-px bg-white" style={{ left: `${(Math.min(time, total) / total) * 100}%` }} />
-                      {/* Where the sweep is looking — dimmer, because the playhead has not moved. */}
-                      {hoverTime !== null && !playing && (
-                        <div
-                          className="pointer-events-none absolute inset-y-0 w-px bg-white/40"
-                          style={{ left: `${(Math.min(hoverTime, total) / total) * 100}%` }}
-                        />
-                      )}
-                    </div>
-                  </div>
-                ))}
-              </div>
-              <ul className="mt-2 space-y-0.5 font-mono text-[10px] text-zinc-500">
-                {plan.items.map((i) => <li key={i.slot}>{describe(i)}</li>)}
-              </ul>
-            </>
-          )}
-        </Section>
+          {exportPanel}
+        </aside>
+      )}
 
-        <Section title="Output">
-          <select
-            value={presetId}
-            onChange={(e) => setPresetId(e.target.value as PresetId)}
-            className="w-full rounded-md border border-zinc-700 bg-zinc-950 px-2 py-1.5 text-[11px] text-zinc-200"
+      {/* Advanced: the rack and the settings in one rail, the words and the
+          finish line in the other. */}
+      {!simple && (
+        <>
+        <aside className="w-[300px] shrink-0 overflow-y-auto border-l border-zinc-800">
+          <Section title="Build">
+            <PersonaRack
+              personas={personas}
+              appliedPersonaId={appliedPersonaId}
+              picks={picks}
+              durations={durations}
+              errors={errors}
+              selectedSlot={selectedSlot}
+              onChoose={() => setPicker({ kind: 'persona' })}
+              onUse={onUsePersona}
+              onClear={onClearPersona}
+              onSelectSlot={selectFromRail}
+              onClearSlot={clearSlot}
+              onDropVideoId={(slot, id) => { const v = resolveVideo(id); if (v) chooseClip(slot, v); }}
+            />
+            <div className="h-2" />
+            {FOLDER_SLOTS.map((id) => {
+              const meta = SLOT_META[id];
+              const p = picks[id];
+              // A Bottom B the Link page doesn't pair with the Bottom A on the
+              // stage is still allowed — it is only said so, since the whole
+              // point of the links is that the two line up.
+              const unlinked = id === 'bottomB' && !!p && !!linkedBottomBs
+                && !linkedBottomBs.some((v) => v.id === p.video.id);
+              return (
+                <SlotCard
+                  key={id}
+                  meta={meta}
+                  pick={p}
+                  duration={p ? slotLength(p) : null}
+                  error={p ? (errors[p.video.id] ?? null) : null}
+                  warn={unlinked ? `Not linked to “${picks.bottomA?.video.name}” — click to pick one that is` : null}
+                  selected={selectedSlot === id}
+                  onChoose={() => setPicker({ kind: 'clip', slot: id })}
+                  onClear={() => clearSlot(id)}
+                  onDropVideoId={(vid) => { const v = resolveVideo(vid); if (v) chooseClip(id, v); }}
+                />
+              );
+            })}
+          </Section>
+
+          <Section
+            title="Bars"
+            collapsible
+            defaultOpen={false}
+            summary={
+              bars.middle || bars.outer
+                ? [bars.middle && 'middle', bars.outer && 'top & bottom'].filter(Boolean).join(' · ')
+                : 'off'
+            }
           >
-            {OUTPUT_PRESETS.map((p) => <option key={p.id} value={p.id}>{p.label}</option>)}
-          </select>
-        </Section>
-      </aside>
+            <BarControl
+              label="Middle bar"
+              hint="between the top and bottom halves"
+              on={bars.middle}
+              size={bars.middleSize}
+              max={Math.floor(outH / 3)}
+              onToggle={(on) => setBars((b) => ({ ...b, middle: on }))}
+              onSize={(n) => setBars((b) => ({ ...b, middleSize: n }))}
+            />
+            <BarControl
+              label="Top & bottom bars"
+              hint="across the whole frame, every phase"
+              on={bars.outer}
+              size={bars.outerSize}
+              max={Math.floor(outH / 4)}
+              onToggle={(on) => setBars((b) => ({ ...b, outer: on }))}
+              onSize={(n) => setBars((b) => ({ ...b, outerSize: n }))}
+            />
+          </Section>
 
-      <VidsCaptionsRail
-        exportPanel={exportPanel}
-        canCaption={canCaption}
-        lines={lines}
-        setLines={setLines}
-        laid={caption}
-        windows={windows}
-        hasLines={hasLines}
-        writing={writing}
-        error={captionError}
-        onWrite={() => void writeLines()}
-        onClear={() => { setLines(EMPTY_LINES); setCaptionError(null); }}
-        notes={notes}
-        setNotes={setNotes}
-        emojis={emojis}
-        setEmojis={setEmojis}
-        styleId={styleId}
-        setStyleId={setStyleId}
-        onResetPos={(ref) => setLinePos(ref, undefined)}
-      />
+          <Section title="Sound">
+            <div className="flex items-center gap-2">
+              <span className="w-10 shrink-0 text-[11px] text-zinc-300">Music</span>
+              <select
+                value={music.url ?? ''}
+                onChange={(e) => {
+                  const url = e.target.value || null;
+                  musicChosenRef.current = true;
+                  setMusic((m) => ({ ...m, url, label: tracks.find((t) => t.url === url)?.label ?? '' }));
+                }}
+                title="A song under the whole video, from the audio library"
+                className="min-w-0 flex-1 rounded-md border border-zinc-700 bg-zinc-950 px-2 py-1 text-[11px] text-zinc-200"
+              >
+                <option value="">None</option>
+                {/* A build brought back by its code may name a track that has since
+                    been deleted. It stays selected and says so, rather than
+                    quietly turning into "None" while the record still says music. */}
+                {music.url && !tracks.some((t) => t.url === music.url) && (
+                  <option value={music.url}>{music.label || music.url.split('/').pop()} — missing</option>
+                )}
+                {tracks.map((t) => <option key={t.url} value={t.url}>{t.label}</option>)}
+              </select>
+            </div>
+            {music.url && (
+              <div className="mt-1 flex items-center gap-2 pl-12">
+                <input
+                  type="range"
+                  min={MIN_MUSIC_LEVEL}
+                  max={MAX_MUSIC_LEVEL}
+                  step={0.05}
+                  value={music.level}
+                  onChange={(e) => setMusic((m) => ({ ...m, level: clampMusicLevel(Number(e.target.value)) }))}
+                  className="h-1.5 flex-1"
+                  style={{ '--fill': `${(music.level / MAX_MUSIC_LEVEL) * 100}%` } as CSSProperties}
+                />
+                <span className="w-12 text-right font-mono text-[10px] text-zinc-400">
+                  {Math.round(music.level * 100)}%
+                </span>
+              </div>
+            )}
+            {!tracks.length && (
+              <p className="mt-1 pl-12 text-[9px] text-zinc-600">
+                {tracksError ? `Couldn't list the audio library: ${tracksError}` : 'No tracks in the audio library yet.'}
+              </p>
+            )}
+            <label className="mt-2 flex cursor-pointer items-center gap-2 text-[11px] text-zinc-300">
+              <input
+                type="checkbox"
+                checked={roomTone.on}
+                onChange={(e) => setRoomTone((r) => ({ ...r, on: e.target.checked }))}
+              />
+              <span>Room tone</span>
+              <span className="truncate text-[9px] text-zinc-600">under the whole video</span>
+            </label>
+            {roomTone.on && (
+              <div className="mt-1 flex items-center gap-2 pl-5">
+                <input
+                  type="range"
+                  min={MIN_ROOM_LEVEL}
+                  max={MAX_ROOM_LEVEL}
+                  step={0.05}
+                  value={roomTone.level}
+                  onChange={(e) => setRoomTone((r) => ({ ...r, level: clampRoomLevel(Number(e.target.value)) }))}
+                  className="h-1.5 flex-1"
+                  style={{ '--fill': `${(roomTone.level / MAX_ROOM_LEVEL) * 100}%` } as CSSProperties}
+                />
+                <span className="w-12 text-right font-mono text-[10px] text-zinc-400">
+                  {Math.round(roomTone.level * 100)}%
+                </span>
+              </div>
+            )}
+            <div className="mt-2 flex items-center gap-2">
+              <span className="w-10 shrink-0 text-[11px] text-zinc-300">Clips</span>
+              <input
+                type="range"
+                min={MIN_CLIP_LEVEL}
+                max={MAX_CLIP_LEVEL}
+                step={0.05}
+                value={clipLevel}
+                onChange={(e) => setClipLevel(clampClipLevel(Number(e.target.value)))}
+                className="h-1.5 flex-1"
+                style={{ '--fill': `${(clipLevel / MAX_CLIP_LEVEL) * 100}%` } as CSSProperties}
+              />
+              <span className="w-12 text-right font-mono text-[10px] text-zinc-400">
+                {Math.round(clipLevel * 100)}%
+              </span>
+            </div>
+            {soundError && (
+              <p className="mt-2 text-[9px] text-red-400">Sound didn&rsquo;t load: {soundError}</p>
+            )}
+          </Section>
+
+          <Section title="Timeline">
+            {plan.items.length === 0 ? (
+              <p className="text-[10px] text-zinc-600">Fill a slot to see the sequence.</p>
+            ) : (
+              <>
+                <div className="space-y-1">
+                  {rows.map((row) => (
+                    <div key={row.region} className="flex items-center gap-1.5">
+                      <span className="w-10 text-[9px] text-zinc-600">{row.label}</span>
+                      <div
+                        className="relative h-4 flex-1 cursor-col-resize touch-none overflow-hidden rounded bg-zinc-900"
+                        title="Sweep to look — click or drag to scrub there"
+                        onPointerDown={(e) => onTimelinePointerDown(e, row.region)}
+                        onPointerMove={onTimelinePointerMove}
+                        onPointerUp={onTimelinePointerUp}
+                        onPointerCancel={onTimelinePointerUp}
+                        onPointerLeave={() => setHoverTime(null)}
+                      >
+                        {plan.items.filter((i) => i.region === row.region).map((i) => (
+                          <div
+                            key={i.slot}
+                            title={`${describe(i)} — right-click to trim`}
+                            onContextMenu={(e) => { e.preventDefault(); e.stopPropagation(); openTrim(i.slot, e.clientX, e.clientY); }}
+                            className={`absolute inset-y-0 flex items-center overflow-hidden px-1 text-[9px] text-black/80 ${SLOT_COLOR[i.slot]}`}
+                            style={{ left: `${(i.start / total) * 100}%`, width: `${((i.end - i.start) / total) * 100}%` }}
+                          >
+                            <span className="truncate">{SLOT_META[i.slot].label}</span>
+                          </div>
+                        ))}
+                        <div className="pointer-events-none absolute inset-y-0 w-px bg-white" style={{ left: `${(Math.min(time, total) / total) * 100}%` }} />
+                        {/* Where the sweep is looking — dimmer, because the playhead has not moved. */}
+                        {hoverTime !== null && !playing && (
+                          <div
+                            className="pointer-events-none absolute inset-y-0 w-px bg-white/40"
+                            style={{ left: `${(Math.min(hoverTime, total) / total) * 100}%` }}
+                          />
+                        )}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+                <ul className="mt-2 space-y-0.5 font-mono text-[10px] text-zinc-500">
+                  {plan.items.map((i) => <li key={i.slot}>{describe(i)}</li>)}
+                </ul>
+              </>
+            )}
+          </Section>
+
+          <Section title="Output">
+            <select
+              value={presetId}
+              onChange={(e) => setPresetId(e.target.value as PresetId)}
+              className="w-full rounded-md border border-zinc-700 bg-zinc-950 px-2 py-1.5 text-[11px] text-zinc-200"
+            >
+              {OUTPUT_PRESETS.map((p) => <option key={p.id} value={p.id}>{p.label}</option>)}
+            </select>
+          </Section>
+        </aside>
+
+        <VidsCaptionsRail
+          exportPanel={exportPanel}
+          canCaption={canCaption}
+          lines={lines}
+          setLines={setLines}
+          laid={caption}
+          windows={windows}
+          hasLines={hasLines}
+          writing={writing}
+          error={captionError}
+          onWrite={() => void writeLines()}
+          onClear={() => { setLines(EMPTY_LINES); setCaptionError(null); }}
+          notes={notes}
+          setNotes={setNotes}
+          emojis={emojis}
+          setEmojis={setEmojis}
+          styleId={styleId}
+          setStyleId={setStyleId}
+          onResetPos={(ref) => setLinePos(ref, undefined)}
+        />
+        </>
+      )}
 
       {picker?.kind === 'persona' && (
         <VidsPersonaPicker
           personas={personas}
           resolveVideo={resolveVideo}
           currentId={appliedPersonaId}
-          onChoose={onUsePersona}
+          onChoose={simple ? chooseSimplePersona : onUsePersona}
           onClose={() => setPicker(null)}
         />
       )}
@@ -2568,14 +2781,16 @@ export function VidsBuilder({
             : undefined;
         return (
           <VidsClipPicker
-            title={meta.label}
+            // Simple never says "Bottom A": there is one vid to choose and
+            // that is what it is called there.
+            title={simple ? 'a vid' : meta.label}
             folder={meta.folder}
             clips={narrowed ?? clipsForSlot(slot)}
             subtitle={subtitle}
             linkedIds={slot === 'bottomB' && linkedBottomBs ? new Set(linkedBottomBs.map((v) => v.id)) : undefined}
             onShowAll={narrowed ? () => setPicker({ kind: 'clip', slot, all: true }) : undefined}
             currentId={picks[slot]?.video.id ?? null}
-            onChoose={(v) => chooseClip(slot, v)}
+            onChoose={(v) => (simple ? chooseSimpleVid(v) : chooseClip(slot, v))}
             onClose={() => setPicker(null)}
           />
         );

@@ -16,6 +16,13 @@
 //                 sound in one, the captions and how they look in the other.
 //                 Everything is picked from the rack in the first rail, so the
 //                 page is stage plus controls with no library pane in the way.
+//                 That is Advanced. Simple, the other half of the switch top
+//                 right, is the same builder with two questions on it — which
+//                 persona, which vid — and everything else left to fill itself
+//                 in: the second bottom clip off the Link page, End, a song,
+//                 the bars, the captions. Play, download, push to Phonedeck,
+//                 nothing to adjust. Switching to Advanced opens that very
+//                 build with every control on it.
 //
 // Both pages share one library hook, and an edit keeps its clip's id, so the
 // build always uses the current footage — edit Top A and the persona that uses
@@ -53,15 +60,56 @@ const PAGES: { id: Page; label: string }[] = [
   { id: 'prep',  label: 'Edit & file' },
 ];
 
+/** How much of the builder is on show, switched top right of the Build page.
+ *  Simple is a persona, a vid and the finished video — everything else about
+ *  the build fills itself in out of sight. Advanced is the whole workbench.
+ *
+ *  It is remembered between visits, since it is how you like to work rather
+ *  than anything about the build in hand, and switching keeps what is on the
+ *  stage either way: a Simple build that wants one adjustment is one click
+ *  from every control there is. */
+type BuildMode = 'simple' | 'advanced';
+const BUILD_MODES: { id: BuildMode; label: string; hint: string }[] = [
+  {
+    id: 'simple',
+    label: 'Simple',
+    hint: 'Choose a persona and a vid — the second bottom clip, End, the sound, the bars and the captions all fill themselves in. Play it, then download it or push it to Phonedeck.',
+  },
+  {
+    id: 'advanced',
+    label: 'Advanced',
+    hint: 'The whole builder: every slot, both rails, the captions, and a stage you can drag, zoom and trim clips on.',
+  },
+];
+const BUILD_MODE_KEY = 'pauv.vids.buildMode';
+
 export function VidsSection({ active }: { active: boolean }) {
   const lib = useVidsLibrary(active);
   const { loaded, loading, folders, videos, personas, links, ensureFolders, refreshWhenIdle } = lib;
   const [page, setPage] = useState<Page>('build');
+  // Advanced until this browser says otherwise — read after the first render
+  // rather than in the initial state, which the server has no way to know.
+  const [buildMode, setBuildMode] = useState<BuildMode>('advanced');
   const [picks, setPicks] = useState<Picks>({});
   const [selectedSlot, setSelectedSlot] = useState<SlotId | null>(null);
   const [hint, setHint] = useState<string | null>(null);
   const hintTimer = useRef<number | null>(null);
   const ensuredRef = useRef(false);
+
+  // Read after mount on purpose: the server render and the first client paint
+  // have to agree, and only the client has a localStorage to read.
+  useEffect(() => {
+    try {
+      const saved = window.localStorage.getItem(BUILD_MODE_KEY);
+      // eslint-disable-next-line react-hooks/set-state-in-effect -- see above
+      if (saved === 'simple' || saved === 'advanced') setBuildMode(saved);
+    } catch { /* a browser that won't remember anything: Advanced, then */ }
+  }, []);
+
+  const chooseBuildMode = useCallback((mode: BuildMode) => {
+    setBuildMode(mode);
+    try { window.localStorage.setItem(BUILD_MODE_KEY, mode); } catch { /* not remembered */ }
+  }, []);
 
   // The four library folders always exist at the top level.
   useEffect(() => {
@@ -193,6 +241,24 @@ export function VidsSection({ active }: { active: boolean }) {
         {hint && (
           <p className="rounded-md border border-amber-800 bg-amber-950/40 px-3 py-1.5 text-[11px] text-amber-300">{hint}</p>
         )}
+        {/* How much of the builder to show. The Build page's own switch, so it
+            is only up while that page is. */}
+        {page === 'build' && (
+          <div className="flex overflow-hidden rounded-md border border-zinc-700">
+            {BUILD_MODES.map((m) => (
+              <button
+                key={m.id}
+                onClick={() => chooseBuildMode(m.id)}
+                title={m.hint}
+                className={`px-3 py-1.5 text-[11px] font-medium transition-colors ${
+                  buildMode === m.id ? 'bg-zinc-200 text-black' : 'text-zinc-400 hover:bg-zinc-900 hover:text-white'
+                }`}
+              >
+                {m.label}
+              </button>
+            ))}
+          </div>
+        )}
       </div>
 
       {/* Both pages stay mounted — switching back must not lose an open edit or
@@ -213,6 +279,7 @@ export function VidsSection({ active }: { active: boolean }) {
           onClearPersona={clearPersona}
           active={active && page === 'build'}
           libraryLoaded={loaded}
+          simple={buildMode === 'simple'}
         />
       </div>
       <div className="flex min-h-0 flex-1" style={{ display: page === 'prep' ? undefined : 'none' }}>

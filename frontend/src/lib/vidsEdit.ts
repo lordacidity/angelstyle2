@@ -72,10 +72,14 @@ export const MIN_PIECE = 0.05;
 
 const clamp = (v: number, lo: number, hi: number) => Math.min(hi, Math.max(lo, v));
 
-export function isEdited(e: ClipEdit, duration: number): boolean {
+/** Whether this edit would change the footage. `baseSpeed` is the rate the
+ *  comparison is against: 1x by default — what the source is — but the editor
+ *  also asks the question against the speed a clip opened at, to know whether
+ *  anything has been touched since. */
+export function isEdited(e: ClipEdit, duration: number, baseSpeed = DEFAULT_SPEED): boolean {
   const r = trimmedRange(e.trim, duration);
   return r.start > 0.001 || r.end < duration - 0.001 || e.cuts.length > 0
-    || e.sfx.length > 0 || Math.abs(e.speed - DEFAULT_SPEED) > 1e-6;
+    || e.sfx.length > 0 || Math.abs(e.speed - baseSpeed) > 1e-6;
 }
 
 /** Clamp ranges into the trim, drop slivers, sort, and merge anything touching.

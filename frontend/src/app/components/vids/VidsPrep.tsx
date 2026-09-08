@@ -47,8 +47,8 @@ import type { PersonaPart, VidContext, VidFolder, VidMark, VidPersona, VidRow } 
 import { PERSONA_PARTS, PERSONA_PART_LABEL, isPhoto } from '@/lib/vids-types';
 import { MEDIA_ONLY, isMediaFile, isVideoFile, type VidsLib } from '../../hooks/useVidsLibrary';
 import {
-  LIBRARY_FOLDERS, PERSONA_FOLDER, SLOT_META, VID_DRAG_MIME, folderGroupIds, isPersonaFolderName,
-  slotForFolderName,
+  LIBRARY_FOLDERS, PERSONA_FOLDER, SLOT_META, VID_DRAG_MIME, folderGroupIds, intakeSpeed,
+  isPersonaFolderName, slotForFolderName,
 } from '@/lib/vidsPlan';
 import { VidsClipEditor, type ContextOwner } from './VidsClipEditor';
 import { VidsContextDialog, type VidsContextSave } from './VidsContext';
@@ -1151,6 +1151,14 @@ export function VidsPrep({ lib, active }: { lib: VidsLib; active: boolean }) {
                 mode={run?.mode !== 'persona'
                   ? 'full'
                   : PERSONA_PARTS[run.index] === 'topAId' ? 'cut' : 'trim'}
+                // A Bottom A or Bottom B being walked in opens at 1.25x — the
+                // nudge every screen recording wants, given once, on the one
+                // pass where the footage is still being made. The save bakes it
+                // in, so opening that clip again later starts at 1x and a
+                // re-edit doesn't speed up what is already sped up. A clip
+                // opened on its own (not through the pipeline) has no run, so it
+                // opens as shot too.
+                startSpeed={run ? intakeSpeed(slotForFolderName(run.folderName)) : undefined}
                 saveLabel={run
                   ? (run.index >= run.files.length - 1 ? 'Save · finish' : 'Save · next clip')
                   : undefined}

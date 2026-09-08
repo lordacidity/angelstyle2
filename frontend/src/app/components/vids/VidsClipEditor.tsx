@@ -44,7 +44,7 @@ import {
   autoCuts, clampSfxGain, isEdited, keptAt, keptLength, keptSegments, nextKept, normaliseRanges,
   renderEditedClip, segmentAt, sfxSpans, type ClipEdit, type Cut, type Segment,
 } from '@/lib/vidsEdit';
-import { MAX_SPEED, MIN_SPEED, SPEED_PRESETS, clampSpeed, trimmedRange } from '@/lib/vidsPlan';
+import { DEFAULT_SPEED, MAX_SPEED, MIN_SPEED, SPEED_PRESETS, clampSpeed, trimmedRange } from '@/lib/vidsPlan';
 import { decodeAudio, SFX_URL } from '@/lib/vidsAudio';
 import { safeExportName } from '@/lib/canvasVideoExport';
 import { CONTEXT_PLACEHOLDER } from './VidsContext';
@@ -352,6 +352,14 @@ interface Props {
    *  'full'  the lot (default).
    */
   mode?: 'full' | 'cut' | 'trim';
+  /** The rate the clip opens at, 1x unless something outside says otherwise:
+   *  the intake opens a bottom clip at INTAKE_SPEED, since a screen recording
+   *  always wants that nudge and this is the one pass where it can be given.
+   *  The save bakes it into the footage, so this is only ever the *opening*
+   *  rate — what Start over goes back to, and what counts as untouched. A clip
+   *  opened again later comes in at 1x like everything else, which is what
+   *  stops a re-edit speeding up what is already sped up. */
+  startSpeed?: number;
   /** What Save says, when something outside is driving the run. */
   saveLabel?: string;
   /** What the progress bar says while the save goes up — the intake run's
@@ -361,7 +369,7 @@ interface Props {
 
 export function VidsClipEditor({
   video, onSave, active, onClose, contextOwner, onContextChange, onMarksChange,
-  mode = 'full', saveLabel, savingLabel,
+  mode = 'full', startSpeed = DEFAULT_SPEED, saveLabel, savingLabel,
 }: Props) {
   const trimOnly = mode === 'trim';
   /** Cut and Auto cut are on. */
@@ -372,6 +380,17 @@ export function VidsClipEditor({
   const trackRef = useRef<HTMLDivElement>(null);
 
   const [edit, setEdit] = useState<ClipEdit>({ ...DEFAULT_EDIT, cuts: [], sfx: [] });
+  // The rate this clip opened at, or the one the last save left it at. Every
+  // question of the form "has anything been touched since?" is asked against
+  // it rather than against 1x, so a bottom clip that opens at INTAKE_SPEED
+  // reads as untouched until you actually change something — and Start over
+  // puts it back there. A save bakes the speed in, so the baseline after one
+  // is 1x again.
+  const [baseSpeed, setBaseSpeed] = useState(DEFAULT_SPEED);
+  // Read in the open effect below, which runs off the clip's id alone — the
+  // ref is what makes sure it is this render's value and not an older one.
+  const startSpeedRef = useRef(startSpeed);
+  startSpeedRef.current = startSpeed;
   const [duration, setDuration] = useState(0);
   const [playhead, setPlayhead] = useState(0);
   const [playing, setPlaying] = useState(false);
@@ -503,7 +522,9 @@ export function VidsClipEditor({
     undoRef.current = [];
     lastPushRef.current = null;
     skipRecordRef.current = true;
-    setEdit({ ...DEFAULT_EDIT, cuts: [], sfx: [], muted: !startHasSfx });
+    const opensAt = clampSpeed(startSpeedRef.current);
+    setEdit({ ...DEFAULT_EDIT, cuts: [], sfx: [], muted: !startHasSfx, speed: opensAt });
+    setBaseSpeed(opensAt);
     setMarksAtOpen(video?.marks ?? []);
     setDuration(startDuration);
     setPlayhead(0);
@@ -746,18 +767,21 @@ export function VidsClipEditor({
 
   /** Everything since the clip opened or was last saved, put back in one go —
    *  the trim, cuts, keys, speed and marks. One Ctrl+Z brings it all back. */
-  const dirty = !untouched || !sameMarks(marks, marksAtOpen);
+  // Against the speed it opened at, not against 1x: a clip the intake opened
+  // at INTAKE_SPEED has had nothing done to it yet.
+  const dirty = isEdited(edit, duration, baseSpeed) || edit.muted !== !startHasSfx
+    || !sameMarks(marks, marksAtOpen);
   const startOver = useCallback(() => {
     pushUndo({ edit, marks });
     lastPushRef.current = null;
     skipRecordRef.current = true;
-    setEdit({ ...DEFAULT_EDIT, cuts: [], sfx: [], muted: !startHasSfx });
+    setEdit({ ...DEFAULT_EDIT, cuts: [], sfx: [], muted: !startHasSfx, speed: baseSpeed });
     if (!sameMarks(marks, marksAtOpen)) onMarksChange(marksAtOpen);
     setSelection(null);
     setMarkDraft(null);
     stopKeys();
     setNote(null);
-  }, [edit, marks, marksAtOpen, onMarksChange, pushUndo, startHasSfx, stopKeys]);
+  }, [baseSpeed, edit, marks, marksAtOpen, onMarksChange, pushUndo, startHasSfx, stopKeys]);
 
   const markSelection = useCallback(() => {
     if (!selection || selection.end - selection.start < MIN_PIECE) return;
@@ -963,6 +987,8 @@ export function VidsClipEditor({
         lastPushRef.current = null;
         skipRecordRef.current = true;
         setEdit({ ...DEFAULT_EDIT, cuts: [], sfx: [], muted: !hadKeys });
+        // The speed went into the file — from here it is footage, not an edit.
+        setBaseSpeed(DEFAULT_SPEED);
         setMarksAtOpen(carried);
         setSelection(null);
         setPlayhead(0);

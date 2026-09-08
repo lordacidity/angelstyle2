@@ -183,6 +183,24 @@ export const isDefaultSpeed = (v: number) => Math.abs(v - DEFAULT_SPEED) < 1e-6;
 export const clampSpeed = (v: number) =>
   Number.isFinite(v) ? clamp(v, MIN_SPEED, MAX_SPEED) : DEFAULT_SPEED;
 
+/** What a bottom clip opens at the first time it is edited — on its way in
+ *  through the upload pipeline, before it has ever been saved. Screen
+ *  recordings run slow to watch back, and every one of them wants the same
+ *  nudge, so the intake starts them there rather than leaving it to be
+ *  remembered clip by clip.
+ *
+ *  It is baked into the footage the save writes, so opening that clip again
+ *  later starts at 1x: the speed-up happens once, not every time it is
+ *  edited. */
+export const INTAKE_SPEED = 1.25;
+/** The slots that get it — the two screen recordings. Start, Top A and Top B
+ *  are a person talking and play as shot; End is the pay-off and does too. */
+export const INTAKE_SPEED_SLOTS: readonly SlotId[] = ['bottomA', 'bottomB'];
+/** The speed a clip on its way into `slot` opens at. Anything else — a
+ *  persona part, an End, footage going to the Inbox — opens as shot. */
+export const intakeSpeed = (slot: SlotId | null): number =>
+  (slot && INTAKE_SPEED_SLOTS.includes(slot) ? INTAKE_SPEED : DEFAULT_SPEED);
+
 // The kept range of a clip, clamped to what the clip actually has.
 export function trimmedRange(trim: Trim, full: number): { start: number; end: number } {
   const start = clamp(trim.start, 0, full);
