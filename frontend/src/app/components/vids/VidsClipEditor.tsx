@@ -16,6 +16,11 @@
 //            the preview runs through — or G to say what is happening in it.
 //            A G mark is what the caption writer times against: the line it
 //            writes for a mark lands over exactly that stretch of the build.
+//            A legend under the picture spells the keys out in bold, so which
+//            does what is read rather than remembered. Beside Play, a button
+//            runs the clip again from its first kept frame. Ctrl+Z puts back
+//            the last change; Start over, at the top of the right column, puts
+//            back every change since the clip opened or was last saved.
 //   Right    speed, the in / out points, the list of cuts, the stretches
 //            carrying keys, the context this footage carries, and Save. The
 //            clip's own audio is never an option: Vids are silent apart from
@@ -121,6 +126,68 @@ function PlayIcon({ playing }: { playing: boolean }) {
         ? <><rect x="6" y="5" width="4" height="14" rx="1" /><rect x="14" y="5" width="4" height="14" rx="1" /></>
         : <path d="M8 5.5v13l11-6.5z" />}
     </svg>
+  );
+}
+
+/** A bar and a play triangle: from the top. */
+function RestartIcon() {
+  return (
+    <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor" aria-hidden>
+      <rect x="4.5" y="5" width="2.5" height="14" rx="1" />
+      <path d="M10 5.5v13l10-6.5z" />
+    </svg>
+  );
+}
+
+/** An arrow back round on itself: every change, put back. */
+function StartOverIcon() {
+  return (
+    <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+      <path d="M3 12a9 9 0 1 0 3-6.7" />
+      <polyline points="3 3 3 9 9 9" />
+    </svg>
+  );
+}
+
+// The key legend under the picture: the key in bold, in the colour of what it
+// does on the track (emerald in / out, rose cuts, amber keys, violet marks),
+// then the word.
+const KEY_TONE = {
+  emerald: 'border-emerald-700 text-emerald-300',
+  rose: 'border-rose-700 text-rose-300',
+  amber: 'border-amber-700 text-amber-300',
+  violet: 'border-violet-700 text-violet-300',
+  zinc: 'border-zinc-600 text-zinc-200',
+} as const;
+
+// ── Undo ──
+/** How many changes Ctrl+Z can walk back through. */
+const UNDO_DEPTH = 100;
+/** A handle or slider still moving this soon after its last move is the same
+ *  change, and one step to undo. */
+const UNDO_MERGE_MS = 700;
+type Snapshot = { edit: ClipEdit; marks: VidMark[] };
+
+/** Which part of the edit a change touched, for folding a drag into one undo
+ *  step: a moving handle or slider changes just its own field, over and over. */
+function changedField(a: ClipEdit, b: ClipEdit): 'trim' | 'speed' | 'sfxGain' | 'other' {
+  const keys = (Object.keys(b) as (keyof ClipEdit)[]).filter((k) => a[k] !== b[k]);
+  if (keys.length !== 1) return 'other';
+  const k = keys[0];
+  return k === 'trim' || k === 'speed' || k === 'sfxGain' ? k : 'other';
+}
+
+function sameMarks(a: VidMark[], b: VidMark[]): boolean {
+  return a.length === b.length
+    && a.every((m, i) => m.start === b[i].start && m.end === b[i].end && m.text === b[i].text);
+}
+
+function KeyHint({ k, tone, children }: { k: string; tone: keyof typeof KEY_TONE; children: React.ReactNode }) {
+  return (
+    <span className="flex items-center gap-1.5">
+      <kbd className={`rounded border bg-zinc-950 px-1.5 py-0.5 font-mono text-[12px] font-bold leading-none ${KEY_TONE[tone]}`}>{k}</kbd>
+      <span className="text-[11px] text-zinc-300">{children}</span>
+    </span>
   );
 }
 
@@ -253,7 +320,9 @@ function MarkIcon({ size = 13 }: { size?: number }) {
 // ── Editor ────────────────────────────────────────────────────────────────────
 
 interface Props {
-  video: VidRow | null;
+  /** The clip. One an intake run holds locally — not uploaded yet — carries
+   *  the file it plays from, so a render reads the disk. */
+  video: (VidRow & { file?: Blob }) | null;
   /** Save the rendered MP4 over the clip it was rendered from — `videoId`, not
    *  whatever is open by the time it lands, because a save outlives the panel
    *  that started it. `hasSfx` says whether the file came out with the keyboard
@@ -285,11 +354,14 @@ interface Props {
   mode?: 'full' | 'cut' | 'trim';
   /** What Save says, when something outside is driving the run. */
   saveLabel?: string;
+  /** What the progress bar says while the save goes up — the intake run's
+   *  first save of a clip is not over any original. */
+  savingLabel?: string;
 }
 
 export function VidsClipEditor({
   video, onSave, active, onClose, contextOwner, onContextChange, onMarksChange,
-  mode = 'full', saveLabel,
+  mode = 'full', saveLabel, savingLabel,
 }: Props) {
   const trimOnly = mode === 'trim';
   /** Cut and Auto cut are on. */
@@ -311,7 +383,17 @@ export function VidsClipEditor({
   const [busy, setBusy] = useState<{ frac: number; label: string } | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [note, setNote] = useState<string | null>(null);
+  // The marks as the clip opened, or as the last save left them — what Start
+  // over puts back, since marks save themselves as they are made.
+  const [marksAtOpen, setMarksAtOpen] = useState<VidMark[]>([]);
   const abortRef = useRef<{ ctrl: AbortController; kind: 'save' | 'download' } | null>(null);
+  // Ctrl+Z's record (see the Undo section below). A clip opening or a save
+  // empties it: there is nothing before that to go back to.
+  const undoRef = useRef<Snapshot[]>([]);
+  const lastSeenRef = useRef<ClipEdit | null>(null);
+  const lastPushRef = useRef<{ at: number; field: string } | null>(null);
+  /** The next change to the edit is an undo or a fresh baseline, not one to record. */
+  const skipRecordRef = useRef(false);
 
   const range = useMemo(() => trimmedRange(edit.trim, duration), [edit.trim, duration]);
   const segs = useMemo(() => keptSegments(edit, duration), [edit, duration]);
@@ -418,7 +500,11 @@ export function VidsClipEditor({
     // clip it is writing to and is left alone to finish. Cancelling a save is
     // something you do on purpose, with the button on the progress bar.
     if (abortRef.current?.kind === 'download') abortRef.current.ctrl.abort();
+    undoRef.current = [];
+    lastPushRef.current = null;
+    skipRecordRef.current = true;
     setEdit({ ...DEFAULT_EDIT, cuts: [], sfx: [], muted: !startHasSfx });
+    setMarksAtOpen(video?.marks ?? []);
     setDuration(startDuration);
     setPlayhead(0);
     setPlaying(false);
@@ -552,6 +638,18 @@ export function VidsClipEditor({
     void el.play().then(() => setPlaying(true)).catch(() => setPlaying(false));
   }, [playing, pause, segs, range.end, sfx.length, armKeys]);
 
+  /** From the top: the first kept frame, playing — whatever was on screen. A
+   *  clip already running just carries on from there. */
+  const playFromStart = useCallback(() => {
+    const el = videoRef.current;
+    if (!el || !segs.length) return;
+    el.currentTime = segs[0].start;
+    setPlayhead(segs[0].start);
+    if (playing) return;
+    if (sfx.length) void armKeys();
+    void el.play().then(() => setPlaying(true)).catch(() => setPlaying(false));
+  }, [playing, segs, sfx.length, armKeys]);
+
   // ── Edits ──
   const patch = useCallback((p: Partial<ClipEdit>) => {
     setEdit((prev) => ({ ...prev, ...p }));
@@ -595,6 +693,72 @@ export function VidsClipEditor({
   // Enter instead of waiting for a render.
   const marks = useMemo(() => video?.marks ?? [], [video]);
 
+  // ── Undo ──
+  // Ctrl+Z puts back the last change — a cut, a stretch of keys, a mark, a
+  // trim, the speed. Changes to the edit are caught here as they land rather
+  // than at each button, so none is missed, and a drag or a slider counts as
+  // one step instead of a hundred. The marks save themselves, so they are
+  // recorded where they change (changeMarks) instead.
+  const pushUndo = useCallback((snap: Snapshot) => {
+    undoRef.current.push(snap);
+    if (undoRef.current.length > UNDO_DEPTH) undoRef.current.shift();
+  }, []);
+
+  useEffect(() => {
+    const prev = lastSeenRef.current;
+    lastSeenRef.current = edit;
+    if (!prev || prev === edit) return;
+    if (skipRecordRef.current) {
+      skipRecordRef.current = false;
+      lastPushRef.current = null;
+      return;
+    }
+    const field = changedField(prev, edit);
+    const now = performance.now();
+    const last = lastPushRef.current;
+    lastPushRef.current = { at: now, field };
+    // The same handle or slider, still moving: the step already on record is
+    // the one to go back to.
+    if (last && field !== 'other' && last.field === field && now - last.at < UNDO_MERGE_MS) return;
+    pushUndo({ edit: prev, marks });
+  }, [edit, marks, pushUndo]);
+
+  /** Every change to the marks goes through here, so Ctrl+Z has it. */
+  const changeMarks = useCallback((next: VidMark[]) => {
+    pushUndo({ edit, marks });
+    lastPushRef.current = null;
+    onMarksChange(next);
+  }, [edit, marks, onMarksChange, pushUndo]);
+
+  const undo = useCallback(() => {
+    const snap = undoRef.current.pop();
+    if (!snap) return;
+    if (snap.edit !== edit) {
+      skipRecordRef.current = true;
+      setEdit(snap.edit);
+    }
+    if (!sameMarks(snap.marks, marks)) onMarksChange(snap.marks);
+    setSelection(null);
+    setMarkDraft(null);
+    setNote(null);
+    lastPushRef.current = null;
+  }, [edit, marks, onMarksChange]);
+
+  /** Everything since the clip opened or was last saved, put back in one go —
+   *  the trim, cuts, keys, speed and marks. One Ctrl+Z brings it all back. */
+  const dirty = !untouched || !sameMarks(marks, marksAtOpen);
+  const startOver = useCallback(() => {
+    pushUndo({ edit, marks });
+    lastPushRef.current = null;
+    skipRecordRef.current = true;
+    setEdit({ ...DEFAULT_EDIT, cuts: [], sfx: [], muted: !startHasSfx });
+    if (!sameMarks(marks, marksAtOpen)) onMarksChange(marksAtOpen);
+    setSelection(null);
+    setMarkDraft(null);
+    stopKeys();
+    setNote(null);
+  }, [edit, marks, marksAtOpen, onMarksChange, pushUndo, startHasSfx, stopKeys]);
+
   const markSelection = useCallback(() => {
     if (!selection || selection.end - selection.start < MIN_PIECE) return;
     setMarkDraft({ start: selection.start, end: selection.end, text: '' });
@@ -608,13 +772,13 @@ export function VidsClipEditor({
     // Re-marking the same stretch with nothing takes the mark off it.
     const rest = marks.filter((m) => !(Math.abs(m.start - draft.start) < 1e-6 && Math.abs(m.end - draft.end) < 1e-6));
     const next = clean ? [...rest, { start: draft.start, end: draft.end, text: clean }] : rest;
-    onMarksChange(next.sort((a, b) => a.start - b.start));
+    changeMarks(next.sort((a, b) => a.start - b.start));
     setSelection(null);
-  }, [markDraft, marks, onMarksChange]);
+  }, [markDraft, marks, changeMarks]);
 
   const removeMark = useCallback((i: number) => {
-    onMarksChange(marks.filter((_, n) => n !== i));
-  }, [marks, onMarksChange]);
+    changeMarks(marks.filter((_, n) => n !== i));
+  }, [marks, changeMarks]);
 
   const removeSfx = useCallback((i: number) => {
     setEdit((prev) => {
@@ -643,13 +807,6 @@ export function VidsClipEditor({
       return { ...prev, cuts: list.filter((_, n) => n !== i) };
     });
   }, [duration]);
-
-  const resetEdit = useCallback(() => {
-    setEdit({ ...DEFAULT_EDIT, cuts: [], sfx: [], muted: !startHasSfx });
-    setSelection(null);
-    stopKeys();
-    setNote(null);
-  }, [stopKeys, startHasSfx]);
 
   // ── Timeline pointer handling ──
   // One track does everything: drag the end handles to trim, drag across the
@@ -710,6 +867,7 @@ export function VidsClipEditor({
     const onKey = (e: globalThis.KeyboardEvent) => {
       const el = e.target as HTMLElement | null;
       if (el && (el.tagName === 'INPUT' || el.tagName === 'TEXTAREA' || el.isContentEditable)) return;
+      if ((e.ctrlKey || e.metaKey) && (e.key === 'z' || e.key === 'Z')) { e.preventDefault(); undo(); return; }
       if (e.key === ' ') { e.preventDefault(); togglePlay(); }
       else if (e.key === 'i' || e.key === 'I') setIn(shown);
       else if (e.key === 'o' || e.key === 'O') setOut(shown);
@@ -728,7 +886,7 @@ export function VidsClipEditor({
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
   }, [active, video, togglePlay, setIn, setOut, selection, cutSelection, keysSelection, markSelection,
-      seek, playhead, shown, canCut, fullKit]);
+      seek, playhead, shown, canCut, fullKit, undo]);
 
   // ── Save / download ──
   // Rendering takes a while, and a save runs against the row it was rendered
@@ -753,7 +911,13 @@ export function VidsClipEditor({
       setBusy({ frac: 1, label: 'Renaming…' });
       try {
         await onSave(null, rowName, startHasSfx, marks, myId);
-        if (mine()) setNote(`Renamed to “${rowName}”. The footage is untouched.`);
+        if (!mine()) return;
+        // Saved as it stands: the marks as they are now are what Start over
+        // goes back to, and there is nothing before this to undo to.
+        undoRef.current = [];
+        lastPushRef.current = null;
+        setMarksAtOpen(marks);
+        setNote(`Renamed to “${rowName}”. The footage is untouched.`);
       } catch (e) {
         if (mine()) setError(e instanceof Error ? e.message : String(e));
       } finally {
@@ -771,6 +935,7 @@ export function VidsClipEditor({
         // 30 resampled 60 and 24fps footage onto a grid it was never shot on,
         // every single save, and the judder that leaves never comes back out.
         url: video.url,
+        file: video.file,
         edit,
         duration,
         onProgress: (frac, label) => { if (mine()) setBusy({ frac, label }); },
@@ -781,7 +946,7 @@ export function VidsClipEditor({
         downloadBlob(blob, file);
         setNote(`Downloaded "${file}".`);
       } else {
-        if (mine()) setBusy({ frac: 1, label: 'Saving over the original…' });
+        if (mine()) setBusy({ frac: 1, label: savingLabel ?? 'Saving over the original…' });
         // What actually reached the file, not what was marked: a stretch the
         // cuts swallowed leaves no sound behind and no reason to un-mute. Sound
         // carried in from the clip's own track counts too.
@@ -789,10 +954,16 @@ export function VidsClipEditor({
         // The marks describe the footage, and the footage just changed — carry
         // them onto the rendered timeline so they still point at the right
         // moments in the clip that comes back.
-        await onSave(blob, rowName, hadKeys, retimeMarks(marks, segs, speed), myId);
+        const carried = retimeMarks(marks, segs, speed);
+        await onSave(blob, rowName, hadKeys, carried, myId);
         if (!mine()) return;
-        // The edit is in the file now — start clean against the new footage.
+        // The edit is in the file now — start clean against the new footage,
+        // with nothing to undo back past this point.
+        undoRef.current = [];
+        lastPushRef.current = null;
+        skipRecordRef.current = true;
         setEdit({ ...DEFAULT_EDIT, cuts: [], sfx: [], muted: !hadKeys });
+        setMarksAtOpen(carried);
         setSelection(null);
         setPlayhead(0);
         setNote(`Saved. “${rowName}” is the clip now — wherever it was filed, it stays.`);
@@ -818,11 +989,12 @@ export function VidsClipEditor({
   const hoverCut = hover !== null && !segmentAt(segs, hover);
   const hasRange = !!selection && selection.end - selection.start >= MIN_PIECE;
   const removed = Math.max(0, (range.end - range.start) - keptLength(segs));
+  // The keys themselves are spelled out in the legend under the picture.
   const scrubHint = trimOnly
-    ? 'hover the bar to scrub · I sets in · O sets out — trimming is all this clip needs'
+    ? 'hover the bar to scrub — trimming is all this clip needs'
     : fullKit
-      ? 'hover the bar to scrub · drag to select · C cut · Q keys'
-      : 'hover the bar to scrub · drag to select · C cut — Top A loops under the whole bottom, so cut it';
+      ? 'hover the bar to scrub · drag to select a stretch'
+      : 'hover the bar to scrub · drag to select a stretch — Top A loops under the whole bottom, so cut it';
 
   return (
     <div className="flex min-h-0 flex-1">
@@ -833,13 +1005,6 @@ export function VidsClipEditor({
           <span className="shrink-0 text-[10px] text-zinc-500">
             {fmtT(duration)}{video.width && video.height ? ` · ${video.width}×${video.height}` : ''}
           </span>
-          <button
-            onClick={resetEdit}
-            title="Put the trim, cuts, keys and speed back where they started"
-            className="shrink-0 text-[10px] text-zinc-500 hover:text-white"
-          >
-            Reset every change
-          </button>
           <button onClick={onClose} title="Close the editor" className="shrink-0 text-zinc-500 hover:text-white">
             <CloseIcon size={13} />
           </button>
@@ -864,6 +1029,25 @@ export function VidsClipEditor({
           />
         </div>
 
+        {/* The keys, spelled out under the picture — only the ones this mode
+            has. I and O work on the frame on screen; C, Q and G on a stretch
+            selected on the bar. */}
+        <div className="flex shrink-0 flex-wrap items-center justify-center gap-x-4 gap-y-1 border-t border-zinc-800 px-3 py-1.5">
+          <KeyHint k="I" tone="emerald">Set in</KeyHint>
+          <KeyHint k="O" tone="emerald">Set out</KeyHint>
+          {canCut && (
+            <>
+              <span className="h-3 w-px bg-zinc-800" />
+              <span className="text-[10px] text-zinc-500">select a stretch, then</span>
+              <KeyHint k="C" tone="rose">Cut it</KeyHint>
+              {fullKit && <KeyHint k="Q" tone="amber">Keys over it</KeyHint>}
+              {fullKit && <KeyHint k="G" tone="violet">Mark what happens</KeyHint>}
+            </>
+          )}
+          <span className="h-3 w-px bg-zinc-800" />
+          <KeyHint k="Ctrl Z" tone="zinc">Undo</KeyHint>
+        </div>
+
         {/* Transport */}
         <div className="flex shrink-0 items-center gap-2 border-t border-zinc-800 px-3 py-2">
           <button
@@ -872,6 +1056,14 @@ export function VidsClipEditor({
             className="flex h-7 w-7 items-center justify-center rounded-md bg-zinc-200 text-black hover:bg-white"
           >
             <PlayIcon playing={playing} />
+          </button>
+          <button
+            onClick={playFromStart}
+            disabled={!segs.length}
+            title="Play from the start"
+            className="flex h-7 w-7 items-center justify-center rounded-md border border-zinc-700 text-zinc-300 transition-colors hover:border-zinc-500 hover:text-white disabled:opacity-30"
+          >
+            <RestartIcon />
           </button>
           <span className={`font-mono text-[10px] ${hover === null ? 'text-zinc-400' : hoverCut ? 'text-rose-400' : 'text-sky-300'}`}>
             {fmtT(shown)}
@@ -1069,6 +1261,19 @@ export function VidsClipEditor({
 
       {/* Controls */}
       <div className="flex w-[260px] shrink-0 flex-col overflow-y-auto border-l border-zinc-800">
+        {/* Start over — every change since the clip opened or was last saved,
+            put back in one go. Ctrl+Z is the one-at-a-time version. */}
+        <div className="border-b border-zinc-800 px-3 py-2">
+          <button
+            onClick={startOver}
+            disabled={!dirty}
+            title="Put the trim, cuts, keys, marks and speed back to how this clip was when it opened, or when it was last saved. Ctrl+Z puts back one change at a time."
+            className="flex w-full items-center justify-center gap-1.5 rounded border border-zinc-700 px-2 py-1.5 text-[11px] text-zinc-200 transition-colors hover:border-zinc-500 hover:text-white disabled:cursor-default disabled:opacity-30"
+          >
+            <StartOverIcon /> Start over
+          </button>
+        </div>
+
         {fullKit && (
           <Panel
             title="Speed"
@@ -1175,7 +1380,7 @@ export function VidsClipEditor({
         <Panel
           title={`Marks${marks.length ? ` (${marks.length})` : ''}`}
           right={marks.length ? (
-            <button onClick={() => onMarksChange([])} className="text-[9px] text-zinc-500 hover:text-white">Clear</button>
+            <button onClick={() => changeMarks([])} className="text-[9px] text-zinc-500 hover:text-white">Clear</button>
           ) : undefined}
         >
           {marks.length === 0 ? (

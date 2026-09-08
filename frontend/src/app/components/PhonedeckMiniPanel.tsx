@@ -5,49 +5,24 @@
 // push a freshly-exported video straight to every connected phone without
 // switching tabs.
 //
-// Connects to the Phonedeck server via SSE (live file list) + REST polling
-// (device list). No code is shared between the two apps — just HTTP. The
-// Phonedeck URL defaults to localhost:8080 (the dev port) and can be
-// overridden with NEXT_PUBLIC_PHONEDECK_URL if Phonedeck runs on a peer
-// machine on the LAN.
+// The data — the live file list, the phones, the sticky phone selection and
+// the push itself — is hooks/usePhonedeck, shared with the smaller list under
+// the export buttons on Vids. This file is the floating face: drag, resize,
+// collapse, and the per-file rows.
 
 import { useEffect, useRef, useState } from 'react';
-
-const PHONEDECK_URL = process.env.NEXT_PUBLIC_PHONEDECK_URL ?? 'http://localhost:8080';
-
-interface FileRecord {
-  name: string;
-  size: number;
-  receivedAt: number;
-  status: 'new' | 'saved' | 'backlog';
-  diskState: 'present' | 'deleted';
-  sentEvents: Array<{ at: number; serials: string[]; okCount: number; errCount: number }>;
-}
-
-interface Device {
-  serial: string;
-  state: string;
-  model?: string;
-  name?: string | null;
-}
-
-function formatSize(bytes: number): string {
-  const u = ['B', 'KB', 'MB', 'GB'];
-  let i = 0; let n = bytes;
-  while (n >= 1024 && i < u.length - 1) { n /= 1024; i++; }
-  return `${n.toFixed(i === 0 ? 0 : 1)} ${u[i]}`;
-}
+import { formatSize, usePhonedeck } from '../hooks/usePhonedeck';
 
 // onPushed fires with the file's name after a successful push to ≥1 phone, so
 // the Studio can mark the originating board row Posted (the board flow marks on
 // push, not on export).
 export function PhonedeckMiniPanel({ onPushed }: { onPushed?: (fileName: string) => void } = {}) {
-  const [files, setFiles] = useState<FileRecord[]>([]);
-  const [devices, setDevices] = useState<Device[]>([]);
-  const [connected, setConnected] = useState(false);
+  const {
+    connected, incoming, ready,
+    selectedSerials, togglePhone, selectAll, clearSelection,
+    pushing, status, pushSelected, clearAllIncoming,
+  } = usePhonedeck({ onPushed });
   const [collapsed, setCollapsed] = useState(false);
-  const [pushing, setPushing] = useState<Record<string, boolean>>({});
-  const [status, setStatus] = useState<Record<string, string>>({});
   // Panel position. null = default bottom-right via className. {x,y} = absolute
   // top-left in viewport coords (set on first drag, then sticky).
   const [position, setPosition] = useState<{ x: number; y: number } | null>(null);
@@ -65,10 +40,13 @@ export function PhonedeckMiniPanel({ onPushed }: { onPushed?: (fileName: string)
   const hydratedRef = useRef(false);
 
   // Hydrate collapsed + position from localStorage so the panel stays where
-  // the user left it across refreshes.
+  // the user left it across refreshes. Read after mount on purpose: the server
+  // render and the first client paint have to agree, and localStorage is only
+  // on the client — so this is the one effect that sets state straight away.
   useEffect(() => {
     try {
       const c = window.localStorage.getItem('studio.phonedeckPanelCollapsed');
+      // eslint-disable-next-line react-hooks/set-state-in-effect -- see above
       if (c === 'true') setCollapsed(true);
       const p = window.localStorage.getItem('studio.phonedeckPanelPosition');
       if (p) {
@@ -128,7 +106,6 @@ export function PhonedeckMiniPanel({ onPushed }: { onPushed?: (fileName: string)
         // Clamp so at least 60px stays on-screen (so the user can always grab
         // it back if dragged near an edge).
         const w = panelRef.current?.offsetWidth ?? 256;
-        const h = panelRef.current?.offsetHeight ?? 40;
         const maxX = window.innerWidth  - 60;
         const maxY = window.innerHeight - 30;
         setPosition({
@@ -176,108 +153,6 @@ export function PhonedeckMiniPanel({ onPushed }: { onPushed?: (fileName: string)
     };
   }, [resizing]);
 
-  // Live file feed.
-  useEffect(() => {
-    const es = new EventSource(`${PHONEDECK_URL}/api/stream`);
-    es.addEventListener('files', (e) => {
-      try {
-        const data: FileRecord[] = JSON.parse((e as MessageEvent).data);
-        setFiles(data);
-        setConnected(true);
-      } catch { /* malformed payload — ignore */ }
-    });
-    es.onopen = () => setConnected(true);
-    es.onerror = () => setConnected(false);
-    return () => es.close();
-  }, []);
-
-  // Phones list — poll every 3s, matches the cadence Phonedeck's own UI uses.
-  useEffect(() => {
-    let cancelled = false;
-    const fetchDevices = async () => {
-      try {
-        const r = await fetch(`${PHONEDECK_URL}/api/devices`);
-        if (!r.ok) return;
-        const data: Device[] = await r.json();
-        if (!cancelled) setDevices(data);
-      } catch { /* Phonedeck unreachable — fall through silently */ }
-    };
-    fetchDevices();
-    const t = setInterval(fetchDevices, 3000);
-    return () => { cancelled = true; clearInterval(t); };
-  }, []);
-
-  const incoming = files.filter(f => f.status === 'new' && f.diskState === 'present');
-  const ready = devices.filter(d => d.state === 'device');
-
-  // Global sticky phone selection — one Set that applies to every file. Starts
-  // empty (default Push -> 0). User toggles phones to add/remove; the selection
-  // persists in localStorage so it survives page refresh and reapplies to
-  // future files until the user changes it. Per-file independence isn't useful
-  // for the typical "push to my usual phones" workflow.
-  const [selectedSerials, setSelectedSerials] = useState<Set<string>>(new Set());
-  const selectionHydratedRef = useRef(false);
-  useEffect(() => {
-    try {
-      const raw = window.localStorage.getItem('studio.phonedeckSelectedSerials');
-      if (raw) {
-        const arr = JSON.parse(raw) as string[];
-        if (Array.isArray(arr)) setSelectedSerials(new Set(arr));
-      }
-    } catch { /* ignore */ }
-    selectionHydratedRef.current = true;
-  }, []);
-  useEffect(() => {
-    if (!selectionHydratedRef.current) return;
-    try { window.localStorage.setItem('studio.phonedeckSelectedSerials', JSON.stringify([...selectedSerials])); } catch { /* ignore */ }
-  }, [selectedSerials]);
-
-  const togglePhone = (serial: string) => {
-    setSelectedSerials(prev => {
-      const next = new Set(prev);
-      if (next.has(serial)) next.delete(serial); else next.add(serial);
-      return next;
-    });
-  };
-  const selectAll = () => setSelectedSerials(new Set(ready.map(d => d.serial)));
-  const clearSelection = () => setSelectedSerials(new Set());
-
-  // Bulk-sweep the Incoming list — mark every file currently shown as past, so
-  // the panel goes empty in one tap. SSE rebroadcast updates `files` automatically.
-  const clearAllIncoming = async (e: React.MouseEvent) => {
-    e.stopPropagation(); // header's mousedown handles drag/collapse; don't trigger
-    if (incoming.length === 0) return;
-    if (!confirm(`Mark all ${incoming.length} incoming file(s) as past?`)) return;
-    try {
-      await fetch(`${PHONEDECK_URL}/api/files/clear-incoming`, { method: 'POST' });
-    } catch { /* server's offline notice already covers this */ }
-  };
-
-  const pushSelected = async (fileName: string) => {
-    if (selectedSerials.size === 0) {
-      setStatus(s => ({ ...s, [fileName]: 'No phones selected' }));
-      setTimeout(() => setStatus(s => { const n = { ...s }; delete n[fileName]; return n; }), 3000);
-      return;
-    }
-    setPushing(p => ({ ...p, [fileName]: true }));
-    try {
-      const r = await fetch(`${PHONEDECK_URL}/api/push`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ fileName, serials: [...selectedSerials] }),
-      });
-      if (!r.ok) throw new Error(await r.text());
-      onPushed?.(fileName);
-      setStatus(s => ({ ...s, [fileName]: `✓ Sent to ${selectedSerials.size}` }));
-      setTimeout(() => setStatus(s => { const n = { ...s }; delete n[fileName]; return n; }), 4000);
-    } catch {
-      setStatus(s => ({ ...s, [fileName]: 'Push failed' }));
-      setTimeout(() => setStatus(s => { const n = { ...s }; delete n[fileName]; return n; }), 4000);
-    } finally {
-      setPushing(p => ({ ...p, [fileName]: false }));
-    }
-  };
-
   // When position is null, fall back to className's bottom-4 right-4. Once
   // the user starts dragging (or we hydrated a saved position), pin via inline
   // style instead.
@@ -316,7 +191,7 @@ export function PhonedeckMiniPanel({ onPushed }: { onPushed?: (fileName: string)
           {connected && incoming.length > 0 && (
             <button
               onMouseDown={(e) => e.stopPropagation()}
-              onClick={clearAllIncoming}
+              onClick={(e) => { e.stopPropagation(); void clearAllIncoming(); }}
               title="Mark every incoming file as past"
               className="text-[10px] text-zinc-500 hover:text-zinc-200 transition-colors"
             >
@@ -378,7 +253,7 @@ export function PhonedeckMiniPanel({ onPushed }: { onPushed?: (fileName: string)
                     )}
                     <div className="flex items-center gap-2">
                       <button
-                        onClick={() => pushSelected(f.name)}
+                        onClick={() => void pushSelected(f.name)}
                         disabled={busy || selectedSerials.size === 0}
                         className="flex items-center gap-1 h-6 px-2.5 rounded-md bg-white text-black hover:bg-zinc-100 disabled:opacity-40 disabled:cursor-not-allowed transition-colors text-[10px] font-semibold shrink-0"
                       >

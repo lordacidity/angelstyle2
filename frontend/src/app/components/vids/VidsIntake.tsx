@@ -4,9 +4,15 @@
 // whole stage is a drop target, and a drop starts the short pipeline that walks
 // footage from the desktop to a finished, filed clip.
 //
-//   one clip (or two, or four)   folder → context → edit → save
+//   one clip (or two, or four)   folder → name → context → edit → save
 //   three at once                a persona: name it, give the bundle its one
 //                                context, then trim each of the three and save
+//
+// Only that last step writes anything. Until a clip has been named, given its
+// context and edited, it lives on your disk and nowhere else: the editor plays
+// it from there, and Save is what uploads it — with the name, the context and
+// the marks already on it. A clip skipped, or a run cancelled, was never saved.
+// A photo has nothing to edit, so naming it is what files it.
 //
 // Three files is read as a persona because that is what a persona is: Start,
 // Top A and Top B are shot together and always travel together, so they get one
@@ -18,11 +24,12 @@
 // in the editor on its own — the pipeline is the way in when you have footage in
 // hand and want it carried all the way through.
 
-import { useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import type { DragEvent } from 'react';
 import { PERSONA_PARTS, PERSONA_PART_LABEL, type VidContext } from '@/lib/vids-types';
 import type { VidRow } from '@/lib/vids-types';
 import { VID_DRAG_MIME } from '@/lib/vidsPlan';
+import { probeVideoFile } from '@/lib/vids-client';
 import { CONTEXT_PLACEHOLDER } from './VidsContext';
 import { ArrowRightIcon, CloseIcon, SpinnerIcon, UploadIcon, VideoIcon } from '@/lib/icons';
 import { fmtBytes } from './VidPreview';
@@ -30,10 +37,20 @@ import { fmtBytes } from './VidPreview';
 export const hasVid = (e: DragEvent) => Array.from(e.dataTransfer.types).includes(VID_DRAG_MIME);
 export const hasFiles = (e: DragEvent) => Array.from(e.dataTransfer.types).includes('Files');
 
+/** A persona part being dragged into a new place in the order — the intake's
+ *  own drag, so the stage's file and clip drops leave it alone. */
+const PART_DRAG_MIME = 'application/x-pauv-persona-part';
+const hasPart = (e: DragEvent) => Array.from(e.dataTransfer.types).includes(PART_DRAG_MIME);
+
 /** Drop this many at once and it is taken to be a persona. */
 export const PERSONA_DROP = PERSONA_PARTS.length;
 
 export type IntakeMode = 'clips' | 'persona';
+
+/** A row standing in for a dropped file until it is saved: the shape the
+ *  editor takes, playing off the disk, with the file itself along for the
+ *  render and the upload. */
+export type LocalRow = VidRow & { file: File };
 
 /** Where a run has got to.
  *    folder    clips only — which folder this footage is being filed in
@@ -50,17 +67,25 @@ export interface Intake {
   /** The dropped files, in the order they will be edited. For a persona that
    *  order is Start, Top A, Top B. */
   files: File[];
+  /** One row per file, standing in for it until it is saved: the editor opens
+   *  these and plays them off the disk, and the name, context and marks are
+   *  kept on them as they are given. Nothing goes up until Save. */
+  local: LocalRow[];
   folderId: string | null;
   folderName: string;
-  /** One slot per file, filled as each upload lands — editing the first can
-   *  start while the ones behind it are still going up. */
+  /** The saved rows, one slot per file, filled in as each save lands. A clip
+   *  skipped or cancelled out of leaves its slot empty — it was never saved. */
   rows: (VidRow | null)[];
   /** Which file the run is on. */
   index: number;
+  /** The persona, once it exists — it is made with its first saved part. */
   personaId: string | null;
   personaName: string;
-  /** An upload is still running somewhere in this run. */
-  busy: boolean;
+  /** The context the persona's three clips share, given at setup and written
+   *  to the persona when it is made. */
+  personaContext: string;
+  /** A save is going up from outside the editor — a photo being filed. */
+  saving: boolean;
 }
 
 const STEPS: Record<IntakeMode, readonly string[]> = {
@@ -169,10 +194,14 @@ interface StageProps {
   /** Context for the clip the run is on — then straight into the editor. */
   onContext: (name: string, context: VidContext) => void;
   onCancel: () => void;
+  /** The run's clip is open in the editor and this stage is showing anyway
+   *  (the Upload tab was opened over it) — go back to the editor. */
+  onResume?: () => void;
 }
 
 export function VidsIntakeStage({
   intake, choices, onFiles, onOpenClip, onChooseFolder, onStartPersona, onFileAsClips, onContext, onCancel,
+  onResume,
 }: StageProps) {
   const [over, setOver] = useState(false);
 
@@ -226,7 +255,7 @@ export function VidsIntakeStage({
           onCancel={onCancel}
         />
       ) : intake.step === 'edit' ? (
-        <WaitStep intake={intake} onCancel={onCancel} />
+        <WaitStep intake={intake} onCancel={onCancel} onResume={onResume} />
       ) : (
         <DoneStage intake={intake} over={over} onFiles={onFiles} onCancel={onCancel} />
       )}
@@ -259,7 +288,8 @@ function IdleStage({ over, onFiles }: { over: boolean; onFiles: (files: FileList
         <UploadIcon size={30} className={over ? 'text-emerald-400' : 'text-zinc-600'} />
         <p className="mt-3 text-[14px] font-semibold text-zinc-100">{over ? 'Drop it' : 'Drop footage here'}</p>
         <p className="mt-1 max-w-[420px] text-[11px] leading-relaxed text-zinc-500">
-          One clip and it walks you through: pick the folder, say what it is showing, edit it, save.
+          One clip and it walks you through: pick the folder, name it, say what it is showing, edit it, save.
+          Nothing is uploaded until that last step.
         </p>
         <p className="mt-0.5 max-w-[420px] text-[11px] leading-relaxed text-zinc-500">
           Drop <span className="font-semibold text-zinc-300">three</span> and it is a persona — name it once,
@@ -285,7 +315,7 @@ function FolderStep({ intake, choices, onChoose, onCancel }: {
     <Card
       intake={intake}
       title={intake.files.length > 1 ? `Where do these ${intake.files.length} go?` : 'Where does this go?'}
-      hint="The folder decides which slot of a build can use it. Uploading starts the moment you pick."
+      hint="The folder decides which slot of a build can use it. Nothing is uploaded until you have named it, said what it shows and saved your edit."
       onCancel={onCancel}
     >
       <div className="mb-3 space-y-1">
@@ -312,7 +342,9 @@ function FolderStep({ intake, choices, onChoose, onCancel }: {
 
 /** The only things a persona is asked for: a name, and the context its three
  *  clips share. The parts are handed out in drop order, which is rarely the
- *  order they play in — hence the arrows. */
+ *  order they play in, so each is shown as a frame from the middle of its clip
+ *  — three file names look alike; three frames don't — and dragging one onto
+ *  another's place puts it there. */
 function PersonaStep({ intake, onStart, onFileAsClips, onCancel }: {
   intake: Intake;
   onStart: (name: string, context: VidContext, order: File[]) => void;
@@ -322,13 +354,42 @@ function PersonaStep({ intake, onStart, onFileAsClips, onCancel }: {
   const [name, setName] = useState('');
   const [text, setText] = useState('');
   const [order, setOrder] = useState<File[]>(intake.files);
+  /** Which part is being dragged, and which place it is held over. */
+  const [dragging, setDragging] = useState<number | null>(null);
+  const [over, setOver] = useState<number | null>(null);
 
-  const move = (i: number, by: number) => {
-    const to = i + by;
-    if (to < 0 || to >= order.length) return;
-    const next = [...order];
-    [next[i], next[to]] = [next[to], next[i]];
-    setOrder(next);
+  // A stable key per file across reorders — the same file dropped twice would
+  // collide on its name and size.
+  const ids = useMemo(() => new Map(intake.files.map((f, i) => [f, i])), [intake.files]);
+
+  // A frame from the middle of each clip, read off the file in the browser the
+  // same way the upload measures it. They come in one by one; the object URLs
+  // are let go when the step is.
+  const [thumbs, setThumbs] = useState<Map<File, string>>(new Map());
+  useEffect(() => {
+    let live = true;
+    const made: string[] = [];
+    for (const f of intake.files) {
+      void probeVideoFile(f).then((p) => {
+        if (!p.thumb) return;
+        const url = URL.createObjectURL(p.thumb);
+        if (!live) { URL.revokeObjectURL(url); return; }
+        made.push(url);
+        setThumbs((m) => new Map(m).set(f, url));
+      });
+    }
+    return () => { live = false; made.forEach((u) => URL.revokeObjectURL(u)); };
+  }, [intake.files]);
+
+  /** Put the part at `from` into place `to`, sliding the others along. */
+  const reorder = (from: number, to: number) => {
+    if (from === to) return;
+    setOrder((prev) => {
+      const next = [...prev];
+      const [f] = next.splice(from, 1);
+      next.splice(to, 0, f);
+      return next;
+    });
   };
 
   const ready = !!name.trim();
@@ -350,33 +411,79 @@ function PersonaStep({ intake, onStart, onFileAsClips, onCancel }: {
         className="mb-2.5 w-full rounded border border-zinc-700 bg-black px-2 py-1.5 text-[12px] text-zinc-100 outline-none placeholder:text-zinc-600 focus:border-zinc-400"
       />
 
-      <p className="mb-1 text-[9px] font-semibold uppercase tracking-wider text-zinc-500">Parts — in the order they play</p>
-      <div className="mb-3 space-y-1">
-        {order.map((f, i) => (
-          <div key={`${f.name}-${f.size}-${i}`} className="flex items-center gap-1">
-            <div className="min-w-0 flex-1">
-              <FileLine file={f} label={PERSONA_PART_LABEL[PERSONA_PARTS[i]]} />
+      <p className="mb-1 text-[9px] font-semibold uppercase tracking-wider text-zinc-500">
+        Parts — drag them into the order they play
+      </p>
+      <div className="mb-3 grid grid-cols-3 gap-2">
+        {order.map((f, i) => {
+          const thumb = thumbs.get(f);
+          const lifted = dragging === i;
+          const target = over === i && dragging !== null && dragging !== i;
+          return (
+            <div
+              key={ids.get(f) ?? i}
+              draggable
+              title="Drag it onto the place it should play in"
+              onDragStart={(e) => {
+                e.dataTransfer.setData(PART_DRAG_MIME, String(i));
+                e.dataTransfer.effectAllowed = 'move';
+                setDragging(i);
+              }}
+              onDragEnd={() => { setDragging(null); setOver(null); }}
+              onDragEnter={(e) => {
+                if (!hasPart(e)) return;
+                e.preventDefault();
+                e.stopPropagation();
+                setOver(i);
+              }}
+              onDragOver={(e) => {
+                if (!hasPart(e)) return;
+                e.preventDefault();
+                e.stopPropagation();
+                e.dataTransfer.dropEffect = 'move';
+                if (over !== i) setOver(i);
+              }}
+              // Moving over the card's own children fires a leave too; only a
+              // pointer that has really left it drops the highlight.
+              onDragLeave={(e) => {
+                if (!e.currentTarget.contains(e.relatedTarget as Node | null)) setOver((o) => (o === i ? null : o));
+              }}
+              onDrop={(e) => {
+                if (!hasPart(e)) return;
+                e.preventDefault();
+                e.stopPropagation();
+                const from = Number(e.dataTransfer.getData(PART_DRAG_MIME));
+                if (Number.isInteger(from)) reorder(from, i);
+                setDragging(null);
+                setOver(null);
+              }}
+              className={`flex cursor-grab flex-col overflow-hidden rounded-md border bg-black transition-colors active:cursor-grabbing ${
+                target ? 'border-emerald-500 bg-emerald-950/20'
+                : lifted ? 'border-zinc-700 opacity-40'
+                : 'border-zinc-800 hover:border-zinc-600'
+              }`}
+            >
+              <div className="flex items-center justify-between px-1.5 py-1">
+                <span className="text-[10px] font-semibold text-zinc-200">{PERSONA_PART_LABEL[PERSONA_PARTS[i]]}</span>
+                <span className="font-mono text-[9px] text-zinc-600">{i + 1}</span>
+              </div>
+              <div className="relative aspect-[9/16] w-full bg-zinc-900">
+                {thumb ? (
+                  // eslint-disable-next-line @next/next/no-img-element
+                  <img src={thumb} alt="" draggable={false} className="pointer-events-none h-full w-full object-cover" />
+                ) : (
+                  <div className="flex h-full items-center justify-center">
+                    <SpinnerIcon size={12} className="animate-spin text-zinc-600" />
+                  </div>
+                )}
+              </div>
+              <div className="px-1.5 py-1">
+                <p className="truncate text-[9px] text-zinc-400" title={f.name}>{f.name}</p>
+                <p className="font-mono text-[8px] text-zinc-600">{fmtBytes(f.size)}</p>
+              </div>
             </div>
-            <div className="flex shrink-0 flex-col">
-              <button
-                onClick={() => move(i, -1)}
-                disabled={i === 0}
-                title="Move it earlier"
-                className="px-1 text-[8px] leading-none text-zinc-500 hover:text-white disabled:opacity-20"
-              >
-                ▲
-              </button>
-              <button
-                onClick={() => move(i, 1)}
-                disabled={i === order.length - 1}
-                title="Move it later"
-                className="px-1 text-[8px] leading-none text-zinc-500 hover:text-white disabled:opacity-20"
-              >
-                ▼
-              </button>
-            </div>
-          </div>
-        ))}
+          );
+        })}
       </div>
 
       <p className="mb-1 text-[9px] font-semibold uppercase tracking-wider text-zinc-500">Context — all three</p>
@@ -393,10 +500,10 @@ function PersonaStep({ intake, onStart, onFileAsClips, onCancel }: {
         disabled={!ready}
         className="mt-3 flex w-full items-center justify-center gap-1.5 rounded bg-white py-1.5 text-[11px] font-medium text-black hover:bg-zinc-200 disabled:opacity-30"
       >
-        <UploadIcon size={12} /> Upload the three and start trimming
+        <UploadIcon size={12} /> Start trimming
       </button>
       <p className="mt-1.5 text-center text-[9px] text-zinc-600">
-        They go in the Persona folder ·{' '}
+        Each part is saved to the Persona folder as its trim is ·{' '}
         <button onClick={onFileAsClips} className="underline decoration-zinc-700 hover:text-zinc-300">
           not a persona — file them as clips
         </button>
@@ -405,39 +512,79 @@ function PersonaStep({ intake, onStart, onFileAsClips, onCancel }: {
   );
 }
 
+/** Which way the trade in a clip went — the second half of its name here. */
+type Direction = 'up' | 'down';
+const DIRECTIONS: readonly Direction[] = ['up', 'down'];
+
 /** Two things about this clip, in this order: what to call it, and what it is
- *  showing. The name is what you go looking for it by, so it is asked for
- *  plainly and required; the context is the sentence the caption writer reads,
+ *  showing. The name has one shape in this flow — who it is on, then which way
+ *  he traded: "elon up", "trump down" — so every clip filed this way reads the
+ *  same in the library and is found by the name and the direction alone. Both
+ *  halves are required; a clip can be renamed to anything afterwards by
+ *  right-clicking it. The context is the sentence the caption writer reads,
  *  and that one can stay empty. */
 function ContextStep({ intake, onNext, onCancel }: {
   intake: Intake;
   onNext: (name: string, context: VidContext) => void;
   onCancel: () => void;
 }) {
-  const [name, setName] = useState('');
+  const [who, setWho] = useState('');
+  const [direction, setDirection] = useState<Direction | null>(null);
   const [text, setText] = useState('');
-  const row = intake.rows[intake.index];
   const file = intake.files[intake.index];
-  const ready = !!row && !!name.trim();
-  const next = () => { if (ready) onNext(name.trim(), { context: text.trim() }); };
+  // A photo has nothing to edit, so this step is the whole of filing it.
+  const photo = !!file && file.type.startsWith('image/');
+  const name = who.trim() && direction ? `${who.trim()} ${direction}` : '';
+  const ready = !!name && !intake.saving;
+  const next = () => { if (ready) onNext(name, { context: text.trim() }); };
 
   return (
     <Card
       intake={intake}
       title={`Name ${file?.name ?? 'this clip'}`}
-      hint={`${intakeLabel(intake)} · filed in ${intake.folderName}. A short name to find it by, then what it is showing — the caption writer reads that one, so say it the way you would out loud.`}
+      hint={`${intakeLabel(intake)} · filed in ${intake.folderName}. Who it is on and which way he traded — that is its name — then what it is showing. The caption writer reads that one, so say it the way you would out loud.`}
       onCancel={onCancel}
     >
-      <p className="mb-1 text-[9px] font-semibold uppercase tracking-wider text-zinc-500">Name</p>
-      <input
-        autoFocus
-        value={name}
-        onChange={(e) => setName(e.target.value)}
-        onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); next(); } }}
-        placeholder="ronaldo search"
-        maxLength={80}
-        className="w-full rounded border border-zinc-700 bg-black px-2 py-1.5 text-[11px] text-zinc-100 outline-none placeholder:text-zinc-600 focus:border-zinc-400"
-      />
+      <p className="mb-1 text-[9px] font-semibold uppercase tracking-wider text-zinc-500">Name — who, then which way</p>
+      <div className="flex items-stretch gap-1.5">
+        <input
+          autoFocus
+          value={who}
+          onChange={(e) => setWho(e.target.value)}
+          // The arrow keys pick the direction without leaving the field, so
+          // "elon", ↑, Enter files a clip in three strokes.
+          onKeyDown={(e) => {
+            if (e.key === 'ArrowUp') { e.preventDefault(); setDirection('up'); }
+            else if (e.key === 'ArrowDown') { e.preventDefault(); setDirection('down'); }
+            else if (e.key === 'Enter') { e.preventDefault(); next(); }
+          }}
+          placeholder="elon"
+          maxLength={80}
+          className="min-w-0 flex-1 rounded border border-zinc-700 bg-black px-2 py-1.5 text-[11px] text-zinc-100 outline-none placeholder:text-zinc-600 focus:border-zinc-400"
+        />
+        {DIRECTIONS.map((d) => (
+          <button
+            key={d}
+            type="button"
+            onClick={() => setDirection(d)}
+            title={d === 'up' ? 'He traded up — ↑ while typing does the same' : 'He traded down — ↓ while typing does the same'}
+            className={`shrink-0 rounded border px-2.5 text-[11px] font-medium transition-colors ${
+              direction === d
+                ? d === 'up'
+                  ? 'border-emerald-500 bg-emerald-500/20 text-emerald-200'
+                  : 'border-rose-500 bg-rose-500/20 text-rose-200'
+                : 'border-zinc-800 text-zinc-500 hover:border-zinc-600 hover:text-zinc-300'
+            }`}
+          >
+            {d}
+          </button>
+        ))}
+      </div>
+      <p className="mt-1 text-[9px] text-zinc-600">
+        {name
+          ? <>Filed as <span className="font-medium text-zinc-300">{name}</span></>
+          : <>Type who it is on, then pick up or down — &quot;elon up&quot;, &quot;trump down&quot;.</>}
+      </p>
 
       <p className="mb-1 mt-2.5 text-[9px] font-semibold uppercase tracking-wider text-zinc-500">What it shows</p>
       <textarea
@@ -454,38 +601,39 @@ function ContextStep({ intake, onNext, onCancel }: {
         disabled={!ready}
         className="mt-3 flex w-full items-center justify-center gap-1.5 rounded bg-white py-1.5 text-[11px] font-medium text-black hover:bg-zinc-200 disabled:opacity-40"
       >
-        {row
-          ? <>Edit this clip <ArrowRightIcon size={12} /></>
-          : <><SpinnerIcon size={12} className="animate-spin" /> Uploading…</>}
+        {intake.saving
+          ? <><SpinnerIcon size={12} className="animate-spin" /> Saving…</>
+          : photo
+            ? <><UploadIcon size={12} /> Save this photo</>
+            : <>Edit this clip <ArrowRightIcon size={12} /></>}
       </button>
       <p className="mt-1.5 text-center text-[9px] text-zinc-600">
-        {row
-          ? 'Enter opens the editor · a name is all it needs'
-          : intake.busy
-            ? 'You can write while it uploads'
-            : 'That upload stopped — the reason is in the list on the left. Close this and drop it again.'}
+        {photo
+          ? `Enter saves it to ${intake.folderName} · a name and a direction are all it needs`
+          : 'Enter opens the editor · nothing is uploaded until you save the edit'}
       </p>
     </Card>
   );
 }
 
-/** The run is on a clip whose upload hasn't landed yet — the editor opens the
- *  moment it does. */
-function WaitStep({ intake, onCancel }: { intake: Intake; onCancel: () => void }) {
-  const file = intake.files[intake.index];
+/** The run is on a clip, and that clip is open on the Edit tab, playing straight
+ *  off the disk — this only says so and points there. */
+function WaitStep({ intake, onCancel, onResume }: { intake: Intake; onCancel: () => void; onResume?: () => void }) {
   return (
     <Card
       intake={intake}
-      title={intake.busy ? `Uploading ${intakeLabel(intake)}` : `${intakeLabel(intake)} didn't upload`}
-      hint={intake.busy
-        ? 'The editor opens as soon as this one is up — the bar on the left has the detail.'
-        : 'The reason is in the upload list on the left. Close this and drop it again.'}
+      title={`${intakeLabel(intake)} is in the editor`}
+      hint="It is open on the Edit tab, playing from your disk — finish it there and save. Saving is what files it."
       onCancel={onCancel}
     >
-      <div className="flex items-center gap-2 text-[11px] text-zinc-300">
-        {intake.busy && <SpinnerIcon size={13} className="animate-spin" />}
-        <span className="min-w-0 flex-1 truncate">{file?.name}</span>
-      </div>
+      {onResume && (
+        <button
+          onClick={onResume}
+          className="flex w-full items-center justify-center gap-1.5 rounded bg-white py-1.5 text-[11px] font-medium text-black hover:bg-zinc-200"
+        >
+          Back to the editor <ArrowRightIcon size={12} />
+        </button>
+      )}
     </Card>
   );
 }
@@ -497,6 +645,13 @@ function DoneStage({ intake, over, onFiles, onCancel }: {
   onCancel: () => void;
 }) {
   const [fileEl, setFileEl] = useState<HTMLInputElement | null>(null);
+  // What actually got saved: a skipped clip has no row, and was never uploaded.
+  const total = intake.files.length;
+  const saved = intake.rows.filter(Boolean).length;
+  const skipped = total - saved;
+  const clipsSaved = saved === total
+    ? (total > 1 ? `All ${total} clips are` : 'That clip is')
+    : `${saved} of ${total} clips are`;
   return (
     <div className="flex min-h-0 flex-1 flex-col p-6">
       <input
@@ -516,14 +671,19 @@ function DoneStage({ intake, over, onFiles, onCancel }: {
           over ? 'border-emerald-500 bg-emerald-950/20' : 'border-zinc-800 hover:border-zinc-600'
         }`}
       >
-        <VideoIcon size={26} className="text-emerald-500" />
+        <VideoIcon size={26} className={saved ? 'text-emerald-500' : 'text-zinc-600'} />
         <p className="mt-3 max-w-[420px] text-[13px] font-semibold text-zinc-100">
           {intake.mode === 'persona'
-            ? `"${intake.personaName}" is built — all three clips trimmed and saved.`
-            : `${intake.files.length > 1 ? `All ${intake.files.length} clips are` : 'That clip is'} saved in ${intake.folderName}.`}
+            ? saved
+              ? `"${intake.personaName}" is built — ${saved === total ? 'all three parts' : `${saved} of ${total} parts`} trimmed and saved.`
+              : `"${intake.personaName}" was not made — none of its parts were saved.`
+            : saved
+              ? `${clipsSaved} saved in ${intake.folderName}.`
+              : 'Nothing was saved.'}
+          {skipped > 0 && saved > 0 && ` ${skipped} skipped and not saved.`}
         </p>
         <p className="mt-1 text-[11px] text-zinc-500">
-          {intake.mode === 'persona'
+          {intake.mode === 'persona' && saved
             ? 'Pick it on the Build page to stack a video.'
             : 'Drop more footage to run it again.'}
         </p>
@@ -557,17 +717,12 @@ export function VidsIntakeBanner({ intake, onSkip, onCancel }: {
             {' · '}{intakeLabel(intake)} ({intake.index + 1} of {intake.files.length}) — trim it, then save.
           </>
         ) : (
-          <>{intakeLabel(intake)} — filed in {intake.folderName}. Cut it, lay the keys over it, then save.</>
+          <>{intakeLabel(intake)} — going to {intake.folderName}. Cut it, lay the keys over it, then save — saving is what files it.</>
         )}
       </p>
-      {intake.busy && (
-        <span className="flex shrink-0 items-center gap-1 text-[10px] text-zinc-500">
-          <SpinnerIcon size={10} className="animate-spin" /> uploading the rest
-        </span>
-      )}
       <button
         onClick={onSkip}
-        title="Leave this clip as it is and move on"
+        title="Move on without saving this clip — it stays on your disk and nowhere else"
         className="shrink-0 rounded border border-zinc-700 px-2 py-0.5 text-[10px] text-zinc-400 hover:border-zinc-500 hover:text-white"
       >
         {last ? 'Skip · finish' : 'Skip this one'}

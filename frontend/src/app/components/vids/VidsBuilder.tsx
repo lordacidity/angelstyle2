@@ -4,7 +4,9 @@
 // Top A/B, Bottom A/B, End) each hold one clip from the library; buildPlan()
 // turns the picks into a timeline, the canvas previews it live from hidden
 // <video> elements, and Export renders the identical timeline to an MP4 via
-// lib/vidsCompose (WebCodecs in the browser — no server).
+// lib/vidsCompose (WebCodecs in the browser — no server). The file either
+// downloads or goes straight to Phonedeck's Incoming list, as a Media export
+// does, to be pushed to the phones from the Phonedeck panel.
 //
 // The rack is four cards, not six: Persona (which fills Start, Top A and Top B
 // in one go) plus Bottom A, Bottom B and End. Clicking a card opens a picker
@@ -13,10 +15,12 @@
 // so a persona's clips drag, zoom and trim on the stage like any other.
 //
 // Random, top right beside Reset, runs the whole errand in one go: a persona
-// from the Persona folder, a clip each for Bottom A, Bottom B and End, and
-// then the captions — the same call the Write button makes, made once the
-// clips it picked have loaded. Roll again as often as you like; only a stage
-// that was built by hand is asked about first.
+// from the Persona folder, a Bottom A and a Bottom B that the Link page says
+// go together (any two, while nothing has been linked yet), an End, and then
+// the captions — the same call the Write button makes, made once the clips it
+// picked have loaded. Roll again as often as you like; only a stage that was
+// built by hand is asked about first. The same links narrow Bottom B's picker
+// to what follows the Bottom A on the stage.
 //
 // On the stage: click a section to select the clip playing there — a popup
 // with its settings opens next to it — drag it to move, pull a corner to zoom
@@ -33,7 +37,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { CSSProperties, DragEvent, KeyboardEvent, PointerEvent, ReactNode, SyntheticEvent } from 'react';
-import type { VidPersona, VidRecipe, VidRow } from '@/lib/vids-types';
+import type { VidLink, VidPersona, VidRecipe, VidRow } from '@/lib/vids-types';
 import { PERSONA_PARTS, isPhoto, parseRecipeCode } from '@/lib/vids-types';
 import {
   DEFAULT_BARS, DEFAULT_SPEED, DEFAULT_TRANSFORM, DEFAULT_TRIM, FOLDER_SLOTS, MAX_SPEED, MIN_SPEED,
@@ -48,12 +52,15 @@ import { VidsClipPicker, VidsPersonaPicker } from './VidsPicker';
 import { composeSequence } from '@/lib/vidsCompose';
 import {
   DEFAULT_CAPTION_STYLE, EMPTY_LINES, ONE_LINE_DEFAULT, buildCaptions, capLine, captionAt,
-  captionStyle, captionWindows, drawCaption, layoutCaption, seamNeedsMerge, wantedCount,
+  captionStyle, captionWindows, drawCaption, layoutCaption, preloadCaptionEmoji, seamNeedsMerge, wantedCount,
   type CaptionLines, type CaptionPos, type CaptionRef, type CaptionWindow,
 } from '@/lib/vidsCaptions';
 import { VidsCaptionsRail } from './VidsCaptionsRail';
+import { emojiByUnified } from '@/lib/emoji';
+import { pinnedUnifieds, useEmojiPrefs } from '@/lib/emoji-prefs-store';
 import { VidsRecall } from './VidsRecall';
-import { createRecipe, deleteRecipe, getRecipe, linkRecipeVideo, writeCaptions } from '@/lib/vids-client';
+import { VidsPhonedeck } from './VidsPhonedeck';
+import { createRecipe, deleteRecipe, getRecipe, writeCaptions } from '@/lib/vids-client';
 import { picksFromSpec, specFromBuild } from '@/lib/vidsRecipe';
 import {
   DEFAULT_CLIP_LEVEL, DEFAULT_MUSIC, DEFAULT_ROOM_TONE, MAX_CLIP_LEVEL, MAX_MUSIC_LEVEL,
@@ -61,7 +68,7 @@ import {
   clampMusicLevel, clampRoomLevel, decodeAudio, listMusic, musicGain, roomToneGain,
   type Music, type MusicTrack, type RoomTone,
 } from '@/lib/vidsAudio';
-import { safeExportName } from '@/lib/canvasVideoExport';
+import { PHONEDECK_URL, safeExportName } from '@/lib/canvasVideoExport';
 import { fmtTime } from '@/lib/utils';
 import { BTN_TEXT } from '@/lib/ui-constants';
 import { CloseIcon, DownloadIcon, SpinnerIcon, UploadIcon, VideoIcon } from '@/lib/icons';
@@ -122,6 +129,20 @@ function downloadBlob(blob: Blob, name: string) {
   a.click();
   a.remove();
   setTimeout(() => URL.revokeObjectURL(url), 10_000);
+}
+
+/** Drop a finished file in Phonedeck's Incoming list — from the browser
+ *  straight to the local server, the way a Media export goes (a Next route
+ *  would run on Vercel and never reach this PC). Resolves to the name the file
+ *  was stored under, which can differ from the one sent: Phonedeck adds " (1)"
+ *  when a name is already taken. */
+async function sendToPhonedeck(blob: Blob, name: string): Promise<string> {
+  const form = new FormData();
+  form.append('files', blob, name);
+  const resp = await fetch(`${PHONEDECK_URL}/api/upload`, { method: 'POST', body: form });
+  if (!resp.ok) throw new Error(await resp.text().catch(() => `Phonedeck answered ${resp.status}`));
+  const result = await resp.json().catch(() => null) as { files?: Array<{ name: string }> } | null;
+  return result?.files?.[0]?.name ?? name;
 }
 
 // ── Small bits ────────────────────────────────────────────────────────────────
@@ -297,9 +318,12 @@ interface SlotCardProps {
   onChoose: () => void;
   onClear: () => void;
   onDropVideoId: (id: string) => void;
+  /** Something off about the pick that isn't a load failure — a Bottom B that
+   *  the Link page doesn't pair with the Bottom A on the stage. */
+  warn?: string | null;
 }
 
-function SlotCard({ meta, pick, duration, error, selected, onChoose, onClear, onDropVideoId }: SlotCardProps) {
+function SlotCard({ meta, pick, duration, error, selected, onChoose, onClear, onDropVideoId, warn }: SlotCardProps) {
   const [over, setOver] = useState(false);
   const accepts = (e: DragEvent) => Array.from(e.dataTransfer.types).includes(VID_DRAG_MIME);
 
@@ -363,6 +387,7 @@ function SlotCard({ meta, pick, duration, error, selected, onChoose, onClear, on
             </button>
           </div>
           {error && <p className="mt-1 text-[10px] text-red-400">{error}</p>}
+          {!error && warn && <p className="mt-1 text-[10px] text-amber-400">{warn}</p>}
         </>
       ) : (
         <p className="mt-1.5 rounded border border-dashed border-zinc-800 px-2 py-2 text-center text-[10px] text-zinc-400">
@@ -787,6 +812,8 @@ interface Props {
   /** The clips filed under a slot's folder — what its picker offers. */
   clipsForSlot: (slot: SlotId) => VidRow[];
   personas: VidPersona[];
+  /** Which Bottom Bs follow on from which Bottom A — the Link page's pairs. */
+  links: VidLink[];
   /** The persona filling Start / Top A / Top B, if the three still match one. */
   appliedPersonaId: string | null;
   onUsePersona: (p: VidPersona) => void;
@@ -795,13 +822,11 @@ interface Props {
   /** The library has arrived. Until it has, a code has nothing to resolve
    *  its clips against, and would come back with every slot empty. */
   libraryLoaded: boolean;
-  /** Put a finished build in the library; resolves to the row it became. */
-  onSaveToLibrary: (blob: Blob, name: string) => Promise<VidRow>;
 }
 
 export function VidsBuilder({
   picks, onPicksChange, onAssign, selectedSlot, onSelectSlot, resolveVideo, clipsForSlot,
-  personas, appliedPersonaId, onUsePersona, onClearPersona, active, libraryLoaded, onSaveToLibrary,
+  personas, links, appliedPersonaId, onUsePersona, onClearPersona, active, libraryLoaded,
 }: Props) {
   const [presetId, setPresetId] = useState<PresetId>('9:16');
   const preset = OUTPUT_PRESETS.find((p) => p.id === presetId) ?? OUTPUT_PRESETS[0];
@@ -841,7 +866,10 @@ export function VidsBuilder({
   const [avail, setAvail] = useState({ w: 0, h: 0 });
   const [exporting, setExporting] = useState<{ frac: number; label: string } | null>(null);
   const [exportError, setExportError] = useState<string | null>(null);
-  const [savedNote, setSavedNote] = useState<string | null>(null);
+  // Where the last push ended up: in Phonedeck's Incoming list (ok, under the
+  // name it was stored as), or in Downloads because the local server wasn't
+  // there to take it.
+  const [sentNote, setSentNote] = useState<{ ok: boolean; text: string; name?: string } | null>(null);
   // The code the last export was written down under (and whether it failed to
   // be), and — separately — a build brought back by its code, with whatever
   // about it didn't come back exactly.
@@ -853,7 +881,9 @@ export function VidsBuilder({
   });
   const [trimPopup, setTrimPopup] = useState<{ slot: SlotId; x: number; y: number } | null>(null);
   // Which rack card has its chooser open: the persona one, or a folder slot's.
-  const [picker, setPicker] = useState<{ kind: 'persona' } | { kind: 'clip'; slot: SlotId } | null>(null);
+  // `all` is Bottom B's "Choose from any": the whole folder, links set aside,
+  // for this one opening.
+  const [picker, setPicker] = useState<{ kind: 'persona' } | { kind: 'clip'; slot: SlotId; all?: boolean } | null>(null);
   // The words are waiting on the clips: `pendingWrite` holds the ids still to
   // report a length, and whether a roll is what put them there — a roll says so
   // on the Random button, a Bottom B chosen by hand just writes when it is
@@ -911,12 +941,24 @@ export function VidsBuilder({
   // default: these are captions for short vertical video, and a bare set reads
   // flat next to everything else on the feed.
   const [emojis, setEmojis] = useState(true);
+  // Which emoji the writer may use: the ones pinned in the sidebar's Emojis
+  // drawer — the set already chosen to reach for — handed over as their
+  // characters. They are drawn from the app's Apple images on the stage and in
+  // the file (lib/vidsCaptions), so what is picked from here is what goes out.
+  const { prefs: emojiPrefs } = useEmojiPrefs();
+  const emojiPalette = useMemo(
+    () => pinnedUnifieds(emojiPrefs).map((u) => emojiByUnified(u)?.char).filter((c): c is string => !!c),
+    [emojiPrefs],
+  );
   const windows = useMemo(() => captionWindows(plan), [plan]);
   const caption = useMemo(() => buildCaptions(windows, lines), [windows, lines]);
   const captions = caption.all;
   const capStyle = useMemo(() => captionStyle(styleId), [styleId]);
   const canCaption = !!windows.start || !!windows.bottomA || !!windows.bottomB || !!windows.end;
-  const hasLines = !!(lines.start.text.trim() || lines.bottomA.length || lines.bottomB.length || lines.end.text.trim());
+  const hasLines = !!(
+    lines.start.text.trim() || lines.bottomA.length || lines.bottomB.length
+    || lines.payoff.text.trim() || lines.end.text.trim()
+  );
 
   // What the writer is told about one screen recording: its overall context and,
   // when it has been marked up, the ordered steps — which is what makes the
@@ -944,6 +986,7 @@ export function VidsBuilder({
         wantEnd: !!windows.end,
         endContext: picks.end?.video.context ?? '',
         emojis,
+        emojiPalette,
         // The one place two marks share a line, and only when the timeline
         // says neither side has room for its own.
         mergeSeam: seamNeedsMerge(windows),
@@ -962,6 +1005,7 @@ export function VidsBuilder({
           ...capLine(t, prev.bottomB[i]?.oneLine ?? ONE_LINE_DEFAULT.bottomB),
           pos: prev.bottomB[i]?.pos,
         })),
+        payoff: { ...capLine(draft.payoff, prev.payoff.oneLine), pos: prev.payoff.pos },
         end: { ...capLine(draft.end, prev.end.oneLine), pos: prev.end.pos },
       }));
     } catch (e) {
@@ -1179,6 +1223,16 @@ export function VidsBuilder({
     draw(shownRef.current);
   }, [captions, capStyle, playing, draw]);
 
+  // The Apple images for whatever emoji the captions carry, fetched as soon as
+  // the words change — and the frame painted again once they are in, so a line
+  // that arrived with a new emoji shows the image rather than the OS glyph it
+  // fell back to while the file was on its way.
+  useEffect(() => {
+    let live = true;
+    void preloadCaptionEmoji(captions).then(() => { if (live && !playing) draw(shownRef.current); });
+    return () => { live = false; };
+  }, [captions, playing, draw]);
+
   // Render loop while playing; a wall clock drives the timeline.
   useEffect(() => {
     if (!playing) return;
@@ -1381,6 +1435,7 @@ export function VidsBuilder({
     setLines((prev) => {
       switch (ref.group) {
         case 'start': return { ...prev, start: { ...prev.start, pos } };
+        case 'payoff': return { ...prev, payoff: { ...prev.payoff, pos } };
         case 'end': return { ...prev, end: { ...prev.end, pos } };
         case 'bottomA':
           return { ...prev, bottomA: prev.bottomA.map((l, i) => (i === ref.index ? { ...l, pos } : l)) };
@@ -1606,11 +1661,11 @@ export function VidsBuilder({
     endContext: picks.end?.video.context ?? '',
   });
 
-  const runExport = async (kind: 'download' | 'save') => {
+  const runExport = async (kind: 'download' | 'phone') => {
     if (!plan.items.length || broken.length || exporting) return;
     pause();
     setExportError(null);
-    setSavedNote(null);
+    setSentNote(null);
     setRecipeError(null);
     setLastRecipe(null);
     setCopied(false);
@@ -1647,12 +1702,19 @@ export function VidsBuilder({
       if (kind === 'download') {
         downloadBlob(blob, name);
       } else {
-        setExporting({ frac: 1, label: 'Uploading to the library…' });
-        const row = await onSaveToLibrary(blob, name);
-        setSavedNote(`Saved "${name}" to the library.`);
-        // Best effort: the record is complete without it. This only notes
-        // which library row the build became.
-        if (recipe) linkRecipeVideo(recipe.code, row.id).catch((e) => console.error('[vids] recipe link failed:', e));
+        // Into Phonedeck's Incoming list — where a Media export lands — to be
+        // pushed to the phones from the list under these buttons. If the local
+        // server isn't up, the render is not thrown away: it goes to Downloads
+        // instead, and the note says so.
+        setExporting({ frac: 1, label: 'Sending to Phonedeck…' });
+        try {
+          const stored = await sendToPhonedeck(blob, name);
+          setSentNote({ ok: true, name: stored, text: `In Phonedeck Incoming: ${stored} — pick the phones below and push.` });
+        } catch (e) {
+          console.warn('[vids] phonedeck upload failed, falling back to browser download:', e);
+          downloadBlob(blob, name);
+          setSentNote({ ok: false, text: 'Phonedeck isn\'t reachable — saved to Downloads instead. Start the local server (Launch server, on the Media page) and push again.' });
+        }
       }
       if (recipe) setLastRecipe(recipe);
     } catch (e) {
@@ -1702,7 +1764,9 @@ export function VidsBuilder({
         : DEFAULT_MUSIC);
       setClipLevel(clampClipLevel(b.clipLevel));
       setPresetId(OUTPUT_PRESETS.some((p) => p.id === b.preset) ? (b.preset as PresetId) : OUTPUT_PRESETS[0].id);
-      setLines(structuredClone(b.captions.lines));
+      // Over the empty set, so a build written down before End had its
+      // pay-off line comes back with that line blank rather than missing.
+      setLines({ ...EMPTY_LINES, ...structuredClone(b.captions.lines) });
       setStyleId(b.captions.styleId);
       setNotes(b.captions.notes);
       setEmojis(b.captions.emojis);
@@ -1714,6 +1778,33 @@ export function VidsBuilder({
       setRecall((r) => ({ ...r, busy: false, error: e instanceof Error ? e.message : String(e) }));
     }
   };
+
+  // ── Links ──
+  // The Bottom A → Bottom B pairs ticked on the Link page, narrowed to clips
+  // still filed where the builder looks for them — a pair with a side that has
+  // been moved or deleted is no pair.
+  const linkedPairs = useMemo(() => {
+    const as = new Map(clipsForSlot('bottomA').map((v) => [v.id, v]));
+    const bs = new Map(clipsForSlot('bottomB').map((v) => [v.id, v]));
+    const out: { a: VidRow; b: VidRow }[] = [];
+    for (const l of links) {
+      const a = as.get(l.bottomAId);
+      const b = bs.get(l.bottomBId);
+      if (a && b) out.push({ a, b });
+    }
+    return out;
+  }, [links, clipsForSlot]);
+
+  // What Bottom B's picker offers while a Bottom A is on the stage: the clips
+  // linked to it. Null when no Bottom A is on, or it has no links — the picker
+  // then shows the whole folder, as it always did. "Choose from any" in the
+  // picker sets it aside for that one opening.
+  const bottomAId = picks.bottomA?.video.id ?? null;
+  const linkedBottomBs = useMemo(() => {
+    if (!bottomAId) return null;
+    const pool = linkedPairs.filter((p) => p.a.id === bottomAId).map((p) => p.b);
+    return pool.length ? pool : null;
+  }, [linkedPairs, bottomAId]);
 
   /** A fresh End, and not the one already on when there is another to be had —
    *  the same idea as rollMusic, for the slot that picks itself. */
@@ -1728,13 +1819,29 @@ export function VidsBuilder({
    *  the persona comes as a bundle and End picks itself — so choosing one starts
    *  the captions writing on their own, as soon as the clips have reported their
    *  lengths (the same wait a roll makes). Rewriting by hand from the rail is
-   *  unchanged, and a Bottom B swapped later simply writes again. */
+   *  unchanged, and a Bottom B swapped later simply writes again.
+   *
+   *  A Bottom A that the Link page pairs with exactly one Bottom B brings that
+   *  Bottom B with it — there is nothing to pick between — and that counts as
+   *  choosing it: the captions start the same way. Bottom A stays the selected
+   *  slot; the stage just fills in behind it. Two or more linked, or none, and
+   *  Bottom B is left for you to pick from its (narrowed) picker. */
   const chooseClip = (slot: SlotId, video: VidRow) => {
     onAssign(slot, video);
-    if (slot !== 'bottomB' || writing || exporting || recall.busy) return;
+    let follower: VidRow | null = null;
+    if (slot === 'bottomA') {
+      const mine = linkedPairs.filter((p) => p.a.id === video.id).map((p) => p.b);
+      if (mine.length === 1 && picks.bottomB?.video.id !== mine[0].id) {
+        const b = mine[0];
+        follower = b;
+        onPicksChange((prev) => ({ ...prev, bottomB: freshPick('bottomB', b, prev.bottomB) }));
+      }
+    }
+    const bottomB = slot === 'bottomB' ? video : follower;
+    if (!bottomB || writing || exporting || recall.busy) return;
     const ids = new Set<string>();
     for (const s of SLOTS) {
-      const p = s.id === 'bottomB' ? { video } : picks[s.id];
+      const p = s.id === 'bottomB' ? { video: bottomB } : s.id === slot ? { video } : picks[s.id];
       if (p && !isPhoto(p.video)) ids.add(p.video.id);
     }
     if (ids.size) pendingWrite.current = { ids, roll: false };
@@ -1819,7 +1926,22 @@ export function VidsBuilder({
         if (video) next[slot] = freshPick(slot, video, picks[slot]);
       }
     }
+    // The bottom pair comes off the Link page once anything has been linked:
+    // one Bottom A among those with links, then one of the Bottom Bs ticked
+    // for it — never two clips that merely share a folder. Each Bottom A gets
+    // an even chance whether it leads on to one clip or five. With nothing
+    // linked yet the two slots roll on their own, as End always does.
+    const pair = (() => {
+      if (!linkedPairs.length) return null;
+      const aId = pickRandom(Array.from(new Set(linkedPairs.map((p) => p.a.id))));
+      return pickRandom(linkedPairs.filter((p) => p.a.id === aId)) ?? null;
+    })();
+    if (pair) {
+      next.bottomA = freshPick('bottomA', pair.a, picks.bottomA);
+      next.bottomB = freshPick('bottomB', pair.b, picks.bottomB);
+    }
     for (const slot of FOLDER_SLOTS) {
+      if (next[slot]) continue;
       const video = pickRandom(clipsForSlot(slot));
       if (video) next[slot] = freshPick(slot, video, picks[slot]);
     }
@@ -1876,20 +1998,22 @@ export function VidsBuilder({
       ) : (
         <div className="flex flex-col gap-1.5">
           <button
+            data-vids-export="phone"
+            onClick={() => void runExport('phone')}
+            disabled={!plan.items.length || broken.length > 0}
+            title="Render the MP4 and drop it in Phonedeck's Incoming list below — then pick the phones and push, the same as a Media export"
+            className={`${BTN_TEXT} justify-center border-zinc-600 bg-white text-black hover:bg-zinc-200`}
+          >
+            <UploadIcon size={13} /> Push to Phonedeck
+          </button>
+          <button
             data-vids-export="download"
             onClick={() => void runExport('download')}
             disabled={!plan.items.length || broken.length > 0}
-            className={`${BTN_TEXT} justify-center border-zinc-600 bg-white text-black hover:bg-zinc-200`}
-          >
-            <DownloadIcon size={13} /> Download MP4
-          </button>
-          <button
-            data-vids-export="save"
-            onClick={() => void runExport('save')}
-            disabled={!plan.items.length || broken.length > 0}
+            title="Render the MP4 and save it to this PC"
             className={`${BTN_TEXT} justify-center border-zinc-700 bg-zinc-900 text-zinc-200 hover:border-zinc-500`}
           >
-            <UploadIcon size={13} /> Save to library
+            <DownloadIcon size={13} /> Download MP4
           </button>
           <p className="text-[10px] text-zinc-600">
             {outW}×{outH} · H.264 + AAC · frame rate follows the clips{total ? ` · ${fmtTime(total)}` : ''}
@@ -1897,7 +2021,10 @@ export function VidsBuilder({
         </div>
       )}
       {exportError && <p className="mt-2 text-[11px] text-red-400">{exportError}</p>}
-      {savedNote && <p className="mt-2 text-[11px] text-emerald-400">{savedNote}</p>}
+      {sentNote && <p className={`mt-2 text-[11px] ${sentNote.ok ? 'text-emerald-400' : 'text-amber-300'}`}>{sentNote.text}</p>}
+      {/* Phonedeck, small: the phones and what is in Incoming, with the file
+          just sent on top. Where a push finishes. */}
+      <VidsPhonedeck recent={sentNote?.ok ? sentNote.name ?? null : null} />
       {recipeError && <p className="mt-2 text-[11px] text-amber-300">{recipeError}</p>}
       {lastRecipe && (
         <div data-vids-recipe={lastRecipe.code} className="mt-2 rounded-md border border-zinc-800 bg-zinc-900/60 p-2">
@@ -1985,7 +2112,9 @@ export function VidsBuilder({
               onClick={randomBuild}
               disabled={!libraryLoaded || !rollable || rolling || writing || !!exporting || recall.busy}
               title={rollable
-                ? 'Fill every slot at random — a persona, Bottom A, Bottom B and End — and write the captions for them'
+                ? (linkedPairs.length
+                  ? 'Fill every slot at random — a persona, a Bottom A with one of the Bottom Bs linked to it, and End — and write the captions for them'
+                  : 'Fill every slot at random — a persona, Bottom A, Bottom B and End — and write the captions for them. Link Bottom As to Bottom Bs on Edit & file → Link and it will only pick pairs')
                 : 'Nothing to draw from yet — file a persona and some bottom clips first'}
               className="flex items-center gap-1.5 rounded border border-zinc-700 bg-zinc-950/80 px-2 py-1 text-[10px] text-zinc-400 backdrop-blur transition-colors hover:border-zinc-500 hover:text-white disabled:cursor-default disabled:border-zinc-800 disabled:text-zinc-700 disabled:hover:border-zinc-800 disabled:hover:text-zinc-700"
             >
@@ -2188,6 +2317,11 @@ export function VidsBuilder({
           {FOLDER_SLOTS.map((id) => {
             const meta = SLOT_META[id];
             const p = picks[id];
+            // A Bottom B the Link page doesn't pair with the Bottom A on the
+            // stage is still allowed — it is only said so, since the whole
+            // point of the links is that the two line up.
+            const unlinked = id === 'bottomB' && !!p && !!linkedBottomBs
+              && !linkedBottomBs.some((v) => v.id === p.video.id);
             return (
               <SlotCard
                 key={id}
@@ -2195,6 +2329,7 @@ export function VidsBuilder({
                 pick={p}
                 duration={p ? slotLength(p) : null}
                 error={p ? (errors[p.video.id] ?? null) : null}
+                warn={unlinked ? `Not linked to “${picks.bottomA?.video.name}” — click to pick one that is` : null}
                 selected={selectedSlot === id}
                 onChoose={() => setPicker({ kind: 'clip', slot: id })}
                 onClear={() => clearSlot(id)}
@@ -2416,16 +2551,35 @@ export function VidsBuilder({
         />
       )}
 
-      {picker?.kind === 'clip' && (
-        <VidsClipPicker
-          title={SLOT_META[picker.slot].label}
-          folder={SLOT_META[picker.slot].folder}
-          clips={clipsForSlot(picker.slot)}
-          currentId={picks[picker.slot]?.video.id ?? null}
-          onChoose={(v) => chooseClip(picker.slot, v)}
-          onClose={() => setPicker(null)}
-        />
-      )}
+      {picker?.kind === 'clip' && (() => {
+        const slot = picker.slot;
+        const meta = SLOT_META[slot];
+        // Bottom B is narrowed to what the Link page pairs with the Bottom A
+        // on the stage, until "Choose from any" opens it up. A Bottom A with
+        // nothing linked yet gets the whole folder, and the subtitle says so.
+        const narrowed = slot === 'bottomB' && !picker.all ? linkedBottomBs : null;
+        const aName = picks.bottomA?.video.name;
+        const subtitle = narrowed
+          ? `the ${narrowed.length} linked to “${aName}” on Edit & file → Link`
+          : slot === 'bottomB' && aName
+            ? (picker.all && linkedBottomBs
+              ? `from the whole ${meta.folder} folder — the ones linked to “${aName}” are tagged`
+              : `from the ${meta.folder} folder — nothing is linked to “${aName}” yet, so all of it`)
+            : undefined;
+        return (
+          <VidsClipPicker
+            title={meta.label}
+            folder={meta.folder}
+            clips={narrowed ?? clipsForSlot(slot)}
+            subtitle={subtitle}
+            linkedIds={slot === 'bottomB' && linkedBottomBs ? new Set(linkedBottomBs.map((v) => v.id)) : undefined}
+            onShowAll={narrowed ? () => setPicker({ kind: 'clip', slot, all: true }) : undefined}
+            currentId={picks[slot]?.video.id ?? null}
+            onChoose={(v) => chooseClip(slot, v)}
+            onClose={() => setPicker(null)}
+          />
+        );
+      })()}
 
       {trimPopup && (() => {
         const pick = picks[trimPopup.slot];

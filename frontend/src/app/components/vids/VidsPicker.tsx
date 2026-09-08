@@ -23,8 +23,13 @@ function PlayBadge() {
   );
 }
 
-function Shell({ title, subtitle, onClose, children }: {
-  title: string; subtitle: string; onClose: () => void; children: React.ReactNode;
+function Shell({ title, subtitle, action, onClose, children }: {
+  title: string;
+  subtitle: string;
+  /** Something for the top right, beside Close — Bottom B's "Choose from any". */
+  action?: React.ReactNode;
+  onClose: () => void;
+  children: React.ReactNode;
 }) {
   useEffect(() => {
     const onKey = (e: globalThis.KeyboardEvent) => { if (e.key === 'Escape') onClose(); };
@@ -42,6 +47,7 @@ function Shell({ title, subtitle, onClose, children }: {
         <div className="flex items-center gap-2 border-b border-zinc-800 px-3 py-2">
           <span className="text-[12px] font-semibold text-zinc-200">{title}</span>
           <span className="min-w-0 flex-1 truncate text-[10px] text-zinc-500">{subtitle}</span>
+          {action}
           <button onClick={onClose} title="Close (Esc)" className="text-zinc-500 hover:text-white">
             <CloseIcon size={14} />
           </button>
@@ -52,7 +58,7 @@ function Shell({ title, subtitle, onClose, children }: {
   );
 }
 
-function Empty({ children }: { children: React.ReactNode }) {
+export function Empty({ children }: { children: React.ReactNode }) {
   return (
     <div className="flex flex-col items-center justify-center rounded-md border border-dashed border-zinc-800 p-6 text-center">
       <VideoIcon size={18} className="mb-2 text-zinc-700" />
@@ -62,14 +68,26 @@ function Empty({ children }: { children: React.ReactNode }) {
 }
 
 // ── One clip tile ─────────────────────────────────────────────────────────────
+// Shared with the Link page, where `current` means linked rather than in use —
+// hence the badge is a prop.
 
-function ClipTile({ video, current, onChoose }: { video: VidRow; current: boolean; onChoose: () => void }) {
+export function ClipTile({ video, current, badge = 'In use', tag, title, onChoose }: {
+  video: VidRow;
+  current: boolean;
+  /** What the corner says while `current`. */
+  badge?: string;
+  /** A word after the length — "Linked", when the list shows more than the
+   *  linked ones. */
+  tag?: string;
+  title?: string;
+  onChoose: () => void;
+}) {
   const [playing, setPlaying] = useState(false);
 
   return (
     <div
       onClick={onChoose}
-      title={`${video.name} — click to use it here`}
+      title={title ?? `${video.name} — click to use it here`}
       className={`group relative cursor-pointer overflow-hidden rounded-md border bg-zinc-950 ${
         current ? 'border-emerald-600' : 'border-zinc-800 hover:border-zinc-500'
       }`}
@@ -97,6 +115,7 @@ function ClipTile({ video, current, onChoose }: { video: VidRow; current: boolea
         <p className="truncate text-[10px] text-zinc-200" title={video.name}>{video.name}</p>
         <p className="text-[9px] text-zinc-500">
           {isPhoto(video) ? 'Photo' : video.duration != null ? fmtTime(video.duration) : '–:––'}
+          {tag && <span className="text-emerald-400"> · {tag}</span>}
         </p>
       </div>
       {/* A still has nothing to play — the tile already shows the whole of it. */}
@@ -113,7 +132,7 @@ function ClipTile({ video, current, onChoose }: { video: VidRow; current: boolea
       )}
       {current && (
         <span className="absolute right-1 top-1 rounded bg-emerald-600/90 px-1 py-px text-[9px] font-medium text-white">
-          In use
+          {badge}
         </span>
       )}
     </div>
@@ -122,16 +141,42 @@ function ClipTile({ video, current, onChoose }: { video: VidRow; current: boolea
 
 // ── Clip picker (Bottom A / Bottom B / End) ───────────────────────────────────
 
-export function VidsClipPicker({ title, folder, clips, currentId, onChoose, onClose }: {
+export function VidsClipPicker({
+  title, folder, clips, subtitle, linkedIds, onShowAll, currentId, onChoose, onClose,
+}: {
   title: string;
   folder: string;
   clips: VidRow[];
+  /** Where these came from, when it isn't simply the folder — Bottom B narrowed
+   *  to what is linked to the Bottom A on the stage, say. */
+  subtitle?: string;
+  /** The clips the Link page pairs with the Bottom A on the stage. Tagged, so
+   *  they still stand out once the list shows more than them. */
+  linkedIds?: Set<string>;
+  /** The list is narrowed to the linked ones, and this opens it up to the whole
+   *  folder — the "Choose from any" button, top right. */
+  onShowAll?: () => void;
   currentId: string | null;
   onChoose: (v: VidRow) => void;
   onClose: () => void;
 }) {
+  // While the list is only the linked ones, tagging every tile says nothing.
+  const tagLinked = !!linkedIds && !onShowAll;
   return (
-    <Shell title={`Choose ${title}`} subtitle={`from the ${folder} folder`} onClose={onClose}>
+    <Shell
+      title={`Choose ${title}`}
+      subtitle={subtitle ?? `from the ${folder} folder`}
+      onClose={onClose}
+      action={onShowAll && (
+        <button
+          onClick={onShowAll}
+          title={`Show everything in the ${folder} folder, not just what is linked`}
+          className="shrink-0 rounded border border-zinc-700 px-2 py-0.5 text-[10px] text-zinc-400 hover:border-zinc-500 hover:text-white"
+        >
+          Choose from any
+        </button>
+      )}
+    >
       {clips.length === 0 ? (
         <Empty>
           Nothing in <span className="text-zinc-300">{folder}</span> yet. Upload clips in the library pane, then drag
@@ -144,6 +189,7 @@ export function VidsClipPicker({ title, folder, clips, currentId, onChoose, onCl
               key={v.id}
               video={v}
               current={v.id === currentId}
+              tag={tagLinked && linkedIds.has(v.id) ? 'Linked' : undefined}
               onChoose={() => { onChoose(v); onClose(); }}
             />
           ))}

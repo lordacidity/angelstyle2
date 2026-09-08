@@ -17,8 +17,8 @@ import pg from 'pg';
 import { createClient, type SupabaseClient } from '@supabase/supabase-js';
 import { RECIPE_CODE_ALPHABET, RECIPE_CODE_LENGTH, cleanMarks, recipeName } from '@/lib/vids-types';
 import type {
-  CreateVideoInput, VidBuildSpec, VidContextPatch, VidFolder, VidMark, VidPersona, VidRecipe, VidRow,
-  VidsLibraryPayload,
+  CreateVideoInput, VidBuildSpec, VidContextPatch, VidFolder, VidLink, VidMark, VidPersona, VidRecipe,
+  VidRow, VidsLibraryPayload,
 } from '@/lib/vids-types';
 
 export const VIDS_BUCKET = 'vids';
@@ -35,7 +35,7 @@ export const errMessage = (e: unknown) => (e instanceof Error ? e.message : 'une
 // reload in dev, or a long-lived server between deploys. Comparing the version
 // makes such a process re-run the (idempotent) DDL instead of trusting a
 // promise that was resolved against the older schema.
-const SCHEMA_VERSION = 6;
+const SCHEMA_VERSION = 7;
 
 const g = globalThis as unknown as {
   __vidsPool?: pg.Pool;
@@ -193,6 +193,17 @@ function ensureSchema(): Promise<void> {
         created_at TIMESTAMPTZ NOT NULL DEFAULT now()
       );
     `);
+    // Which Bottom B clips follow on from which Bottom A — see VidLink. A pair
+    // is a row, and a clip deleted from either side takes its pairs with it
+    // (CASCADE): a link to footage that is gone says nothing.
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS vids_links (
+        bottom_a_id UUID        NOT NULL REFERENCES vids_videos(id) ON DELETE CASCADE,
+        bottom_b_id UUID        NOT NULL REFERENCES vids_videos(id) ON DELETE CASCADE,
+        created_at  TIMESTAMPTZ NOT NULL DEFAULT now(),
+        PRIMARY KEY (bottom_a_id, bottom_b_id)
+      );
+    `);
     await pool.query('CREATE INDEX IF NOT EXISTS vids_videos_folder_idx ON vids_videos (folder_id)');
     await pool.query('CREATE INDEX IF NOT EXISTS vids_folders_parent_idx ON vids_folders (parent_id)');
   })().catch((e) => {
@@ -222,7 +233,10 @@ interface RecipeDb {
   code: string; title: string; video_id: string | null; build: unknown; created_at: Date;
 }
 
+interface LinkDb { bottom_a_id: string; bottom_b_id: string }
+
 const FOLDER_COLS = 'id, parent_id, name, created_at';
+const LINK_COLS = 'bottom_a_id, bottom_b_id';
 const RECIPE_COLS = 'code, title, video_id, build, created_at';
 const PERSONA_COLS = 'id, name, start_id, top_a_id, top_b_id, context, created_at';
 const VIDEO_COLS =
@@ -242,6 +256,8 @@ const toPersona = (r: PersonaDb): VidPersona => ({
   context: r.context ?? '',
   createdAt: r.created_at.toISOString(),
 });
+
+const toLink = (r: LinkDb): VidLink => ({ bottomAId: r.bottom_a_id, bottomBId: r.bottom_b_id });
 
 const toRecipe = (r: RecipeDb): VidRecipe => ({
   code: r.code,
@@ -276,12 +292,56 @@ const toVideo = (r: VideoDb): VidRow => ({
 export async function listLibrary(): Promise<VidsLibraryPayload> {
   await ensureSchema();
   const pool = getPool();
-  const [f, v, p] = await Promise.all([
+  const [f, v, p, l] = await Promise.all([
     pool.query<FolderDb>(`SELECT ${FOLDER_COLS} FROM vids_folders ORDER BY name`),
     pool.query<VideoDb>(`SELECT ${VIDEO_COLS} FROM vids_videos ORDER BY created_at DESC`),
     pool.query<PersonaDb>(`SELECT ${PERSONA_COLS} FROM vids_personas ORDER BY name`),
+    pool.query<LinkDb>(`SELECT ${LINK_COLS} FROM vids_links ORDER BY created_at`),
   ]);
-  return { folders: f.rows.map(toFolder), videos: v.rows.map(toVideo), personas: p.rows.map(toPersona) };
+  return {
+    folders: f.rows.map(toFolder),
+    videos: v.rows.map(toVideo),
+    personas: p.rows.map(toPersona),
+    links: l.rows.map(toLink),
+  };
+}
+
+// ── Links ─────────────────────────────────────────────────────────────────────
+
+/** Replace the set of Bottom Bs that follow on from one Bottom A. The whole
+ *  set at once rather than one pair at a time, so two quick ticks on the Link
+ *  page can't race each other into a state neither of them meant. Ids that
+ *  aren't clips any more are dropped rather than refused — a stale tick is not
+ *  a reason to lose the rest. Null when the Bottom A itself is gone. */
+export async function setLinks(bottomAId: string, bottomBIds: string[]): Promise<VidLink[] | null> {
+  await ensureSchema();
+  const client = await getPool().connect();
+  try {
+    await client.query('BEGIN');
+    const a = await client.query('SELECT 1 FROM vids_videos WHERE id = $1', [bottomAId]);
+    if (!a.rows[0]) { await client.query('ROLLBACK'); return null; }
+    await client.query('DELETE FROM vids_links WHERE bottom_a_id = $1', [bottomAId]);
+    const wanted = Array.from(new Set(bottomBIds)).filter((id) => id !== bottomAId);
+    if (wanted.length) {
+      await client.query(
+        `INSERT INTO vids_links (bottom_a_id, bottom_b_id)
+         SELECT $1::uuid, id FROM vids_videos WHERE id = ANY($2::uuid[])
+         ON CONFLICT DO NOTHING`,
+        [bottomAId, wanted],
+      );
+    }
+    const r = await client.query<LinkDb>(
+      `SELECT ${LINK_COLS} FROM vids_links WHERE bottom_a_id = $1 ORDER BY created_at`,
+      [bottomAId],
+    );
+    await client.query('COMMIT');
+    return r.rows.map(toLink);
+  } catch (e) {
+    await client.query('ROLLBACK').catch(() => {});
+    throw e;
+  } finally {
+    client.release();
+  }
 }
 
 // ── Folders ───────────────────────────────────────────────────────────────────
@@ -395,12 +455,14 @@ export async function createVideo(input: CreateVideoInput): Promise<VidRow> {
   try {
     const r = await getPool().query<VideoDb>(
       `INSERT INTO vids_videos
-         (id, folder_id, name, storage_path, thumb_path, mime_type, size_bytes, duration_s, width, height)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+         (id, folder_id, name, storage_path, thumb_path, mime_type, size_bytes, duration_s, width, height,
+          has_sfx, context, marks)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13::jsonb)
        RETURNING ${VIDEO_COLS}`,
       [
         input.id, input.folderId, input.name, input.storagePath, input.thumbPath, input.mimeType,
         input.sizeBytes, input.duration, input.width, input.height,
+        input.hasSfx ?? false, input.context ?? '', JSON.stringify(cleanMarks(input.marks ?? [])),
       ],
     );
     return toVideo(r.rows[0]);

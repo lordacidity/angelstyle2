@@ -65,7 +65,10 @@ export function fallbackWords(build: VidBuildSpec): string[] {
 
 function buildPrompt(build: VidBuildSpec, brief: RecipeTitleBrief): string {
   const { lines } = build.captions;
-  const captions = [lines.start.text, ...lines.bottomA.map((l) => l.text), ...lines.bottomB.map((l) => l.text), lines.end.text]
+  const captions = [
+    lines.start.text, ...lines.bottomA.map((l) => l.text), ...lines.bottomB.map((l) => l.text),
+    lines.payoff?.text ?? '', lines.end.text,
+  ]
     .map((t) => t.trim())
     .filter(Boolean);
   const name = build.persona?.name ?? '';

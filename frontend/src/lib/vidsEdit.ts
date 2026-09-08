@@ -230,6 +230,11 @@ export function sfxSpans(edit: ClipEdit, duration: number): Cut[] {
 export interface RenderOptions {
   /** Playback URL of the source clip. */
   url: string;
+  /** The clip as a file on the disk, when it has not been uploaded yet — the
+   *  intake run edits before it saves. Read directly, rather than through the
+   *  blob: URL the preview plays, which is not a thing to make range requests
+   *  of. */
+  file?: Blob;
   edit: ClipEdit;
   /** Source length in seconds — the browser-measured one, not the stored guess. */
   duration: number;
@@ -253,7 +258,7 @@ const even = (n: number) => Math.max(2, Math.round(n / 2) * 2);
  *  resampled by `speed`, matching what the preview plays. */
 export async function renderEditedClip(opts: RenderOptions): Promise<Blob> {
   const {
-    Input, UrlSource, ALL_FORMATS, VideoSampleSink, AudioSampleSink,
+    Input, UrlSource, BlobSource, ALL_FORMATS, VideoSampleSink, AudioSampleSink,
     Output, Mp4OutputFormat, BufferTarget, CanvasSource, AudioBufferSource,
     canEncodeVideo, canEncodeAudio,
   } = await import('mediabunny');
@@ -272,7 +277,10 @@ export async function renderEditedClip(opts: RenderOptions): Promise<Blob> {
     throw new Error('This browser has no WebCodecs support — save from Chrome or Edge.');
   }
 
-  const input = new Input({ source: new UrlSource(opts.url), formats: ALL_FORMATS });
+  const input = new Input({
+    source: opts.file ? new BlobSource(opts.file) : new UrlSource(opts.url),
+    formats: ALL_FORMATS,
+  });
   let gen: AsyncGenerator<MB.VideoSample | null, void, unknown> | null = null;
 
   try {

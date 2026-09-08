@@ -125,10 +125,26 @@ export const PERSONA_PART_LABEL: Record<PersonaPart, string> = {
   topBId: 'Top B',
 };
 
+// ── Links ─────────────────────────────────────────────────────────────────────
+// Which Bottom B clips follow on from which Bottom A. A screen recording of a
+// search only makes sense before the recording of the thing it found, and one
+// Bottom A often has two or three Bottom Bs that fit it and a dozen that don't
+// — so the pairs are written down here, on the Link page, and the builder
+// offers (and Random picks) only those. A Bottom A with no links yet is treated
+// as unlinked rather than unusable: its picker shows everything.
+
+/** One pair: this Bottom B may follow that Bottom A. Many-to-many. */
+export interface VidLink {
+  bottomAId: string;
+  bottomBId: string;
+}
+
 export interface VidsLibraryPayload {
   folders: VidFolder[];
   videos: VidRow[];
   personas: VidPersona[];
+  /** Absent from a server that predates links — read as none. */
+  links?: VidLink[];
 }
 
 /** POST /api/vids/videos/sign → short-lived upload targets for one clip. */
@@ -150,6 +166,14 @@ export interface CreateVideoInput {
   duration: number | null;
   width: number | null;
   height: number | null;
+  /** Known at filing time when the clip was named, given its context and
+   *  edited before it was ever uploaded — the intake run saves a clip only
+   *  once all of that is settled — so the row is whole from its first moment
+   *  rather than patched together afterwards. All optional: a plain upload
+   *  from the library pane sends none of them. */
+  context?: string;
+  marks?: VidMark[];
+  hasSfx?: boolean;
 }
 
 /** Browser-side metadata read off a file before upload. */
@@ -233,7 +257,15 @@ export interface VidBuildSpec {
   /** Output preset id — '9:16', '1:1', '4:5', '16:9'. */
   preset: string;
   captions: {
-    lines: { start: RecipeCaptionLine; bottomA: RecipeCaptionLine[]; bottomB: RecipeCaptionLine[]; end: RecipeCaptionLine };
+    lines: {
+      start: RecipeCaptionLine;
+      bottomA: RecipeCaptionLine[];
+      bottomB: RecipeCaptionLine[];
+      /** The pay-off over the closing clip, before the comment line. Absent on
+       *  builds written down before End carried two lines. */
+      payoff?: RecipeCaptionLine;
+      end: RecipeCaptionLine;
+    };
     styleId: string;
     notes: string;
     emojis: boolean;

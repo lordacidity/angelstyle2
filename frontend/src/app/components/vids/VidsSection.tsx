@@ -3,14 +3,14 @@
 // "Vids" — a shared cloud video library (folders + clips in Supabase Storage)
 // beside the stacked-sequence builder, in two pages:
 //
-//   Edit & file   upload footage, then open a clip in the editor — trim it, cut
-//                 chunks out of the middle, change its speed, drop its sound.
-//                 Saving puts the edit back over that clip, and you drag it into
-//                 the folder it belongs in. Dropping footage on the middle of the
-//                 page instead runs that whole errand for you: folder, context,
-//                 edit, save — and three files at once is taken to be a persona,
-//                 which is named once, given one context, and trimmed clip by
-//                 clip.
+//   Edit & file   three pages of its own. Upload: drop footage on the middle
+//                 and it runs the whole errand — folder, context, edit, save —
+//                 with three files at once taken to be a persona, named once,
+//                 given one context, and trimmed clip by clip. Edit: a clip
+//                 open in the editor — trim it, cut chunks out of the middle,
+//                 change its speed, drop its sound; saving puts the edit back
+//                 over that clip. Link: which Bottom Bs follow on from which
+//                 Bottom A, which is what the builder goes by below.
 //   Build         pick a persona plus the bottom clips, stack them into one
 //                 video, and caption it. Two rails on the right: placement and
 //                 sound in one, the captions and how they look in the other.
@@ -27,9 +27,11 @@
 //                               that name.
 // So a build chooses one persona plus up to three bottom clips, and the builder
 // plays the sequence: Start full screen → Top A over Bottom A → Bottom B, then
-// Top B over End. Export downloads the MP4 or saves it straight back into the
-// library so anyone can grab it from anywhere. No AI, no captions: just footage
-// in, video out.
+// Top B over End. Bottom A and Bottom B go together only in the pairs the Link
+// page has ticked: once a Bottom A is on the stage its Bottom B picker offers
+// just those, and Random draws a linked pair rather than two clips at random. Export downloads the MP4 or sends it to Phonedeck's Incoming
+// list — where a Media export lands — to be pushed to the phones from the
+// Phonedeck panel. No AI, no captions: just footage in, video out.
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useVidsLibrary } from '../../hooks/useVidsLibrary';
@@ -53,7 +55,7 @@ const PAGES: { id: Page; label: string }[] = [
 
 export function VidsSection({ active }: { active: boolean }) {
   const lib = useVidsLibrary(active);
-  const { loaded, folders, videos, personas, ensureFolders, uploadBlob } = lib;
+  const { loaded, loading, folders, videos, personas, links, ensureFolders, refreshWhenIdle } = lib;
   const [page, setPage] = useState<Page>('build');
   const [picks, setPicks] = useState<Picks>({});
   const [selectedSlot, setSelectedSlot] = useState<SlotId | null>(null);
@@ -161,15 +163,6 @@ export function VidsSection({ active }: { active: boolean }) {
     return videos.filter((v) => v.folderId && ids.has(v.folderId));
   }, [folders, videos]);
 
-  // A finished build lands unfiled, in the Inbox on the Edit & file page — the
-  // build page has no folder open to put it in, and the Inbox is where you go to
-  // look at it anyway.
-  const saveToLibrary = useCallback(async (blob: Blob, name: string): Promise<VidRow> => {
-    const row = await uploadBlob(blob, name, null);
-    if (!row) throw new Error('Upload failed — check the Edit & file page for details.');
-    return row;
-  }, [uploadBlob]);
-
   return (
     <div className="vids-scroll flex h-full flex-col text-white">
       <div className="flex items-center gap-4 border-b border-zinc-800 px-6 py-3">
@@ -178,7 +171,13 @@ export function VidsSection({ active }: { active: boolean }) {
           {PAGES.map((p, i) => (
             <button
               key={p.id}
-              onClick={() => setPage(p.id)}
+              onClick={() => {
+                // Coming over to Build reads the library again, so whatever was
+                // just filed or edited is in the rack — once any upload or save
+                // still on its way has landed, not over the top of it.
+                if (p.id === 'build' && page !== 'build') refreshWhenIdle();
+                setPage(p.id);
+              }}
               className={`px-3 py-1.5 text-[11px] font-medium transition-colors ${
                 page === p.id ? 'bg-zinc-200 text-black' : 'text-zinc-400 hover:bg-zinc-900 hover:text-white'
               }`}
@@ -187,6 +186,9 @@ export function VidsSection({ active }: { active: boolean }) {
             </button>
           ))}
         </div>
+        {loaded && loading && (
+          <span className="text-[10px] text-zinc-500">Refreshing the library…</span>
+        )}
         <span className="flex-1" />
         {hint && (
           <p className="rounded-md border border-amber-800 bg-amber-950/40 px-3 py-1.5 text-[11px] text-amber-300">{hint}</p>
@@ -205,12 +207,12 @@ export function VidsSection({ active }: { active: boolean }) {
           resolveVideo={resolveVideo}
           clipsForSlot={clipsForSlot}
           personas={personas}
+          links={links}
           appliedPersonaId={appliedPersonaId}
           onUsePersona={usePersona}
           onClearPersona={clearPersona}
           active={active && page === 'build'}
           libraryLoaded={loaded}
-          onSaveToLibrary={saveToLibrary}
         />
       </div>
       <div className="flex min-h-0 flex-1" style={{ display: page === 'prep' ? undefined : 'none' }}>

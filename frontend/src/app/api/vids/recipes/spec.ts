@@ -54,6 +54,8 @@ export const BuildSpecSchema = z.object({
       start: Line,
       bottomA: z.array(Line).max(24),
       bottomB: z.array(Line).max(24),
+      // Missing from records written before End carried two lines.
+      payoff: Line.optional(),
       end: Line,
     }),
     styleId: z.string().max(32),

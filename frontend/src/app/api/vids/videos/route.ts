@@ -3,7 +3,7 @@
 // can't point a row at somebody else's object.
 import { NextRequest, NextResponse } from 'next/server';
 import { createVideo, errMessage, isUuid } from '@/lib/vids-db';
-import type { CreateVideoInput } from '@/lib/vids-types';
+import { cleanMarks, readContextPatch, type CreateVideoInput, type VidContextPatch } from '@/lib/vids-types';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -41,6 +41,13 @@ export async function POST(req: NextRequest) {
     width: num(b.width) === null ? null : Math.round(num(b.width) as number),
     height: num(b.height) === null ? null : Math.round(num(b.height) as number),
   };
+  // Filed whole — see CreateVideoInput. Each is left off when it wasn't sent,
+  // so a plain upload gets the column defaults.
+  const context: VidContextPatch = {};
+  readContextPatch(b as Record<string, unknown>, context);
+  if (context.context !== undefined) input.context = context.context;
+  if (b.marks !== undefined) input.marks = cleanMarks(b.marks);
+  if (b.hasSfx === true) input.hasSfx = true;
   try {
     return NextResponse.json(await createVideo(input));
   } catch (err) {

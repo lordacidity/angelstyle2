@@ -95,8 +95,9 @@ const SETUP_COMMAND =
 // auto-opens once per browser so a new teammate sees how to get started.
 //
 // `hidden` blanks it out rather than unmounting it — Vids is a full-screen
-// builder with its own controls down that edge, and nothing on it talks to the
-// local server. Staying mounted keeps the once-per-browser dropdown from
+// builder whose transport bar runs along that edge, right where this button
+// sits. (A Vids push that finds no server falls back to a download and says to
+// start it from here.) Staying mounted keeps the once-per-browser dropdown from
 // popping open again every time you come back off that tab.
 function LaunchServerButton({ hidden }: { hidden: boolean }) {
   const [open, setOpen] = useState(false);
@@ -298,10 +299,10 @@ export function StudioShell() {
       {/* Floating Phonedeck panel — bottom-right, mirrors Phonedeck's Incoming
           list over HTTP/SSE so a fresh export can be pushed to phones without
           switching tabs. Works locally; can point at a peer machine on the LAN
-          via NEXT_PUBLIC_PHONEDECK_URL. Hidden on the Brand Kit / template
-          selector landing page since no content is being created or exported
-          there — kept mounted (display:none) so the SSE connection persists
-          across navigation. */}
+          via NEXT_PUBLIC_PHONEDECK_URL. Media only: Vids has its own, smaller
+          face on the same list under its export buttons (VidsPhonedeck), and
+          nothing is exported anywhere else — kept mounted (display:none) so
+          the SSE connection persists across navigation. */}
       <div style={{ display: activeSection === 'media' ? undefined : 'none' }}>
         <PhonedeckMiniPanel onPushed={handlePhonedeckPushed} />
       </div>
@@ -511,8 +512,8 @@ export function StudioShell() {
       />
 
       {/* Launch-server split button + first-time setup dropdown (see component).
-          Off on Vids: that page fills the screen and never needs the local
-          server. */}
+          Off on Vids: the transport bar runs along that edge, and the Phonedeck
+          list under that page's export buttons shows whether the server is up. */}
       <LaunchServerButton hidden={activeSection === 'vids'} />
     </div>
   );

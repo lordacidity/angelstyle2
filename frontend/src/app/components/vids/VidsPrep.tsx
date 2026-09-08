@@ -8,14 +8,23 @@
 //           panel up here any more — everything new comes in through the middle
 //           — but the pane still takes a drop that misses a folder, and files it
 //           in the Inbox.
-//   Right   the editor for the open clip — trim, cut, speed, sound, save — or,
-//           while nothing is open, the intake stage: the whole middle is a drop
-//           target, and a drop runs the pipeline in VidsIntake. One clip walks
-//           folder → context → edit → save; three at once is taken to be a
-//           persona and walks name + one context → trim each of the three.
-//           Dropping onto a folder on the left still just files footage, and
-//           clicking a clip still opens it on its own — the pipeline is a way
-//           through, not the only way in.
+//   Right   three pages under one strip:
+//           Upload   the intake stage: the whole middle is a drop target, and
+//                    a drop runs the pipeline in VidsIntake. One clip walks
+//                    folder → context → edit → save; three at once is taken
+//                    to be a persona and walks name + one context → trim each
+//                    of the three. Dropping onto a folder on the left still
+//                    just files footage, and clicking a clip still opens it
+//                    on its own — the pipeline is a way through, not the only
+//                    way in.
+//           Edit     the editor for the open clip — trim, cut, speed, sound,
+//                    save. Opening a clip from anywhere lands here.
+//           Link     which Bottom Bs follow on from which Bottom A
+//                    (VidsLinks) — what the builder's Bottom B picker and its
+//                    Random button go by.
+//           A run turns the page for you — Upload while it is asking
+//           something, Edit once it has a clip open — and all three stay
+//           mounted, so nothing half-done is lost to a look elsewhere.
 //
 // Right-click says what a piece of footage is showing: a clip's thumbnail opens
 // the context popup for that clip, a persona row (or one of its part tiles) for
@@ -34,7 +43,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { DragEvent } from 'react';
-import type { PersonaPart, VidContext, VidContextPatch, VidFolder, VidMark, VidPersona, VidRow } from '@/lib/vids-types';
+import type { PersonaPart, VidContext, VidFolder, VidMark, VidPersona, VidRow } from '@/lib/vids-types';
 import { PERSONA_PARTS, PERSONA_PART_LABEL, isPhoto } from '@/lib/vids-types';
 import { MEDIA_ONLY, isMediaFile, isVideoFile, type VidsLib } from '../../hooks/useVidsLibrary';
 import {
@@ -42,12 +51,13 @@ import {
   slotForFolderName,
 } from '@/lib/vidsPlan';
 import { VidsClipEditor, type ContextOwner } from './VidsClipEditor';
-import { VidsContextDialog } from './VidsContext';
+import { VidsContextDialog, type VidsContextSave } from './VidsContext';
 import {
   PERSONA_DROP, VidsIntakeBanner, VidsIntakeStage, hasFiles, hasVid,
-  type FolderChoice, type Intake,
+  type FolderChoice, type Intake, type LocalRow,
 } from './VidsIntake';
 import { VidPreview, fmtBytes } from './VidPreview';
+import { VidsLinks } from './VidsLinks';
 import { fmtTime } from '@/lib/utils';
 import { CloseIcon, SpinnerIcon, TrashIcon, UploadIcon, VideoIcon } from '@/lib/icons';
 
@@ -58,6 +68,19 @@ const sameName = (a: string, b: string) => a.trim().toLowerCase() === b.trim().t
 const INBOX = '__inbox__';
 const personaKey = (id: string) => `persona:${id}`;
 const personaOf = (list: string) => (list.startsWith('persona:') ? list.slice('persona:'.length) : null);
+
+/** The ids of an intake run's local rows — clips still on the disk, not yet
+ *  saved — so the editor's saves and mark edits know where to write. */
+const LOCAL_PREFIX = 'local:';
+const isLocalId = (id: string | null | undefined): id is string => !!id && id.startsWith(LOCAL_PREFIX);
+
+/** The three pages on the right. */
+type Tab = 'upload' | 'edit' | 'link';
+const TABS: { id: Tab; label: string }[] = [
+  { id: 'upload', label: 'Upload' },
+  { id: 'edit',   label: 'Edit' },
+  { id: 'link',   label: 'Link' },
+];
 
 function FolderIcon({ open }: { open: boolean }) {
   return (
@@ -173,7 +196,7 @@ function ClipCard({ v, open, onOpen, onDelete, onContext }: {
     >
       <button
         onClick={onOpen}
-        title={`${v.name} — click to edit it, drag to file it, right-click for context`}
+        title={`${v.name} — click to edit it, drag to file it, right-click to rename it or say what it shows`}
         className="block h-20 w-full bg-black"
       >
         {v.thumbUrl ? (
@@ -225,7 +248,7 @@ function PartCard({ label, video, open, busy, onOpen, onFiles, onVideoId, onClea
   return (
     <div
       title={video
-        ? `${label} — ${video.name} — click to edit it, right-click for the persona's context`
+        ? `${label} — ${video.name} — click to edit it, right-click for the persona's name and context`
         : `${label} — drop a clip here, or click to choose a file`}
       onContextMenu={(e) => { e.preventDefault(); onContext(); }}
       draggable={!!video}
@@ -317,8 +340,37 @@ function PartCard({ label, video, open, busy, onOpen, onFiles, onVideoId, onClea
   );
 }
 
+/** The Edit page with nothing open: how to open something. A run that is
+ *  asking a question on the Upload page is pointed back to. */
+function EditIdle({ waiting, onUpload }: { waiting: boolean; onUpload: () => void }) {
+  return (
+    <div className="flex min-h-0 flex-1 flex-col p-6">
+      <div className="flex min-h-0 flex-1 flex-col items-center justify-center rounded-xl border-2 border-dashed border-zinc-800 px-8 text-center">
+        <VideoIcon size={30} className="text-zinc-700" />
+        <p className="mt-3 text-[14px] font-semibold text-zinc-100">Nothing open</p>
+        <p className="mt-1 max-w-[420px] text-[11px] leading-relaxed text-zinc-500">
+          {waiting
+            ? 'Your drop is waiting on a question on the Upload page.'
+            : 'Click a clip on the left to open it here — trim it, cut it, change its speed, lay the keys over it, save.'}
+        </p>
+        {waiting ? (
+          <button
+            onClick={onUpload}
+            className="mt-4 rounded bg-white px-3 py-1 text-[11px] font-medium text-black hover:bg-zinc-200"
+          >
+            Back to it
+          </button>
+        ) : (
+          <p className="mt-4 text-[10px] text-zinc-600">New footage goes in on the Upload page.</p>
+        )}
+      </div>
+    </div>
+  );
+}
+
 export function VidsPrep({ lib, active }: { lib: VidsLib; active: boolean }) {
   const [openId, setOpenId] = useState<string | null>(null);
+  const [tab, setTab] = useState<Tab>('upload');
   const [list, setList] = useState<string>(INBOX);
   const [paneOver, setPaneOver] = useState(false);
   // The Persona row is closed until you press it. Naming a new one, or landing
@@ -329,6 +381,16 @@ export function VidsPrep({ lib, active }: { lib: VidsLib; active: boolean }) {
   const [busyPart, setBusyPart] = useState<PersonaPart | null>(null);
   // Which thing the right-click popup is asking about, if it is up.
   const [ctxTarget, setCtxTarget] = useState<{ kind: 'clip' | 'persona'; id: string } | null>(null);
+  // The intake run, if one is going — see the Intake section below. Declared
+  // up here because the clip on screen can be one of its local rows.
+  const [intake, setIntake] = useState<Intake | null>(null);
+  /** Change one of the run's local rows — its name, context or marks as they
+   *  are given, kept there for the editor to show and the save to send. */
+  const patchLocal = useCallback((id: string, patch: Partial<VidRow>) => {
+    setIntake((prev) => (prev
+      ? { ...prev, local: prev.local.map((r) => (r.id === id ? { ...r, ...patch } : r)) }
+      : prev));
+  }, []);
   // dragenter/dragleave fire for every child crossed; count them so the
   // highlight only drops once the pointer truly leaves the pane.
   const paneDepth = useRef(0);
@@ -369,6 +431,14 @@ export function VidsPrep({ lib, active }: { lib: VidsLib; active: boolean }) {
     return g ? lib.videos.filter((v) => v.folderId && g.ids.has(v.folderId)) : [];
   }, [list, unfiled, groups, lib.videos]);
 
+  // What the Link page pairs up: everything filed under Bottom A and Bottom B.
+  const clipsIn = useCallback((name: string) => {
+    const g = groups.find((x) => sameName(x.name, name));
+    return g ? lib.videos.filter((v) => v.folderId && g.ids.has(v.folderId)) : [];
+  }, [groups, lib.videos]);
+  const bottomAClips = useMemo(() => clipsIn(SLOT_META.bottomA.folder), [clipsIn]);
+  const bottomBClips = useMemo(() => clipsIn(SLOT_META.bottomB.folder), [clipsIn]);
+
   // Clips filed under Persona that this persona isn't already using — what an
   // open persona offers as swap-ins for its three parts.
   const personaSpares = useMemo(() => {
@@ -381,7 +451,12 @@ export function VidsPrep({ lib, active }: { lib: VidsLib; active: boolean }) {
     (id: string | null | undefined) => (id ? lib.videos.find((v) => v.id === id) : undefined),
     [lib.videos],
   );
-  const openVideo = videoById(openId) ?? null;
+  /** A run's local row by id — a clip the editor plays off the disk. */
+  const localById = useCallback(
+    (id: string | null | undefined) => (isLocalId(id) ? intake?.local.find((r) => r.id === id) : undefined),
+    [intake],
+  );
+  const openVideo = videoById(openId) ?? localById(openId) ?? null;
 
   // ── Context ──
   // What a piece of footage is showing. An ordinary clip carries its own; the
@@ -401,10 +476,13 @@ export function VidsPrep({ lib, active }: { lib: VidsLib; active: boolean }) {
       : { id: openVideo.id, kind: 'clip', name: openVideo.name, value: { context: openVideo.context } };
   }, [openVideo, personaOfVideo]);
 
-  const saveContext = useCallback((target: { kind: 'clip' | 'persona'; id: string }, patch: VidContextPatch) => {
+  // The editor's panel sends the context alone; the right-click popup can send
+  // a new name with it. Both land on the clip or on the persona the same way.
+  const saveContext = useCallback((target: { kind: 'clip' | 'persona'; id: string }, patch: VidsContextSave) => {
     if (target.kind === 'persona') void lib.updatePersona(target.id, patch);
+    else if (isLocalId(target.id)) patchLocal(target.id, patch);
     else void lib.setVideoContext(target.id, patch);
-  }, [lib]);
+  }, [lib, patchLocal]);
 
   /** Right-clicking a clip that a persona is using asks about the persona. */
   const askClipContext = useCallback((v: VidRow) => {
@@ -419,15 +497,17 @@ export function VidsPrep({ lib, active }: { lib: VidsLib; active: boolean }) {
     if (ctxTarget.kind === 'persona') {
       const p = lib.personas.find((x) => x.id === ctxTarget.id);
       return p && {
-        title: p.name,
-        hint: 'What this persona is doing — shared by its Start, Top A and Top B.',
+        kind: 'persona' as const,
+        name: p.name,
+        hint: 'Its name, and what it is doing — shared by its Start, Top A and Top B.',
         value: { context: p.context },
       };
     }
     const v = lib.videos.find((x) => x.id === ctxTarget.id);
     return v && {
-      title: v.name,
-      hint: 'What this clip is showing, in your words.',
+      kind: 'clip' as const,
+      name: v.name,
+      hint: 'What to call this clip, and what it is showing, in your words.',
       value: { context: v.context },
     };
   }, [ctxTarget, lib.personas, lib.videos]);
@@ -455,22 +535,79 @@ export function VidsPrep({ lib, active }: { lib: VidsLib; active: boolean }) {
   // are shot together — so that run asks for one name and one context and then
   // walks the three, trimming only.
   //
+  // Nothing is uploaded until the end. Each file plays in the editor straight
+  // off the disk, as a local row standing in for the clip it will become, and
+  // Save is what files it: the bytes go up with the name, the context and the
+  // marks already on them, into the folder the run chose. A clip skipped, or a
+  // run cancelled, was never saved anywhere. A photo has nothing to edit, so
+  // naming it is what files it.
+  //
   // A run is a plan, not a lock: it holds the files, where they are going, the
-  // rows as their uploads land, and which one it is standing on. Saving in the
-  // editor moves it on; cancelling leaves everything it already did in place.
-  const [intake, setIntake] = useState<Intake | null>(null);
+  // rows as their saves land, and which one it is standing on. (`intake` itself
+  // is declared up with the other state — the clip on screen can be one of its
+  // local rows.)
+  //
   // Read from callbacks that run after an await, where the closure's copy would
   // be a render behind.
   const intakeRef = useRef<Intake | null>(null);
   useEffect(() => { intakeRef.current = intake; }, [intake]);
-  // Bumped whenever a run starts or stops, so an upload loop from an abandoned
-  // one can tell it is no longer the one steering the page.
+  // Bumped whenever a run starts or stops, so a save from an abandoned one can
+  // tell it is no longer the one steering the page.
   const runRef = useRef(0);
+  // The object URLs the run's local rows play from, let go when the run ends.
+  const localUrls = useRef<string[]>([]);
 
-  const cancelIntake = useCallback(() => {
+  /** A row that stands in for a file until it is saved — the same shape the
+   *  editor and the context panel already take, playing off the disk. The
+   *  editor reads the length off the footage itself, so it is left unknown. */
+  const localRow = useCallback((file: File, name: string): LocalRow => {
+    const url = URL.createObjectURL(file);
+    localUrls.current.push(url);
+    return {
+      file,
+      id: `${LOCAL_PREFIX}${crypto.randomUUID()}`,
+      folderId: null,
+      name,
+      storagePath: '',
+      thumbPath: null,
+      mimeType: file.type || 'video/mp4',
+      sizeBytes: file.size,
+      duration: null,
+      width: null,
+      height: null,
+      createdAt: new Date().toISOString(),
+      url,
+      thumbUrl: null,
+      context: '',
+      marks: [],
+      hasSfx: false,
+    };
+  }, []);
+
+  /** End the run outright: whatever it saved stays, the local rows are let go. */
+  const endRun = useCallback(() => {
     runRef.current++;
+    for (const u of localUrls.current) URL.revokeObjectURL(u);
+    localUrls.current = [];
+    setOpenId(null);
     setIntake(null);
   }, []);
+
+  /** Stop the run. Whatever it hadn't saved yet was never anywhere but the
+   *  disk, so a run with clips still waiting asks first. Says whether it
+   *  actually ended. */
+  const cancelIntake = useCallback((): boolean => {
+    const cur = intakeRef.current;
+    if (cur && cur.step !== 'done') {
+      const left = cur.files.length - cur.rows.filter(Boolean).length;
+      const what = left === 1 ? "The clip you dropped hasn't" : `${left} of the clips you dropped haven't`;
+      if (left > 0 && !window.confirm(`Stop here? ${what} been saved, and won't be — nothing goes up until an edit is saved.`)) {
+        return false;
+      }
+    }
+    endRun();
+    return true;
+  }, [endRun]);
 
   /** Where a run can file footage: the Inbox, or one of the fixed folders with
    *  the reason it exists said in the words the builder uses. */
@@ -488,32 +625,12 @@ export function VidsPrep({ lib, active }: { lib: VidsLib; active: boolean }) {
     return out;
   }, [groups]);
 
-  /** Push a run's files up one at a time, dropping each row into the run as it
-   *  lands so the first clip can be edited while the rest are still going. */
-  const runUploads = useCallback(async (
-    token: number,
-    files: File[],
-    folderId: string | null,
-    nameOf: (i: number) => string,
-    onRow?: (i: number, row: VidRow) => Promise<void> | void,
-  ) => {
-    for (let i = 0; i < files.length; i++) {
-      const row = await lib.uploadBlob(files[i], nameOf(i), folderId);
-      if (row && onRow) await onRow(i, row);
-      // A run that has been called off stops steering the page, but the footage
-      // still goes up: you dropped it, so it belongs in the library either way.
-      if (runRef.current !== token) continue;
-      if (!row) break;   // it failed — the upload list on the left says why
-      setIntake((prev) => (prev ? { ...prev, rows: prev.rows.map((r, n) => (n === i ? row : r)) } : prev));
-    }
-    if (runRef.current === token) setIntake((prev) => (prev ? { ...prev, busy: false } : prev));
-  }, [lib]);
-
   const startIntake = useCallback((files: FileList | File[]) => {
     const list = Array.from(files).filter(isMediaFile);
     if (list.length === 0) { lib.setError(MEDIA_ONLY); return; }
-    runRef.current++;
-    setOpenId(null);
+    // A finished run still on screen makes way; a live one never gets here,
+    // since the stage takes no drop while it is asking something.
+    endRun();
     // Three files is a persona only when all three are footage: a persona is one
     // performance, and a photo is never part of one.
     const persona = list.length === PERSONA_DROP && list.every(isVideoFile);
@@ -521,57 +638,52 @@ export function VidsPrep({ lib, active }: { lib: VidsLib; active: boolean }) {
       mode: persona ? 'persona' : 'clips',
       step: persona ? 'setup' : 'folder',
       files: list,
+      local: list.map((f) => localRow(f, f.name)),
       folderId: persona ? personaFolderId : null,
       folderName: persona ? PERSONA_FOLDER : 'Inbox',
       rows: list.map(() => null),
       index: 0,
       personaId: null,
       personaName: '',
-      busy: false,
+      personaContext: '',
+      saving: false,
     });
-  }, [lib, personaFolderId]);
+  }, [lib, personaFolderId, endRun, localRow]);
 
+  /** The folder is only remembered here — nothing goes to it until a save. */
   const chooseFolder = useCallback((choice: FolderChoice) => {
-    if (!intake) return;
-    const token = ++runRef.current;
-    setIntake({ ...intake, step: 'context', folderId: choice.id, folderName: choice.name, busy: true });
-    void runUploads(token, intake.files, choice.id, (i) => intake.files[i].name);
-  }, [intake, runUploads]);
+    setIntake((prev) => (prev ? { ...prev, step: 'context', folderId: choice.id, folderName: choice.name } : prev));
+  }, []);
 
-  /** The persona exists from the moment its name is given, and each of its three
-   *  parts is pointed at its clip as that upload lands — so a run interrupted
-   *  halfway leaves a real persona with the parts it got, not a stray file. */
-  const startPersona = useCallback(async (name: string, context: VidContext, order: File[]) => {
+  /** Persona setup is done: the three take their parts' names, in the order
+   *  given, and go straight to trimming. The persona itself is made when the
+   *  first trim is saved, alongside that part — so a run cancelled before then
+   *  leaves nothing behind, not even an empty persona. */
+  const startPersona = useCallback((name: string, context: VidContext, order: File[]) => {
     if (!intake) return;
-    const token = ++runRef.current;
-    const persona = await lib.createPersona(name);
-    if (!persona) { setIntake(null); return; }   // lib.error says why
-    if (context.context) void lib.updatePersona(persona.id, context);
-    if (runRef.current !== token) return;
-    setIntake((prev) => (prev ? {
-      ...prev,
+    const clean = name.trim();
+    const local = order.map((f, i) => ({
+      ...(intake.local[intake.files.indexOf(f)] ?? localRow(f, f.name)),
+      name: `${clean} — ${PERSONA_PART_LABEL[PERSONA_PARTS[i]]}`,
+    }));
+    setIntake({
+      ...intake,
       step: 'edit',
       files: order,
+      local,
       rows: order.map(() => null),
       folderId: personaFolderId,
       folderName: PERSONA_FOLDER,
-      personaId: persona.id,
-      personaName: persona.name,
+      personaId: null,
+      personaName: clean,
+      personaContext: context.context,
       index: 0,
-      busy: true,
-    } : prev));
-    setList(personaKey(persona.id));
-    void runUploads(
-      token,
-      order,
-      personaFolderId,
-      (i) => `${persona.name} — ${PERSONA_PART_LABEL[PERSONA_PARTS[i]]}`,
-      (i, row) => lib.updatePersona(persona.id, { [PERSONA_PARTS[i]]: row.id }),
-    );
-  }, [intake, lib, personaFolderId, runUploads]);
+    });
+  }, [intake, personaFolderId, localRow]);
 
   /** Three files that turn out not to be a persona: nothing has been uploaded
-   *  yet at that point, so it just becomes an ordinary run. */
+   *  at that point (nothing ever is until a save), so it just becomes an
+   *  ordinary run. */
   const fileAsClips = useCallback(() => {
     setIntake((prev) => (prev ? { ...prev, mode: 'clips', step: 'folder' } : prev));
   }, []);
@@ -587,39 +699,61 @@ export function VidsPrep({ lib, active }: { lib: VidsLib; active: boolean }) {
     });
   }, []);
 
-  /** What this clip is showing, then straight into the editor — unless it is a
-   *  photo, which has nothing to trim, cut or listen to: saying what it shows is
-   *  the whole of filing one, so the run goes straight on to the next. */
-  const intakeContext = useCallback((name: string, context: VidContext) => {
-    if (!intake) return;
-    const row = intake.rows[intake.index];
-    if (!row) return;
-    void lib.renameVideo(row.id, name);
-    if (context.context) void lib.setVideoContext(row.id, context);
-    if (isPhoto(row)) advanceIntake();
-    else setIntake({ ...intake, step: 'edit' });
-  }, [intake, lib, advanceIntake]);
-
-  // A run standing on a clip that has finished uploading is a clip in the
-  // editor: this is the only thing that opens one on the run's behalf, so the
-  // step it is on and what is on screen can't drift apart.
-  useEffect(() => {
-    if (intake?.step !== 'edit') return;
-    const id = intake.rows[intake.index]?.id;
-    if (id) setOpenId(id);
-  }, [intake]);
-
-  /** Clicking a clip while a run is going. One of the run's own clips moves the
-   *  run onto it. Anything else ends a run that had a clip open — you have left
-   *  it, and nothing more should be saved on its behalf — but a run still asking
-   *  a question keeps its place and puts the question back when you close this. */
-  const openClip = useCallback((id: string | null) => {
-    setOpenId(id);
+  /** The clip's name and what it is showing, kept on its local row for the
+   *  editor to open with — then straight into the editor. A photo has nothing
+   *  to trim, cut or listen to, so naming it is the whole of filing one: it is
+   *  saved right here, and the run goes on to the next. */
+  const intakeContext = useCallback(async (name: string, context: VidContext) => {
     const cur = intakeRef.current;
-    if (!cur) return;
-    const at = id ? cur.rows.findIndex((r) => r?.id === id) : -1;
-    if (at >= 0 && cur.step !== 'done') setIntake({ ...cur, index: at, step: 'edit' });
-    else if (cur.step === 'edit' || cur.step === 'done') cancelIntake();
+    const row = cur?.local[cur.index];
+    if (!cur || !row) return;
+    if (!isPhoto(row)) {
+      setIntake((prev) => (prev ? {
+        ...prev,
+        step: 'edit',
+        local: prev.local.map((r) => (r.id === row.id ? { ...r, name, context: context.context } : r)),
+      } : prev));
+      return;
+    }
+    const token = runRef.current;
+    const at = cur.index;
+    setIntake((prev) => (prev ? { ...prev, saving: true } : prev));
+    const saved = await lib.uploadBlob(row.file, name, cur.folderId, { context: context.context });
+    if (runRef.current !== token) return;
+    setIntake((prev) => (prev ? { ...prev, saving: false } : prev));
+    // It failed — the upload list on the left says why, and the run stays put.
+    if (!saved) return;
+    setIntake((prev) => (prev ? { ...prev, rows: prev.rows.map((r, n) => (n === at ? saved : r)) } : prev));
+    advanceIntake();
+  }, [lib, advanceIntake]);
+
+  // A run standing on a clip is that clip in the editor, playing off the disk:
+  // this is the only thing that opens one on the run's behalf, so the step it
+  // is on and what is on screen can't drift apart. It also turns the page to
+  // wherever the run is — Edit once it has a clip, Upload while it is asking
+  // something — keyed on the step and the clip rather than the whole run, so a
+  // mark or a context typed against the clip doesn't keep pulling you back if
+  // you went to look at something else.
+  const intakeStep = intake?.step ?? null;
+  const intakeClipId = intake?.step === 'edit' ? (intake.local[intake.index]?.id ?? null) : null;
+  useEffect(() => {
+    if (!intakeStep) return;
+    if (intakeStep === 'edit') {
+      if (intakeClipId) { setOpenId(intakeClipId); setTab('edit'); }
+      return;
+    }
+    setTab('upload');
+  }, [intakeStep, intakeClipId]);
+
+  /** Clicking a clip while a run is going. A run that had a clip open ends
+   *  first — you have left it — and asks before dropping anything unsaved; if
+   *  you keep the run, the click does nothing. A run still asking a question
+   *  keeps its place and puts the question back when you close this. */
+  const openClip = useCallback((id: string | null) => {
+    const cur = intakeRef.current;
+    if (cur && (cur.step === 'edit' || cur.step === 'done') && !cancelIntake()) return;
+    setOpenId(id);
+    if (id) setTab('edit');
   }, [cancelIntake]);
 
   // ── Personas ──
@@ -661,49 +795,85 @@ export function VidsPrep({ lib, active }: { lib: VidsLib; active: boolean }) {
     if (p) setList(personaKey(p.id));
   };
 
-  // The edit goes back over the clip it came from: same row, same folder, same
-  // persona part — only the footage changes. Saving is also what moves a run on,
-  // so the last thing you do to a clip is the thing that hands you the next one.
+  // Save is what files a clip. For a row the run holds locally, the bytes go up
+  // here for the first time — the edit as rendered, or the file as dropped when
+  // the editor found nothing to change — with the name, the context and the
+  // marks on them, into the folder the run chose; then the run moves on. A
+  // persona's part goes up the same way, and the persona is made with its
+  // first part. A clip already in the library takes the edit over itself: same
+  // row, same folder, same persona part — only the footage changes. No blob
+  // there means the editor found nothing about the footage to change, so the
+  // row just takes the name.
   //
   // `videoId` comes from the editor rather than from what is open here: a render
   // takes long enough that another clip can be open by the time it lands, and the
   // bytes belong to the clip they were made from.
-  // No blob means the editor found nothing about the footage to change — the
-  // clip was only renamed, so the row takes the name and the bytes in the bucket
-  // are left exactly where they are. Marks are already saved as they are made,
-  // so there is nothing else to carry over. Either way the run moves on.
   const saveEdited = useCallback(async (
     blob: Blob | null, name: string, hasSfx: boolean, marks: VidMark[], videoId: string,
   ) => {
-    if (blob) {
-      const row = await lib.replaceVideo(videoId, blob, name, hasSfx, marks);
-      if (!row) throw new Error('Saving failed — see the message on the left.');
-    } else {
-      await lib.renameVideo(videoId, name);
+    if (!isLocalId(videoId)) {
+      if (blob) {
+        const row = await lib.replaceVideo(videoId, blob, name, hasSfx, marks);
+        if (!row) throw new Error('Saving failed — see the message on the left.');
+      } else {
+        await lib.renameVideo(videoId, name);
+      }
+      return;
     }
+
     const cur = intakeRef.current;
-    if (cur?.step !== 'edit' || cur.rows[cur.index]?.id !== videoId) return;
-    setIntake((prev) => (prev
-      ? { ...prev, rows: prev.rows.map((r) => (r?.id === videoId ? { ...r, name } : r)) }
-      : prev));
-    advanceIntake();
+    const at = cur ? cur.local.findIndex((r) => r.id === videoId) : -1;
+    if (!cur || at < 0) throw new Error('This clip is no longer part of a run — drop it again to file it.');
+    const token = runRef.current;
+    const row = await lib.uploadBlob(blob ?? cur.local[at].file, name, cur.folderId, {
+      context: cur.local[at].context, marks, hasSfx,
+    });
+    if (!row) throw new Error('Saving failed — see the message on the left.');
+    // The run was called off while this went up. The clip is saved either way —
+    // it was already on its way — but nothing more is done on the run's behalf.
+    if (runRef.current !== token) return;
+
+    if (cur.mode === 'persona') {
+      const part = PERSONA_PARTS[at];
+      const personaId = intakeRef.current?.personaId ?? null;
+      if (personaId) {
+        await lib.updatePersona(personaId, { [part]: row.id });
+      } else {
+        const persona = await lib.createPersona(cur.personaName, { [part]: row.id });
+        if (!persona) throw new Error('The clip is saved, but the persona could not be made — see the message on the left.');
+        if (cur.personaContext) void lib.updatePersona(persona.id, { context: cur.personaContext });
+        setIntake((prev) => (prev ? { ...prev, personaId: persona.id } : prev));
+        setList(personaKey(persona.id));
+      }
+    }
+    setIntake((prev) => (prev ? { ...prev, rows: prev.rows.map((r, n) => (n === at ? row : r)) } : prev));
+    const now = intakeRef.current;
+    if (now?.step === 'edit' && now.index === at) advanceIntake();
   }, [lib, advanceIntake]);
 
   // Closing the clip a run has open ends the run — otherwise it would just put
-  // the same clip straight back. A run that is only holding a question is left
-  // alone: closing here is how you get back to it.
+  // the same clip straight back — asking first if clips are still waiting, and
+  // leaving the clip open if you keep the run. A run that is only holding a
+  // question is left alone: closing here is how you get back to it.
   const closeEditor = useCallback(() => {
+    if (intakeRef.current?.step === 'edit') { cancelIntake(); return; }
     setOpenId(null);
-    if (intakeRef.current?.step === 'edit') cancelIntake();
   }, [cancelIntake]);
 
   /** The run, only while the clip on screen really is the one it is standing on
    *  — what the banner, the trim-only editor and the Save label all key off. */
-  const run = intake?.step === 'edit' && intake.rows[intake.index]?.id === openId ? intake : null;
+  const run = intake?.step === 'edit' && intake.local[intake.index]?.id === openId ? intake : null;
 
   /** Whether the Persona row is showing its personas. Pressed open by hand, and
    *  forced open whenever one of them is what you are looking at or naming. */
   const personaShown = personaOpen || personaOf(list) !== null || newPersona !== null;
+
+  /** One line beside the strip saying what the open page is for. */
+  const tabHint = tab === 'upload'
+    ? 'Drop footage in the middle. One clip walks through folder, name, edit and save; three at once make a persona.'
+    : tab === 'edit'
+      ? (openVideo ? `Editing ${openVideo.name}` : 'Click a clip on the left to open it here.')
+      : 'Pick a Bottom A, then tick the Bottom Bs that follow it. Build offers only those, and Random picks its pairs from here.';
 
   return (
     <div className="flex min-h-0 flex-1">
@@ -918,48 +1088,92 @@ export function VidsPrep({ lib, active }: { lib: VidsLib; active: boolean }) {
 
       </div>
 
-      {/* Right: the editor once a clip is open, the intake stage until then —
-          the middle of the page is never dead space. */}
-      {openVideo && !isPhoto(openVideo) ? (
-        <div className="flex min-h-0 flex-1 flex-col">
-          {run && (
-            <VidsIntakeBanner intake={run} onSkip={advanceIntake} onCancel={cancelIntake} />
-          )}
-          <VidsClipEditor
-            video={openVideo}
-            onSave={saveEdited}
-            active={active}
-            onClose={closeEditor}
-            contextOwner={contextOwner}
-            onMarksChange={(marks) => { if (openId) void lib.setVideoMarks(openId, marks); }}
-            onContextChange={(patch) => {
-              if (contextOwner) saveContext({ kind: contextOwner.kind, id: contextOwner.id }, patch);
-            }}
-            // A persona's clips only get trimmed, and the run's own Save is what
-            // hands over the next one — except Top A, which loops under the whole
-            // bottom sequence in a build. That is the one place jump cuts have to
-            // be made, so it gets Cut and Auto cut on top of the in / out points.
-            mode={run?.mode !== 'persona'
-              ? 'full'
-              : PERSONA_PARTS[run.index] === 'topAId' ? 'cut' : 'trim'}
-            saveLabel={run
-              ? (run.index >= run.files.length - 1 ? 'Save · finish' : 'Save · next clip')
-              : undefined}
+      {/* Right: three pages under one strip — Upload (the intake stage, and the
+          questions a run asks), Edit (the open clip), Link (Bottom A → Bottom
+          B). All three stay mounted: switching away from a half-done edit, a
+          half-typed name or a chosen Bottom A must not lose it. */}
+      <div className="flex min-h-0 min-w-0 flex-1 flex-col">
+        <div className="flex shrink-0 items-center gap-3 border-b border-zinc-800 px-4 py-2">
+          <div className="flex overflow-hidden rounded-md border border-zinc-700">
+            {TABS.map((t) => (
+              <button
+                key={t.id}
+                onClick={() => setTab(t.id)}
+                className={`px-3 py-1 text-[11px] font-medium transition-colors ${
+                  tab === t.id ? 'bg-zinc-200 text-black' : 'text-zinc-400 hover:bg-zinc-900 hover:text-white'
+                }`}
+              >
+                {t.label}
+              </button>
+            ))}
+          </div>
+          <p className="min-w-0 flex-1 truncate text-[10px] text-zinc-500" title={tabHint}>{tabHint}</p>
+        </div>
+
+        <div className="flex min-h-0 flex-1 flex-col" style={{ display: tab === 'upload' ? undefined : 'none' }}>
+          <VidsIntakeStage
+            intake={intake}
+            choices={folderChoices}
+            onFiles={startIntake}
+            onOpenClip={openClip}
+            onChooseFolder={chooseFolder}
+            onStartPersona={startPersona}
+            onFileAsClips={fileAsClips}
+            onContext={intakeContext}
+            onCancel={cancelIntake}
+            onResume={() => setTab('edit')}
           />
         </div>
-      ) : (
-        <VidsIntakeStage
-          intake={intake}
-          choices={folderChoices}
-          onFiles={startIntake}
-          onOpenClip={openClip}
-          onChooseFolder={chooseFolder}
-          onStartPersona={(name, context, order) => void startPersona(name, context, order)}
-          onFileAsClips={fileAsClips}
-          onContext={intakeContext}
-          onCancel={cancelIntake}
-        />
-      )}
+
+        <div className="flex min-h-0 flex-1 flex-col" style={{ display: tab === 'edit' ? undefined : 'none' }}>
+          {openVideo && !isPhoto(openVideo) ? (
+            <>
+              {run && (
+                <VidsIntakeBanner intake={run} onSkip={advanceIntake} onCancel={cancelIntake} />
+              )}
+              <VidsClipEditor
+                video={openVideo}
+                onSave={saveEdited}
+                active={active && tab === 'edit'}
+                onClose={closeEditor}
+                contextOwner={contextOwner}
+                onMarksChange={(marks) => {
+                  if (isLocalId(openId)) patchLocal(openId, { marks });
+                  else if (openId) void lib.setVideoMarks(openId, marks);
+                }}
+                onContextChange={(patch) => {
+                  if (contextOwner) saveContext({ kind: contextOwner.kind, id: contextOwner.id }, patch);
+                }}
+                // A persona's clips only get trimmed, and the run's own Save is what
+                // hands over the next one — except Top A, which loops under the whole
+                // bottom sequence in a build. That is the one place jump cuts have to
+                // be made, so it gets Cut and Auto cut on top of the in / out points.
+                mode={run?.mode !== 'persona'
+                  ? 'full'
+                  : PERSONA_PARTS[run.index] === 'topAId' ? 'cut' : 'trim'}
+                saveLabel={run
+                  ? (run.index >= run.files.length - 1 ? 'Save · finish' : 'Save · next clip')
+                  : undefined}
+                savingLabel={run ? `Saving to ${run.folderName}…` : undefined}
+              />
+            </>
+          ) : (
+            <EditIdle
+              waiting={!!intake && intake.step !== 'edit' && intake.step !== 'done'}
+              onUpload={() => setTab('upload')}
+            />
+          )}
+        </div>
+
+        <div className="flex min-h-0 flex-1 flex-col" style={{ display: tab === 'link' ? undefined : 'none' }}>
+          <VidsLinks
+            bottomA={bottomAClips}
+            bottomB={bottomBClips}
+            links={lib.links}
+            onSetLinks={(a, bs) => void lib.setLinks(a, bs)}
+          />
+        </div>
+      </div>
 
       {openVideo && isPhoto(openVideo) && (
         <VidPreview video={openVideo} onClose={closeEditor} />
@@ -967,7 +1181,8 @@ export function VidsPrep({ lib, active }: { lib: VidsLib; active: boolean }) {
 
       {ctxTarget && ctxDialog && (
         <VidsContextDialog
-          title={ctxDialog.title}
+          kind={ctxDialog.kind}
+          name={ctxDialog.name}
           hint={ctxDialog.hint}
           value={ctxDialog.value}
           onSave={(patch) => saveContext(ctxTarget, patch)}

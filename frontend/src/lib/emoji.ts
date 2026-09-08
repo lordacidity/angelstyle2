@@ -149,7 +149,28 @@ export function splitEmojiTokens(str: string): EmojiToken[] {
     : { type: 'emoji', value: t.v } as const);
 }
 
-const emojiAdvance = (size: number) => size * 1.1;
+/** The horizontal room an emoji takes on a line: its box plus a little air
+ *  either side. Exported so a renderer that walks the tokens itself (the Vids
+ *  captions, which centre and outline their lines) advances by the same amount
+ *  measureRichWidth counted. */
+export const emojiAdvance = (size: number) => size * 1.1;
+
+/** Anything in the text that looks like an emoji but has no PNG in the set —
+ *  a skin-tone variant, a flag, a joined sequence, a glyph newer than the
+ *  data — is taken out, so a caption never falls back to the OS's own glyph
+ *  beside the Apple ones. A bare pictograph that only lacks its U+FE0F
+ *  presentation selector (❤ for ❤️) is completed rather than dropped. */
+const STRAY_EMOJI = /\p{Extended_Pictographic}(?:\uFE0F|\u20E3)?|[\u{1F3FB}-\u{1F3FF}\u{1F1E6}-\u{1F1FF}\u200D\uFE0F]/gu;
+export function keepKnownEmoji(text: string): string {
+  return tokenize(text)
+    .map((tok) => (tok.t === 'e' ? tok.v : tok.v.replace(STRAY_EMOJI, (m) => {
+      const withSelector = m + '\uFE0F';
+      return CHAR_TO_UNIFIED.has(withSelector) ? withSelector : '';
+    })))
+    .join('')
+    .replace(/ {2,}/g, ' ')
+    .trim();
+}
 
 /** Width of a string segment with emoji measured as fixed-size boxes. Assumes
  *  ctx.font is already set to the text font. */

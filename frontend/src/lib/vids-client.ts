@@ -6,7 +6,7 @@
 // (so Vercel's request-body cap is irrelevant and we get real progress).
 
 import type {
-  CreateVideoInput, SignUploadResponse, VidContextPatch, VidFolder, VidMark, VidPersona, VidRow,
+  CreateVideoInput, SignUploadResponse, VidContextPatch, VidFolder, VidLink, VidMark, VidPersona, VidRow,
   CreateRecipeInput, VideoProbe, VidRecipe, VidsLibraryPayload,
 } from '@/lib/vids-types';
 
@@ -74,6 +74,13 @@ export const moveVideo = (id: string, folderId: string | null) =>
 export const deleteVideo = (id: string) =>
   api<{ ok: true }>(`/videos/${id}`, { method: 'DELETE' });
 
+// ── Links ─────────────────────────────────────────────────────────────────────
+
+/** Replace the Bottom Bs that follow on from one Bottom A. Comes back with the
+ *  pairs as the server now holds them for that Bottom A. */
+export const setLinks = (bottomAId: string, bottomBIds: string[]) =>
+  api<VidLink[]>(`/links/${bottomAId}`, { method: 'PUT', body: JSON.stringify({ bottomBIds }) });
+
 // ── Captions ──────────────────────────────────────────────────────────────────
 
 /** What a build needs written: the persona's bit for the hook, and for each
@@ -102,6 +109,9 @@ export interface CaptionRequest {
   endContext: string;
   /** Let a couple of emoji in, where one actually lands. */
   emojis: boolean;
+  /** The emoji the writer picks from — the ones pinned in the app's Emojis
+   *  drawer, as their characters. Empty means any standard emoji. */
+  emojiPalette: string[];
   /** Bottom A's last moment and Bottom B's first are too brief for a line each
    *  (lib/vidsCaptions seamNeedsMerge), so the writer puts one line across
    *  both: A's last entry carries it, B's first is left ''. */
@@ -109,8 +119,10 @@ export interface CaptionRequest {
 }
 
 /** The written lines. A marked clip's array lines up with its marks by index;
- *  the only '' is Bottom B's first when the seam was merged into A's last. */
-export interface CaptionDraft { start: string; bottomA: string[]; bottomB: string[]; end: string }
+ *  the only '' is Bottom B's first when the seam was merged into A's last.
+ *  `payoff` and `end` are the two lines over the closing clip, in that order:
+ *  that he made the money, then the comment line. */
+export interface CaptionDraft { start: string; bottomA: string[]; bottomB: string[]; payoff: string; end: string }
 
 export const writeCaptions = (input: CaptionRequest) =>
   api<CaptionDraft>('/captions', { method: 'POST', body: JSON.stringify(input) });
@@ -242,6 +254,12 @@ function putWithProgress(url: string, body: Blob, contentType: string, onProgres
 export interface UploadVideoOptions {
   name: string;
   folderId: string | null;
+  /** Filed whole: what it shows, its marks, and whether the keyboard is on
+   *  it. The intake run gives these, since it saves a clip only once they are
+   *  all known — see CreateVideoInput. */
+  context?: string;
+  marks?: VidMark[];
+  hasSfx?: boolean;
   onProgress?: (frac: number) => void;
 }
 
@@ -324,6 +342,11 @@ export async function uploadVideo(file: Blob, opts: UploadVideoOptions): Promise
     duration: probe.duration,
     width: probe.width,
     height: probe.height,
+    // Left undefined when not given, which JSON drops — the row then takes
+    // the defaults.
+    context: opts.context,
+    marks: opts.marks,
+    hasSfx: opts.hasSfx,
   };
   return api<VidRow>('/videos', { method: 'POST', body: JSON.stringify(row) });
 }

@@ -4,11 +4,19 @@
 // the video rows, which folder is open, and in-flight uploads. Thin optimistic
 // wrapper over lib/vids-client (/api/vids/*); every action updates local state
 // first and surfaces a failure through `error` rather than throwing into the UI.
+//
+// The library is shared, so it is read again each time the section is shown and
+// each time the Build page is opened (refreshWhenIdle) — but never over the top
+// of our own writes still on their way: a read that lands while an upload or a
+// save is in flight would be the library as it stood before it, and would wipe
+// the row that write is about to make. So every write is counted in and out
+// (tracked), a read asked for mid-write waits for the last of them, and a read
+// that a write finished underneath is thrown away and taken again.
 
 import { useCallback, useEffect, useRef, useState } from 'react';
 import * as client from '@/lib/vids-client';
 import type { PersonaParts } from '@/lib/vids-client';
-import type { VidContextPatch, VidFolder, VidMark, VidPersona, VidRow } from '@/lib/vids-types';
+import type { VidContextPatch, VidFolder, VidLink, VidMark, VidPersona, VidRow } from '@/lib/vids-types';
 
 export interface UploadItem {
   id: string;
@@ -37,10 +45,20 @@ export const isMediaFile = (f: File): boolean => isVideoFile(f) || isPhotoFile(f
 /** What to say when a drop had nothing usable in it. */
 export const MEDIA_ONLY = 'Only videos (mp4, mov, webm) and photos (jpg, png, webp) can be added.';
 
+/** What a clip can be filed with beyond its name and folder — see
+ *  CreateVideoInput. */
+export interface UploadExtras {
+  context?: string;
+  marks?: VidMark[];
+  hasSfx?: boolean;
+}
+
 export function useVidsLibrary(active: boolean) {
   const [folders, setFolders] = useState<VidFolder[]>([]);
   const [videos, setVideos] = useState<VidRow[]>([]);
   const [personas, setPersonas] = useState<VidPersona[]>([]);
+  // Which Bottom Bs follow on from which Bottom A — see VidLink.
+  const [links, setLinkRows] = useState<VidLink[]>([]);
   const [selectedFolderId, setSelectedFolderId] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const [loaded, setLoaded] = useState(false);
@@ -50,13 +68,31 @@ export function useVidsLibrary(active: boolean) {
   const foldersRef = useRef<VidFolder[]>([]);
   useEffect(() => { foldersRef.current = folders; }, [folders]);
 
+  // Writes on their way to the server, and how many have finished — what keeps
+  // a read from landing on top of one (see the header).
+  const inFlightRef = useRef(0);
+  const settledRef = useRef(0);
+  const wantRefreshRef = useRef(false);
+  const refreshRef = useRef<() => Promise<void>>(async () => {});
+
   const refresh = useCallback(async () => {
     setLoading(true);
     try {
-      const lib = await client.listLibrary();
-      setFolders(lib.folders);
-      setVideos(lib.videos);
-      setPersonas(lib.personas ?? []);
+      // A write that finishes while the read is out makes the read stale the
+      // moment it lands — the server may have answered before it took. Read
+      // again, until one comes back with nothing having changed under it.
+      let applied = false;
+      for (let pass = 0; pass < 4 && !applied; pass++) {
+        const settledAt = settledRef.current;
+        const lib = await client.listLibrary();
+        if (settledRef.current !== settledAt) continue;
+        setFolders(lib.folders);
+        setVideos(lib.videos);
+        setPersonas(lib.personas ?? []);
+        setLinkRows(lib.links ?? []);
+        applied = true;
+      }
+      if (!applied) wantRefreshRef.current = true;
       setError(null);
       loadedRef.current = true;
       setLoaded(true);
@@ -66,11 +102,37 @@ export function useVidsLibrary(active: boolean) {
       setLoading(false);
     }
   }, []);
+  refreshRef.current = refresh;
 
-  // First load when the section is shown.
+  /** Every write to the server goes through here, so a read knows to wait. */
+  const tracked = useCallback(async <T,>(p: Promise<T>): Promise<T> => {
+    inFlightRef.current++;
+    try {
+      return await p;
+    } finally {
+      inFlightRef.current--;
+      settledRef.current++;
+      if (inFlightRef.current === 0 && wantRefreshRef.current) {
+        wantRefreshRef.current = false;
+        void refreshRef.current();
+      }
+    }
+  }, []);
+
+  /** Read the library again — now, or as soon as the last of our own writes
+   *  has landed, so nothing of ours is read back before it is there. */
+  const refreshWhenIdle = useCallback(() => {
+    if (inFlightRef.current > 0) { wantRefreshRef.current = true; return; }
+    void refresh();
+  }, [refresh]);
+
+  // First load when the section is shown; every showing after that reads it
+  // again, since someone else may have filed footage in the meantime.
   useEffect(() => {
-    if (active && !loadedRef.current) void refresh();
-  }, [active, refresh]);
+    if (!active) return;
+    if (loadedRef.current) refreshWhenIdle();
+    else void refresh();
+  }, [active, refresh, refreshWhenIdle]);
 
   // ── Folders ─────────────────────────────────────────────────────────────────
 
@@ -78,14 +140,14 @@ export function useVidsLibrary(active: boolean) {
     const clean = name.trim();
     if (!clean) return null;
     try {
-      const f = await client.createFolder(clean, parentId);
+      const f = await tracked(client.createFolder(clean, parentId));
       setFolders((prev) => [...prev, f].sort((a, b) => a.name.localeCompare(b.name)));
       return f;
     } catch (e) {
       setError(msg(e));
       return null;
     }
-  }, []);
+  }, [tracked]);
 
   // Make sure the four fixed top-level folders exist. The server does the
   // get-or-create under a lock, so two tabs opening at once still end up with
@@ -97,7 +159,7 @@ export function useVidsLibrary(active: boolean) {
         continue;
       }
       try {
-        const f = await client.ensureFolder(name);
+        const f = await tracked(client.ensureFolder(name));
         setFolders((prev) => (prev.some((x) => x.id === f.id)
           ? prev
           : [...prev, f].sort((a, b) => a.name.localeCompare(b.name))));
@@ -105,19 +167,19 @@ export function useVidsLibrary(active: boolean) {
         setError(msg(e));
       }
     }
-  }, []);
+  }, [tracked]);
 
   const renameFolder = useCallback(async (id: string, name: string) => {
     const clean = name.trim();
     if (!clean) return;
     setFolders((prev) => prev.map((f) => (f.id === id ? { ...f, name: clean } : f)));
     try {
-      await client.renameFolder(id, clean);
+      await tracked(client.renameFolder(id, clean));
     } catch (e) {
       setError(msg(e));
       void refresh();
     }
-  }, [refresh]);
+  }, [refresh, tracked]);
 
   const deleteFolder = useCallback(async (id: string) => {
     // Everything under this folder goes too (cascade); the videos inside every
@@ -135,12 +197,12 @@ export function useVidsLibrary(active: boolean) {
     setVideos((prev) => prev.map((v) => (v.folderId && doomed.has(v.folderId) ? { ...v, folderId: null } : v)));
     setSelectedFolderId((cur) => (cur && doomed.has(cur) ? (target?.parentId ?? null) : cur));
     try {
-      await client.deleteFolder(id);
+      await tracked(client.deleteFolder(id));
     } catch (e) {
       setError(msg(e));
       void refresh();
     }
-  }, [folders, refresh]);
+  }, [folders, refresh, tracked]);
 
   // ── Personas ────────────────────────────────────────────────────────────────
   // A persona bundles the three clips that always travel together (Start, Top A,
@@ -153,14 +215,14 @@ export function useVidsLibrary(active: boolean) {
     const clean = name.trim();
     if (!clean) return null;
     try {
-      const p = await client.createPersona(clean, parts);
+      const p = await tracked(client.createPersona(clean, parts));
       setPersonas((prev) => personaSorted([...prev, p]));
       return p;
     } catch (e) {
       setError(msg(e));
       return null;
     }
-  }, []);
+  }, [tracked]);
 
   const updatePersona = useCallback(async (id: string, patch: PersonaParts & VidContextPatch & { name?: string }) => {
     const clean = patch.name === undefined ? undefined : patch.name.trim();
@@ -168,22 +230,22 @@ export function useVidsLibrary(active: boolean) {
     const next = { ...patch, ...(clean === undefined ? {} : { name: clean }) };
     setPersonas((prev) => personaSorted(prev.map((p) => (p.id === id ? { ...p, ...next } : p))));
     try {
-      await client.updatePersona(id, next);
+      await tracked(client.updatePersona(id, next));
     } catch (e) {
       setError(msg(e));
       void refresh();
     }
-  }, [refresh]);
+  }, [refresh, tracked]);
 
   const deletePersona = useCallback(async (id: string) => {
     setPersonas((prev) => prev.filter((p) => p.id !== id));
     try {
-      await client.deletePersona(id);
+      await tracked(client.deletePersona(id));
     } catch (e) {
       setError(msg(e));
       void refresh();
     }
-  }, [refresh]);
+  }, [refresh, tracked]);
 
   // ── Videos ──────────────────────────────────────────────────────────────────
 
@@ -196,53 +258,54 @@ export function useVidsLibrary(active: boolean) {
     }));
     if (prevFolder === folderId) return;
     try {
-      await client.moveVideo(id, folderId);
+      await tracked(client.moveVideo(id, folderId));
     } catch (e) {
       setError(msg(e));
       void refresh();
     }
-  }, [refresh]);
+  }, [refresh, tracked]);
 
   const renameVideo = useCallback(async (id: string, name: string) => {
     const clean = name.trim();
     if (!clean) return;
     setVideos((prev) => prev.map((v) => (v.id === id ? { ...v, name: clean } : v)));
     try {
-      await client.renameVideo(id, clean);
+      await tracked(client.renameVideo(id, clean));
     } catch (e) {
       setError(msg(e));
       void refresh();
     }
-  }, [refresh]);
+  }, [refresh, tracked]);
 
-  // What a clip is showing, in your words. Optimistic like every other patch —
-  // the field you are typing in must not wait on a round trip.
-  //
-  // Only the context: naming a clip is its own thing, asked for plainly when the
-  // clip is filed and changed in the editor, so saying more about what a clip
-  // shows never quietly renames it. A persona's context doesn't come through
-  // here either — it lives on the persona itself.
-  const setVideoContext = useCallback(async (id: string, patch: VidContextPatch) => {
-    setVideos((prev) => prev.map((v) => (v.id === id ? { ...v, ...patch } : v)));
+  // What a clip is showing, in your words — and its name, when the right-click
+  // popup asks for both at once. Optimistic like every other patch: the field
+  // you are typing in must not wait on a round trip. A blank name is dropped
+  // rather than sent, since a clip can't be called nothing. A persona's context
+  // doesn't come through here — it lives on the persona itself.
+  const setVideoContext = useCallback(async (id: string, patch: VidContextPatch & { name?: string }) => {
+    const { name, ...rest } = patch;
+    const clean = name?.trim();
+    const next: VidContextPatch & { name?: string } = clean ? { ...rest, name: clean } : rest;
+    setVideos((prev) => prev.map((v) => (v.id === id ? { ...v, ...next } : v)));
     try {
-      await client.setVideoContext(id, patch);
+      await tracked(client.setVideoContext(id, next));
     } catch (e) {
       setError(msg(e));
       void refresh();
     }
-  }, [refresh]);
+  }, [refresh, tracked]);
 
   // The clip's context stretch by stretch. Replaces the whole list — the editor
   // always holds the authoritative set for the clip it has open.
   const setVideoMarks = useCallback(async (id: string, marks: VidMark[]) => {
     setVideos((prev) => prev.map((v) => (v.id === id ? { ...v, marks } : v)));
     try {
-      await client.setVideoMarks(id, marks);
+      await tracked(client.setVideoMarks(id, marks));
     } catch (e) {
       setError(msg(e));
       void refresh();
     }
-  }, [refresh]);
+  }, [refresh, tracked]);
 
   const deleteVideo = useCallback(async (row: VidRow) => {
     setVideos((prev) => prev.filter((v) => v.id !== row.id));
@@ -254,26 +317,51 @@ export function useVidsLibrary(active: boolean) {
       topAId: p.topAId === row.id ? null : p.topAId,
       topBId: p.topBId === row.id ? null : p.topBId,
     })));
+    // Its pairs go with it (CASCADE) — on either side.
+    setLinkRows((prev) => prev.filter((l) => l.bottomAId !== row.id && l.bottomBId !== row.id));
     try {
-      await client.deleteVideo(row.id);
+      await tracked(client.deleteVideo(row.id));
     } catch (e) {
       setError(msg(e));
       void refresh();
     }
-  }, [refresh]);
+  }, [refresh, tracked]);
+
+  // ── Links ───────────────────────────────────────────────────────────────────
+  // The Bottom Bs that follow on from one Bottom A, replaced as a whole set: the
+  // Link page ticks and unticks tiles, and each tick sends the list as it now
+  // stands. Optimistic like everything else here — a tick must not wait on a
+  // round trip — and put back from the server if the write didn't take.
+
+  const setLinks = useCallback(async (bottomAId: string, bottomBIds: string[]) => {
+    const wanted = Array.from(new Set(bottomBIds)).filter((id) => id !== bottomAId);
+    setLinkRows((prev) => [
+      ...prev.filter((l) => l.bottomAId !== bottomAId),
+      ...wanted.map((bottomBId) => ({ bottomAId, bottomBId })),
+    ]);
+    try {
+      await tracked(client.setLinks(bottomAId, wanted));
+    } catch (e) {
+      setError(msg(e));
+      void refresh();
+    }
+  }, [refresh, tracked]);
 
   // ── Uploads ─────────────────────────────────────────────────────────────────
 
-  const uploadOne = useCallback(async (blob: Blob, name: string, folderId: string | null): Promise<VidRow | null> => {
+  const uploadOne = useCallback(async (
+    blob: Blob, name: string, folderId: string | null, extras: UploadExtras = {},
+  ): Promise<VidRow | null> => {
     const id = crypto.randomUUID();
     setUploads((u) => [...u, { id, name, progress: 0, error: null, done: false }]);
     const patch = (p: Partial<UploadItem>) => setUploads((u) => u.map((x) => (x.id === id ? { ...x, ...p } : x)));
     try {
-      const row = await client.uploadVideo(blob, {
+      const row = await tracked(client.uploadVideo(blob, {
         name,
         folderId,
+        ...extras,
         onProgress: (progress) => patch({ progress }),
-      });
+      }));
       setVideos((v) => [row, ...v]);
       patch({ progress: 1, done: true });
       // Finished rows linger briefly so the bar visibly completes, then clear.
@@ -283,7 +371,7 @@ export function useVidsLibrary(active: boolean) {
       patch({ error: msg(e) });
       return null;
     }
-  }, []);
+  }, [tracked]);
 
   // Sequential on purpose — parallel multi-GB uploads just fight for bandwidth
   // and make every progress bar crawl.
@@ -293,8 +381,10 @@ export function useVidsLibrary(active: boolean) {
     for (const file of list) await uploadOne(file, file.name, folderId);
   }, [uploadOne]);
 
+  /** One clip up, with — when the intake run is the one saving it — what it
+   *  shows, its marks and whether the keyboard is on it, all at once. */
   const uploadBlob = useCallback(
-    (blob: Blob, name: string, folderId: string | null) => uploadOne(blob, name, folderId),
+    (blob: Blob, name: string, folderId: string | null, extras?: UploadExtras) => uploadOne(blob, name, folderId, extras),
     [uploadOne],
   );
 
@@ -309,9 +399,9 @@ export function useVidsLibrary(active: boolean) {
       setUploads((u) => [...u, { id: jobId, name: label, progress: 0, error: null, done: false }]);
       const patch = (p: Partial<UploadItem>) => setUploads((u) => u.map((x) => (x.id === jobId ? { ...x, ...p } : x)));
       try {
-        const row = await client.replaceVideo(id, blob, {
+        const row = await tracked(client.replaceVideo(id, blob, {
           name, hasSfx, marks, onProgress: (progress) => patch({ progress }),
-        });
+        }));
         setVideos((prev) => prev.map((v) => (v.id === row.id ? row : v)));
         patch({ progress: 1, done: true });
         setTimeout(() => setUploads((u) => u.filter((x) => x.id !== jobId)), 2500);
@@ -321,7 +411,7 @@ export function useVidsLibrary(active: boolean) {
         return null;
       }
     },
-    [videos],
+    [videos, tracked],
   );
 
   const dismissUpload = useCallback((id: string) => {
@@ -329,11 +419,12 @@ export function useVidsLibrary(active: boolean) {
   }, []);
 
   return {
-    folders, videos, personas, selectedFolderId, setSelectedFolderId,
-    loading, loaded, error, setError, uploads, dismissUpload, refresh,
+    folders, videos, personas, links, selectedFolderId, setSelectedFolderId,
+    loading, loaded, error, setError, uploads, dismissUpload, refresh, refreshWhenIdle,
     createFolder, ensureFolders, renameFolder, deleteFolder,
     createPersona, updatePersona, deletePersona,
     moveVideo, renameVideo, deleteVideo, setVideoContext, setVideoMarks,
+    setLinks,
     uploadFiles, uploadBlob, replaceVideo,
   };
 }

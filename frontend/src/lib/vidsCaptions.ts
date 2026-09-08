@@ -14,11 +14,14 @@
 //                                       caption timed inside Bottom A's share
 //                                       lines up with Bottom A by construction,
 //                                       and likewise for Bottom B.
-//   End      [endStart, total)          one caption, the call to action. Every
-//                                       build finishes on him showing what he
-//                                       made, and over it the same line every
-//                                       time — "comment <word> for the link",
-//                                       the word matched to the video.
+//   End      [endStart, total)          two captions in turn, a line each.
+//                                       Every build finishes on him showing
+//                                       what he made: over the first half the
+//                                       pay-off, a line that says he made it
+//                                       ("just made bands off ronaldo"), and
+//                                       over the second the same call to action
+//                                       every time — comment "<word>" for the
+//                                       link, the word matched to the video.
 //
 // Top B has no window of its own: it plays across exactly the same stretch as
 // End, and a caption is drawn on the whole frame anyway, so the End line is the
@@ -48,9 +51,19 @@
 // an unmarked clip's share — so "go to chatgpt / see who's trending rn" puts
 // the first up where the moment starts and the second halfway through it. The
 // writer is told to do this where a step is really two, and it is what to type
-// by hand for the same effect. Start's hook and the End line never split.
+// by hand for the same effect. Start's hook and the two End lines never split:
+// the pay-off and the comment line are written lines of their own, and each has
+// its half of the End window (see buildCaptions).
+//
+// Emoji in a caption are painted from the app's own Apple images (lib/emoji,
+// the PNGs under /public/emoji) rather than the OS's glyph for them, so the
+// stage and the file show the same emoji the Emojis drawer does — on Windows
+// the font would draw the flat Segoe ones straight into the export.
 
 import { DEFAULT_BARS, regionRect, type BarsLayout, type Plan, type PlanItem } from '@/lib/vidsPlan';
+import {
+  emojiAdvance, getEmojiImage, measureRichWidth, preloadEmojiImagesForText, splitEmojiTokens, wrapRichText,
+} from '@/lib/emoji';
 
 /** Where a line sits on the frame: a share of the width and height, measured to
  *  the middle of the whole block, so a two-line caption grows either side of the
@@ -69,18 +82,20 @@ export interface CaptionLine {
 
 export const capLine = (text: string, oneLine = false): CaptionLine => ({ text, oneLine });
 
-/** The four groups of written lines — the sections of the build that carry text. */
-export type CaptionGroup = 'start' | 'bottomA' | 'bottomB' | 'end';
+/** The groups of written lines — the sections of the build that carry text.
+ *  `payoff` and `end` are the two lines over the closing clip: the money made,
+ *  then the comment line. */
+export type CaptionGroup = 'start' | 'bottomA' | 'bottomB' | 'payoff' | 'end';
 
 /** Which written line a caption came from, so a drag on the stage knows what to
- *  move. Start and End carry one line each, so their index is always 0. */
+ *  move. Start, Payoff and End carry one line each, so their index is always 0. */
 export interface CaptionRef { group: CaptionGroup; index: number }
 
 /** One line by default over the screen recordings and the pay-off: those are
  *  directions and a sign-off, and a wrapped block covers the very thing on
  *  screen it is pointing at. The hook is left to wrap — it is the long one. */
 export const ONE_LINE_DEFAULT: Record<CaptionGroup, boolean> = {
-  start: false, bottomA: true, bottomB: true, end: true,
+  start: false, bottomA: true, bottomB: true, payoff: true, end: true,
 };
 
 /** Where on the frame a line sits. Everything is centred except Start's hook:
@@ -125,7 +140,11 @@ export interface CaptionWindows {
   bottomA: CaptionWindow | null;
   /** Bottom B's share of it. */
   bottomB: CaptionWindow | null;
-  /** The closing phase — End on the bottom, Top B above it. */
+  /** The closing phase — End on the bottom, Top B above it — as the pay-off
+   *  line sees it: the same window as `end`, listed once per line that shares
+   *  it so every group has a window of its own to be held against. */
+  payoff: CaptionWindow | null;
+  /** The closing phase again, for the comment line. */
   end: CaptionWindow | null;
 }
 
@@ -160,11 +179,13 @@ function windowFor(plan: Plan, slot: 'start' | 'bottomA' | 'bottomB' | 'end'): C
  *  are used as-is: Top A rides exactly across the pair of them, so their own
  *  spans are the alignment. */
 export function captionWindows(plan: Plan): CaptionWindows {
+  const end = windowFor(plan, 'end');
   return {
     start: windowFor(plan, 'start'),
     bottomA: windowFor(plan, 'bottomA'),
     bottomB: windowFor(plan, 'bottomB'),
-    end: windowFor(plan, 'end'),
+    payoff: end,
+    end,
   };
 }
 
@@ -275,7 +296,9 @@ export interface CaptionLines {
   start: CaptionLine;
   bottomA: CaptionLine[];
   bottomB: CaptionLine[];
-  /** The pay-off over the winnings. End only ever carries one. */
+  /** Over the winnings, first: that he made the money. One line. */
+  payoff: CaptionLine;
+  /** Over the winnings, after it: the comment line. One line. */
   end: CaptionLine;
 }
 
@@ -283,6 +306,7 @@ export const EMPTY_LINES: CaptionLines = {
   start: capLine('', ONE_LINE_DEFAULT.start),
   bottomA: [],
   bottomB: [],
+  payoff: capLine('', ONE_LINE_DEFAULT.payoff),
   end: capLine('', ONE_LINE_DEFAULT.end),
 };
 
@@ -292,12 +316,13 @@ export interface LaidOutCaptions {
   start: Caption[];
   bottomA: Caption[];
   bottomB: Caption[];
+  payoff: Caption[];
   end: Caption[];
   /** Every caption on the build, in timeline order. */
   all: Caption[];
 }
 
-/** A window that carries exactly one line — Start's hook, End's closing line.
+/** A window that carries exactly one line — Start's hook, the two End lines.
  *  If that clip happens to be marked up the line goes over the first mark,
  *  which is where the moment was said to be; otherwise it opens the window. */
 function single(
@@ -311,7 +336,7 @@ function single(
 }
 
 /** The order the windows play in. */
-const GROUP_ORDER: readonly CaptionGroup[] = ['start', 'bottomA', 'bottomB', 'end'];
+const GROUP_ORDER: readonly CaptionGroup[] = ['start', 'bottomA', 'bottomB', 'payoff', 'end'];
 
 /** Settle when each line comes down: the moment the next one comes up, so
  *  there is always a caption on screen. Within a window that is simply the
@@ -343,12 +368,20 @@ export function buildCaptions(windows: CaptionWindows, lines: CaptionLines): Lai
   const start = single(lines.start, windows.start, 'start', 'top');
   const bottomA = layoutCaptions(lines.bottomA, windows.bottomA, 'bottomA');
   const bottomB = layoutCaptions(lines.bottomB, windows.bottomB, 'bottomB');
-  const end = single(lines.end, windows.end, 'end');
+  // The closing clip carries two lines in turn: the pay-off from where the
+  // window opens, and the comment line from halfway — or from the start, when
+  // there is no pay-off written to go before it. `hold` then runs the pay-off
+  // until the comment line comes up, and whichever is last to the very end.
+  const payoff = single(lines.payoff, windows.payoff, 'payoff');
+  const endW = windows.end;
+  const from = endW ? (endW.marks[0]?.start ?? endW.start) : 0;
+  const commentW = endW && payoff.length ? { ...endW, start: from + (endW.end - from) / 2, marks: [] } : endW;
+  const end = single(lines.end, commentW, 'end');
   // The per-group arrays hold the same objects `all` does, so settling the
   // ends here settles them everywhere.
-  const all = [...start, ...bottomA, ...bottomB, ...end].sort((a, b) => a.start - b.start);
+  const all = [...start, ...bottomA, ...bottomB, ...payoff, ...end].sort((a, b) => a.start - b.start);
   hold(all, windows);
-  return { start, bottomA, bottomB, end, all };
+  return { start, bottomA, bottomB, payoff, end, all };
 }
 
 /** The line on screen at time `t`, if any. */
@@ -420,25 +453,12 @@ const MIN_ONE_LINE_SCALE = 0.45;
  *  exactly the same place: hard against the top of the video either way. */
 const TOP_GAP = 0.05;
 
-/** Greedy word wrap to `maxWidth`. A single word too long to fit stays on its
- *  own line rather than being broken — captions are short, and a hyphenated
- *  word mid-screen reads worse than one long line. */
-function wrap(ctx: CanvasRenderingContext2D, text: string, maxWidth: number): string[] {
-  const words = text.split(/\s+/).filter(Boolean);
-  const out: string[] = [];
-  let cur = '';
-  for (const w of words) {
-    const next = cur ? `${cur} ${w}` : w;
-    if (cur && ctx.measureText(next).width > maxWidth) {
-      out.push(cur);
-      cur = w;
-    } else {
-      cur = next;
-    }
-  }
-  if (cur) out.push(cur);
-  return out;
-}
+/** Greedy word wrap to `maxWidth`, with each emoji measured as the image it is
+ *  drawn as. A single word too long to fit stays on its own line rather than
+ *  being broken — captions are short, and a hyphenated word mid-screen reads
+ *  worse than one long line. */
+const wrap = (ctx: CanvasRenderingContext2D, text: string, maxWidth: number, emojiSize: number): string[] =>
+  wrapRichText(ctx, text.replace(/\s+/g, ' ').trim(), maxWidth, emojiSize);
 
 /** Where a caption's block lands and how it is set, worked out on `ctx` without
  *  painting anything. The stage measures with this to know what a pointer is
@@ -492,7 +512,7 @@ export function layoutCaption(
   let lines: string[];
   if (caption.oneLine) {
     // Shrink until the whole thing fits across, rather than letting it wrap.
-    const w = ctx.measureText(text).width;
+    const w = measureRichWidth(ctx, text, size);
     const needed = w > maxWidth ? Math.floor(size * (maxWidth / w)) : size;
     const floor = Math.round(size * MIN_ONE_LINE_SCALE);
     size = Math.max(floor, needed);
@@ -500,13 +520,14 @@ export function layoutCaption(
     // A caption so long that one line would mean unreadable type gets the
     // smallest size we allow and then wraps anyway — "one line" is a request,
     // and honouring it literally here would run the words off the frame.
-    lines = needed < floor ? wrap(ctx, text, maxWidth) : [text];
+    lines = needed < floor ? wrap(ctx, text, maxWidth, size) : [text];
   } else {
-    lines = wrap(ctx, text, maxWidth);
+    lines = wrap(ctx, text, maxWidth, size);
   }
 
+  // Emoji are drawn a type-size square, so they are measured as one too.
   const step = Math.round(size * LINE_HEIGHT);
-  const widest = lines.reduce((m, l) => Math.max(m, ctx.measureText(l).width), 0);
+  const widest = lines.reduce((m, l) => Math.max(m, measureRichWidth(ctx, l, size)), 0);
   ctx.restore();
 
   // The middle of the block: a caption dropped somewhere is anchored there, and
@@ -536,6 +557,49 @@ export function layoutCaption(
   };
 }
 
+/** Paint one wrapped line centred on `cx` with its middle at `y`: the words in
+ *  the current font, and every emoji as the Apple image from the app's own set
+ *  (lib/emoji) rather than whatever glyph the OS would draw for it. The stroke
+ *  pass outlines the words only; an image needs no outline. An image not yet
+ *  loaded falls back to the OS glyph for that frame and is swapped in on the
+ *  next — preloadCaptionEmoji is what keeps that off an export. The advance
+ *  is the one measureRichWidth counted, so the line lands where layoutCaption
+ *  measured it. */
+function paintLine(
+  ctx: CanvasRenderingContext2D,
+  line: string,
+  cx: number,
+  y: number,
+  emojiSize: number,
+  pass: 'stroke' | 'fill',
+): void {
+  let cursor = cx - measureRichWidth(ctx, line, emojiSize) / 2;
+  for (const tok of splitEmojiTokens(line)) {
+    if (tok.type === 'text') {
+      if (pass === 'stroke') ctx.strokeText(tok.value, cursor, y);
+      else ctx.fillText(tok.value, cursor, y);
+      cursor += ctx.measureText(tok.value).width;
+      continue;
+    }
+    const adv = emojiAdvance(emojiSize);
+    if (pass === 'fill') {
+      const img = getEmojiImage(tok.value);
+      if (img && img.complete && img.naturalWidth > 0) {
+        ctx.drawImage(img, cursor + (adv - emojiSize) / 2, y - emojiSize / 2, emojiSize, emojiSize);
+      } else {
+        ctx.fillText(tok.value, cursor, y);
+      }
+    }
+    cursor += adv;
+  }
+}
+
+/** Fetch the Apple image for every emoji these captions use, so the first
+ *  frame that carries one is drawn with it: the exporter waits on this before
+ *  rendering, and the stage paints again once it settles. */
+export const preloadCaptionEmoji = (captions: readonly Caption[]): Promise<void> =>
+  preloadEmojiImagesForText(captions.map((c) => c.text).join(' '));
+
 /** Across the middle of the frame in the chosen style, across the top for a
  *  caption placed there (Start's hook), or wherever it was dragged to. The
  *  shadow is not decoration: Bottom A and Bottom B are screen recordings, and
@@ -553,7 +617,9 @@ export function drawCaption(
   const { lines, step, x, top } = laid;
 
   ctx.save();
-  ctx.textAlign = 'center';
+  // Each line is walked token by token from its left edge (paintLine), so the
+  // context is left-aligned and the centring is done there.
+  ctx.textAlign = 'left';
   ctx.textBaseline = 'middle';
   ctx.font = laid.font;
   (ctx as Spaced).letterSpacing = laid.spacing;
@@ -565,12 +631,12 @@ export function drawCaption(
     ctx.miterLimit = 2;
     ctx.lineWidth = laid.size * style.stroke;
     ctx.strokeStyle = '#000';
-    lines.forEach((l, i) => ctx.strokeText(l, x, top + i * step));
+    lines.forEach((l, i) => paintLine(ctx, l, x, top + i * step, laid.size, 'stroke'));
     // The outline already separates the text from the picture; a shadow on top
     // of it just muddies the letterforms.
     ctx.shadowBlur = 0;
   }
   ctx.fillStyle = style.color;
-  lines.forEach((l, i) => ctx.fillText(l, x, top + i * step));
+  lines.forEach((l, i) => paintLine(ctx, l, x, top + i * step, laid.size, 'fill'));
   ctx.restore();
 }

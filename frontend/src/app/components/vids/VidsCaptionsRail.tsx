@@ -187,7 +187,7 @@ export function VidsCaptionsRail({
               <button
                 onClick={() => setEmojis(!emojis)}
                 title={emojis
-                  ? 'Two or three emoji across the whole set, only where one lands. Applied on the next write.'
+                  ? 'Two or three emoji across the whole set, picked from the ones pinned in the Emojis drawer, only where one lands. Applied on the next write.'
                   : 'No emoji at all. Applied on the next write.'}
                 className={`shrink-0 rounded border px-1.5 py-1 text-[10px] leading-none transition-colors ${
                   emojis
@@ -256,8 +256,17 @@ export function VidsCaptionsRail({
                   onResetPos={onResetPos}
                 />
                 <CaptionRows
-                  label="End"
-                  hint="comment … for the link"
+                  label="End · money"
+                  hint="he made it · first half of End"
+                  group="payoff"
+                  laid={laid.payoff}
+                  lines={[lines.payoff]}
+                  onChange={(_i, patch) => setLines((l) => ({ ...l, payoff: { ...l.payoff, ...patch } }))}
+                  onResetPos={onResetPos}
+                />
+                <CaptionRows
+                  label="End · comment"
+                  hint="comment “…” for the link · second half"
                   group="end"
                   laid={laid.end}
                   lines={[lines.end]}

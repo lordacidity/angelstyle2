@@ -21,7 +21,7 @@ import type * as MB from 'mediabunny';
 import { isPhoto } from '@/lib/vids-types';
 import { drawInRegion, regionRect, smoothScaling, videoBitrate, type Plan, type PlanItem } from '@/lib/vidsPlan';
 import {
-  captionAt, captionStyle, drawCaption, DEFAULT_CAPTION_STYLE, type Caption, type CaptionStyle,
+  captionAt, captionStyle, drawCaption, preloadCaptionEmoji, DEFAULT_CAPTION_STYLE, type Caption, type CaptionStyle,
 } from '@/lib/vidsCaptions';
 import {
   DEFAULT_CLIP_LEVEL, DEFAULT_MUSIC, DEFAULT_ROOM_TONE, MUSIC_FADE, ROOM_TONE_URL, clampClipLevel,
@@ -332,6 +332,9 @@ export async function composeSequence(opts: ComposeOptions): Promise<Blob> {
       output.addAudioTrack(audioSource);
     }
 
+    // Every emoji in the captions is painted from its Apple image; fetched now
+    // so no frame goes out with the OS glyph in its place.
+    await preloadCaptionEmoji(captions);
     await output.start();
     try {
       for (let f = 0; f < frameCount; f++) {
