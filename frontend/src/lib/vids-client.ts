@@ -127,6 +127,28 @@ export interface CaptionDraft { start: string; bottomA: string[]; bottomB: strin
 export const writeCaptions = (input: CaptionRequest) =>
   api<CaptionDraft>('/captions', { method: 'POST', body: JSON.stringify(input) });
 
+// ── Post caption ──────────────────────────────────────────────────────────────
+
+/** Which way the video trades on the person: up, they are getting bigger;
+ *  down, they should come down. */
+export type TradePosition = 'up' | 'down';
+
+/** What the post caption is written from: the screen recordings' context, for
+ *  the route to read the person and the position off — or, once they are
+ *  known, the person and position outright (a Regenerate with the name
+ *  corrected or the position flipped). `person` wins when both are sent. */
+export interface PostCaptionRequest {
+  brief?: string;
+  person?: string;
+  position?: TradePosition | null;
+}
+
+/** The caption, and the person and position it was written for. */
+export interface PostCaptionDraft { caption: string; person: string; position: TradePosition }
+
+export const writePostCaption = (input: PostCaptionRequest) =>
+  api<PostCaptionDraft>('/post-caption', { method: 'POST', body: JSON.stringify(input) });
+
 // ── Upload ────────────────────────────────────────────────────────────────────
 
 // Read duration / dimensions and grab a poster frame, all in the browser via a

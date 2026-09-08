@@ -30,7 +30,11 @@
 // them; drag/zoom tweaks are relative, so they survive.
 //
 // Two ways to work, switched top right of the page:
-//   Advanced  everything above — the rack, both rails, a stage you can drag.
+//   Advanced  everything above — the rack, three rails, a stage you can drag.
+//             The third rail, far right, is where a build leaves: the post
+//             caption for Instagram — the person being traded, the position
+//             and the case for it, read off the screen recordings' context
+//             (VidsExportRail) — the Phonedeck list, and the export buttons.
 //   Simple    two choices and nothing else: a persona, and a vid (the Bottom
 //             A). Bottom B comes off the Link page, End fills itself, and the
 //             song, the room tone, the bars and the captions are all what they
@@ -71,6 +75,7 @@ import { emojiByUnified } from '@/lib/emoji';
 import { pinnedUnifieds, useEmojiPrefs } from '@/lib/emoji-prefs-store';
 import { VidsRecall } from './VidsRecall';
 import { VidsPhonedeck } from './VidsPhonedeck';
+import { VidsExportRail } from './VidsExportRail';
 import { createRecipe, deleteRecipe, getRecipe, writeCaptions } from '@/lib/vids-client';
 import { picksFromSpec, specFromBuild } from '@/lib/vidsRecipe';
 import {
@@ -1235,11 +1240,11 @@ export function VidsBuilder({
       const local = item.loop
         ? item.trimStart + (into % item.sourceLength)
         : item.trimStart + Math.min(into, Math.max(0, item.sourceLength - 0.001));
-      // Match the exporter: resample rather than pitch-correct, so the preview
-      // sounds like the file will. Both are set every pass because re-picking a
-      // slot hands us a fresh element.
+      // Match the exporter: hold the pitch rather than resample, so a sped-up
+      // slot sounds like itself here and in the file. Both are set every pass
+      // because re-picking a slot hands us a fresh element.
       if (v.playbackRate !== item.speed) v.playbackRate = item.speed;
-      v.preservesPitch = false;
+      v.preservesPitch = true;
       if ((!wasActive || force) && Math.abs(v.currentTime - local) > 0.05) seekTo(item.slot, v, local);
       if (play) {
         // Park on the out point: a trimmed clip must not run past it while its
@@ -1725,6 +1730,28 @@ export function VidsBuilder({
     endContext: picks.end?.video.context ?? '',
   });
 
+  // What the post caption is read from: the screen recordings and the ending
+  // — what each shows and, where a clip was marked up, its moments in order.
+  // Not the persona: the caption is about the person being traded, and he is
+  // on the screen, not on camera. It is about which clips are on the stage
+  // and nothing else — trimming, moving or re-captioning them leaves it alone
+  // — so the caption is drafted again exactly when it would be about someone
+  // else. Empty until there is a vid, since the vid is where the person is.
+  const postBrief = useMemo(() => {
+    if (!picks.bottomA) return '';
+    const say = (label: string, context: string | undefined, marks: readonly { text: string }[] = []) => {
+      const said = (context ?? '').trim();
+      const beats = marks.map((m) => m.text.trim()).filter(Boolean);
+      if (!said && !beats.length) return '';
+      return `${label}: ${said || '(no context given)'}${beats.length ? `. Moments, in order: ${beats.join('; ')}` : ''}`;
+    };
+    return [
+      say('Screen recording 1', picks.bottomA.video.context, picks.bottomA.video.marks),
+      say('Screen recording 2, on pauv.com', picks.bottomB?.video.context, picks.bottomB?.video.marks),
+      say('Ending, him showing what the trade made', picks.end?.video.context),
+    ].filter(Boolean).join('\n');
+  }, [picks]);
+
   const runExport = async (kind: 'download' | 'phone') => {
     if (!plan.items.length || broken.length || exporting) return;
     pause();
@@ -1773,7 +1800,7 @@ export function VidsBuilder({
         setExporting({ frac: 1, label: 'Sending to Phonedeck…' });
         try {
           const stored = await sendToPhonedeck(blob, name);
-          setSentNote({ ok: true, name: stored, text: `In Phonedeck Incoming: ${stored} — pick the phones below and push.` });
+          setSentNote({ ok: true, name: stored, text: `In Phonedeck Incoming: ${stored} — pick the phones and push.` });
         } catch (e) {
           console.warn('[vids] phonedeck upload failed, falling back to browser download:', e);
           downloadBlob(blob, name);
@@ -2174,10 +2201,12 @@ export function VidsBuilder({
   })();
 
   // The finish line, built here — where everything it reads from lives — and
-  // rendered at the foot of the captions rail, or of Simple's own. Reading the
-  // words back and exporting are the last two things you do, so they belong in
-  // one column.
-  const exportPanel = (
+  // rendered at the foot of the export rail, or of Simple's own. `phonedeck`
+  // is the Phonedeck list, or where it goes: Simple keeps it here under the
+  // buttons, Advanced puts it in the export rail with a column's height to
+  // itself and passes nothing.
+  const recentFile = sentNote?.ok ? sentNote.name ?? null : null;
+  const renderExport = (phonedeck: ReactNode) => (
     <>
       {exporting ? (
         <div>
@@ -2220,9 +2249,7 @@ export function VidsBuilder({
       )}
       {exportError && <p className="mt-2 text-[11px] text-red-400">{exportError}</p>}
       {sentNote && <p className={`mt-2 text-[11px] ${sentNote.ok ? 'text-emerald-400' : 'text-amber-300'}`}>{sentNote.text}</p>}
-      {/* Phonedeck, small: the phones and what is in Incoming, with the file
-          just sent on top. Where a push finishes. */}
-      <VidsPhonedeck recent={sentNote?.ok ? sentNote.name ?? null : null} />
+      {phonedeck}
       {recipeError && <p className="mt-2 text-[11px] text-amber-300">{recipeError}</p>}
       {lastRecipe && (
         <div data-vids-recipe={lastRecipe.code} className="mt-2 rounded-md border border-zinc-800 bg-zinc-900/60 p-2">
@@ -2540,12 +2567,15 @@ export function VidsBuilder({
           </div>
           {captionError && <p className="mb-2 text-[10px] text-red-400">{captionError}</p>}
 
-          {exportPanel}
+          {/* Phonedeck, small, under the buttons: the phones and what is in
+              Incoming, with the file just sent on top. Where a push finishes. */}
+          {renderExport(<VidsPhonedeck recent={recentFile} />)}
         </aside>
       )}
 
-      {/* Advanced: the rack and the settings in one rail, the words and the
-          finish line in the other. */}
+      {/* Advanced: the rack and the settings in one rail, the words in the
+          next, and in the last the post caption, the Phonedeck list and the
+          finish line. */}
       {!simple && (
         <>
         <aside className="w-[300px] shrink-0 overflow-y-auto border-l border-zinc-800">
@@ -2772,7 +2802,6 @@ export function VidsBuilder({
         </aside>
 
         <VidsCaptionsRail
-          exportPanel={exportPanel}
           canCaption={canCaption}
           lines={lines}
           setLines={setLines}
@@ -2790,6 +2819,12 @@ export function VidsBuilder({
           styleId={styleId}
           setStyleId={setStyleId}
           onResetPos={(ref) => setLinePos(ref, undefined)}
+        />
+
+        <VidsExportRail
+          brief={postBrief}
+          recent={recentFile}
+          exportPanel={renderExport(null)}
         />
         </>
       )}

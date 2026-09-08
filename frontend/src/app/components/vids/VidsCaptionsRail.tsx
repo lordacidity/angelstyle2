@@ -1,7 +1,8 @@
 'use client';
 
-// The captions column — the right-hand of the build page's two rails, beside the
-// one holding placement and sound.
+// The captions column — the middle of the build page's three rails, between
+// the one holding placement and sound and the one the build leaves by (the
+// post caption, Phonedeck and Export — VidsExportRail).
 //
 // Write captions drafts them from the persona's context and each bottom clip's
 // marks; everything it produces is editable by hand afterwards, since the model
@@ -11,11 +12,6 @@
 //
 // Where a caption sits is set on the stage rather than here — drag it — so a
 // line that has been moved shows a ⤾ to put it back where its section starts.
-//
-// Export sits at the foot of this rail rather than the other one: reading the
-// words back and sending the file out are the last two things you do. It is
-// built by the builder (which owns everything it reports on) and handed over as
-// `exportPanel` — the rail only decides where it goes.
 
 import type { ReactNode } from 'react';
 import {
@@ -122,9 +118,6 @@ function CaptionRows({ label, hint, group, laid, lines, moments = [], onChange, 
 }
 
 interface Props {
-  /** The export controls, built by the builder. Pinned to the foot of the rail,
-   *  so it stays reachable however far the captions run. */
-  exportPanel?: ReactNode;
   /** Nothing to caption until Start or a bottom clip is filled. */
   canCaption: boolean;
   lines: CaptionLines;
@@ -149,7 +142,7 @@ interface Props {
 }
 
 export function VidsCaptionsRail({
-  exportPanel, canCaption, lines, setLines, laid, windows, hasLines, writing, error,
+  canCaption, lines, setLines, laid, windows, hasLines, writing, error,
   onWrite, onClear, notes, setNotes, emojis, setEmojis, styleId, setStyleId, onResetPos,
 }: Props) {
   const momentsOf = (w: CaptionWindows['bottomA']) => (w?.marks ?? []).map((m) => m.text);
@@ -217,9 +210,6 @@ export function VidsCaptionsRail({
                 title="Anything you want changed about how these are written. Enter rewrites with it; Shift+Enter starts a new line. Kept for the next rewrite."
                 className="w-full resize-none rounded border border-zinc-800 bg-black px-1.5 py-1 text-[10px] leading-relaxed text-zinc-200 outline-none placeholder:text-zinc-600 focus:border-zinc-500"
               />
-              <p className="mt-0.5 text-[9px] text-zinc-600">
-                Notes for the writer — Enter {hasLines ? 'rewrites' : 'runs'} with them, Shift+Enter for a new line.
-              </p>
             </div>
 
             {error && <p className="mt-1.5 break-words text-[10px] text-red-400">{error}</p>}
@@ -273,9 +263,6 @@ export function VidsCaptionsRail({
                   onChange={(_i, patch) => setLines((l) => ({ ...l, end: { ...l.end, ...patch } }))}
                   onResetPos={onResetPos}
                 />
-                <p className="text-[9px] leading-relaxed text-zinc-600">
-                  A &quot; / &quot; in a Bottom line makes it two captions, one after the other across that moment.
-                </p>
               </div>
             )}
           </>
@@ -311,21 +298,7 @@ export function VidsCaptionsRail({
             </button>
           ))}
         </div>
-        <p className="mt-1.5 text-[9px] leading-relaxed text-zinc-600">
-          One is picked at random for each build, like the song — click another to change it. Applies to every caption. Use 1 line on a caption that wraps when you would rather it did not.
-        </p>
       </Section>
-
-      {exportPanel && (
-        // mt-auto puts it at the foot of a short rail; sticky keeps it there
-        // once the captions run past the bottom of the screen. The background
-        // is the page's own, because the rail doesn't paint one and a
-        // transparent sticky footer would have the captions scroll through it.
-        <div className="sticky bottom-0 mt-auto border-t border-zinc-800 bg-[var(--background)] px-3 py-3">
-          <p className="mb-2 text-[10px] font-semibold uppercase tracking-wider text-zinc-500">Export</p>
-          {exportPanel}
-        </div>
-      )}
     </aside>
   );
 }

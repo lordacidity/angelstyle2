@@ -34,7 +34,7 @@ import {
   clampSpeed, smoothScaling, trimmedRange, videoBitrate,
   DEFAULT_SPEED, DEFAULT_TRIM, type Trim,
 } from '@/lib/vidsPlan';
-import { decodeAudio, scheduleLoop, SFX_URL } from '@/lib/vidsAudio';
+import { decodeAudio, scheduleLoop, stretchToRate, SFX_URL } from '@/lib/vidsAudio';
 import type { VidEdit, VidMark } from '@/lib/vids-types';
 
 /** A removed range, in source seconds. */
@@ -343,7 +343,8 @@ const even = (n: number) => Math.max(2, Math.round(n / 2) * 2);
  *  mediabunny) — same reasoning as vidsCompose: no server ffmpeg, so localhost
  *  and Vercel behave identically. Kept segments are decoded in order and drawn
  *  back to back; audio is laid onto an OfflineAudioContext at the same joins and
- *  resampled by `speed`, matching what the preview plays. */
+ *  time-stretched by `speed` — its pitch left where it was, matching what the
+ *  preview plays. */
 export async function renderEditedClip(opts: RenderOptions): Promise<Blob> {
   const {
     Input, UrlSource, BlobSource, ALL_FORMATS, VideoSampleSink, AudioSampleSink,
@@ -459,17 +460,19 @@ export async function renderEditedClip(opts: RenderOptions): Promise<Blob> {
               off += piece.length;
             }
             const src = octx.createBufferSource();
-            src.buffer = buf;
+            // Speed baked into the buffer rather than played as a rate, so a
+            // sped-up clip still sounds like itself. What comes back is already
+            // `span / speed` long, which is what the output clock counts in.
+            src.buffer = stretchToRate(octx, buf, speed);
             src.connect(octx.destination);
-            src.playbackRate.value = speed;
             // `lead` > 0: the decoded audio starts a little after the segment's
             // in point; < 0: the first sample straddles it, so skip into the
             // buffer instead. It is in source seconds, so /speed turns it into
-            // output seconds. start()'s offset and duration stay in buffer
-            // seconds.
+            // output seconds — and so do offset and duration, the stretched
+            // buffer being on the output clock already.
             const lead = (firstTs ?? seg.start) - seg.start;
             const at0 = (acc - span) / speed;
-            src.start(at0 + Math.max(0, lead) / speed, Math.max(0, -lead), span);
+            src.start(at0 + Math.max(0, lead) / speed, Math.max(0, -lead) / speed, span / speed);
             scheduled++;
           }
         }

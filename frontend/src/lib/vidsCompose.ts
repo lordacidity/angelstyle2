@@ -9,9 +9,9 @@
 // localhost behave identically (same reasoning as canvasVideoExport.ts).
 //
 // A slot's `speed` shows up twice: clip time advances that much faster per
-// output frame, and its audio is resampled by the same factor. Resampling
-// shifts pitch, which the live preview matches by turning preservesPitch off —
-// what you hear while scrubbing is what lands in the file.
+// output frame, and its audio is time-stretched by the same factor. Stretching
+// leaves the pitch where it was, which the live preview matches by leaving
+// preservesPitch on — what you hear while scrubbing is what lands in the file.
 //
 // Sound comes from three places and none is the footage: the keyboard a clip
 // is carrying (a slot is only ever un-muted for that), room tone, and the song
@@ -25,7 +25,7 @@ import {
 } from '@/lib/vidsCaptions';
 import {
   DEFAULT_CLIP_LEVEL, DEFAULT_MUSIC, DEFAULT_ROOM_TONE, MUSIC_FADE, ROOM_TONE_URL, clampClipLevel,
-  decodeAudio, musicGain, roomToneGain, scheduleLoop, type Music, type RoomTone,
+  decodeAudio, musicGain, roomToneGain, scheduleLoop, stretchToRate, type Music, type RoomTone,
 } from '@/lib/vidsAudio';
 
 export interface ComposeOptions {
@@ -274,12 +274,16 @@ export async function composeSequence(opts: ComposeOptions): Promise<Blob> {
         // mix is only as long as the timeline, so the last pass is cut off there.
         const passSpan = sourceSpan / rate;
         const passes = p.item.loop && passSpan > 0 ? Math.ceil(span / passSpan) : 1;
+        // Speed is baked into the buffer rather than played as a rate, so it
+        // never moves the pitch. What comes back already runs at timeline
+        // speed, which is why offset and duration are divided by the rate here
+        // and the node itself is left alone.
+        const play = stretchToRate(octx, buf, rate);
         for (let i = 0; i < passes; i++) {
           const src = octx.createBufferSource();
-          src.buffer = buf;
-          src.playbackRate.value = rate;
+          src.buffer = play;
           src.connect(g);
-          src.start(p.item.start + i * passSpan + Math.max(0, lead) / rate, Math.max(0, -lead), sourceSpan);
+          src.start(p.item.start + i * passSpan + Math.max(0, lead) / rate, Math.max(0, -lead) / rate, sourceSpan / rate);
         }
         scheduled++;
       }

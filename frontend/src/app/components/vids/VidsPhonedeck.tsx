@@ -9,13 +9,18 @@
 //
 // `recent` is the file the last export put in Incoming: it goes first and is
 // lit, so the one you just made is the one under your hand.
+//
+// Two sizes. Under Simple's buttons it is a few rows, as the panel on Media
+// is. In Advanced's export rail, `grow` gives it the height of its column:
+// the list takes whatever is left between the post caption and the buttons,
+// so a day's worth of files is in view rather than three at a time.
 
 import { useState } from 'react';
 import { formatSize, usePhonedeck } from '../../hooks/usePhonedeck';
 
 const LINK = 'text-[10px] text-zinc-500 transition-colors hover:text-zinc-200';
 
-export function VidsPhonedeck({ recent }: { recent?: string | null }) {
+export function VidsPhonedeck({ recent, grow = false }: { recent?: string | null; grow?: boolean }) {
   const pd = usePhonedeck();
   const { connected, incoming, ready, selectedSerials, pushing, status } = pd;
   const [collapsed, setCollapsed] = useState(false);
@@ -24,13 +29,21 @@ export function VidsPhonedeck({ recent }: { recent?: string | null }) {
     ? [...incoming].sort((a, b) => (a.name === recent ? -1 : b.name === recent ? 1 : 0))
     : incoming;
   const allSelected = ready.length > 0 && selectedSerials.size === ready.length;
+  // Only a list that is showing takes the column's height: folded, or with
+  // nothing but the offline line to say, the box stays the size of its words.
+  const stretched = grow && !collapsed && connected;
 
   return (
-    <div data-vids-phonedeck className="mt-2 overflow-hidden rounded-md border border-zinc-800 bg-zinc-900/40">
+    <div
+      data-vids-phonedeck
+      className={`overflow-hidden rounded-md border border-zinc-800 bg-zinc-900/40 ${
+        grow ? `flex min-h-0 flex-col ${stretched ? 'flex-1' : ''}` : 'mt-2'
+      }`}
+    >
       <button
         onClick={() => setCollapsed((c) => !c)}
         title={connected ? 'Phonedeck connected — click to fold' : 'Phonedeck offline — click to fold'}
-        className="flex w-full items-center gap-1.5 px-2 py-1.5 text-left transition-colors hover:bg-zinc-900"
+        className="flex w-full shrink-0 items-center gap-1.5 px-2 py-1.5 text-left transition-colors hover:bg-zinc-900"
       >
         {/* The same downward triangle as the Deck entry in the sidebar and the
             panel on Media; green while the file feed is live. */}
@@ -56,7 +69,7 @@ export function VidsPhonedeck({ recent }: { recent?: string | null }) {
         ) : (
           <>
             {/* The phones. One sticky selection for every file. */}
-            <div className="flex flex-wrap items-center gap-1 border-t border-zinc-800 px-2 py-1.5">
+            <div className="flex shrink-0 flex-wrap items-center gap-1 border-t border-zinc-800 px-2 py-1.5">
               {ready.length === 0 ? (
                 <span className="text-[10px] italic text-zinc-600">No phones connected</span>
               ) : (
@@ -86,8 +99,10 @@ export function VidsPhonedeck({ recent }: { recent?: string | null }) {
               )}
             </div>
 
-            {/* Incoming — one line a file. */}
-            <div className="max-h-28 overflow-y-auto border-t border-zinc-800">
+            {/* Incoming — one line a file. Stretched, the list is what grows;
+                the floor keeps a short window from crushing it to nothing
+                (the rail scrolls instead). */}
+            <div className={`overflow-y-auto border-t border-zinc-800 ${stretched ? 'min-h-[140px] flex-1' : 'max-h-28'}`}>
               {files.length === 0 ? (
                 <p className="px-2 py-2 text-[10px] text-zinc-600">Nothing in Incoming yet.</p>
               ) : (
@@ -121,7 +136,7 @@ export function VidsPhonedeck({ recent }: { recent?: string | null }) {
               )}
             </div>
             {incoming.length > 0 && (
-              <div className="flex justify-end border-t border-zinc-800 px-2 py-1">
+              <div className="flex shrink-0 justify-end border-t border-zinc-800 px-2 py-1">
                 <button onClick={() => void pd.clearAllIncoming()} title="Mark every incoming file as past" className={LINK}>Clear list</button>
               </div>
             )}

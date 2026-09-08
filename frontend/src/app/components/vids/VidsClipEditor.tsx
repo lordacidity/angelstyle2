@@ -553,8 +553,9 @@ export function VidsClipEditor({
 
   useEffect(() => () => { if (abortRef.current?.kind === 'download') abortRef.current.ctrl.abort(); }, []);
 
-  // Keep the element in step with the settings. preservesPitch off so what you
-  // hear while scrubbing is what the renderer bakes in (it resamples too).
+  // Keep the element in step with the settings. preservesPitch on, so speed
+  // changes how long the clip runs and nothing about how it sounds — and what
+  // you hear while scrubbing is what the renderer bakes in (it stretches too).
   useEffect(() => {
     const el = videoRef.current;
     if (!el) return;
@@ -562,8 +563,8 @@ export function VidsClipEditor({
     el.defaultPlaybackRate = speed;
     type PitchEl = HTMLVideoElement & { preservesPitch?: boolean; mozPreservesPitch?: boolean };
     const p = el as PitchEl;
-    p.preservesPitch = false;
-    p.mozPreservesPitch = false;
+    p.preservesPitch = true;
+    p.mozPreservesPitch = true;
   }, [speed, video]);
 
   // The element plays exactly what the render will carry out of the source: for

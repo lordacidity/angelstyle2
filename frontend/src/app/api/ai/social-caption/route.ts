@@ -22,65 +22,22 @@ import { z } from 'zod';
 import { type ChatMessage } from '@/lib/deepseek';
 import { geminiGenerate, extractGeminiJson } from '@/lib/gemini';
 import { listPrompts, type AiPromptRow, type PromptCategory } from '@/lib/ai-prompts-db';
+import {
+  LONG_CAPTION_MAX, LONG_CAPTION_MIN, LONG_CAPTION_PARAGRAPHS, cleanText, clampRange, countParagraphs,
+  normalizeParagraphs,
+} from '@/lib/long-caption';
 
 export const runtime = 'nodejs';
 
-const MIN_CHARS = 1750;
-const MAX_CHARS = 2000;
-const TARGET_PARAGRAPHS = 3;
+// The band and the text helpers are lib/long-caption's, shared with the Vids
+// post caption, which is the same shape of thing.
+const MIN_CHARS = LONG_CAPTION_MIN;
+const MAX_CHARS = LONG_CAPTION_MAX;
+const TARGET_PARAGRAPHS = LONG_CAPTION_PARAGRAPHS;
 
 // Hard-coded, NOT env-driven, so every environment behaves the same with no .env
 // setup. Both AI steps in this route run on it.
 const CAPTION_MODEL = 'gemini-3.5-flash-lite';
-
-// Strip wrapping quotes, stray markdown, and (critically) every em / en dash —
-// the caption must never contain one. Dashes become commas; any double comma
-// that falls out of that is collapsed.
-function cleanText(raw: string): string {
-  return (raw ?? '')
-    .trim()
-    .replace(/^["']|["']$/g, '')
-    .replace(/\*\*(.+?)\*\*/g, '$1')
-    .replace(/\*(.+?)\*/g, '$1')
-    .replace(/\*/g, '')
-    .replace(/\s*[—–]\s*/g, ', ')
-    .replace(/,\s*,/g, ',')
-    .trim();
-}
-
-// Force the caption to exactly `n` paragraphs. Too many → merge the overflow into
-// the last; too few → return as-is (nothing reliable to split on; the retry loop
-// nudges the model instead).
-function normalizeParagraphs(s: string, n: number): string {
-  const paras = s.split(/\n\s*\n/).map((p) => p.trim()).filter(Boolean);
-  if (paras.length <= 1) return paras[0] ?? s.trim();
-  if (paras.length === n) return paras.join('\n\n');
-  if (paras.length > n) {
-    const head = paras.slice(0, n - 1);
-    const tail = paras.slice(n - 1).join(' ');
-    return [...head, tail].join('\n\n');
-  }
-  return paras.join('\n\n');
-}
-
-function countParagraphs(s: string): number {
-  return s.split(/\n\s*\n/).map((p) => p.trim()).filter(Boolean).length;
-}
-
-// Trim an over-long caption to <= max, preferring the last sentence end at/above
-// min so we stay inside the band and never cut a word.
-function clampRange(s: string, min: number, max: number): string {
-  if (s.length <= max) return s;
-  const cut = s.slice(0, max);
-  let best = -1;
-  for (const stop of ['. ', '! ', '? ', '\n']) {
-    const i = cut.lastIndexOf(stop);
-    if (i >= 0 && i + 1 >= min && i + 1 > best) best = i + 1;
-  }
-  if (best >= min) return cut.slice(0, best).trim();
-  const lastSpace = cut.lastIndexOf(' ');
-  return (lastSpace >= min ? cut.slice(0, lastSpace) : cut).trim();
-}
 
 // Ask the model which single topic best fits the video (judged by the on-card
 // caption + context). Returns an index into `candidates`; defaults to 0 on any

@@ -163,9 +163,10 @@ export const isTrimmed = (t: Trim) => t.start > 0 || t.end !== null;
 export const MIN_TRIM_LENGTH = 0.1;
 
 // Playback rate for one clip. 2 means it plays twice as fast and takes half as
-// long on the timeline; the kept range of the source is unchanged. Audio is
-// resampled with the picture rather than pitch-corrected, in both the preview
-// and the export, so the two always agree.
+// long on the timeline; the kept range of the source is unchanged. Audio keeps
+// its pitch — it is time-stretched rather than resampled, in both the preview
+// and the export, so a sped-up clip still sounds like itself and the two always
+// agree (see lib/vidsAudio).
 /** How long a still runs when nothing else decides. End is the usual home for
  *  one, and End is normally as long as Top B — so this is only reached by a
  *  build with no Top B, where the photo is simply held for a beat. Trim and

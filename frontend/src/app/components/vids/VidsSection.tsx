@@ -12,8 +12,12 @@
 //                 over that clip. Link: which Bottom Bs follow on from which
 //                 Bottom A, which is what the builder goes by below.
 //   Build         pick a persona plus the bottom clips, stack them into one
-//                 video, and caption it. Two rails on the right: placement and
-//                 sound in one, the captions and how they look in the other.
+//                 video, and caption it. Three rails on the right: placement
+//                 and sound in one, the captions and how they look in the
+//                 next, and in the last the post caption for Instagram (the
+//                 person being traded and the case for up or down, read off
+//                 the screen recordings' context), the Phonedeck list and the
+//                 export buttons.
 //                 Everything is picked from the rack in the first rail, so the
 //                 page is stage plus controls with no library pane in the way.
 //                 That is Advanced. Simple, the other half of the switch top
@@ -78,7 +82,7 @@ const BUILD_MODES: { id: BuildMode; label: string; hint: string }[] = [
   {
     id: 'advanced',
     label: 'Advanced',
-    hint: 'The whole builder: every slot, both rails, the captions, and a stage you can drag, zoom and trim clips on.',
+    hint: 'The whole builder: every slot, all three rails, the captions, the post caption for Instagram, and a stage you can drag, zoom and trim clips on.',
   },
 ];
 const BUILD_MODE_KEY = 'pauv.vids.buildMode';
