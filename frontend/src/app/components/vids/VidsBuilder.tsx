@@ -1867,6 +1867,17 @@ export function VidsBuilder({
     return pool.length ? pool : null;
   }, [linkedPairs, bottomAId]);
 
+  /** How many Bottom Bs each Bottom A leads on to. The picker carries it in
+   *  the corner of every tile, so a Bottom A with nothing linked to it yet —
+   *  the one whose Bottom B would come from the whole folder, and which Random
+   *  passes over — shows before you choose it rather than after. */
+  const bottomALinks = useMemo(() => {
+    const counts = new Map<string, number>();
+    for (const v of clipsForSlot('bottomA')) counts.set(v.id, 0);
+    for (const p of linkedPairs) counts.set(p.a.id, (counts.get(p.a.id) ?? 0) + 1);
+    return counts;
+  }, [clipsForSlot, linkedPairs]);
+
   /** A fresh End, and not the one already on when there is another to be had —
    *  the same idea as rollMusic, for the slot that picks itself. */
   const rollEnd = (): SlotPick | null => {
@@ -2788,6 +2799,7 @@ export function VidsBuilder({
             clips={narrowed ?? clipsForSlot(slot)}
             subtitle={subtitle}
             linkedIds={slot === 'bottomB' && linkedBottomBs ? new Set(linkedBottomBs.map((v) => v.id)) : undefined}
+            linkCounts={slot === 'bottomA' ? bottomALinks : undefined}
             onShowAll={narrowed ? () => setPicker({ kind: 'clip', slot, all: true }) : undefined}
             currentId={picks[slot]?.video.id ?? null}
             onChoose={(v) => (simple ? chooseSimpleVid(v) : chooseClip(slot, v))}

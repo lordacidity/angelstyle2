@@ -13,7 +13,7 @@ import { useEffect, useState } from 'react';
 import type { PersonaPart, VidPersona, VidRow } from '@/lib/vids-types';
 import { PERSONA_PARTS, PERSONA_PART_LABEL, isPhoto } from '@/lib/vids-types';
 import { fmtTime } from '@/lib/utils';
-import { CloseIcon, VideoIcon } from '@/lib/icons';
+import { CloseIcon, LinkIcon, VideoIcon } from '@/lib/icons';
 
 function PlayBadge() {
   return (
@@ -71,7 +71,7 @@ export function Empty({ children }: { children: React.ReactNode }) {
 // Shared with the Link page, where `current` means linked rather than in use —
 // hence the badge is a prop.
 
-export function ClipTile({ video, current, badge = 'In use', tag, title, onChoose }: {
+export function ClipTile({ video, current, badge = 'In use', tag, links, title, onChoose }: {
   video: VidRow;
   current: boolean;
   /** What the corner says while `current`. */
@@ -79,6 +79,11 @@ export function ClipTile({ video, current, badge = 'In use', tag, title, onChoos
   /** A word after the length — "Linked", when the list shows more than the
    *  linked ones. */
   tag?: string;
+  /** How many Bottom Bs the Link page pairs with this clip. Only ever given
+   *  for Bottom A, the one slot where that decides what can follow it — the
+   *  corner then carries a link mark, green once there is something linked.
+   *  Undefined leaves the corner alone. */
+  links?: number;
   title?: string;
   onChoose: () => void;
 }) {
@@ -130,10 +135,31 @@ export function ClipTile({ video, current, badge = 'In use', tag, title, onChoos
         {playing ? <CloseIcon size={10} /> : <PlayBadge />}
       </button>
       )}
-      {current && (
-        <span className="absolute right-1 top-1 rounded bg-emerald-600/90 px-1 py-px text-[9px] font-medium text-white">
-          {badge}
-        </span>
+      {/* Top right: how this clip stands. The link mark says whether anything
+          follows on from it — green with a count once something does, dim
+          while nothing has been ticked for it on the Link page — so a Bottom
+          A that has never been linked up shows before you choose it. */}
+      {(links != null || current) && (
+        <div className="absolute right-1 top-1 flex items-center gap-1">
+          {links != null && (
+            <span
+              title={links
+                ? `${links} Bottom B${links === 1 ? '' : 's'} linked to this one on Edit & file → Link`
+                : 'Nothing linked to this one yet — its Bottom B would come from the whole folder'}
+              className={`flex items-center gap-0.5 rounded px-1 py-px text-[9px] font-medium ${
+                links ? 'bg-emerald-600/90 text-white' : 'bg-black/75 text-zinc-500'
+              }`}
+            >
+              <LinkIcon size={8} />
+              {links ? links : null}
+            </span>
+          )}
+          {current && (
+            <span className="rounded bg-emerald-600/90 px-1 py-px text-[9px] font-medium text-white">
+              {badge}
+            </span>
+          )}
+        </div>
       )}
     </div>
   );
@@ -142,7 +168,7 @@ export function ClipTile({ video, current, badge = 'In use', tag, title, onChoos
 // ── Clip picker (Bottom A / Bottom B / End) ───────────────────────────────────
 
 export function VidsClipPicker({
-  title, folder, clips, subtitle, linkedIds, onShowAll, currentId, onChoose, onClose,
+  title, folder, clips, subtitle, linkedIds, linkCounts, onShowAll, currentId, onChoose, onClose,
 }: {
   title: string;
   folder: string;
@@ -153,6 +179,10 @@ export function VidsClipPicker({
   /** The clips the Link page pairs with the Bottom A on the stage. Tagged, so
    *  they still stand out once the list shows more than them. */
   linkedIds?: Set<string>;
+  /** How many Bottom Bs each of these clips leads on to — Bottom A's list
+   *  only. Puts the link mark in every tile's corner, so which ones have been
+   *  linked up (and which never have) reads off the grid. */
+  linkCounts?: ReadonlyMap<string, number>;
   /** The list is narrowed to the linked ones, and this opens it up to the whole
    *  folder — the "Choose from any" button, top right. */
   onShowAll?: () => void;
@@ -190,6 +220,7 @@ export function VidsClipPicker({
               video={v}
               current={v.id === currentId}
               tag={tagLinked && linkedIds.has(v.id) ? 'Linked' : undefined}
+              links={linkCounts?.get(v.id)}
               onChoose={() => { onChoose(v); onClose(); }}
             />
           ))}
