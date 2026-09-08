@@ -9,6 +9,7 @@ export const SECTION_PATHS: Record<AppSection, string> = {
   brandkit: '/brand-kit',
   deck: '/deck',
   media: '/media',
+  vids: '/vids',
   carousel: '/carousel',
   builder: '/builder',
   trending: '/trending',

@@ -61,6 +61,11 @@ function whyEmpty(data: GeminiResponse, cand?: GeminiCandidate): string {
   ].filter(Boolean).join(' · ') || 'empty response';
 }
 
+/** How hard a Gemini 3 model thinks before it answers. Flash-Lite starts at
+ *  'minimal' (as good as none); the bigger 3.x models start at 'high'. The 2.x
+ *  models have no levels, so the fallbacks below keep their own settings. */
+export type ThinkingLevel = 'minimal' | 'low' | 'medium' | 'high';
+
 /**
  * One Gemini generateContent call against `parts`, with transient-error backoff
  * and fall-up to a couple of alternate models. Returns the drafted text.
@@ -69,10 +74,16 @@ export async function geminiGenerate(parts: GeminiPart[], opts: {
   temperature?: number;
   maxOutputTokens?: number;
   timeoutMs?: number;
+  /** Pin this call to one model, whatever GEMINI_MODEL says — for a route that
+   *  wants a particular one rather than the project default. */
+  model?: string;
+  /** Thinking level for a Gemini 3 model; left unset, the model uses its own
+   *  default. Thinking tokens count against maxOutputTokens, so leave room. */
+  thinking?: ThinkingLevel;
 } = {}): Promise<string> {
   const apiKey = process.env.GEMINI_API_KEY ?? '';
   if (!apiKey) throw new Error('GEMINI_API_KEY is not set');
-  const primary = process.env.GEMINI_MODEL || 'gemini-2.5-flash';
+  const primary = opts.model || process.env.GEMINI_MODEL || 'gemini-2.5-flash';
   const maxOutputTokens = opts.maxOutputTokens ?? 800;
 
   async function call(modelName: string): Promise<GeminiResponse> {
@@ -82,7 +93,9 @@ export async function geminiGenerate(parts: GeminiPart[], opts: {
       maxOutputTokens,
     };
     // Only 2.5 Flash lets us fully disable "thinking" (budget 0) — keeps it fast.
+    // Gemini 3 has levels instead, and never takes a budget alongside one.
     if (/2\.5-flash/.test(modelName)) generationConfig.thinkingConfig = { thinkingBudget: 0 };
+    else if (opts.thinking && /gemini-3/.test(modelName)) generationConfig.thinkingConfig = { thinkingLevel: opts.thinking };
     const body = JSON.stringify({ contents: [{ role: 'user', parts }], generationConfig });
 
     const MAX_TRIES = 4;

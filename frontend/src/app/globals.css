@@ -104,3 +104,41 @@ input[type='range']::-moz-range-progress {
   to { transform: rotate(360deg); }
 }
 
+
+/* Vids only: thin grey scrollbars in place of the browser's own, which on
+   Windows are a wide white slab against a page that is otherwise all black.
+   Scoped to .vids-scroll (the Vids section root) rather than set globally so
+   nothing else in the studio changes; the descendant selector covers the rails,
+   the rack and the library panes, which each scroll on their own. */
+.vids-scroll,
+.vids-scroll * {
+  scrollbar-width: thin;                       /* Firefox */
+  scrollbar-color: #3f3f46 transparent;        /* thumb, track */
+}
+
+.vids-scroll ::-webkit-scrollbar,
+.vids-scroll::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+
+.vids-scroll ::-webkit-scrollbar-track,
+.vids-scroll::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.vids-scroll ::-webkit-scrollbar-thumb,
+.vids-scroll::-webkit-scrollbar-thumb {
+  background: #3f3f46;                         /* zinc-700 */
+  border-radius: 9999px;
+}
+
+.vids-scroll ::-webkit-scrollbar-thumb:hover,
+.vids-scroll::-webkit-scrollbar-thumb:hover {
+  background: #52525b;                         /* zinc-600 */
+}
+
+.vids-scroll ::-webkit-scrollbar-corner,
+.vids-scroll::-webkit-scrollbar-corner {
+  background: transparent;
+}

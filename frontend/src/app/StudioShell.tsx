@@ -50,6 +50,10 @@ const XPhotoSection = lazy(() =>
   import('./components/xphoto/XPhotoSection').then(m => ({ default: m.XPhotoSection }))
 );
 
+const VidsSection = lazy(() =>
+  import('./components/vids/VidsSection').then(m => ({ default: m.VidsSection }))
+);
+
 function SectionLoader() {
   return (
     <div className="flex items-center justify-center h-full min-h-[200px]">
@@ -89,7 +93,12 @@ const SETUP_COMMAND =
 // setup.ps1) that runs launch-server.bat → the local Express backend. The
 // attached "First time?" dropdown shows the one-paste setup command; it
 // auto-opens once per browser so a new teammate sees how to get started.
-function LaunchServerButton() {
+//
+// `hidden` blanks it out rather than unmounting it — Vids is a full-screen
+// builder with its own controls down that edge, and nothing on it talks to the
+// local server. Staying mounted keeps the once-per-browser dropdown from
+// popping open again every time you come back off that tab.
+function LaunchServerButton({ hidden }: { hidden: boolean }) {
   const [open, setOpen] = useState(false);
   const [copied, setCopied] = useState(false);
 
@@ -111,6 +120,8 @@ function LaunchServerButton() {
     } catch { /* clipboard blocked — the code is select-all, copy manually */ }
     markSeen();
   }
+
+  if (hidden) return null;
 
   return (
     <div className="fixed bottom-3 left-[84px] z-[15]">
@@ -226,6 +237,11 @@ export function StudioShell() {
   // text + thumbnails round-trip through localStorage).
   const [pricerEverVisited, setPricerEverVisited] = useState(false);
   useEffect(() => { if (activeSection === 'pricer') setPricerEverVisited(true); }, [activeSection]);
+
+  // Vids too: keep the builder's slot picks + the open folder alive across
+  // tab switches once the section has been opened.
+  const [vidsEverVisited, setVidsEverVisited] = useState(false);
+  useEffect(() => { if (activeSection === 'vids') setVidsEverVisited(true); }, [activeSection]);
 
   // Board widget → generator. Replace the current rows with a single fresh entry
   // carrying this row's link/caption/context, then hand its id to CanvasGrid via
@@ -413,6 +429,23 @@ export function StudioShell() {
           </div>
         )}
 
+        {vidsEverVisited && (
+          <div style={{ display: activeSection === 'vids' ? undefined : 'none' }}>
+            <ErrorBoundary>
+              {/* Plain black like Board — the library grid + preview stage read
+                  better without the dotted background. Stays mounted after the
+                  first visit (display toggled) so the builder survives nav. */}
+              <div className="flex flex-col h-screen">
+                <div className="flex-1 min-h-0">
+                  <Suspense fallback={<SectionLoader />}>
+                    <VidsSection active={activeSection === 'vids'} />
+                  </Suspense>
+                </div>
+              </div>
+            </ErrorBoundary>
+          </div>
+        )}
+
         {activeSection === 'xphoto' && (
           <ErrorBoundary>
             <Suspense fallback={<SectionLoader />}>
@@ -477,8 +510,10 @@ export function StudioShell() {
         zIndex={20}
       />
 
-      {/* Launch-server split button + first-time setup dropdown (see component). */}
-      <LaunchServerButton />
+      {/* Launch-server split button + first-time setup dropdown (see component).
+          Off on Vids: that page fills the screen and never needs the local
+          server. */}
+      <LaunchServerButton hidden={activeSection === 'vids'} />
     </div>
   );
 }

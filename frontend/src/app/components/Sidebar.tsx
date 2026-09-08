@@ -52,6 +52,17 @@ const NAV: { id: AppSection; label: string; icon: React.ReactNode }[] = [
     ),
   },
   {
+    id: 'vids',
+    label: 'Vids',
+    // Film strip — the shared cloud video library + stacked-sequence builder.
+    icon: (
+      <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+        <rect x="2" y="3" width="20" height="18" rx="2"/>
+        <path d="M7 3v18M17 3v18M2 8h5M2 16h5M17 8h5M17 16h5"/>
+      </svg>
+    ),
+  },
+  {
     id: 'carousel',
     label: 'Carousel',
     // Stacked cards — a multi-page swipe post.

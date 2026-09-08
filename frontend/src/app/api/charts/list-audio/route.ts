@@ -32,7 +32,10 @@ export async function GET() {
 
   let files: string[];
   try {
-    files = readdirSync(audioDir).filter(f => f.endsWith('.mp3'));
+    // Tracks only. public/audio also holds the beds the Vids builder lays under
+    // a video (room-tone.mp3) — those are part of the app, not songs anyone
+    // would pick, and they have no business in a track list.
+    files = readdirSync(audioDir).filter(f => f.endsWith('.mp3') && f.startsWith('track-'));
   } catch {
     return NextResponse.json([]);
   }

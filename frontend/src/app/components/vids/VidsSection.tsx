@@ -1,0 +1,221 @@
+'use client';
+
+// "Vids" — a shared cloud video library (folders + clips in Supabase Storage)
+// beside the stacked-sequence builder, in two pages:
+//
+//   Edit & file   upload footage, then open a clip in the editor — trim it, cut
+//                 chunks out of the middle, change its speed, drop its sound.
+//                 Saving puts the edit back over that clip, and you drag it into
+//                 the folder it belongs in. Dropping footage on the middle of the
+//                 page instead runs that whole errand for you: folder, context,
+//                 edit, save — and three files at once is taken to be a persona,
+//                 which is named once, given one context, and trimmed clip by
+//                 clip.
+//   Build         pick a persona plus the bottom clips, stack them into one
+//                 video, and caption it. Two rails on the right: placement and
+//                 sound in one, the captions and how they look in the other.
+//                 Everything is picked from the rack in the first rail, so the
+//                 page is stage plus controls with no library pane in the way.
+//
+// Both pages share one library hook, and an edit keeps its clip's id, so the
+// build always uses the current footage — edit Top A and the persona that uses
+// it plays the edited Top A, with no re-picking.
+//
+// Four top-level folders feed the six slots of the sequence:
+//   Persona   a bundle of three clips — Start, Top A, Top B — chosen together.
+//   Bottom A / Bottom B / End   picked one clip at a time, from the folder of
+//                               that name.
+// So a build chooses one persona plus up to three bottom clips, and the builder
+// plays the sequence: Start full screen → Top A over Bottom A → Bottom B, then
+// Top B over End. Export downloads the MP4 or saves it straight back into the
+// library so anyone can grab it from anywhere. No AI, no captions: just footage
+// in, video out.
+
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useVidsLibrary } from '../../hooks/useVidsLibrary';
+import { VidsBuilder } from './VidsBuilder';
+import { VidsPrep } from './VidsPrep';
+import {
+  DEFAULT_TRIM, LIBRARY_FOLDERS, PERSONA_PART_SLOT, PERSONA_SLOTS, SLOT_META,
+  folderGroupIds, freshPick, type Picks, type SlotId,
+} from '@/lib/vidsPlan';
+import { PERSONA_PARTS } from '@/lib/vids-types';
+import type { VidPersona, VidRow } from '@/lib/vids-types';
+
+/** The two pages. Building is what you come here to do — the footage is already
+ *  filed most days — so it leads, and Edit & file is where you go when there is
+ *  new footage to put through. */
+type Page = 'prep' | 'build';
+const PAGES: { id: Page; label: string }[] = [
+  { id: 'build', label: 'Build' },
+  { id: 'prep',  label: 'Edit & file' },
+];
+
+export function VidsSection({ active }: { active: boolean }) {
+  const lib = useVidsLibrary(active);
+  const { loaded, folders, videos, personas, ensureFolders, uploadBlob } = lib;
+  const [page, setPage] = useState<Page>('build');
+  const [picks, setPicks] = useState<Picks>({});
+  const [selectedSlot, setSelectedSlot] = useState<SlotId | null>(null);
+  const [hint, setHint] = useState<string | null>(null);
+  const hintTimer = useRef<number | null>(null);
+  const ensuredRef = useRef(false);
+
+  // The four library folders always exist at the top level.
+  useEffect(() => {
+    if (!loaded || ensuredRef.current) return;
+    ensuredRef.current = true;
+    void ensureFolders([...LIBRARY_FOLDERS]);
+  }, [loaded, ensureFolders]);
+
+  // What the build actually uses. A pick stores the row it was made from, and a
+  // clip edited on the first page keeps its id but gets new footage at a new URL
+  // (the old object is gone from the bucket) — so every slot is resolved against
+  // the library each render rather than trusting that snapshot. Edit Top A and
+  // the persona using it plays the edited Top A, with nothing to re-pick.
+  //
+  // A clip whose row has gone empties its slot; new footage resets that slot's
+  // in / out points, since they pointed into footage that no longer exists.
+  // Framing, sound and speed are the build's own and stay. Unchanged picks keep
+  // their identity, so an ordinary library refresh doesn't churn the stage.
+  const livePicks = useMemo(() => {
+    let changed = false;
+    const next: Picks = {};
+    for (const slot of Object.keys(picks) as SlotId[]) {
+      const pick = picks[slot];
+      if (!pick) continue;
+      const cur = videos.find((v) => v.id === pick.video.id);
+      if (!cur) { changed = true; continue; }
+      const sameFootage = cur.url === pick.video.url;
+      if (sameFootage && cur.name === pick.video.name && cur.duration === pick.video.duration) {
+        next[slot] = pick;
+        continue;
+      }
+      next[slot] = sameFootage
+        ? { ...pick, video: cur }
+        : { ...pick, video: cur, trim: { ...DEFAULT_TRIM } };
+      changed = true;
+    }
+    return changed ? next : picks;
+  }, [picks, videos]);
+
+  const flash = useCallback((message: string) => {
+    setHint(message);
+    if (hintTimer.current) window.clearTimeout(hintTimer.current);
+    hintTimer.current = window.setTimeout(() => setHint(null), 4500);
+  }, []);
+
+  // What a freshly picked clip starts from is freshPick's business: re-picking
+  // a slot keeps its fit / align (unless the slot has a placement of its own),
+  // and the new clip arrives untrimmed and silent unless Prep gave it sound.
+  const assign = useCallback((slot: SlotId, video: VidRow) => {
+    setPicks((prev) => ({ ...prev, [slot]: freshPick(slot, video, prev[slot]) }));
+    setSelectedSlot(slot);
+  }, []);
+
+  // Choosing a persona fills Start, Top A and Top B together. A part the persona
+  // hasn't got yet clears its slot, so what's on the stage always matches the
+  // bundle rather than leaving a clip behind from the persona before it.
+  const usePersona = useCallback((persona: VidPersona) => {
+    setPicks((prev) => {
+      const next = { ...prev };
+      for (const part of PERSONA_PARTS) {
+        const slot = PERSONA_PART_SLOT[part];
+        const video = videos.find((v) => v.id === persona[part]);
+        if (video) next[slot] = freshPick(slot, video, prev[slot]);
+        else delete next[slot];
+      }
+      return next;
+    });
+    const missing = PERSONA_PARTS.filter((k) => !persona[k]).length;
+    if (missing) flash(`"${persona.name}" is missing ${missing} of its three clips — drop them onto its tiles.`);
+  }, [videos, flash]);
+
+  const clearPersona = useCallback(() => {
+    setPicks((prev) => {
+      const next = { ...prev };
+      for (const slot of PERSONA_SLOTS) delete next[slot];
+      return next;
+    });
+  }, []);
+
+  // Which persona the three top slots currently hold. Derived rather than
+  // stored, so editing one of those slots by hand silently drops the badge
+  // instead of claiming a persona that is no longer really in use.
+  const appliedPersonaId = useMemo(() => {
+    const found = personas.find((p) => {
+      const parts = PERSONA_PARTS.filter((k) => p[k]);
+      if (parts.length === 0) return false;
+      return PERSONA_PARTS.every((k) => livePicks[PERSONA_PART_SLOT[k]]?.video.id === (p[k] ?? undefined));
+    });
+    return found?.id ?? null;
+  }, [personas, livePicks]);
+
+  const onPicksChange = useCallback((updater: (prev: Picks) => Picks) => setPicks(updater), []);
+  const resolveVideo = useCallback((id: string) => videos.find((v) => v.id === id), [videos]);
+
+  // Everything filed under a slot's folder, sub-folders included — what that
+  // slot's picker in the rack offers.
+  const clipsForSlot = useCallback((slot: SlotId): VidRow[] => {
+    const ids = folderGroupIds(folders, SLOT_META[slot].folder);
+    return videos.filter((v) => v.folderId && ids.has(v.folderId));
+  }, [folders, videos]);
+
+  // A finished build lands unfiled, in the Inbox on the Edit & file page — the
+  // build page has no folder open to put it in, and the Inbox is where you go to
+  // look at it anyway.
+  const saveToLibrary = useCallback(async (blob: Blob, name: string): Promise<VidRow> => {
+    const row = await uploadBlob(blob, name, null);
+    if (!row) throw new Error('Upload failed — check the Edit & file page for details.');
+    return row;
+  }, [uploadBlob]);
+
+  return (
+    <div className="vids-scroll flex h-full flex-col text-white">
+      <div className="flex items-center gap-4 border-b border-zinc-800 px-6 py-3">
+        <h1 className="text-lg font-semibold">Vids</h1>
+        <div className="flex overflow-hidden rounded-md border border-zinc-700">
+          {PAGES.map((p, i) => (
+            <button
+              key={p.id}
+              onClick={() => setPage(p.id)}
+              className={`px-3 py-1.5 text-[11px] font-medium transition-colors ${
+                page === p.id ? 'bg-zinc-200 text-black' : 'text-zinc-400 hover:bg-zinc-900 hover:text-white'
+              }`}
+            >
+              <span className="mr-1 text-[9px] opacity-60">{i + 1}</span>{p.label}
+            </button>
+          ))}
+        </div>
+        <span className="flex-1" />
+        {hint && (
+          <p className="rounded-md border border-amber-800 bg-amber-950/40 px-3 py-1.5 text-[11px] text-amber-300">{hint}</p>
+        )}
+      </div>
+
+      {/* Both pages stay mounted — switching back must not lose an open edit or
+          the slots that have already been picked. */}
+      <div className="flex min-h-0 flex-1" style={{ display: page === 'build' ? undefined : 'none' }}>
+        <VidsBuilder
+          picks={livePicks}
+          onPicksChange={onPicksChange}
+          onAssign={assign}
+          selectedSlot={selectedSlot}
+          onSelectSlot={setSelectedSlot}
+          resolveVideo={resolveVideo}
+          clipsForSlot={clipsForSlot}
+          personas={personas}
+          appliedPersonaId={appliedPersonaId}
+          onUsePersona={usePersona}
+          onClearPersona={clearPersona}
+          active={active && page === 'build'}
+          libraryLoaded={loaded}
+          onSaveToLibrary={saveToLibrary}
+        />
+      </div>
+      <div className="flex min-h-0 flex-1" style={{ display: page === 'prep' ? undefined : 'none' }}>
+        <VidsPrep lib={lib} active={active && page === 'prep'} />
+      </div>
+    </div>
+  );
+}
