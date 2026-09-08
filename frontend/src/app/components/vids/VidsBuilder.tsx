@@ -16,9 +16,9 @@
 //
 // Random, top right beside Reset, runs the whole errand in one go: a persona
 // from the Persona folder, a Bottom A and a Bottom B that the Link page says
-// go together (any two, while nothing has been linked yet), an End, and then
-// the captions — the same call the Write button makes, made once the clips it
-// picked have loaded. Roll again as often as you like; only a stage that was
+// go together (any two, while nothing has been linked yet), an End, a song, a
+// look for the captions, and then the captions themselves — the same call the
+// Write button makes, made once the clips it picked have loaded. Roll again as often as you like; only a stage that was
 // built by hand is asked about first. The same links narrow Bottom B's picker
 // to what follows the Bottom A on the stage.
 //
@@ -62,7 +62,7 @@ import {
 import { VidsClipPicker, VidsPersonaPicker } from './VidsPicker';
 import { composeSequence } from '@/lib/vidsCompose';
 import {
-  DEFAULT_CAPTION_STYLE, EMPTY_LINES, ONE_LINE_DEFAULT, buildCaptions, capLine, captionAt,
+  CAPTION_STYLES, DEFAULT_CAPTION_STYLE, EMPTY_LINES, ONE_LINE_DEFAULT, buildCaptions, capLine, captionAt,
   captionStyle, captionWindows, drawCaption, layoutCaption, preloadCaptionEmoji, seamNeedsMerge, wantedCount,
   type CaptionLines, type CaptionPos, type CaptionRef, type CaptionWindow,
 } from '@/lib/vidsCaptions';
@@ -910,6 +910,9 @@ export function VidsBuilder({
   // a roll, or a build brought back by its code all count — after any of them
   // the list arriving (or arriving again) leaves the choice alone.
   const musicChosenRef = useRef(false);
+  // Likewise the captions' look: rolled once when the pane first opens, then
+  // only by Random, Reset, or a code bringing its own back.
+  const styleChosenRef = useRef(false);
   // Browser-measured clip lengths + load failures, keyed by video id so a
   // re-picked slot never carries a stale value.
   const [durations, setDurations] = useState<Record<string, number>>({});
@@ -1828,7 +1831,10 @@ export function VidsBuilder({
       // Over the empty set, so a build written down before End had its
       // pay-off line comes back with that line blank rather than missing.
       setLines({ ...EMPTY_LINES, ...structuredClone(b.captions.lines) });
-      setStyleId(b.captions.styleId);
+      // Through captionStyle(), so a build written down with a look that has
+      // since been retired comes back on one that exists.
+      styleChosenRef.current = true;
+      setStyleId(captionStyle(b.captions.styleId).id);
       setNotes(b.captions.notes);
       setEmojis(b.captions.emojis);
       setCaptionError(null);
@@ -2001,11 +2007,12 @@ export function VidsBuilder({
 
   /** Back to an empty stage: every slot cleared and the words written for those
    *  clips gone with them, since a caption is about the clip it was written over.
-   *  It lands where a build starts rather than on nothing at all: a fresh End
-   *  and a fresh song, the two the builder picks for itself anyway.
-   *  How the video is set up — the bars, the size, the room tone, the caption
-   *  style — is left alone: those are how you work, not what you picked. Nothing
-   *  leaves the library; this clears the stage, it doesn't delete footage. */
+   *  It lands where a build starts rather than on nothing at all: a fresh End,
+   *  a fresh song and a fresh look for the captions, the three the builder
+   *  picks for itself anyway. How the video is set up — the bars, the size,
+   *  the room tone — is left alone: those are how you work, not what you
+   *  picked. Nothing leaves the library; this clears the stage, it doesn't
+   *  delete footage. */
   const resetBuild = () => {
     pause();
     onSelectSlot(null);
@@ -2014,6 +2021,7 @@ export function VidsBuilder({
     const end = rollEnd();
     onPicksChange(() => (end ? { end } : {}));
     rollMusic();
+    rollStyle();
     setLines(EMPTY_LINES);
     setCaptionError(null);
     setRecall({ busy: false, loaded: null, problems: [], error: null });
@@ -2051,6 +2059,26 @@ export function VidsBuilder({
     musicChosenRef.current = true;
     setMusic((m) => ({ ...m, url: t.url, label: t.label }));
   };
+
+  /** A look for the captions off the shelf, and not the one already on when
+   *  there is another to be had — the song's rule, for the song's reason: a
+   *  look nobody chose is easier to swap than one nobody thought to try.
+   *  Random and Reset use it; the pane rolls one itself the first time it
+   *  opens (below). */
+  const rollStyle = () => {
+    const pool = CAPTION_STYLES.filter((s) => s.id !== styleId);
+    const s = pickRandom(pool.length ? pool : CAPTION_STYLES);
+    if (!s) return;
+    styleChosenRef.current = true;
+    setStyleId(s.id);
+  };
+  useEffect(() => {
+    if (!active || styleChosenRef.current) return;
+    const s = pickRandom(CAPTION_STYLES);
+    if (!s) return;
+    styleChosenRef.current = true;
+    setStyleId(s.id);
+  }, [active]);
 
   /** A whole build at random: one persona (a complete one when there is one,
    *  else whichever partial one), a clip each for Bottom A, Bottom B and End,
@@ -2104,6 +2132,7 @@ export function VidsBuilder({
     setLines(EMPTY_LINES);
     setCaptionError(null);
     rollMusic();
+    rollStyle();
     setRecall({ busy: false, loaded: null, problems: [], error: null });
     timeRef.current = 0;
     setTime(0);

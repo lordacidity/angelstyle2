@@ -312,7 +312,7 @@ export function VidsCaptionsRail({
           ))}
         </div>
         <p className="mt-1.5 text-[9px] leading-relaxed text-zinc-600">
-          Applies to every caption. Use 1 line on a caption that wraps when you would rather it did not.
+          One is picked at random for each build, like the song — click another to change it. Applies to every caption. Use 1 line on a caption that wraps when you would rather it did not.
         </p>
       </Section>
 

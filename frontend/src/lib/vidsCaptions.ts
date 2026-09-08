@@ -414,16 +414,14 @@ export interface CaptionStyle {
   tracking: number;
 }
 
+/** The looks on offer. The builder picks one at random for each build, the
+ *  way it picks the song — none of them is the default. (Impact, big outlined
+ *  caps, was retired; a build written down with it comes back as Clean.) */
 export const CAPTION_STYLES: readonly CaptionStyle[] = [
   {
     id: 'clean', label: 'Clean', note: 'white, plain',
     family: 'Inter, "Helvetica Neue", Arial, sans-serif',
     weight: 700, size: 0.053, color: '#ffffff', letterCase: 'as-written', stroke: 0, shadow: 0.012, tracking: 0,
-  },
-  {
-    id: 'impact', label: 'Impact', note: 'big caps, outlined',
-    family: '"Arial Black", Impact, Inter, sans-serif',
-    weight: 900, size: 0.064, color: '#ffffff', letterCase: 'upper', stroke: 0.11, shadow: 0.005, tracking: -0.01,
   },
   {
     id: 'soft', label: 'Soft', note: 'lighter and smaller',
@@ -437,7 +435,10 @@ export const CAPTION_STYLES: readonly CaptionStyle[] = [
   },
 ];
 
+/** What stands in before a style has been rolled, and what an export with no
+ *  style given draws in. Not what a build lands on — see CAPTION_STYLES. */
 export const DEFAULT_CAPTION_STYLE = CAPTION_STYLES[0].id;
+/** The style with this id, or the stand-in for one that no longer exists. */
 export const captionStyle = (id: string): CaptionStyle =>
   CAPTION_STYLES.find((s) => s.id === id) ?? CAPTION_STYLES[0];
 
