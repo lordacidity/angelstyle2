@@ -78,6 +78,11 @@ export async function geminiGenerate(parts: GeminiPart[], opts: {
   // 3.x only. 'minimal' is the floor and is right for trivial work (classification,
   // picking an index); leave unset for prose, where 'low' is worth the extra seconds.
   thinkingLevel?: ThinkingLevel;
+  // Loosen the default safety filters to "block only high" so opinionated takes
+  // about real public figures (the ChatGPT lookalike arguing someone is on the
+  // way down) don't come back empty. Off by default; every other route keeps
+  // Gemini's defaults.
+  relaxSafety?: boolean;
 } = {}): Promise<string> {
   const apiKey = process.env.GEMINI_API_KEY ?? '';
   if (!apiKey) throw new Error('GEMINI_API_KEY is not set');
@@ -104,7 +109,11 @@ export async function geminiGenerate(parts: GeminiPart[], opts: {
     } else if (/2\.5-flash/.test(modelName)) {
       generationConfig.thinkingConfig = { thinkingBudget: 0 };
     }
-    const body = JSON.stringify({ contents: [{ role: 'user', parts }], generationConfig });
+    const safetySettings = opts.relaxSafety
+      ? ['HARM_CATEGORY_HARASSMENT', 'HARM_CATEGORY_HATE_SPEECH', 'HARM_CATEGORY_DANGEROUS_CONTENT', 'HARM_CATEGORY_SEXUALLY_EXPLICIT']
+          .map(category => ({ category, threshold: 'BLOCK_ONLY_HIGH' }))
+      : undefined;
+    const body = JSON.stringify({ contents: [{ role: 'user', parts }], generationConfig, ...(safetySettings ? { safetySettings } : {}) });
 
     const MAX_TRIES = 4;
     for (let attempt = 1; ; attempt++) {

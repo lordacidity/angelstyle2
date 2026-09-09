@@ -42,8 +42,8 @@ const AiPromptsSection = lazy(() =>
   import('./components/AiPromptsSection').then(m => ({ default: m.AiPromptsSection }))
 );
 
-const PricerSection = lazy(() =>
-  import('./components/PricerSection').then(m => ({ default: m.PricerSection }))
+const ChatGptSection = lazy(() =>
+  import('./components/chatgpt/ChatGptSection').then(m => ({ default: m.ChatGptSection }))
 );
 
 const XPhotoSection = lazy(() =>
@@ -233,11 +233,10 @@ export function StudioShell() {
   const [carouselEverVisited, setCarouselEverVisited] = useState(false);
   useEffect(() => { if (activeSection === 'carousel') setCarouselEverVisited(true); }, [activeSection]);
 
-  // Same keep-mounted trick for Pricer: once visited, stay mounted (hidden) so the
-  // in-memory full-res photos a batch is cropping aren't lost on tab switch (only
-  // text + thumbnails round-trip through localStorage).
-  const [pricerEverVisited, setPricerEverVisited] = useState(false);
-  useEffect(() => { if (activeSection === 'pricer') setPricerEverVisited(true); }, [activeSection]);
+  // Same keep-mounted trick for ChatGPT: once visited, stay mounted (hidden) so a
+  // chat in progress (or one already answered) survives a tab switch.
+  const [chatgptEverVisited, setChatgptEverVisited] = useState(false);
+  useEffect(() => { if (activeSection === 'chatgpt') setChatgptEverVisited(true); }, [activeSection]);
 
   // Vids too: keep the builder's slot picks + the open folder alive across
   // tab switches once the section has been opened.
@@ -420,11 +419,11 @@ export function StudioShell() {
           </ErrorBoundary>
         )}
 
-        {pricerEverVisited && (
-          <div style={{ display: activeSection === 'pricer' ? undefined : 'none' }}>
+        {chatgptEverVisited && (
+          <div style={{ display: activeSection === 'chatgpt' ? undefined : 'none' }}>
             <ErrorBoundary>
               <Suspense fallback={<SectionLoader />}>
-                <PricerSection />
+                <ChatGptSection active={activeSection === 'chatgpt'} />
               </Suspense>
             </ErrorBoundary>
           </div>

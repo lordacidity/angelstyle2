@@ -96,13 +96,13 @@ const NAV: { id: AppSection; label: string; icon: React.ReactNode }[] = [
     ),
   },
   {
-    id: 'pricer',
-    label: 'Pricer',
-    // Price tag — paste names + prices, generate tickers, attach cropped photos.
+    id: 'chatgpt',
+    label: 'ChatGPT',
+    // Chat bubble — the ChatGPT lookalike that argues a chosen name is up or down.
     icon: (
       <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
-        <path d="M20.59 13.41 13.42 20.6a2 2 0 0 1-2.83 0L3 13V3h10l7.59 7.59a2 2 0 0 1 0 2.82z"/>
-        <circle cx="7.5" cy="7.5" r="1.5"/>
+        <path d="M21 12a8 8 0 0 1-8 8H7l-4 3v-7.5A8 8 0 0 1 13 4a8 8 0 0 1 8 8z"/>
+        <path d="M9 12h.01M13 12h.01M17 12h.01"/>
       </svg>
     ),
   },
