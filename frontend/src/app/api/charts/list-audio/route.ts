@@ -10,7 +10,6 @@ const PRELOADED: Record<string, { label: string; durationMs: number }> = {
   'track-2.mp3': { label: 'Track 2', durationMs: 60000 },
   'track-3.mp3': { label: 'Track 3', durationMs: 20033 },
   'track-4.mp3': { label: 'Track 4', durationMs: 23067 },
-  'track-5.mp3': { label: 'Track 5', durationMs: 26067 },
   'track-6.mp3': { label: 'Track 6', durationMs: 33033 },
   'track-7.mp3': { label: 'Track 7', durationMs: 28033 },
   'track-8.mp3': { label: 'Track 8', durationMs: 26033 },
