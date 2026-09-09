@@ -449,10 +449,11 @@ const LINE_HEIGHT = 1.22;
  *  it the text is too small to read, and wrapping was the better answer. */
 const MIN_ONE_LINE_SCALE = 0.45;
 /** The gap between the top edge of the picture and the top of a top-placed
- *  block, as a share of the frame height — a slight border, no more. The block
- *  hangs from that line and grows downward, so one line and three lines start in
- *  exactly the same place: hard against the top of the video either way. */
-const TOP_GAP = 0.05;
+ *  block, as a share of the frame height — a little way in from the edge, so
+ *  the hook sits below the very top of the video without reaching the face in
+ *  the middle of it. The block hangs from that line and grows downward, so one
+ *  line and three lines start in exactly the same place. */
+const TOP_GAP = 0.09;
 
 /** Greedy word wrap to `maxWidth`, with each emoji measured as the image it is
  *  drawn as. A single word too long to fit stays on its own line rather than

@@ -1859,7 +1859,8 @@ export function VidsBuilder({
     setRecall((r) => ({ ...r, busy: true, error: null }));
     try {
       const recipe = await getRecipe(code);
-      const { picks: restored, problems } = picksFromSpec(recipe.build, resolveVideo, personas);
+      const { picks: restored, problems: pickProblems } = picksFromSpec(recipe.build, resolveVideo, personas);
+      const problems = [...pickProblems];
       const b = recipe.build;
       pause();
       onSelectSlot(null);
@@ -1869,11 +1870,19 @@ export function VidsBuilder({
       setBars({ ...b.bars });
       setRoomTone({ on: b.roomTone.on, level: clampRoomLevel(b.roomTone.level) });
       // A record written before music was a layer has none, which is what it
-      // was exported with.
+      // was exported with. A song that has since left the audio library cannot
+      // be played or exported, so the build comes back without one and says so;
+      // the label written down with it names what it was. Only once the list
+      // has arrived — an empty list says nothing about what is in it.
       musicChosenRef.current = true;
-      setMusic(b.music
+      let song: Music = b.music
         ? { url: b.music.url ?? null, label: b.music.label ?? '', level: clampMusicLevel(b.music.level) }
-        : DEFAULT_MUSIC);
+        : DEFAULT_MUSIC;
+      if (song.url && tracks.length && !tracks.some((t) => t.url === song.url)) {
+        problems.push(`Song "${song.label || song.url.split('/').pop()}" is no longer in the audio library, so this build has no music — pick another under Sound.`);
+        song = { ...song, url: null };
+      }
+      setMusic(song);
       setClipLevel(clampClipLevel(b.clipLevel));
       setPresetId(OUTPUT_PRESETS.some((p) => p.id === b.preset) ? (b.preset as PresetId) : OUTPUT_PRESETS[0].id);
       // Over the empty set, so a build written down before End had its

@@ -8,8 +8,9 @@
 // often never mention the site, because whoever wrote them could see it. So this
 // writes three kinds of line — one weird hook over Start, a step-by-step
 // commentary over the screen recording, and the pay-off over the winnings at
-// the end. The hook always says he is making money ("making bands off ronaldo
-// while ..."); the pay-off is two captions in turn — one that says he made it,
+// the end. The hook always says he is making money and names the weird thing
+// he is doing on camera ("making bank shorting trump in the woods" — see HOOK);
+// the pay-off is two captions in turn — one that says he made it,
 // then the same call to action on every build, comment "<word>" for the link,
 // where the model only picks the word, so the line matches the video without
 // ever drifting from the form. And somewhere in every set a line spells out
@@ -37,6 +38,18 @@
 // little text-speak — ppl, rn, tbh — the way the audience types. Flash-Lite
 // answers with no thinking unless asked; this asks for a little, since each
 // line has to be right about the whole video and not only the clip it sits on.
+//
+// The hook is written to one guide (HOOK): a money phrase from a fixed list,
+// the weird thing or the place from the persona context, and usually who he is
+// trading on and which way — "shorting" for down, plain "on" for up. He is
+// always typing or on a computer, so that part is never said; the weird thing
+// is what is left, and it is in the line every time. Which way the trade goes
+// is read off the screen recordings' contexts and marks, the same reading the
+// steps come from. Now and then it is a "how to", addressed to the viewer,
+// or ends on how fast it was ("in 69 secs"). The pay-off is written to a guide
+// of its own (PAYOFF): the same money phrases closed in the past tense, always
+// naming the person he traded on and never the stunt — that was the hook's job.
+// Every build is written the same way; there is no choice of voice.
 //
 // Emoji come from the app's own set: the ones pinned in the Emojis drawer are
 // handed over as the palette to pick from, and every line is drawn from that
@@ -85,6 +98,102 @@ ${palette.length
     : `  Pick whatever emoji actually fits what that caption is saying — a plain standard one. No skin tones, no flags, no joined sequences.`}`
   : `- No emoji.`}`;
 
+/** The hook, written to one guide. The persona context says what he is doing
+ *  or where he is ("typing in the middle of the road", "in the woods on my
+ *  computer"); he is always typing or on a computer, so the caption never says
+ *  that part, and the weird thing or the place is what it names — every time.
+ *  The money is one phrase from a fixed list, the trade is "shorting" when it
+ *  is down and plain "on" when it is up, and which way it goes is read off the
+ *  screen recordings, the same reading the steps come from. Now and then the
+ *  line is a "how to", addressed to the viewer, or ends on how fast it was —
+ *  "in 67 secs", "in 69 secs", the house numbers. Every build is written this
+ *  way; there is no choice of voice. */
+const HOOK = `START — the hook. One caption over the persona on camera.
+The persona context says what he is doing or where he is: "typing in the middle of the road", "putting a phone in my mouth", "in the park today", "in the woods on my computer". He is ALWAYS typing or on a computer, so never say that part — not "typing", not "on my laptop", not "on my phone". The hook is the WEIRD thing — the place he is, or the thing he is doing — and it is in the caption every single time, named from the context.
+TWO things in every hook:
+  1. THE MONEY, in one of these phrases and no other: making bank, getting paid, making money, making bands, making rent, profiting, paying my bills, securing the bag, making a living — or a salary: "making a doctor's salary", "making a lawyer's salary", "making messi's salary" (a job, or the person he is trading on).
+  2. THE WEIRD THING, from the context: "in the woods", "with a phone in my mouth", "on the toilet", "at the park", "in a dinosaur costume".
+Usually name WHO he is trading on — the person the screen recording shows — and say which way. Read the direction off the screen recordings' contexts and moments: trading up on him, backing him, buying him is UP; trading down on him, fading him, betting on him falling is DOWN. If nothing says, it is UP.
+  UP:   "on ronaldo", "off ronaldo", "trading ronaldo"
+  DOWN: "shorting trump", "profiting on tate's downfall", "off kanye getting cancelled"
+Never "trade up", "trade down" or "trading down" in the hook. Now and then leave the person out and let the weird thing carry it: "getting paid with a phone in my mouth", "at the park getting paid".
+Sometimes write it as a HOW TO, addressed to the viewer: "how to make rent off mbappe from a hammock", "how to get paid with a phone in your mouth". Then "my" becomes "your" and the money phrase goes to its base form.
+Now and then put how fast it was on the end — "in 67 secs" or "in 69 secs", the house numbers: "making bank shorting trump in the woods in 69 secs", "getting paid off ronaldo on the toilet in 67 secs". Not on every build, and never any other number unless a context gives it.
+Either order works — money first or weird thing first. Vary it. All lower case, no full stop, no hashtags. Short, though the hook may wrap.
+WRONG:
+  "making bank on trump today" — no weird thing
+  "making money typing in a park" — typing is not the thing, the park is
+  "trading down on drake in the bath" — say shorting
+RIGHT:
+  making bank shorting trump in the woods
+  getting paid with a phone in my mouth
+  at the park making money on ronaldo
+  on the toilet making money off kanye getting cancelled
+  3am in bed profiting on tate's downfall
+  getting paid in a shopping trolley
+  making rent shorting drake with tape on my mouth
+  velo in my mouth making bands on ronaldo
+  paying my bills shorting trump in the back of an uber
+  securing the bag on ronaldo on a trampoline
+  making a living on messi at the bus stop
+  in a cupboard profiting off drake getting cancelled
+  how to make rent off mbappe from a hammock
+  how to get paid with a phone in your mouth
+  how to secure the bag on trump's downfall from the bath
+  making a doctor's salary shorting trump in the woods
+  making a lawyer's salary off ronaldo on the toilet
+  making messi's salary off messi in the bath
+  making bank shorting trump in the woods in 69 secs
+  getting paid off ronaldo on the toilet in 67 secs`;
+
+/** The pay-off, written to one guide: the hook's money phrases closed in the
+ *  past tense, always naming the person he traded on and never the stunt —
+ *  that was the hook's job. Which way it went is said the hook's way, shorting
+ *  for down. "67 secs" and "69 secs" are the house numbers for how fast; any
+ *  other figure only from a context. */
+const PAYOFF = `THE PAY-OFF
+One short line over him showing the money: that he made it, done, past tense. It ALWAYS names the person he traded on — the same one as the hook and the screen recording — and NEVER the weird thing he was doing on camera. That was the hook's job, and it is over.
+THE MONEY is one of the hook's phrases, closed: made bank, got paid, made money, made bands, made rent, paid my bills, secured the bag, profited — or a salary: "made a lawyer's salary off ronaldo", "made messi's salary off messi". Not "making a living" here.
+Say which way, the way the hook does. UP: "off ronaldo", "on messi". DOWN: "shorting trump", "on tate's downfall", "off kanye getting cancelled". Never "trade up" or "trade down".
+Shapes — vary them from build to build:
+  the phrase closed, plus who: "made bank shorting trump", "got paid off ronaldo", "secured the bag on messi"
+  the person pays him: "ronaldo just paid my rent", "trump's downfall paid my bills", "kanye getting cancelled paid me"
+  pointing at the money on screen: "that's rent off ronaldo", "that's the bag off messi", "there's trump's money"
+  how fast: "got paid off ronaldo in 69 secs", "paid my bills shorting elon in 67 secs", "made rent off ronaldo in 2 mins" — 67 and 69 secs are the house numbers; any other number only when a context gives it
+  the salary: "made a lawyer's salary off ronaldo", "a doctor's salary shorting trump"
+  after a HOW TO hook: "and that's how you make rent off mbappe", "that's how you get paid shorting tate"
+An amount ("$340") only when the end context gives one; never invent a figure. Short — three to eight words. Not the hook again word for word. No "insane", "crazy", "literally" — the money is the boast.
+WRONG:
+  "made bank in the woods" — the weird thing, not the person
+  "got paid on the toilet" — same
+  "traded down on drake and won" — say shorting
+RIGHT:
+  made bank shorting trump
+  got paid off ronaldo
+  rent made shorting drake
+  paid my bills off kanye getting cancelled
+  secured the bag on messi
+  profited on tate's downfall
+  made money on mbappe
+  made bands shorting lebron
+  ronaldo just paid my rent
+  trump's downfall paid my bills
+  kanye getting cancelled paid me
+  messi covered rent this month
+  speed just paid my bills
+  drake being washed paid rent
+  that's rent off ronaldo
+  that's the bag off messi
+  there's trump's money
+  made rent off ronaldo in 2 mins
+  paid my bills shorting elon in 67 secs
+  got paid off ronaldo in 69 secs
+  made a lawyer's salary off ronaldo
+  a doctor's salary shorting trump
+  made messi's salary off messi
+  and that's how you make rent off mbappe
+  that's how you get paid shorting tate`;
+
 /** Where each screen recording is. Bottom B is the Pauv clip on every build,
  *  and its context and moments are written by whoever cut it — who could see
  *  the screen, and so had no reason to write "on pauv" anywhere. Left to infer
@@ -103,8 +212,8 @@ At least one caption in the set says "pauv.com" in full, as a direction the view
 It goes on the moment he arrives at the site: the LAST BOTTOM A line when that is where he types the address, otherwise the FIRST BOTTOM B line. Once the full domain has been on screen once, the lines after it can go back to "pauv" on its own — "trade up on pauv" — it only has to be spelled out the one time.`
   : `SEND THEM TO PAUV.COM
 This build has no screen recording to carry the address, so ${hasEnd
-    ? 'the pay-off line says "pauv.com" in full, on top of saying he made the money — "just made bands off ronaldo on pauv.com"'
-    : 'the START caption says "pauv.com" in full, on top of everything else it is doing — "making bands off ronaldo on pauv.com while i can\'t talk"'}. Every build, no exception.`;
+    ? 'the pay-off line says "pauv.com" in full, on top of saying he made the money — "got paid off ronaldo on pauv.com"'
+    : 'the START caption says "pauv.com" in full, on top of everything else it is doing — "making bank off ronaldo on pauv.com with a phone in my mouth"'}. Every build, no exception.`;
 
 // The screen-recording lines are directions the viewer follows along with, not a
 // commentary on what the screen is doing. Marks get written down as "opening
@@ -112,7 +221,7 @@ This build has no screen recording to carry the address, so ${hasEnd
 // other way round.
 const IMPERATIVE = `VOICE for the BOTTOM A and BOTTOM B captions — write them as INSTRUCTIONS to the viewer, not as narration of what is on screen. Every one starts with a plain command verb: "search", "go to", "type in", "look at", "trade up", "place a trade", "watch for", "pick", "check" — and says where: "search on chatgpt", "go to pauv.com", "trade up on pauv".
 NEVER start one with an -ing word. Not "typing the name" but "type in the name". Not "looking up ronaldo" but "look up ronaldo". Not "placing a trade" but "place a trade". Not "heading to pauv.com" but "go to pauv.com".
-The START caption is the exception — the hook, phrased however it lands best. (END's pay-off is a statement, not an instruction — "just made bands off ronaldo"; its comment line is fixed and you only pick the word.)`;
+The START caption is the exception — the hook, written to START above. (END's pay-off is a statement, not an instruction — "got paid off ronaldo"; its comment line is fixed and you only pick the word.)`;
 
 /** One screen recording: what it shows overall, and — when it has been marked up
  *  — what happens at each stretch, in the order they play. */
@@ -208,7 +317,7 @@ function endWord(v: unknown): string {
 /** What the pay-off says when the model handed back nothing usable for it —
  *  generic, but the money still gets said. */
 const PAYOFF_FALLBACK = (word: string) =>
-  (word === END_FALLBACK_WORD ? 'just made bands on pauv' : `just made bands off ${word}`);
+  (word === END_FALLBACK_WORD ? 'got paid on pauv' : `got paid off ${word}`);
 
 /** The two lines over the closing clip. The pay-off is a line the model wrote,
  *  so it is cleaned like the rest; the comment line is built here from the
@@ -331,19 +440,15 @@ Part 2 — the screen recording: the same guy's screen while he does something o
 Part 3 — END: the pay-off. He is back on camera showing off the money the trade made him, and over it two captions in turn: that he made it, then the line that sends the viewer to the comments for the link.
 
 WHAT EACH CAPTION DOES
-START — one caption, the hook. Weird and funny, cocky and absurd, never like an ad. TWO things are in it every single time, and the collision between them is the whole joke:
-  1. THE MONEY. The hook always says he is making money, in those words — "making bands", "made bands off", "up bands", "making a bag", "making rent". "bands" is the default and the best of them; the others are there so every video does not open the same way. Never leave it to the video to imply: if the line does not say he is making money, it is the wrong line.
-  2. THE STUPID THING he is actually doing on camera, named from his context. If it says he is putting a can of velo in his mouth, the caption says so. Do not swap it for some other bit of business you made up.
-Two shapes carry both, either way round — use one unless a better line does both jobs:
-  "making bands off <who or what> while <the stupid thing>"
-  "<the stupid thing> while making bands on <who>"
-like "making bands off ronaldo while i can't talk", or "tape on my mouth while making bands on ronaldo". The <who> is the person the screen recording actually trades on, so the hook and the steps are about the same person.
+${HOOK}
 BOTTOM A and BOTTOM B — tell the viewer what to do, step by step, so someone learns how Pauv works by following along. Assume they CANNOT see the screen: the recording is small and quick, and most people read the caption and never make out what is on it. So every line has to stand on its own — name the site or app and the exact thing being done there, in the words the viewer would need to go and do it themselves. Not "type in most hated person in the world" but "search on chatgpt most hated ppl rn". Not "click the button" but "hit trade up on pauv.com". Not "look him up" but "search ronaldo on pauv". Each caption still describes ITS OWN clip: a Bottom A caption is what the viewer does in the Bottom A recording, a Bottom B caption in Bottom B — which is on pauv.com every time, whatever its context happens to mention. Do not describe a step that is not on that clip's screen.
 When a clip is given as a numbered list of moments, a caption goes on screen at exactly its moment and stays up until the next one — so caption 1 describes moment 1 and nothing else, caption 2 moment 2, and so on. Every moment gets its own caption: keep them in order, never skip one, never merge two into one line${mergeSeam ? ' — except at the seam, below' : ''}. Each line says what is on screen RIGHT THEN, not what came before or what comes next.
 A moment that is really two things — go to the site, then do the thing there — or that will not fit in one short line, gets TWO captions: put both in that moment's one entry with " / " between them, like "go to chatgpt / see who the most hated person is rn". The first goes up where the moment starts, the second halfway through it. Two at most for a moment, and the entry still counts as one, so the array stays one entry per moment. Split rather than write one long line. The same " / " works inside any line of an unmarked clip.
 END — two captions, one after the other over him showing the money:
-  1. THE PAY-OFF, "payoff": one short line that says he made the money — done, past tense, cocky. "just made bands off ronaldo", "ronaldo just paid my rent", "up bands off ronaldo in 67 secs", "made a bag off trump while i couldn't talk". It names the same person the hook and the screen recording were about, so the story closes on him. Take an amount from the end context when it gives one; never invent a figure.
+  1. THE PAY-OFF, "payoff": one short line that says he made the money — past tense, naming the person he traded on. Written to THE PAY-OFF, below.
   2. THE COMMENT LINE — one fixed line, always exactly: comment "<word>" for the link. The line is already written, quotes and all; the ONLY thing you choose is <word>, what a viewer types in the comments to get the link. Reply with JUST the word as "end", not the whole line. It must match THIS video — the name of the person he traded on ("ronaldo"), or the stupid thing he did on camera ("velo") — taken from the contexts below, never made up. One word, two at the very most. Lower case, no quotes, no emoji. Not "pauv", not "link".
+
+${PAYOFF}
 
 ONE STORY, NOT FOUR SEPARATE CAPTIONS
 Read everything under THIS VIDEO before you write a word — the persona bit, both screen recordings, the ending — and keep the whole of it in mind for every line. The captions are one story told in order: the hook sets up what he is about to do online, each screen-recording line carries that same thread on (the same person he is trading on, the same reason he picked them, the same site), and the closing word ties it back. A line written from its own clip alone reads like a stranger wrote it. When a Bottom B line says "trade up on him", "him" is the person named in the hook and Bottom A; when the hook names who he made money on, it is the person the screen recording actually shows; the reason he picked them (trending, most hated, just got signed) can be carried from the clip that gives it into the lines that don't. Every line still says what is on screen RIGHT THEN — the whole video is what you write each line WITH, not what you write it ABOUT.
@@ -368,15 +473,15 @@ bottom b — 2 moments (the clip overall: finding ronaldo on pauv and trading up
   1. searched ronaldo
   2. traded up on him
 ->
-start: making bands off ronaldo with a can of velo in my mouth${hookEx()}
+start: velo in my mouth making bands on ronaldo${hookEx()}
 bottomA: ["go to chatgpt / see who's trending rn${ex(1, '👀')}", ${mergeSeam ? '"go to pauv.com, search ronaldo"' : '"go to pauv.com"'}]
 bottomB: [${mergeSeam ? '""' : '"search ronaldo on pauv"'}, "trade up on him bc he's trending${ex(2, '📈')}"]
-payoff: just made bands off ronaldo
+payoff: ronaldo just paid my rent
 end: ronaldo
-(${mergeSeam ? 'the seam is merged there: one line across the end of A and the start of B, and "" in B\'s first slot. ' : 'one short line per moment, in its own slot. '}"payoff" and "end" close it: over the money he shows off, first "just made bands off ronaldo", then the fixed line, which reads comment "ronaldo" for the link. Every screen line says where he is and what he does there — chatgpt, pauv.com, ronaldo — so it reads without seeing the screen; "him" in the last line is the ronaldo from the hook and bottom a, one story across all of it. The hook says outright that he is making bands and names the velo he is doing it with, the pay-off says he made them, and "go to pauv.com" spells the address out the once, on the moment he gets there. Moment 1 of bottom a is two things, so it is two short captions with " / " between them, one after the other; "rn" and "bc" are the text-speak)
+(${mergeSeam ? 'the seam is merged there: one line across the end of A and the start of B, and "" in B\'s first slot. ' : 'one short line per moment, in its own slot. '}"payoff" and "end" close it: over the money he shows off, first "ronaldo just paid my rent", then the fixed line, which reads comment "ronaldo" for the link. Every screen line says where he is and what he does there — chatgpt, pauv.com, ronaldo — so it reads without seeing the screen; "him" in the last line is the ronaldo from the hook and bottom a, one story across all of it. The hook says he is making bands, names ronaldo and the velo in his mouth — the weird thing from the persona context — and never mentions the typing; the pay-off names ronaldo again and says he got paid — the person, never the velo — and "go to pauv.com" spells the address out the once, on the moment he gets there. Moment 1 of bottom a is two things, so it is two short captions with " / " between them, one after the other; "rn" and "bc" are the text-speak)
 ${emojis ? `(the three emoji there are just where they happened to land for that video — choose your own${emojiPalette.length ? ', from the saved set above,' : ''} for this one)` : ''}
 THIS VIDEO
-persona${personaName ? ` (${personaName})` : ''} context: ${personaContext || '(not given — keep the hook general, still weird and funny)'}
+persona${personaName ? ` (${personaName})` : ''} context: ${personaContext || '(not given — no weird thing to name, so the hook is just the money and who he is trading on)'}
 ${describe('bottom a', bottomA)}
 ${describe('bottom b', bottomB, true)}
 ${wantEnd ? `end context: ${endContext || '(not given — pick the closing word from the rest of the video)'}` : 'end: (no clip)'}
