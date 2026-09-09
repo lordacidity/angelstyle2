@@ -22,6 +22,9 @@ const PRELOADED: Record<string, { label: string; durationMs: number }> = {
   'track-custom-1780826265457.mp3': { label: 'Custom Jun 7 · 8',  durationMs: 25000 },
   'track-custom-1780827436027.mp3': { label: 'Custom Jun 7 · 9',  durationMs: 29000 },
   'track-custom-1780829352765.mp3': { label: 'Custom Jun 7 · 10', durationMs: 29500 },
+  'track-custom-1788980666858.mp3': { label: 'Mimosa 2000',          durationMs: 60029 },
+  'track-custom-1788980666859.mp3': { label: 'Took Her To The O',    durationMs: 60029 },
+  'track-custom-1788980666860.mp3': { label: 'worry (ultra slowed)', durationMs: 60029 },
 };
 
 export async function GET() {
