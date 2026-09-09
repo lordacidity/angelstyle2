@@ -12,14 +12,71 @@
 //
 // Where a caption sits is set on the stage rather than here — drag it — so a
 // line that has been moved shows a ⤾ to put it back where its section starts.
+//
+// Typing "@" in any caption line brings the emoji picker up under it, the same
+// as the media caption box — see CaptionInput.
 
-import type { ReactNode } from 'react';
+import { useRef, type KeyboardEvent, type ReactNode } from 'react';
+import { useEmojiField } from '../EmojiPicker';
 import {
   CAPTION_STYLES, type Caption, type CaptionGroup, type CaptionLine, type CaptionLines,
   type CaptionRef, type CaptionWindows, type LaidOutCaptions,
 } from '@/lib/vidsCaptions';
 import { fmtTime } from '@/lib/utils';
 import { SpinnerIcon } from '@/lib/icons';
+
+/** One caption's words. Typing "@" pulls the emoji picker up under the line —
+ *  the same gesture as the media caption box and the board's cells, and the
+ *  same picker, so what comes up first is whatever is pinned in the Emojis
+ *  drawer: the set the model is handed to write from, now the set you reach for
+ *  by hand as well. A line is its own field, so the hook is wired here rather
+ *  than in the row that lists them. */
+function CaptionInput({ value, onChange, placeholder, title, className }: {
+  value: string;
+  onChange: (v: string) => void;
+  placeholder?: string;
+  title: string;
+  className: string;
+}) {
+  const ref = useRef<HTMLInputElement>(null);
+  const { detect, close, active, picker } = useEmojiField(ref, onChange);
+  /** The line as it read when Escape was pressed. Closing on the key DOWN is
+   *  not enough on its own: the key UP that follows re-runs detect over an
+   *  "@word" that is still sitting there, and the picker comes straight back.
+   *  So it stays shut until the words actually change — moving the caret about
+   *  in a line you have dismissed leaves it shut too. */
+  const escaped = useRef<string | null>(null);
+  const look = () => {
+    if (escaped.current !== null && ref.current?.value === escaped.current) return;
+    escaped.current = null;
+    detect();
+  };
+  const onKeyDown = (e: KeyboardEvent<HTMLInputElement>) => {
+    // Escape puts the picker away and leaves the "@word" as typed, rather than
+    // falling through to whatever else Escape does on this page.
+    if (e.key === 'Escape' && active) {
+      e.preventDefault();
+      escaped.current = ref.current?.value ?? '';
+      close();
+    }
+  };
+  return (
+    <>
+      <input
+        ref={ref}
+        value={value}
+        onChange={(e) => { onChange(e.target.value); look(); }}
+        onKeyUp={look}
+        onClick={look}
+        onKeyDown={onKeyDown}
+        placeholder={placeholder}
+        title={title}
+        className={className}
+      />
+      {picker}
+    </>
+  );
+}
 
 function Section({ title, children }: { title: string; children: ReactNode }) {
   return (
@@ -78,11 +135,11 @@ function CaptionRows({ label, hint, group, laid, lines, moments = [], onChange, 
               <span className={`w-8 shrink-0 text-right font-mono text-[9px] ${at ? 'text-zinc-500' : 'text-zinc-700'}`}>
                 {at ? fmtTime(at.start) : '—'}
               </span>
-              <input
+              <CaptionInput
                 value={l.text}
-                onChange={(e) => onChange(i, { text: e.target.value })}
+                onChange={(text) => onChange(i, { text })}
                 placeholder={moment ? `(${moment})` : undefined}
-                title={why}
+                title={`${why}. Type @ for an emoji.`}
                 className={`min-w-0 flex-1 rounded border bg-black px-1.5 py-1 text-[10px] outline-none placeholder:text-zinc-700 focus:border-zinc-500 ${
                   at ? 'border-zinc-800 text-zinc-100' : 'border-zinc-900 text-zinc-600'
                 }`}

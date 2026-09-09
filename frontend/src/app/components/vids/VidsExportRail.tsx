@@ -16,6 +16,15 @@
 //                  words were about whoever was there), so by the time the
 //                  file has rendered the caption is waiting to be copied.
 //                  Auto-copy is Media's setting, shared.
+//
+//                  The build's code goes on the end of it, on a line of its
+//                  own, from the moment an export is started rather than when
+//                  the file lands — the build is written down as the render
+//                  begins, and the caption is what someone is copying while
+//                  the frames go. It is the same code that ends the file name,
+//                  so the post carries it too and a video found in the wild
+//                  can be brought back to the stage from what is under it. An
+//                  export that fails or is cancelled takes its code back off.
 //   Phonedeck      the phones and what is in Incoming, given the whole height
 //                  between the caption and the buttons rather than a few rows:
 //                  it is where a push finishes.
@@ -51,17 +60,35 @@ interface CaptionState {
   person: string;
   position: TradePosition;
   text: string;
+  /** The build code currently sitting on the end of `text`, or null while no
+   *  export has minted one. Kept beside the words so the line can be taken off
+   *  again by the exact string it was put on as. */
+  code: string | null;
   loading: boolean;
   error: string | null;
   copied: boolean;
 }
+
+/** The code as it reads under a post: a line of its own after a blank one, the
+ *  last thing in the caption the way it is the last thing in the file name. */
+const withCode = (text: string, code: string | null): string => (code ? `${text}\n\n${code}` : text);
+
+/** The caption carrying `next` as its code instead of whatever it carries now.
+ *  The old line comes off by the exact string it went on as — never by hunting
+ *  for something code-shaped, because the caption is edited by hand and a guess
+ *  at what a code looks like would eventually eat somebody's words. */
+const swapCode = (c: CaptionState, next: string | null): CaptionState => {
+  const suffix = c.code ? `\n\n${c.code}` : '';
+  const bare = suffix && c.text.endsWith(suffix) ? c.text.slice(0, -suffix.length) : c.text;
+  return { ...c, text: withCode(bare, next), code: next };
+};
 
 /** Who and which way, when the card already knows — what a rewrite sends
  *  instead of having the recordings read again. */
 type Fields = Pick<CaptionState, 'person' | 'position'>;
 
 const blank = (brief: string): CaptionState =>
-  ({ brief, person: '', position: 'up', text: '', loading: false, error: null, copied: false });
+  ({ brief, person: '', position: 'up', text: '', code: null, loading: false, error: null, copied: false });
 
 function Section({ title, children }: { title: string; children: ReactNode }) {
   return (
@@ -83,15 +110,26 @@ interface Props {
   brief: string;
   /** The file the last export put in Incoming — lit at the top of the list. */
   recent: string | null;
+  /** The code the last export minted, or null before one has run. It goes on
+   *  the end of the caption. */
+  code: string | null;
   /** The export controls, built by the builder. */
   exportPanel: ReactNode;
 }
 
-export function VidsExportRail({ brief, recent, exportPanel }: Props) {
+export function VidsExportRail({ brief, recent, code, exportPanel }: Props) {
   const [caption, setCaption] = useState<CaptionState | null>(null);
   const [autoCopy, setAutoCopy] = useState(false);
   const autoCopyRef = useRef(autoCopy);
   autoCopyRef.current = autoCopy;
+  const briefRef = useRef(brief);
+  briefRef.current = brief;
+  const codeRef = useRef(code);
+  codeRef.current = code;
+  /** What the build looked like when the code was minted. A code describes the
+   *  build that was exported, so once the clips change it stops being this
+   *  video's code and does not go on the caption drafted for the new ones. */
+  const codeBrief = useRef<string | null>(null);
   // The request that counts. The clips can change while one is out, and the
   // answer to the earlier brief must not land over the later one's.
   const seqRef = useRef(0);
@@ -109,6 +147,16 @@ export function VidsExportRail({ brief, recent, exportPanel }: Props) {
     setAutoCopy(next);
     try { window.localStorage.setItem(AUTO_COPY_KEY, String(next)); } catch { /* not remembered */ }
   };
+
+  // An export writes the build down as it starts, long after the caption was
+  // written, so the code goes on the end of the one already on show rather
+  // than the caption waiting for it. An export clears the code before it mints
+  // the next, so this runs twice — once taking the old line off, once putting
+  // the new one on — and a cancelled one clears it again on the way out.
+  useEffect(() => {
+    codeBrief.current = code ? briefRef.current : null;
+    setCaption((c) => (c && c.brief === briefRef.current ? swapCode(c, code) : c));
+  }, [code]);
 
   const flashCopied = useCallback(() => {
     setCaption((c) => (c ? { ...c, copied: true } : c));
@@ -135,6 +183,7 @@ export function VidsExportRail({ brief, recent, exportPanel }: Props) {
         person: fields?.person ?? same?.person ?? '',
         position: fields?.position ?? same?.position ?? 'up',
         text: !fresh && same ? same.text : '',
+        code: !fresh && same ? same.code : null,
         loading: true,
         error: null,
         copied: false,
@@ -143,13 +192,17 @@ export function VidsExportRail({ brief, recent, exportPanel }: Props) {
     try {
       const d = await writePostCaption(fields ? { person: fields.person, position: fields.position } : { brief: forBrief });
       if (seq !== seqRef.current) return;
+      // Words written for the build the code was minted for — a Regenerate
+      // after the export — carry it; ones written for other clips do not.
+      const forCode = codeBrief.current === forBrief ? codeRef.current : null;
+      const text = withCode(d.caption, forCode);
       setCaption({
-        brief: forBrief, person: d.person, position: d.position, text: d.caption,
+        brief: forBrief, person: d.person, position: d.position, text, code: forCode,
         loading: false, error: null, copied: false,
       });
       if (autoCopyRef.current) {
         try {
-          await navigator.clipboard.writeText(d.caption);
+          await navigator.clipboard.writeText(text);
           if (seq === seqRef.current) flashCopied();
         } catch { /* clipboard blocked — the Copy button still works */ }
       }
@@ -289,13 +342,21 @@ export function VidsExportRail({ brief, recent, exportPanel }: Props) {
           {cur?.error ? (
             <p className="break-words text-[10px] text-red-400">{cur.error}</p>
           ) : cur?.text ? (
-            <textarea
-              value={cur.text}
-              onChange={(e) => setCaption((c) => (c ? { ...c, text: e.target.value, copied: false } : c))}
-              rows={12}
-              title="Edit by hand — Copy takes what is here"
-              className="w-full resize-y rounded border border-zinc-800 bg-black px-1.5 py-1 text-[10px] leading-relaxed text-zinc-200 outline-none focus:border-zinc-500"
-            />
+            <>
+              <textarea
+                value={cur.text}
+                onChange={(e) => setCaption((c) => (c ? { ...c, text: e.target.value, copied: false } : c))}
+                rows={12}
+                title="Edit by hand — Copy takes what is here"
+                className="w-full resize-y rounded border border-zinc-800 bg-black px-1.5 py-1 text-[10px] leading-relaxed text-zinc-200 outline-none focus:border-zinc-500"
+              />
+              {cur.code && (
+                <p className="mt-0.5 text-[9px] leading-relaxed text-zinc-600">
+                  Ends on <span className="font-mono tracking-widest text-emerald-300">{cur.code}</span>, this
+                  export&rsquo;s code — the same one in the file name. Delete the line if a post shouldn&rsquo;t carry it.
+                </p>
+              )}
+            </>
           ) : (
             <p className="text-[10px] leading-relaxed text-zinc-600">
               {!brief

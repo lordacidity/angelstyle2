@@ -19,7 +19,6 @@ const PRELOADED: Record<string, { label: string; durationMs: number }> = {
   'track-custom-1780820406014.mp3': { label: 'Custom Jun 7 · 4',  durationMs: 27833 },
   'track-custom-1780824798684.mp3': { label: 'Custom Jun 7 · 5',  durationMs: 23500 },
   'track-custom-1780824815067.mp3': { label: 'Custom Jun 7 · 6',  durationMs: 25500 },
-  'track-custom-1780824836042.mp3': { label: 'Custom Jun 7 · 7',  durationMs: 21000 },
   'track-custom-1780826265457.mp3': { label: 'Custom Jun 7 · 8',  durationMs: 25000 },
   'track-custom-1780827436027.mp3': { label: 'Custom Jun 7 · 9',  durationMs: 29000 },
   'track-custom-1780829352765.mp3': { label: 'Custom Jun 7 · 10', durationMs: 29500 },

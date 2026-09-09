@@ -943,6 +943,10 @@ export function VidsBuilder({
   // be), and — separately — a build brought back by its code, with whatever
   // about it didn't come back exactly.
   const [lastRecipe, setLastRecipe] = useState<VidRecipe | null>(null);
+  // Which export the code on show belongs to. The record is written down as
+  // the render starts and shown straight away, so a run that then fails has to
+  // be able to disown a record still on its way back.
+  const exportRun = useRef(0);
   const [recipeError, setRecipeError] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);
   const [recall, setRecall] = useState<{ busy: boolean; loaded: VidRecipe | null; problems: string[]; error: string | null }>({
@@ -1763,10 +1767,20 @@ export function VidsBuilder({
     const ctrl = new AbortController();
     abortRef.current = ctrl;
     setExporting({ frac: 0, label: 'Starting…' });
+    // Which export this is. A record that arrives after its own export has
+    // failed belongs to nothing, so a late one is dropped rather than putting a
+    // code on a video that never existed — see the catch.
+    const run = ++exportRun.current;
     // The title and code are worked out while the frames render, so by the
     // time the file exists its name is waiting. The render is the long part.
     const recipeP = createRecipe({ build: currentSpec(), brief: currentBrief() });
-    recipeP.catch(() => { /* handled where it is awaited */ });
+    // The code goes up the moment it exists rather than when the render is
+    // done: pressing the button is what writes the build down, and the caption
+    // it belongs on is the thing being copied and pasted while the frames are
+    // still going. Waiting for the file left it to be pasted from memory.
+    recipeP
+      .then((r) => { if (exportRun.current === run) setLastRecipe(r); })
+      .catch(() => { /* handled where it is awaited */ });
     try {
       const blob = await composeSequence({
         // No fps: the export runs at the rate of the fastest clip in the build,
@@ -1807,9 +1821,16 @@ export function VidsBuilder({
           setSentNote({ ok: false, text: 'Phonedeck isn\'t reachable — saved to Downloads instead. Start the local server (Launch server, on the Media page) and push again.' });
         }
       }
+      // Already up since the record was written — set again only for the run
+      // where it arrived after this point.
       if (recipe) setLastRecipe(recipe);
     } catch (e) {
-      // No file came of it, so no code should answer to it.
+      // No file came of it, so no code should answer to it: the record is
+      // dropped, and the code comes back off the card and off the end of the
+      // post caption. Bumping the run first sees off a record still in flight,
+      // which would otherwise land a code on a video that never rendered.
+      exportRun.current++;
+      setLastRecipe(null);
       recipeP.then((r) => deleteRecipe(r.code)).catch(() => { /* never minted, or already gone */ });
       if (!(e instanceof DOMException && e.name === 'AbortError')) {
         setExportError(e instanceof Error ? e.message : String(e));
@@ -2824,6 +2845,9 @@ export function VidsBuilder({
         <VidsExportRail
           brief={postBrief}
           recent={recentFile}
+          // The code the export just minted, so the caption ends on it as the
+          // file name does.
+          code={lastRecipe?.code ?? null}
           exportPanel={renderExport(null)}
         />
         </>
