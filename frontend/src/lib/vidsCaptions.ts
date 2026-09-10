@@ -36,6 +36,9 @@
 //   unmarked   fall back to spreading whatever was written evenly across the
 //              clip — right for footage nobody has annotated, and the only
 //              thing possible without knowing what happens when.
+//   placed     Bottom A on Fast: two lines, each at the moment the writer
+//              chose for it (CaptionLine.at, in clip seconds, mapped the way
+//              the marks are), kept in order and apart — see `placed`.
 //
 // However it started, a line stays up until the next line comes up, so there
 // is always a caption on screen: the hook holds until the first direction,
@@ -78,6 +81,10 @@ export interface CaptionLine {
   oneLine: boolean;
   /** Where it was dragged to, if it has been. */
   pos?: CaptionPos;
+  /** When it comes up, when the writer chose that itself — Bottom A on Fast
+   *  (see `placed`). In CLIP seconds, like a mark, so it stays on the moment it
+   *  was written for whatever the slot's trim and speed do afterwards. */
+  at?: number;
 }
 
 export const capLine = (text: string, oneLine = false): CaptionLine => ({ text, oneLine });
@@ -119,6 +126,9 @@ const TARGET_EVERY = 2.5;
 /** A stretch either side of the Bottom A → Bottom B seam shorter than this
  *  can't carry a line of its own, so the two are written as one line. */
 export const SEAM_MERGE_UNDER = 1.5;
+/** How many lines Bottom A carries on Fast — the search and the pick, nearly
+ *  always — each placed by the writer rather than one per mark. */
+export const FAST_BOTTOM_A_CAPTIONS = 2;
 
 export interface Span { start: number; end: number }
 
@@ -129,6 +139,9 @@ export interface TimedMark extends Span { text: string }
  *  up with. `marks` empty means nobody annotated that clip. */
 export interface CaptionWindow extends Span {
   marks: TimedMark[];
+  /** The slot's in point, kept length and rate — what maps a clip second onto
+   *  this window, for a placed line's `at` as for the marks. */
+  clip: { from: number; kept: number; speed: number };
 }
 
 /** The captionable stretches, each already lined up with the clip it belongs to.
@@ -172,7 +185,10 @@ function windowFor(plan: Plan, slot: 'start' | 'bottomA' | 'bottomB' | 'end'): C
     marks.push({ start, end: Math.min(end, item.end), text: m.text });
   }
   marks.sort((a, b) => a.start - b.start);
-  return { start: item.start, end: item.end, marks };
+  return {
+    start: item.start, end: item.end, marks,
+    clip: { from: item.trimStart, kept: item.sourceLength, speed: item.speed },
+  };
 }
 
 /** Read the captionable windows straight off a built plan. Bottom A and Bottom B
@@ -272,8 +288,43 @@ function spread(lines: CaptionLine[], w: Span, place: CaptionPlace, group: Capti
   ));
 }
 
-/** Lay lines over a window: on its marks when it has them, evenly when it does
- *  not. */
+/** Clip seconds onto the window, through the slot's trim and speed — the same
+ *  mapping as the marks, clamped to the kept range so a time outside it lands
+ *  on the nearer edge rather than nowhere. */
+function clipToWindow(w: CaptionWindow, t: number): number {
+  const { from, kept, speed } = w.clip;
+  return w.start + (Math.min(Math.max(t, from), from + kept) - from) / speed;
+}
+
+/** Lines the writer placed itself: Bottom A on Fast, where it chose both what
+ *  each says and the moment it goes up (CaptionLine.at). Kept in order, inside
+ *  the window and at least MIN_SHARE apart, so each can be read whatever time
+ *  came back. A split line takes turns across its stretch, up to the next. */
+function placed(lines: CaptionLine[], w: CaptionWindow, place: CaptionPlace, group: CaptionGroup): Caption[] {
+  const timed = lines
+    .map((line, index) => ({ line, index }))
+    .filter(({ line }) => line.at != null && line.text.trim())
+    .map(({ line, index }) => ({ line, index, at: clipToWindow(w, line.at ?? 0) }))
+    .sort((a, b) => a.at - b.at)
+    .slice(0, captionCount(w.end - w.start));
+  let floor = w.start;
+  const starts = timed.map(({ at }, i) => {
+    const latest = w.end - (timed.length - i) * MIN_SHARE;
+    const s = Math.min(Math.max(at, floor), Math.max(floor, latest));
+    floor = s + MIN_SHARE;
+    return s;
+  });
+  return timed.flatMap(({ line, index }, i) => {
+    const span = (starts[i + 1] ?? w.end) - starts[i];
+    const parts = fitParts(splitParts(line.text), span);
+    return parts.map((text, j) => ({
+      ...line, text, start: starts[i] + (span * j) / parts.length, end: w.end, place, ref: { group, index },
+    }));
+  });
+}
+
+/** Lay lines over a window: where the writer placed them when it did, on its
+ *  marks when it has them, evenly when it does not. */
 export function layoutCaptions(
   lines: CaptionLine[],
   window: CaptionWindow | null,
@@ -281,6 +332,7 @@ export function layoutCaptions(
   place: CaptionPlace = 'middle',
 ): Caption[] {
   if (!window) return [];
+  if (lines.some((l) => l.at != null)) return placed(lines, window, place, group);
   return window.marks.length
     ? onMarks(lines, window, place, group)
     : spread(lines, window, place, group);

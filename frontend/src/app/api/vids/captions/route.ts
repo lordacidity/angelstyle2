@@ -18,7 +18,8 @@
 //
 // The model is told how many lines each clip can hold; the caller works that out
 // from the real timeline (lib/vidsCaptions), so nothing here has to think about
-// timing. Extra lines are dropped at layout time rather than crammed in.
+// timing — Bottom A on Fast aside, below. Extra lines are dropped at layout
+// time rather than crammed in.
 //
 // A clip marked up in the editor (select a stretch, press G, say what happens)
 // arrives with its moments in order, and then the job is one caption per
@@ -28,6 +29,15 @@
 // B: when the caller finds A's last stretch or B's first too brief for a line
 // each (`mergeSeam`), the model writes one line across both. An unmarked clip
 // just gets its overall context and a count.
+//
+// Bottom A on Fast is the one clip the model times itself. Sped up to fit ten
+// seconds, it has room for two lines rather than one per moment, so it arrives
+// `placed`: its moments with their times on those ten seconds, or just its
+// context when nobody marked it. The model answers with two lines and the
+// second each goes up — nearly always the search and the pick ("look up most
+// hated ppl on chatgpt", "pick trump from the list") — and the caller keeps
+// them in order and apart and lays them over the clip there. No seam is merged
+// across it: its last line is the pick, not the way into Pauv.
 //
 // Three rules shape the words themselves. The captions are written for someone
 // who can't make out the screen — the recording is small and quick — so every
@@ -223,12 +233,29 @@ const IMPERATIVE = `VOICE for the BOTTOM A and BOTTOM B captions — write them 
 NEVER start one with an -ing word. Not "typing the name" but "type in the name". Not "looking up ronaldo" but "look up ronaldo". Not "placing a trade" but "place a trade". Not "heading to pauv.com" but "go to pauv.com".
 The START caption is the exception — the hook, written to START above. (END's pay-off is a statement, not an instruction — "got paid off ronaldo"; its comment line is fixed and you only pick the word.)`;
 
+/** Seconds as the writer is shown them: "3.5s". */
+const secs = (n: number) => `${n.toFixed(1)}s`;
+
+/** Bottom A on Fast. Sped up to fit its window, it has room for a couple of
+ *  lines rather than one per moment, so the writer picks the steps that matter
+ *  and says when each goes up — the one place it does any timing. */
+const FAST_A = (n: number, length: number) => `BOTTOM A ON FAST
+Bottom A is sped up to play in ${secs(length)}, so it carries EXACTLY ${n} captions instead of one per moment — the ${n} steps that matter, in order. This replaces the one-caption-per-moment rule above for Bottom A; Bottom B keeps it. Nearly always the two are where he looks something up and what he picks from what comes back: "look up most hated ppl on chatgpt", then "pick trump from the list". Each still names the site and the exact thing, like every screen line, and still describes only what is on Bottom A's screen.
+You also choose WHEN each comes up, as "at": seconds from the start of Bottom A, from 0 to ${length.toFixed(1)}. The first usually goes at 0. Each one after it goes at the moment the thing it describes happens — the start of that moment when the clip's moments are given, and when they are not, where that step most likely falls in a recording like this, usually a little past the middle. Keep them at least 2 seconds apart, and none in the last 2 seconds.
+Unless Bottom A is itself on pauv.com, the address is not one of these — spell out pauv.com on the first BOTTOM B line instead.`;
+
 /** One screen recording: what it shows overall, and — when it has been marked up
- *  — what happens at each stretch, in the order they play. */
+ *  — what happens at each stretch, in the order they play. `placed` is Bottom A
+ *  on Fast: the writer places `count` lines itself — `length` is the clip's
+ *  window in seconds, `spans` each mark's stretch of it, in `marks` order. */
 const Clip = z.object({
   context: z.string().max(600).default(''),
   marks: z.array(z.string().max(200)).max(24).default([]),
   count: z.number().int().min(0).max(24),
+  placed: z.object({
+    length: z.number().min(0).max(600),
+    spans: z.array(z.object({ start: z.number(), end: z.number() })).max(24).default([]),
+  }).optional(),
 }).nullable().default(null);
 
 const Schema = z.object({
@@ -294,6 +321,23 @@ const asLines = (v: unknown, n: number, marked: boolean): string[] => {
   while (out.length < n) out.push('');
   return out;
 };
+/** A placed clip's reply: each entry a line and the second it goes up, as the
+ *  writer chose. A bare string, or a time that is missing or not a number,
+ *  falls back to an even share of the window; anything outside it is pulled
+ *  in. In play order — the caller keeps them apart (lib/vidsCaptions). */
+const asPlaced = (v: unknown, n: number, length: number): { text: string; at: number }[] =>
+  (Array.isArray(v) ? v : [])
+    .map((x, i) => {
+      const o: Record<string, unknown> = x && typeof x === 'object' && !Array.isArray(x)
+        ? (x as Record<string, unknown>)
+        : { text: x };
+      const raw = typeof o.at === 'string' ? Number(o.at) : o.at;
+      const at = typeof raw === 'number' && Number.isFinite(raw) ? raw : (length * i) / Math.max(1, n);
+      return { text: asText(o.text), at: Math.round(Math.min(Math.max(0, at), length) * 100) / 100 };
+    })
+    .filter((l) => l.text)
+    .slice(0, n)
+    .sort((a, b) => a.at - b.at);
 
 /** The comment line is the same on every build; only the word changes, and it
  *  goes in quotes so the viewer sees exactly what to type. */
@@ -378,13 +422,18 @@ function ensureSite(d: Drafted, mergeSeam: boolean): Drafted {
 function buildPrompt(input: z.infer<typeof Schema>): string {
   const {
     personaContext, personaName, wantStart, bottomA, bottomB, wantEnd, endContext, notes, emojis, emojiPalette,
-    mergeSeam,
   } = input;
+  // A placed Bottom A ends on the pick, not on the way into Pauv, so no seam
+  // is merged across it whatever the caller sent.
+  const mergeSeam = input.mergeSeam && !bottomA?.placed;
 
   /** What the reply must hold for one screen recording: a marked clip's array
    *  stays in step with its moments, an unmarked one is a ceiling. */
   const shape = (key: string, clip: typeof bottomA): string | null => {
     if (!clip?.count) return null;
+    if (clip.placed) {
+      return `"${key}": an array of exactly ${clip.count} object${clip.count === 1 ? '' : 's'} in the order they play, each {"text": the caption, "at": the second it comes up, from 0 to ${secs(clip.placed.length)}}`;
+    }
     const n = `${clip.count} string${clip.count === 1 ? '' : 's'}`;
     return clip.marks.length
       ? `"${key}": an array of exactly ${n}, one per moment in order`
@@ -412,6 +461,31 @@ function buildPrompt(input: z.infer<typeof Schema>): string {
    *  rule above it. */
   const hookEx = () => (emojis ? ` ${emojiPalette.find((e) => !isLaughing(e)) ?? '💰'}` : '');
 
+  /** The worked example's screen part, shaped the way this build's Bottom A is
+   *  asked for: one line per moment, or on Fast two lines with their times. */
+  const fastEx = !!bottomA?.placed;
+  const exA = fastEx
+    ? 'bottom a — SPED UP to play in 10.0s, so EXACTLY 2 captions, and you choose what each says AND when it comes up (the clip overall: asking chatgpt who is trending, then heading to pauv). What happens when, in seconds on those 10.0s:\n'
+      + '  0.0s–3.5s: typed who\'s trending into chatgpt\n'
+      + '  3.5s–7.0s: chatgpt listed names, picked ronaldo\n'
+      + '  7.0s–10.0s: typed pauv.com'
+    : 'bottom a — 2 moments (the clip overall: asking chatgpt who is trending, then heading to pauv):\n'
+      + '  1. asked chatgpt who\'s trending, picked ronaldo\n'
+      + '  2. typed pauv.com';
+  const exLines = fastEx
+    ? `bottomA: [{"text": "ask chatgpt who's trending rn${ex(1, '👀')}", "at": 0}, {"text": "pick ronaldo from the list", "at": 3.5}]\n`
+      + `bottomB: ["search ronaldo on pauv.com", "trade up on him bc he's trending${ex(2, '📈')}"]`
+    : `bottomA: ["go to chatgpt / see who's trending rn${ex(1, '👀')}", ${mergeSeam ? '"go to pauv.com, search ronaldo"' : '"go to pauv.com"'}]\n`
+      + `bottomB: [${mergeSeam ? '""' : '"search ronaldo on pauv"'}, "trade up on him bc he's trending${ex(2, '📈')}"]`;
+  const exShape = fastEx
+    ? 'bottom a is on fast, so it is two captions: the search at 0, and the pick at 3.5, where that moment starts. '
+    : mergeSeam
+      ? 'the seam is merged there: one line across the end of A and the start of B, and "" in B\'s first slot. '
+      : 'one short line per moment, in its own slot. ';
+  const exSite = fastEx
+    ? '"pauv.com" is spelled out the once, on the first bottom b line, since neither bottom a caption is where he types it'
+    : '"go to pauv.com" spells the address out the once, on the moment he gets there. Moment 1 of bottom a is two things, so it is two short captions with " / " between them, one after the other';
+
   /** A marked clip is a numbered list of moments; an unmarked one is a sentence. */
   const describe = (label: string, clip: typeof bottomA, onPauv = false): string => {
     if (!clip) return `${label}: (no clip)`;
@@ -419,6 +493,20 @@ function buildPrompt(input: z.infer<typeof Schema>): string {
     // ignored: a list of marks that never mentions Pauv reads like a list of
     // steps taken somewhere else.
     const where = onPauv ? ' Every one of these is on pauv.com, whether or not the moment says so.' : '';
+    if (clip.placed) {
+      const { length, spans } = clip.placed;
+      const steps = clip.marks
+        .map((m, i) => {
+          const s = spans[i];
+          return s ? `  ${secs(s.start)}–${secs(s.end)}: ${m}` : `  ${m}`;
+        })
+        .join('\n');
+      return `${label} — SPED UP to play in ${secs(length)}, so EXACTLY ${clip.count} captions, and you choose what each says AND when it comes up`
+        + `${clip.context ? ` (the clip overall: ${clip.context})` : ''}.`
+        + (clip.marks.length
+          ? ` What happens when, in seconds on those ${secs(length)}:${where}\n${steps}`
+          : ` Nobody has marked when things happen in it, so place them from the context and how a recording like this usually goes.${where}`);
+    }
     if (clip.marks.length) {
       const steps = clip.marks.map((m, i) => `  ${i + 1}. ${m}`).join('\n');
       return `${label} — ${clip.marks.length} moment${clip.marks.length === 1 ? '' : 's'}, in order`
@@ -444,7 +532,7 @@ ${HOOK}
 BOTTOM A and BOTTOM B — tell the viewer what to do, step by step, so someone learns how Pauv works by following along. Assume they CANNOT see the screen: the recording is small and quick, and most people read the caption and never make out what is on it. So every line has to stand on its own — name the site or app and the exact thing being done there, in the words the viewer would need to go and do it themselves. Not "type in most hated person in the world" but "search on chatgpt most hated ppl rn". Not "click the button" but "hit trade up on pauv.com". Not "look him up" but "search ronaldo on pauv". Each caption still describes ITS OWN clip: a Bottom A caption is what the viewer does in the Bottom A recording, a Bottom B caption in Bottom B — which is on pauv.com every time, whatever its context happens to mention. Do not describe a step that is not on that clip's screen.
 When a clip is given as a numbered list of moments, a caption goes on screen at exactly its moment and stays up until the next one — so caption 1 describes moment 1 and nothing else, caption 2 moment 2, and so on. Every moment gets its own caption: keep them in order, never skip one, never merge two into one line${mergeSeam ? ' — except at the seam, below' : ''}. Each line says what is on screen RIGHT THEN, not what came before or what comes next.
 A moment that is really two things — go to the site, then do the thing there — or that will not fit in one short line, gets TWO captions: put both in that moment's one entry with " / " between them, like "go to chatgpt / see who the most hated person is rn". The first goes up where the moment starts, the second halfway through it. Two at most for a moment, and the entry still counts as one, so the array stays one entry per moment. Split rather than write one long line. The same " / " works inside any line of an unmarked clip.
-END — two captions, one after the other over him showing the money:
+${bottomA?.placed ? `${FAST_A(bottomA.count, bottomA.placed.length)}\n` : ''}END — two captions, one after the other over him showing the money:
   1. THE PAY-OFF, "payoff": one short line that says he made the money — past tense, naming the person he traded on. Written to THE PAY-OFF, below.
   2. THE COMMENT LINE — one fixed line, always exactly: comment "<word>" for the link. The line is already written, quotes and all; the ONLY thing you choose is <word>, what a viewer types in the comments to get the link. Reply with JUST the word as "end", not the whole line. It must match THIS video — the name of the person he traded on ("ronaldo"), or the stupid thing he did on camera ("velo") — taken from the contexts below, never made up. One word, two at the very most. Lower case, no quotes, no emoji. Not "pauv", not "link".
 
@@ -466,19 +554,16 @@ ${IMPERATIVE}
 
 WORKED EXAMPLE
 persona context: putting a can of velo in mouth
-bottom a — 2 moments (the clip overall: asking chatgpt who is trending, then heading to pauv):
-  1. asked chatgpt who's trending, picked ronaldo
-  2. typed pauv.com
+${exA}
 bottom b — 2 moments (the clip overall: finding ronaldo on pauv and trading up on him):
   1. searched ronaldo
   2. traded up on him
 ->
 start: velo in my mouth making bands on ronaldo${hookEx()}
-bottomA: ["go to chatgpt / see who's trending rn${ex(1, '👀')}", ${mergeSeam ? '"go to pauv.com, search ronaldo"' : '"go to pauv.com"'}]
-bottomB: [${mergeSeam ? '""' : '"search ronaldo on pauv"'}, "trade up on him bc he's trending${ex(2, '📈')}"]
+${exLines}
 payoff: ronaldo just paid my rent
 end: ronaldo
-(${mergeSeam ? 'the seam is merged there: one line across the end of A and the start of B, and "" in B\'s first slot. ' : 'one short line per moment, in its own slot. '}"payoff" and "end" close it: over the money he shows off, first "ronaldo just paid my rent", then the fixed line, which reads comment "ronaldo" for the link. Every screen line says where he is and what he does there — chatgpt, pauv.com, ronaldo — so it reads without seeing the screen; "him" in the last line is the ronaldo from the hook and bottom a, one story across all of it. The hook says he is making bands, names ronaldo and the velo in his mouth — the weird thing from the persona context — and never mentions the typing; the pay-off names ronaldo again and says he got paid — the person, never the velo — and "go to pauv.com" spells the address out the once, on the moment he gets there. Moment 1 of bottom a is two things, so it is two short captions with " / " between them, one after the other; "rn" and "bc" are the text-speak)
+(${exShape}"payoff" and "end" close it: over the money he shows off, first "ronaldo just paid my rent", then the fixed line, which reads comment "ronaldo" for the link. Every screen line says where he is and what he does there — chatgpt, pauv.com, ronaldo — so it reads without seeing the screen; "him" in the last line is the ronaldo from the hook and bottom a, one story across all of it. The hook says he is making bands, names ronaldo and the velo in his mouth — the weird thing from the persona context — and never mentions the typing; the pay-off names ronaldo again and says he got paid — the person, never the velo — and ${exSite}; "rn" and "bc" are the text-speak)
 ${emojis ? `(the three emoji there are just where they happened to land for that video — choose your own${emojiPalette.length ? ', from the saved set above,' : ''} for this one)` : ''}
 THIS VIDEO
 persona${personaName ? ` (${personaName})` : ''} context: ${personaContext || '(not given — no weird thing to name, so the hook is just the money and who he is trading on)'}
@@ -520,13 +605,18 @@ export async function POST(req: NextRequest) {
     });
 
     const parsed = JSON.parse(extractGeminiJson(raw)) as Record<string, unknown>;
+    // Bottom A on Fast comes back as lines with the second each goes up.
+    const placedA = bottomA?.placed ? asPlaced(parsed.bottomA, bottomA.count, bottomA.placed.length) : null;
     const drafted: Drafted = {
       start: wantStart ? dropLaughing(cleanLine(parsed.start)) : '',
-      bottomA: asLines(parsed.bottomA, bottomA?.count ?? 0, !!bottomA?.marks.length),
+      bottomA: placedA
+        ? placedA.map((l) => l.text)
+        : asLines(parsed.bottomA, bottomA?.count ?? 0, !!bottomA?.marks.length),
       bottomB: asLines(parsed.bottomB, bottomB?.count ?? 0, !!bottomB?.marks.length),
       ...(wantEnd ? closing(parsed.payoff, parsed.end) : { payoff: '', end: '' }),
     };
-    return NextResponse.json(ensureSite(drafted, input.mergeSeam));
+    const done = ensureSite(drafted, input.mergeSeam && !bottomA?.placed);
+    return NextResponse.json(placedA ? { ...done, bottomAAt: placedA.map((l) => l.at) } : done);
   } catch (err) {
     console.error('[vids captions POST]', err);
     const msg = err instanceof Error ? err.message : 'unexpected error';

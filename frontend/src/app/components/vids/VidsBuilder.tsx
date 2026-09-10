@@ -17,7 +17,8 @@
 // Random, top right beside Reset, runs the whole errand in one go: a persona
 // from the Persona folder, a Bottom A and a Bottom B that the Link page says
 // go together (any two, while nothing has been linked yet), an End, a song, a
-// look for the captions, and then the captions themselves — the same call the
+// look for the captions, Bottom A back on Fast, and then the captions
+// themselves — the same call the
 // Write button makes, made once the clips it picked have loaded. Roll again as often as you like; only a stage that was
 // built by hand is asked about first. The same links narrow Bottom B's picker
 // to what follows the Bottom A on the stage.
@@ -37,7 +38,8 @@
 //             (VidsExportRail) — the Phonedeck list, and the export buttons.
 //   Simple    two choices and nothing else: a persona, and a vid (the Bottom
 //             A). Bottom B comes off the Link page, End fills itself, and the
-//             song, the room tone, the bars and the captions are all what they
+//             song, Bottom A's pace, the room tone, the bars and the captions
+//             are all what they
 //             would have been in Advanced anyway — you just don't see them.
 //             Play it, then download it or push it to Phonedeck. Nothing there
 //             can be edited, and nothing needs to be: switching to Advanced
@@ -55,18 +57,21 @@ import type { CSSProperties, DragEvent, KeyboardEvent, PointerEvent, ReactNode, 
 import type { VidLink, VidPersona, VidRecipe, VidRow } from '@/lib/vids-types';
 import { PERSONA_PARTS, isPhoto, parseRecipeCode } from '@/lib/vids-types';
 import {
-  DEFAULT_BARS, DEFAULT_SPEED, DEFAULT_TRANSFORM, DEFAULT_TRIM, FOLDER_SLOTS, MAX_SPEED, MIN_SPEED,
+  BOTTOM_A_PACES, DEFAULT_BARS, DEFAULT_BOTTOM_A_PACE, DEFAULT_SPEED, DEFAULT_TRANSFORM, DEFAULT_TRIM,
+  FAST_BOTTOM_A_LENGTH, FOLDER_SLOTS, MAX_SPEED, MIN_SPEED,
   MIN_TRIM_LENGTH, PERSONA_DRAG_MIME, PERSONA_PART_SLOT, PERSONA_SLOTS, PHOTO_LENGTH, SLOTS, SLOT_META,
   SPEED_PRESETS,
-  VID_DRAG_MIME, buildPlan, centredOffset, clampSpeed, drawInRegion, fittedRect, freshPick, isDefaultSpeed,
-  isDefaultTransform, isTrimmed, placedRect, regionRect, smoothScaling, timelineLength, trimmedRange,
-  type Align, type BarsLayout, type Fit, type Picks, type Plan, type PlanItem, type Rect,
+  VID_DRAG_MIME, buildPlan, centredOffset, clampSpeed, cleanBottomAPace, drawInRegion, fittedRect, fmtSpeed,
+  freshPick, isDefaultSpeed, isDefaultTransform, isTrimmed, placedRect, regionRect, slotSpeed, smoothScaling,
+  timelineLength, trimmedLength, trimmedRange,
+  type Align, type BarsLayout, type BottomAPace, type Fit, type Picks, type Plan, type PlanItem, type Rect,
   type Region, type SlotId, type SlotMeta, type SlotPick, type Transform, type Trim,
 } from '@/lib/vidsPlan';
 import { VidsClipPicker, VidsPersonaPicker } from './VidsPicker';
 import { composeSequence } from '@/lib/vidsCompose';
 import {
-  CAPTION_STYLES, DEFAULT_CAPTION_STYLE, EMPTY_LINES, ONE_LINE_DEFAULT, buildCaptions, capLine, captionAt,
+  CAPTION_STYLES, DEFAULT_CAPTION_STYLE, EMPTY_LINES, FAST_BOTTOM_A_CAPTIONS, MIN_SHARE, ONE_LINE_DEFAULT,
+  buildCaptions, capLine, captionAt,
   captionStyle, captionWindows, drawCaption, layoutCaption, preloadCaptionEmoji, seamNeedsMerge, wantedCount,
   type CaptionLines, type CaptionPos, type CaptionRef, type CaptionWindow,
 } from '@/lib/vidsCaptions';
@@ -127,6 +132,7 @@ const ALIGNS: readonly Align[] = ['start', 'center', 'end'];
 const ALIGN_LABEL: Record<Align, string> = { start: 'Start', center: 'Mid', end: 'End' };
 const FITS: readonly Fit[] = ['height', 'width'];
 const FIT_LABEL: Record<Fit, string> = { height: 'Height', width: 'Width' };
+const PACE_LABEL: Record<BottomAPace, string> = { normal: 'Normal', fast: 'Fast' };
 
 const clamp = (v: number, lo: number, hi: number) => Math.min(hi, Math.max(lo, v));
 const inRect = (p: { x: number; y: number }, r: Rect) => p.x >= r.x && p.x <= r.x + r.w && p.y >= r.y && p.y <= r.y + r.h;
@@ -328,6 +334,9 @@ interface SlotCardProps {
   meta: SlotMeta;
   pick: SlotPick | undefined;
   duration: number | null;
+  /** The rate it plays at on the timeline — its own speed, or Fast's for
+   *  Bottom A. */
+  rate: number;
   error: string | null;
   selected: boolean;
   /** Open this slot's picker — the card's own click does it too. */
@@ -339,7 +348,7 @@ interface SlotCardProps {
   warn?: string | null;
 }
 
-function SlotCard({ meta, pick, duration, error, selected, onChoose, onClear, onDropVideoId, warn }: SlotCardProps) {
+function SlotCard({ meta, pick, duration, rate, error, selected, onChoose, onClear, onDropVideoId, warn }: SlotCardProps) {
   const [over, setOver] = useState(false);
   const accepts = (e: DragEvent) => Array.from(e.dataTransfer.types).includes(VID_DRAG_MIME);
 
@@ -391,7 +400,7 @@ function SlotCard({ meta, pick, duration, error, selected, onChoose, onClear, on
                 {error ? 'failed to load' : duration != null ? fmtTime(duration) : 'loading…'}
                 {!isDefaultTransform(pick.transform) ? ` · ${Math.round(pick.transform.zoom * 100)}% · moved` : ''}
                 {isTrimmed(pick.trim) ? ' · trimmed' : ''}
-                {!isDefaultSpeed(pick.speed) ? ` · ${pick.speed}×` : ''}
+                {!isDefaultSpeed(rate) ? ` · ${fmtSpeed(rate)}` : ''}
               </p>
             </div>
             <button
@@ -595,10 +604,12 @@ function PersonaRack({
 
 // ── Trim popup (right-click a timeline segment) ────────────────────────────────
 
-function TrimPopup({ slot, pick, full, x, y, onChange, onSpeed, onPreview, onClose }: {
+function TrimPopup({ slot, pick, full, pace, x, y, onChange, onSpeed, onPreview, onClose }: {
   slot: SlotId;
   pick: SlotPick;
   full: number | null;
+  /** The build's Bottom A pace — on Fast, Bottom A's rate is set for it. */
+  pace: BottomAPace;
   x: number;
   y: number;
   onChange: (trim: Trim) => void;
@@ -611,6 +622,10 @@ function TrimPopup({ slot, pick, full, x, y, onChange, onSpeed, onPreview, onClo
   const dragging = useRef<'in' | 'out' | null>(null);
   const total = full ?? 0;
   const { start, end } = trimmedRange(pick.trim, total);
+  // Bottom A on Fast has its rate worked out for it from the kept range — see
+  // slotSpeed — so the speed controls stand down and the readout says what it is.
+  const fast = slot === 'bottomA' && pace === 'fast';
+  const rate = slotSpeed(slot, pick.speed, end - start, pace);
   const W = 320;
 
   useEffect(() => {
@@ -714,7 +729,7 @@ function TrimPopup({ slot, pick, full, x, y, onChange, onSpeed, onPreview, onClo
 
             {/* Speed — shortens the slot's window rather than the kept range */}
             <div className="mt-2 border-t border-zinc-800 pt-2">
-              <div className="flex items-center gap-2 text-[10px] text-zinc-400">
+              <div className={`flex items-center gap-2 text-[10px] text-zinc-400 ${fast ? 'opacity-40' : ''}`}>
                 <span>Speed</span>
                 <input
                   type="range"
@@ -722,6 +737,7 @@ function TrimPopup({ slot, pick, full, x, y, onChange, onSpeed, onPreview, onClo
                   max={MAX_SPEED}
                   step={0.05}
                   value={pick.speed}
+                  disabled={fast}
                   onChange={(e) => onSpeed(Number(e.target.value))}
                   className="h-1.5 flex-1"
                   style={{ '--fill': `${((pick.speed - MIN_SPEED) / (MAX_SPEED - MIN_SPEED)) * 100}%` } as CSSProperties}
@@ -730,12 +746,19 @@ function TrimPopup({ slot, pick, full, x, y, onChange, onSpeed, onPreview, onClo
               </div>
               <div className="mt-1.5 flex items-center gap-1">
                 {SPEED_PRESETS.map((v) => (
-                  <Chip key={v} on={Math.abs(pick.speed - v) < 1e-6} onClick={() => onSpeed(v)}>{v}×</Chip>
+                  <Chip key={v} disabled={fast} on={Math.abs(pick.speed - v) < 1e-6} onClick={() => onSpeed(v)}>{v}×</Chip>
                 ))}
                 <span className="ml-auto text-[10px] text-zinc-500">
-                  plays in <span className="font-mono text-zinc-200">{((end - start) / pick.speed).toFixed(2)}s</span>
+                  plays in <span className="font-mono text-zinc-200">{((end - start) / rate).toFixed(2)}s</span>
+                  {fast && <> at <span className="font-mono text-zinc-200">{fmtSpeed(rate)}</span></>}
                 </span>
               </div>
+              {fast && (
+                <p className="mt-1.5 text-[10px] leading-snug text-zinc-500">
+                  Bottom A is on Fast: sped up to fit {FAST_BOTTOM_A_LENGTH}s, never slowed. Switch it to Normal under
+                  Build to set its speed by hand.
+                </p>
+              )}
             </div>
             <div className="mt-2 flex items-center gap-1">
               <Chip onClick={() => onPreview('in', pick.trim)} title="Scrub the preview to the in point">Show in</Chip>
@@ -900,6 +923,10 @@ export function VidsBuilder({
   const outH = preset.h;
 
   const [bars, setBars] = useState<BarsLayout>(DEFAULT_BARS);
+  // Bottom A sped up to fit ten seconds (Fast), or at its own speed (Normal).
+  // Every new video starts on Fast — see resetPace — and the switch under
+  // Build overrides it for the build on the stage.
+  const [bottomAPace, setBottomAPace] = useState<BottomAPace>(DEFAULT_BOTTOM_A_PACE);
   // Room tone rides under every build unless it is turned off here; clipLevel is
   // how loud what the clips carry sits against it. Music is nothing until a
   // track is chosen, and then it is a third layer beside the other two.
@@ -994,7 +1021,10 @@ export function VidsBuilder({
   const dispW = Math.round(outW * k);
   const dispH = Math.round(outH * k);
 
-  const plan = useMemo(() => buildPlan(picks, durations, bars), [picks, durations, bars]);
+  const plan = useMemo(
+    () => buildPlan(picks, durations, bars, bottomAPace),
+    [picks, durations, bars, bottomAPace],
+  );
   const total = plan.total;
 
   // ── Captions ──
@@ -1046,6 +1076,15 @@ export function VidsBuilder({
   const writeLines = async () => {
     if (!canCaption) return;
     const persona = personas.find((p) => p.id === appliedPersonaId) ?? null;
+    // Bottom A on Fast carries FAST_BOTTOM_A_CAPTIONS lines, and the writer
+    // says when each goes up as well as what it says: it is handed the clip's
+    // moments on the sped-up window, and what comes back is put on the clip's
+    // own clock, so a line stays on its moment whatever the pace does later.
+    const aWin = windows.bottomA;
+    const aItem = plan.items.find((i) => i.slot === 'bottomA') ?? null;
+    const placeA = bottomAPace === 'fast' && !!aWin && !!aItem
+      && aWin.end - aWin.start >= FAST_BOTTOM_A_CAPTIONS * MIN_SHARE;
+    const briefA = clipBrief(aWin, picks.bottomA?.video.context);
     setWriting(true);
     setCaptionError(null);
     try {
@@ -1054,26 +1093,42 @@ export function VidsBuilder({
         personaContext: persona?.context || picks.start?.video.context || '',
         wantStart: !!windows.start,
         notes: notes.trim(),
-        bottomA: clipBrief(windows.bottomA, picks.bottomA?.video.context),
+        bottomA: placeA && briefA && aWin
+          ? {
+            ...briefA,
+            count: FAST_BOTTOM_A_CAPTIONS,
+            placed: {
+              length: aWin.end - aWin.start,
+              spans: aWin.marks.map((m) => ({ start: m.start - aWin.start, end: m.end - aWin.start })),
+            },
+          }
+          : briefA,
         bottomB: clipBrief(windows.bottomB, picks.bottomB?.video.context),
         wantEnd: !!windows.end,
         endContext: picks.end?.video.context ?? '',
         emojis,
         emojiPalette,
         // The one place two marks share a line, and only when the timeline
-        // says neither side has room for its own.
-        mergeSeam: seamNeedsMerge(windows),
+        // says neither side has room for its own. Never across a placed
+        // Bottom A: its two lines are the search and the pick.
+        mergeSeam: !placeA && seamNeedsMerge(windows),
       });
+      const atA = placeA ? draft.bottomAAt : undefined;
+      const toClip = (at: number) => (aItem ? Math.round((aItem.trimStart + at * aItem.speed) * 100) / 100 : at);
       // A rewrite keeps whatever was set to one line, and wherever a line was
       // dragged to, matched up by position — both are about the shape and place
       // of the caption slot rather than its wording. A line that wasn't there
       // before starts on its section's default.
       setLines((prev) => ({
         start: { ...capLine(draft.start, prev.start.oneLine), pos: prev.start.pos },
-        bottomA: draft.bottomA.map((t, i) => ({
-          ...capLine(t, prev.bottomA[i]?.oneLine ?? ONE_LINE_DEFAULT.bottomA),
-          pos: prev.bottomA[i]?.pos,
-        })),
+        bottomA: draft.bottomA.map((t, i) => {
+          const at = atA?.[i];
+          return {
+            ...capLine(t, prev.bottomA[i]?.oneLine ?? ONE_LINE_DEFAULT.bottomA),
+            pos: prev.bottomA[i]?.pos,
+            ...(at != null && Number.isFinite(at) ? { at: toClip(at) } : {}),
+          };
+        }),
         bottomB: draft.bottomB.map((t, i) => ({
           ...capLine(t, prev.bottomB[i]?.oneLine ?? ONE_LINE_DEFAULT.bottomB),
           pos: prev.bottomB[i]?.pos,
@@ -1438,12 +1493,22 @@ export function VidsBuilder({
     setDurations((prev) => (prev[videoId] === d ? prev : { ...prev, [videoId]: d }));
   };
 
+  /** The rate this pick plays at on the timeline: its own speed, or Fast's for
+   *  Bottom A. A photo has no rate to play at. */
+  const slotRate = (slot: SlotId, pick: SlotPick): number => {
+    if (isPhoto(pick.video)) return DEFAULT_SPEED;
+    const kept = trimmedLength(pick.trim, durations[pick.video.id] ?? pick.video.duration) ?? 0;
+    return slotSpeed(slot, pick.speed, kept, bottomAPace);
+  };
+
   /** How long this pick runs on the timeline. A photo has no length of its own
    *  and nothing to trim — it is held for PHOTO_LENGTH, or for as long as the
    *  window it is fitted to (End against Top B). */
-  const slotLength = (pick: SlotPick): number | null => (isPhoto(pick.video)
-    ? PHOTO_LENGTH
-    : timelineLength(pick.trim, durations[pick.video.id] ?? pick.video.duration, pick.speed));
+  const slotLength = (slot: SlotId, pick: SlotPick): number | null => {
+    if (isPhoto(pick.video)) return PHOTO_LENGTH;
+    const kept = trimmedLength(pick.trim, durations[pick.video.id] ?? pick.video.duration);
+    return kept == null ? null : kept / slotRate(slot, pick);
+  };
 
   const setPick = (slot: SlotId, patch: PickPatch) =>
     onPicksChange((prev) => (prev[slot] ? { ...prev, [slot]: { ...prev[slot], ...patch } } : prev));
@@ -1670,7 +1735,8 @@ export function VidsBuilder({
     const pick = picks[slot];
     if (!item || !pick) return;
     const full = durations[pick.video.id] ?? pick.video.duration ?? item.sourceDuration;
-    const len = timelineLength(trim, full, pick.speed) ?? item.duration;
+    const kept = trimmedLength(trim, full);
+    const len = kept == null ? item.duration : kept / slotSpeed(slot, pick.speed, kept, bottomAPace);
     if (playing) pause();
     seek(kind === 'in' ? item.start : Math.max(item.start, item.start + len - 0.05), false);
   };
@@ -1724,8 +1790,8 @@ export function VidsBuilder({
   // carry. Both read the moment an export starts, before anything renders.
   const appliedPersona = personas.find((p) => p.id === appliedPersonaId) ?? null;
   const currentSpec = () => specFromBuild({
-    picks, persona: appliedPersona, bars, roomTone, music, clipLevel, preset: presetId, lines, styleId,
-    notes, emojis,
+    picks, persona: appliedPersona, bars, bottomAPace, roomTone, music, clipLevel, preset: presetId, lines,
+    styleId, notes, emojis,
   });
   const currentBrief = () => ({
     personaContext: appliedPersona?.context || picks.start?.video.context || '',
@@ -1868,6 +1934,9 @@ export function VidsBuilder({
       setPicker(null);
       onPicksChange(() => restored);
       setBars({ ...b.bars });
+      // A record from before there was a choice played Bottom A at its own
+      // speed, which is Normal.
+      setBottomAPace(cleanBottomAPace(b.bottomAPace));
       setRoomTone({ on: b.roomTone.on, level: clampRoomLevel(b.roomTone.level) });
       // A record written before music was a layer has none, which is what it
       // was exported with. A song that has since left the audio library cannot
@@ -2008,7 +2077,8 @@ export function VidsBuilder({
    *  filled in without asking: a Bottom B the Link page pairs with it — any of
    *  them, at random, since Simple has nobody to choose between them — or any
    *  Bottom B at all while nothing is linked yet; an End, if the stage somehow
-   *  hasn't got one; then the captions, once the clips have loaded. */
+   *  hasn't got one; Bottom A back on Fast, where every new video starts;
+   *  then the captions, once the clips have loaded. */
   const chooseSimpleVid = (video: VidRow) => {
     const next: Picks = { ...picks, bottomA: freshPick('bottomA', video, picks.bottomA) };
     const linked = linkedPairs.filter((p) => p.a.id === video.id).map((p) => p.b);
@@ -2022,6 +2092,7 @@ export function VidsBuilder({
     pause();
     onSelectSlot(null);
     setPicker(null);
+    resetPace();
     // The words were written about the vid that was there — they go with it.
     setLines(EMPTY_LINES);
     setCaptionError(null);
@@ -2066,7 +2137,7 @@ export function VidsBuilder({
    *  clips gone with them, since a caption is about the clip it was written over.
    *  It lands where a build starts rather than on nothing at all: a fresh End,
    *  a fresh song and a fresh look for the captions, the three the builder
-   *  picks for itself anyway. How the video is set up — the bars, the size,
+   *  picks for itself anyway, and Bottom A back on Fast. How the video is set up — the bars, the size,
    *  the room tone — is left alone: those are how you work, not what you
    *  picked. Nothing leaves the library; this clears the stage, it doesn't
    *  delete footage. */
@@ -2079,6 +2150,7 @@ export function VidsBuilder({
     onPicksChange(() => (end ? { end } : {}));
     rollMusic();
     rollStyle();
+    resetPace();
     setLines(EMPTY_LINES);
     setCaptionError(null);
     setRecall({ busy: false, loaded: null, problems: [], error: null });
@@ -2137,6 +2209,12 @@ export function VidsBuilder({
     setStyleId(s.id);
   }, [active]);
 
+  /** Bottom A back on the default pace, Fast, whatever the last video was
+   *  switched to — every new video starts there: Random, Reset and a vid
+   *  chosen in Simple all come through here. The switch under Build overrides
+   *  it for the build on the stage. */
+  const resetPace = () => setBottomAPace(DEFAULT_BOTTOM_A_PACE);
+
   /** A whole build at random: one persona (a complete one when there is one,
    *  else whichever partial one), a clip each for Bottom A, Bottom B and End,
    *  and then the captions, once the clips have loaded — see the effect above.
@@ -2190,6 +2268,7 @@ export function VidsBuilder({
     setCaptionError(null);
     rollMusic();
     rollStyle();
+    resetPace();
     setRecall({ busy: false, loaded: null, problems: [], error: null });
     timeRef.current = 0;
     setTime(0);
@@ -2209,6 +2288,13 @@ export function VidsBuilder({
     { label: 'Top', region: 'top' },
     { label: 'Bottom', region: 'bottom' },
   ];
+  // What the pace is doing to the Bottom A on the stage, beside the switch.
+  const bottomAItem = plan.items.find((i) => i.slot === 'bottomA') ?? null;
+  const paceNote = bottomAPace === 'fast'
+    ? (bottomAItem
+      ? `${fmtSpeed(bottomAItem.speed)} · plays ${fmtTime(bottomAItem.duration)}`
+      : `fits it into ${FAST_BOTTOM_A_LENGTH}s`)
+    : 'its own speed';
   const describe = (i: PlanItem) =>
     `${fmtTime(i.start)}–${fmtTime(i.end)}  ${SLOT_META[i.slot].label}`
     + `${i.region === 'full' ? '' : ` (${i.region})`}${i.loop ? ' · loops' : ''}`;
@@ -2638,7 +2724,8 @@ export function VidsBuilder({
                   key={id}
                   meta={meta}
                   pick={p}
-                  duration={p ? slotLength(p) : null}
+                  duration={p ? slotLength(id, p) : null}
+                  rate={p ? slotRate(id, p) : DEFAULT_SPEED}
                   error={p ? (errors[p.video.id] ?? null) : null}
                   warn={unlinked ? `Not linked to “${picks.bottomA?.video.name}” — click to pick one that is` : null}
                   selected={selectedSlot === id}
@@ -2648,6 +2735,20 @@ export function VidsBuilder({
                 />
               );
             })}
+            {/* Bottom A's pace, last in the section and so just above Bars.
+                Every new video starts on Fast; this is where it shows, and
+                where it is switched for the build on the stage. */}
+            <div data-vids-pace className="mt-1 flex items-center gap-2">
+              <span className="shrink-0 text-[11px] text-zinc-300">Bottom A</span>
+              <Segmented
+                value={bottomAPace}
+                options={BOTTOM_A_PACES}
+                labels={PACE_LABEL}
+                title={`Normal plays Bottom A at its own speed. Fast speeds it up to fit ${FAST_BOTTOM_A_LENGTH}s (never slows it) — the song and room tone are left as they are. Every new video starts on Fast.`}
+                onChange={setBottomAPace}
+              />
+              <span className="min-w-0 flex-1 truncate text-right text-[9px] text-zinc-600">{paceNote}</span>
+            </div>
           </Section>
 
           <Section
@@ -2913,6 +3014,7 @@ export function VidsBuilder({
             slot={trimPopup.slot}
             pick={pick}
             full={durations[pick.video.id] ?? pick.video.duration}
+            pace={bottomAPace}
             x={trimPopup.x}
             y={trimPopup.y}
             onChange={(trim) => setPick(trimPopup.slot, { trim })}

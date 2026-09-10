@@ -92,6 +92,10 @@ export interface CaptionClip {
   /** The clip's marks in order, or empty for an unmarked clip. */
   marks: string[];
   count: number;
+  /** Bottom A on Fast: the writer places `count` lines itself and says when
+   *  each comes up. `length` is the clip's window in seconds; `spans` is each
+   *  mark's stretch of it, in the order `marks` lists them. */
+  placed?: { length: number; spans: { start: number; end: number }[] };
 }
 
 export interface CaptionRequest {
@@ -122,7 +126,15 @@ export interface CaptionRequest {
  *  the only '' is Bottom B's first when the seam was merged into A's last.
  *  `payoff` and `end` are the two lines over the closing clip, in that order:
  *  that he made the money, then the comment line. */
-export interface CaptionDraft { start: string; bottomA: string[]; bottomB: string[]; payoff: string; end: string }
+export interface CaptionDraft {
+  start: string;
+  bottomA: string[];
+  bottomB: string[];
+  payoff: string;
+  end: string;
+  /** When Bottom A was placed: the second into its window each line goes up. */
+  bottomAAt?: number[];
+}
 
 export const writeCaptions = (input: CaptionRequest) =>
   api<CaptionDraft>('/captions', { method: 'POST', body: JSON.stringify(input) });

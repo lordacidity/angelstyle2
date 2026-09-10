@@ -5,7 +5,7 @@
 // is a minute or a year old, it just says what no longer matches.
 
 import type { RecipePick, VidBuildSpec, VidPersona, VidRow } from '@/lib/vids-types';
-import { SLOTS, clampSpeed, type BarsLayout, type Picks, type SlotPick } from '@/lib/vidsPlan';
+import { SLOTS, clampSpeed, type BarsLayout, type BottomAPace, type Picks, type SlotPick } from '@/lib/vidsPlan';
 import type { CaptionLines } from '@/lib/vidsCaptions';
 import type { Music, RoomTone } from '@/lib/vidsAudio';
 
@@ -16,6 +16,8 @@ export interface BuildState {
   /** The persona filling the top three slots, if they still match one. */
   persona: VidPersona | null;
   bars: BarsLayout;
+  /** Normal, or Bottom A sped up to fit ten seconds. */
+  bottomAPace: BottomAPace;
   roomTone: RoomTone;
   music: Music;
   clipLevel: number;
@@ -51,6 +53,7 @@ export function specFromBuild(s: BuildState): VidBuildSpec {
     persona: s.persona ? { id: s.persona.id, name: s.persona.name } : null,
     picks,
     bars: { ...s.bars },
+    bottomAPace: s.bottomAPace,
     roomTone: { ...s.roomTone },
     music: { ...s.music },
     clipLevel: s.clipLevel,

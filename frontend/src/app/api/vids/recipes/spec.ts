@@ -24,6 +24,8 @@ const Line = z.object({
   text: z.string().max(300),
   oneLine: z.boolean().default(false),
   pos: z.object({ x: num(0, 1), y: num(0, 1) }).optional(),
+  // Clip seconds, when the writer placed the line itself (Bottom A on Fast).
+  at: num(0, 1e6).optional(),
 });
 
 export const BuildSpecSchema = z.object({
@@ -39,6 +41,9 @@ export const BuildSpecSchema = z.object({
   bars: z.object({
     middle: z.boolean(), middleSize: num(0, 4000), outer: z.boolean(), outerSize: num(0, 4000),
   }),
+  // Missing from records written before Bottom A had a pace — those played it
+  // at its own speed, which is what Normal is.
+  bottomAPace: z.enum(['normal', 'fast']).default('normal'),
   roomTone: z.object({ on: z.boolean(), level: num(0, 2) }),
   // A record is read straight back onto the stage and its track fetched, so the
   // url may only ever be a path this app serves — never somewhere else's audio.

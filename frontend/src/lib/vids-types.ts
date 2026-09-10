@@ -327,6 +327,9 @@ export interface RecipeCaptionLine {
   text: string;
   oneLine: boolean;
   pos?: { x: number; y: number };
+  /** When the writer placed the line itself (Bottom A on Fast): the clip
+   *  second it comes up at. */
+  at?: number;
 }
 
 /** Everything the builder needs to put a build back exactly as it was exported.
@@ -337,6 +340,10 @@ export interface VidBuildSpec {
   persona: { id: string; name: string } | null;
   picks: Partial<Record<'start' | 'topA' | 'topB' | 'bottomA' | 'bottomB' | 'end', RecipePick>>;
   bars: { middle: boolean; middleSize: number; outer: boolean; outerSize: number };
+  /** How Bottom A plays: at its own speed, or sped up to fit ten seconds (see
+   *  BottomAPace in lib/vidsPlan). Absent on builds written down before there
+   *  was a choice — those played it at its own speed, which is Normal. */
+  bottomAPace?: 'normal' | 'fast';
   roomTone: { on: boolean; level: number };
   /** The song under it, and how loud it sat. Absent on builds written down
    *  before music was a layer — those come back with no music, which is what

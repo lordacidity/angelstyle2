@@ -203,6 +203,8 @@ export function VidsCaptionsRail({
   onWrite, onClear, notes, setNotes, emojis, setEmojis, styleId, setStyleId, onResetPos,
 }: Props) {
   const momentsOf = (w: CaptionWindows['bottomA']) => (w?.marks ?? []).map((m) => m.text);
+  // Bottom A on Fast: two lines the writer put where it chose, not one per mark.
+  const placedA = lines.bottomA.some((l) => l.at != null);
   const patchLine = (
     group: 'bottomA' | 'bottomB',
   ) => (i: number, patch: Partial<CaptionLine>) => setLines((l) => ({
@@ -284,11 +286,13 @@ export function VidsCaptionsRail({
                 />
                 <CaptionRows
                   label="Bottom A"
-                  hint="over the first recording"
+                  hint={placedA ? 'two lines, timed by the writer' : 'over the first recording'}
                   group="bottomA"
                   laid={laid.bottomA}
                   lines={lines.bottomA}
-                  moments={momentsOf(windows.bottomA)}
+                  // Placed lines go where the writer put them, not one per
+                  // mark, so the marks are not theirs to show.
+                  moments={placedA ? [] : momentsOf(windows.bottomA)}
                   onChange={patchLine('bottomA')}
                   onResetPos={onResetPos}
                 />

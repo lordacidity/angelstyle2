@@ -211,6 +211,39 @@ export const INTAKE_SPEED_SLOTS: readonly SlotId[] = ['bottomA', 'bottomB'];
 export const intakeSpeed = (slot: SlotId | null): number =>
   (slot && INTAKE_SPEED_SLOTS.includes(slot) ? INTAKE_SPEED : DEFAULT_SPEED);
 
+// ── Bottom A's pace ───────────────────────────────────────────────────────────
+// Bottom A is the long screen recording, and the stretch people have said
+// drags. Fast speeds it up until it runs FAST_BOTTOM_A_LENGTH on the timeline,
+// whatever its length — the picture and the typing it carries, and nothing
+// else: the song and the room tone run under the whole timeline and are never
+// sped. Fast never slows a clip down, so one already shorter than that plays
+// at its own speed, and it is never slower than the speed the slot is set to.
+// Normal plays it at its own speed, as set on the slot. Every new video starts
+// on Fast.
+
+export type BottomAPace = 'normal' | 'fast';
+export const BOTTOM_A_PACES: readonly BottomAPace[] = ['normal', 'fast'];
+/** What every new video starts Bottom A on. */
+export const DEFAULT_BOTTOM_A_PACE: BottomAPace = 'fast';
+/** How long Bottom A runs on Fast, in timeline seconds. */
+export const FAST_BOTTOM_A_LENGTH = 10;
+/** The most Fast will speed a clip up: the fastest a <video> will play before
+ *  the browser refuses the rate. A clip longer than this many times
+ *  FAST_BOTTOM_A_LENGTH runs a little over rather than breaking the preview. */
+export const MAX_FAST_SPEED = 16;
+/** A pace off a stored record. One written before there was a choice played
+ *  Bottom A at its own speed, so anything but Fast reads as Normal — not as
+ *  the default a new video starts on. */
+export const cleanBottomAPace = (v: unknown): BottomAPace => (v === 'fast' ? 'fast' : 'normal');
+
+/** The rate a slot actually plays at, with `kept` clip seconds of it: its own
+ *  speed, except Bottom A on Fast. */
+export function slotSpeed(slot: SlotId, speed: number, kept: number, pace: BottomAPace): number {
+  const own = clampSpeed(speed);
+  if (slot !== 'bottomA' || pace !== 'fast' || !(kept > 0)) return own;
+  return Math.max(own, Math.min(MAX_FAST_SPEED, kept / FAST_BOTTOM_A_LENGTH));
+}
+
 // The kept range of a clip, clamped to what the clip actually has.
 export function trimmedRange(trim: Trim, full: number): { start: number; end: number } {
   const start = clamp(trim.start, 0, full);
@@ -314,7 +347,14 @@ export interface Plan {
 
 // `durations` (by video id) are the browser-measured lengths, which win over
 // the value stored at upload time (that one can be missing for odd codecs).
-export function buildPlan(picks: Picks, durations: Record<string, number> = {}, bars: BarsLayout = DEFAULT_BARS): Plan {
+// `bottomAPace` is Normal or Fast — see slotSpeed; left out, every clip plays
+// at its own speed.
+export function buildPlan(
+  picks: Picks,
+  durations: Record<string, number> = {},
+  bars: BarsLayout = DEFAULT_BARS,
+  bottomAPace: BottomAPace = 'normal',
+): Plan {
   // A photo has no length of its own, nothing to trim and no rate to play at:
   // it is one frame held for as long as its window is open. Giving it a length
   // here rather than special-casing further down is what lets every slot, every
@@ -329,12 +369,15 @@ export function buildPlan(picks: Picks, durations: Record<string, number> = {}, 
   const range = (id: SlotId) => (photo(id)
     ? { start: 0, end: PHOTO_LENGTH }
     : trimmedRange(picks[id]?.trim ?? DEFAULT_TRIM, fullDur(id)));
-  const rate = (id: SlotId) => (photo(id) ? DEFAULT_SPEED : clampSpeed(picks[id]?.speed ?? DEFAULT_SPEED));
   /** Kept range in clip seconds. */
   const kept = (id: SlotId): number => {
     const r = range(id);
     return Math.max(0, r.end - r.start);
   };
+  // Bottom A on Fast plays at whatever rate fits it — see slotSpeed.
+  const rate = (id: SlotId) => (photo(id)
+    ? DEFAULT_SPEED
+    : slotSpeed(id, picks[id]?.speed ?? DEFAULT_SPEED, kept(id), bottomAPace));
   /** The same range on the timeline, which is what every offset below is in. */
   const dur = (id: SlotId): number => kept(id) / rate(id);
   const has = (id: SlotId) => !!picks[id] && dur(id) > 0;
