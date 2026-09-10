@@ -590,8 +590,9 @@ export function layoutCaption(
   const blockH = (lines.length - 1) * step;
   const cx = caption.pos ? W * caption.pos.x : W / 2;
   // A top-placed caption is measured from the picture, not the frame: with
-  // outer bars on, the video starts below them, and the line belongs against
-  // that edge rather than floating over the black.
+  // outer bars on, the video starts below them, and Start sits lower still
+  // (START_DROP), and the line belongs against that edge rather than floating
+  // over the black.
   const pictureTop = regionRect('full', W, H, bars).y;
   const cy = caption.pos
     ? H * caption.pos.y

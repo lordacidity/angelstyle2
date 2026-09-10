@@ -447,11 +447,21 @@ export function buildPlan(
 }
 
 // The picture area for a region once the bars have taken their share.
+/** Start sits a little down the frame rather than dead centre: its picture
+ *  begins this much of the frame height below the top bar, and the bottom edge
+ *  stays where the split phases have theirs, so the persona rides lower and the
+ *  cut to the screen recording keeps its floor. The hook is measured from the
+ *  same edge (lib/vidsCaptions), so it comes down with the picture. */
+export const START_DROP = 0.06;
+
 export function regionRect(region: Region, W: number, H: number, bars: BarsLayout = DEFAULT_BARS): Rect {
   const o = bars.outer ? clamp(bars.outerSize, 0, H / 2 - 1) : 0;
   const innerY = o;
   const innerH = H - 2 * o;
-  if (region === 'full') return { x: 0, y: innerY, w: W, h: innerH };
+  if (region === 'full') {
+    const d = Math.min(Math.round(H * START_DROP), innerH - 1);
+    return { x: 0, y: innerY + d, w: W, h: innerH - d };
+  }
   const m = bars.middle ? clamp(bars.middleSize, 0, innerH - 2) : 0;
   const half = (innerH - m) / 2;
   return { x: 0, y: region === 'top' ? innerY : innerY + half + m, w: W, h: half };
