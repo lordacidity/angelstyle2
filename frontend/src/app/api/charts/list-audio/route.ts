@@ -25,6 +25,7 @@ const PRELOADED: Record<string, { label: string; durationMs: number }> = {
   'track-custom-1788980666859.mp3': { label: 'Took Her To The O',    durationMs: 60029 },
   'track-custom-1788980666860.mp3': { label: 'worry (ultra slowed)', durationMs: 60029 },
   'track-custom-1789056009934.mp3': { label: 'Yi Jian Mei (Xue hua piao piao)', durationMs: 145137 },
+  'track-custom-1789065813191.mp3': { label: 'Hava Nagila',          durationMs: 60029 },
 };
 
 export async function GET() {
