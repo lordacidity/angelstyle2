@@ -10,7 +10,10 @@
 //
 // Whatever gets typed, /api/ai/chatgpt (Gemini Flash Lite) answers with the
 // chosen name as #1, argued in the chosen direction, plus four more names. The
-// loading state is held for at least ~4s no matter how fast the model returns.
+// loading state is held for at least ~1.5s no matter how fast the model returns.
+// The model itself takes a couple of seconds, so for the pre-written question
+// the answer is asked for the moment it starts typing itself out: by the time
+// it sends, the answer is usually back and the loading runs just its ~1.5s.
 //
 // These get screen-recorded, so the question is written ahead of time on the
 // setup card: the first click in the chat's search bar types it out at a human
@@ -50,8 +53,8 @@ const SETUP_KEY = 'studio-chatgpt-setup-v1';
 // The loading state is held for this long (plus a little jitter so it never
 // looks metronomic) before the answer starts streaming, however fast the model
 // actually came back. If the model takes longer, loading simply continues.
-const MIN_LOADING_MS = 4000;
-const LOADING_JITTER_MS = 400;
+const MIN_LOADING_MS = 1500;
+const LOADING_JITTER_MS = 150;
 // chatgpt.com shows a pulsing dot the instant a message is sent, then swaps to
 // the shimmering status line.
 const DOT_MS = 700;
@@ -328,6 +331,9 @@ export function ChatGptSection({ active }: { active: boolean }) {
   const [input, setInput] = useState('');
 
   const abortRef = useRef<AbortController | null>(null);
+  // The pre-written question's answer, asked for while it types itself out —
+  // see engageComposer. Taken up by send() when that question is what goes.
+  const prefetchRef = useRef<{ text: string; ctrl: AbortController; request: Promise<Reply> } | null>(null);
   const streamRef = useRef<number | null>(null);
   const threadRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
@@ -433,6 +439,8 @@ export function ChatGptSection({ active }: { active: boolean }) {
   // loading drops the pending answer entirely.
   const stop = useCallback(() => {
     cancelAutoType();
+    prefetchRef.current?.ctrl.abort();
+    prefetchRef.current = null;
     abortRef.current?.abort();
     abortRef.current = null;
     if (streamRef.current != null) { cancelAnimationFrame(streamRef.current); streamRef.current = null; }
@@ -486,6 +494,13 @@ export function ChatGptSection({ active }: { active: boolean }) {
     typingRef.current = script;
     setAutoTyping(true);
     inputRef.current?.focus();
+    // Ask for the answer now, while the question types itself out, so the
+    // model's own couple of seconds are spent before it is sent rather than
+    // after; send() picks this up when the same question goes.
+    const ctrl = new AbortController();
+    const request = requestReply([{ role: 'user', content: script }], ctrl.signal);
+    request.catch(() => { /* aborted, or handled where it is awaited */ });
+    prefetchRef.current = { text: script, ctrl, request };
     let i = 0;
     const step = () => {
       i++;
@@ -555,6 +570,7 @@ export function ChatGptSection({ active }: { active: boolean }) {
 
   useEffect(() => () => {
     abortRef.current?.abort();
+    prefetchRef.current?.ctrl.abort();
     if (streamRef.current != null) cancelAnimationFrame(streamRef.current);
     if (typeTimerRef.current != null) clearTimeout(typeTimerRef.current);
   }, []);
@@ -568,6 +584,20 @@ export function ChatGptSection({ active }: { active: boolean }) {
       streamRef.current = status === 'done' ? null : requestAnimationFrame(tick);
     };
     streamRef.current = requestAnimationFrame(tick);
+  }
+
+  /** One answer from the route, for the chat so far. */
+  function requestReply(history: { role: 'user' | 'assistant'; content: string }[], signal: AbortSignal): Promise<Reply> {
+    return fetch('/api/ai/chatgpt', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ name: name.trim(), direction, messages: history }),
+      signal,
+    }).then(async r => {
+      const j = await r.json().catch(() => ({})) as { error?: string } & Partial<Reply>;
+      if (!r.ok) throw new Error(j.error || `HTTP ${r.status}`);
+      return { intro: j.intro ?? '', picks: j.picks ?? [], outro: j.outro ?? '' } as Reply;
+    });
   }
 
   // `base` is the chat the new message follows (defaults to the current one;
@@ -585,20 +615,17 @@ export function ChatGptSection({ active }: { active: boolean }) {
     setMessages([...base, userMsg, { id: asstId, role: 'assistant', reply: null, status: 'loading', shown: 0 }]);
     setInput('');
 
-    const ctrl = new AbortController();
+    // The answer already on its way for this exact question, when it was the
+    // pre-written one; anything else is asked for now.
+    const pre = prefetchRef.current;
+    prefetchRef.current = null;
+    const reuse = pre && base.length === 0 && pre.text === text ? pre : null;
+    if (pre && !reuse) pre.ctrl.abort();
+    const ctrl = reuse?.ctrl ?? new AbortController();
     abortRef.current = ctrl;
-    const request = fetch('/api/ai/chatgpt', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ name: name.trim(), direction, messages: history }),
-      signal: ctrl.signal,
-    }).then(async r => {
-      const j = await r.json().catch(() => ({})) as { error?: string } & Partial<Reply>;
-      if (!r.ok) throw new Error(j.error || `HTTP ${r.status}`);
-      return { intro: j.intro ?? '', picks: j.picks ?? [], outro: j.outro ?? '' } as Reply;
-    });
+    const request = reuse?.request ?? requestReply(history, ctrl.signal);
 
-    // Hold the loading state for ~5s no matter how fast the model returns.
+    // Hold the loading state for ~1.5s no matter how fast the model returns.
     const [result] = await Promise.allSettled([request, sleep(MIN_LOADING_MS + Math.random() * LOADING_JITTER_MS)]);
     if (ctrl.signal.aborted) return;
     abortRef.current = null;
