@@ -481,9 +481,9 @@ export const CAPTION_STYLES: readonly CaptionStyle[] = [
     weight: 500, size: 0.042, color: '#f4f4f5', letterCase: 'as-written', stroke: 0, shadow: 0.022, tracking: 0.012,
   },
   {
-    id: 'gold', label: 'Gold', note: 'yellow lowercase, outlined',
+    id: 'gold', label: 'Gold', note: 'yellow, outlined',
     family: 'Inter, "Helvetica Neue", Arial, sans-serif',
-    weight: 800, size: 0.057, color: '#ffd84d', letterCase: 'lower', stroke: 0.09, shadow: 0.008, tracking: 0,
+    weight: 800, size: 0.057, color: '#ffd84d', letterCase: 'as-written', stroke: 0.09, shadow: 0.008, tracking: 0,
   },
 ];
 

@@ -97,7 +97,7 @@ const isLaughing = (char: string) => LAUGHING.has(char.replace(/\uFE0F/g, ''));
 
 const style = (emojis: boolean, palette: string[]) => `Every caption:
 - SHORT. A screen line is 3 to 7 words and never more than 8 — it is read in a second while the screen moves on. Not a sentence. No full stop at the end. The hook may run a little longer; it wraps.
-- all lower case.
+- mostly lower case, the way ppl type — that is still the default for every line. Capitals are allowed: a word or a short line in caps for emphasis ("making BANK shorting trump", "he is DONE"), or a name or acronym capitalised where it reads better. Do not start every line with a capital, do not capitalise every word, and keep it consistent across the set — if one line writes Ronaldo, they all do.
 - plain spoken, the way someone talks to a camera. No hashtags, no quote marks.
 - text-speak, the way ppl actually type: "bc" for because, "rn" for right now, "ppl", "tbh", "ngl", "fr", "w/", "ur". Shorten with these before cutting meaning — "trade down on him bc ppl hate him rn". A few across the set, where they land naturally — never one in every line, never forced, never at the cost of being clear.
 ${emojis
@@ -129,7 +129,7 @@ Usually name WHO he is trading on — the person the screen recording shows — 
 Never "trade up", "trade down" or "trading down" in the hook. Now and then leave the person out and let the weird thing carry it: "getting paid with a phone in my mouth", "at the park getting paid".
 Sometimes write it as a HOW TO, addressed to the viewer: "how to make rent off mbappe from a hammock", "how to get paid with a phone in your mouth". Then "my" becomes "your" and the money phrase goes to its base form.
 Now and then put how fast it was on the end — "in 67 secs" or "in 69 secs", the house numbers: "making bank shorting trump in the woods in 69 secs", "getting paid off ronaldo on the toilet in 67 secs". Not on every build, and never any other number unless a context gives it.
-Either order works — money first or weird thing first. Vary it. All lower case, no full stop, no hashtags. Short, though the hook may wrap.
+Either order works — money first or weird thing first. Vary it. Mostly lower case, with capitals only as the style rules below allow; no full stop, no hashtags. Short, though the hook may wrap.
 WRONG:
   "making bank on trump today" — no weird thing
   "making money typing in a park" — typing is not the thing, the park is
