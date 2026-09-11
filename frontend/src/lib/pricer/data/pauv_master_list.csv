@@ -1,0 +1,1061 @@
+name,industry,subindustry,price,old_price,change
+Elon Musk,Business,,70.00,70.13,-0.13
+Mark Zuckerberg,Business,,48.00,38.17,+9.83
+Sam Altman,Business,,36.00,20.72,+15.28
+Jensen Huang,Business,,34.00,18.32,+15.68
+Satya Nadella,Business,,26.00,15.23,+10.77
+Sundar Pichai,Business,,26.00,41.73,-15.73
+Bob Iger,Business,,22.00,39.41,-17.41
+Alex Hormozi,Business,,16.00,8.53,+7.47
+Alex Karp,Business,,14.00,12.40,+1.60
+Palmer Luckey,Business,,14.00,11.85,+2.15
+Chamath Palihapitiya,Business,,12.00,6.70,+5.30
+Jeff Bezos,Business,Entrepreneur,48.00,48.73,-0.73
+Bill Gates,Business,Entrepreneur,45.00,43.03,+1.97
+Oprah Winfrey,Business,Entrepreneur,45.00,44.17,+0.83
+Dana White,Business,Entrepreneur,32.00,32.69,-0.69
+Kris Jenner,Business,Entrepreneur,32.00,35.15,-3.15
+Richard Branson,Business,Entrepreneur,32.00,41.57,-9.57
+Larry Ellison,Business,Entrepreneur,28.00,31.95,-3.95
+Gary Vaynerchuk,Business,Entrepreneur,24.00,36.87,-12.87
+Jerry Jones,Business,Entrepreneur,22.00,27.67,-5.67
+Demis Hassabis,Business,Entrepreneur,18.00,41.97,-23.97
+Steven Bartlett,Business,Entrepreneur,18.00,29.37,-11.37
+Vitalik Buterin,Business,Entrepreneur,18.00,16.97,+1.03
+Michael Saylor,Business,Entrepreneur,16.00,12.93,+3.07
+Bryan Johnson,Business,Entrepreneur,14.00,12.87,+1.13
+Grant Cardone,Business,Entrepreneur,14.00,27.67,-13.67
+Rich Paul,Business,Entrepreneur,14.00,12.79,+1.21
+Flavio Briatore,Business,Entrepreneur,10.00,6.59,+3.41
+Codie Sanchez,Business,Entrepreneur,8.00,17.17,-9.17
+Scott Boras,Business,Entrepreneur,8.00,12.18,-4.18
+Tim Cook,Business,Executive,36.00,36.27,-0.27
+Steve Ballmer,Business,Executive,18.00,17.88,+0.12
+Adam Silver,Business,Executive,16.00,16.41,-0.41
+Steve Cohen,Business,Executive,12.00,17.83,-5.83
+Rob Manfred,Business,Executive,10.00,14.87,-4.87
+Warren Buffett,Business,Investor,42.00,40.71,+1.29
+Joe Rogan,Comedy,,48.00,52.95,-4.95
+Theo Von,Comedy,,32.00,23.21,+8.79
+Shane Gillis,Comedy,,30.00,19.11,+10.89
+Tony Hinchcliffe,Comedy,,18.00,13.81,+4.19
+Dave Chappelle,Comedy,Comedians,42.00,37.73,+4.27
+Kevin Hart,Comedy,Comedians,42.00,38.87,+3.13
+Chris Rock,Comedy,Comedians,36.00,36.37,-0.37
+Conan O'Brien,Comedy,Comedians,34.00,35.27,-1.27
+Jimmy Kimmel,Comedy,Comedians,32.00,30.67,+1.33
+Jon Stewart,Comedy,Comedians,32.00,40.87,-8.87
+Ellen DeGeneres,Comedy,Comedians,30.00,29.87,+0.13
+Pete Davidson,Comedy,Comedians,28.00,26.93,+1.07
+Cody Ko,Comedy,Comedians,10.00,9.07,+0.93
+Jake Shane,Comedy,Comedians,10.00,16.57,-6.57
+Ali Siddiq,Comedy,Comedians,8.00,0.25,+7.75
+Hans Kim,Comedy,Comedians,5.00,3.50,+1.50
+Kyle Kinane,Comedy,Comedians,5.00,0.07,+4.93
+Sam Tallent,Comedy,Comedians,4.00,0.05,+3.95
+Matthew McConaughey,Film and TV,,38.00,38.69,-0.69
+Dwayne Johnson,Film and TV,Actors,48.00,44.35,+3.65
+Leonardo DiCaprio,Film and TV,Actors,48.00,43.87,+4.13
+Tom Cruise,Film and TV,Actors,47.00,35.18,+11.82
+Brad Pitt,Film and TV,Actors,45.00,36.61,+8.39
+Tom Hanks,Film and TV,Actors,45.00,48.63,-3.63
+Keanu Reeves,Film and TV,Actors,44.00,43.13,+0.87
+Robert Downey Jr.,Film and TV,Actors,44.00,42.59,+1.41
+Will Smith,Film and TV,Actors,44.00,41.27,+2.73
+Adam Sandler,Film and TV,Actors,42.00,35.93,+6.07
+Denzel Washington,Film and TV,Actors,42.00,41.97,+0.03
+Johnny Depp,Film and TV,Actors,42.00,42.27,-0.27
+Ryan Reynolds,Film and TV,Actors,42.00,39.17,+2.83
+Timothée Chalamet,Film and TV,Actors,42.00,40.06,+1.94
+Chris Hemsworth,Film and TV,Actors,40.00,37.17,+2.83
+George Clooney,Film and TV,Actors,40.00,39.57,+0.43
+Harrison Ford,Film and TV,Actors,40.00,40.77,-0.77
+Ryan Gosling,Film and TV,Actors,40.00,35.93,+4.07
+Tom Holland,Film and TV,Actors,40.00,37.89,+2.11
+Ben Affleck,Film and TV,Actors,38.00,36.47,+1.53
+Chris Evans,Film and TV,Actors,38.00,42.17,-4.17
+Jim Carrey,Film and TV,Actors,38.00,36.17,+1.83
+Matt Damon,Film and TV,Actors,38.00,29.41,+8.59
+Pedro Pascal,Film and TV,Actors,38.00,26.03,+11.97
+Sylvester Stallone,Film and TV,Actors,38.00,35.39,+2.61
+Chris Pratt,Film and TV,Actors,36.00,39.27,-3.27
+Christian Bale,Film and TV,Actors,36.00,36.76,-0.76
+Jack Black,Film and TV,Actors,36.00,31.23,+4.77
+Mark Wahlberg,Film and TV,Actors,36.00,34.34,+1.66
+Michael B. Jordan,Film and TV,Actors,36.00,39.99,-3.99
+Robert Pattinson,Film and TV,Actors,36.00,41.17,-5.17
+Henry Cavill,Film and TV,Actors,34.00,34.73,-0.73
+Jason Momoa,Film and TV,Actors,34.00,35.97,-1.97
+Nicolas Cage,Film and TV,Actors,34.00,35.57,-1.57
+Paul Rudd,Film and TV,Actors,34.00,35.87,-1.87
+Zac Efron,Film and TV,Actors,34.00,34.93,-0.93
+Ben Stiller,Film and TV,Actors,32.00,34.97,-2.97
+Cillian Murphy,Film and TV,Actors,32.00,36.17,-4.17
+Daniel Craig,Film and TV,Actors,32.00,23.27,+8.73
+Daniel Radcliffe,Film and TV,Actors,32.00,22.01,+9.99
+Jake Gyllenhaal,Film and TV,Actors,32.00,34.32,-2.32
+Steve Carell,Film and TV,Actors,32.00,29.47,+2.53
+Andrew Garfield,Film and TV,Actors,30.00,31.55,-1.55
+Austin Butler,Film and TV,Actors,30.00,34.37,-4.37
+Glen Powell,Film and TV,Actors,30.00,33.18,-3.18
+Jacob Elordi,Film and TV,Actors,30.00,32.19,-2.19
+Seth Rogen,Film and TV,Actors,30.00,27.34,+2.66
+Adam Driver,Film and TV,Actors,28.00,34.87,-6.87
+Jeremy Allen White,Film and TV,Actors,26.00,27.73,-1.73
+Jonah Hill,Film and TV,Actors,26.00,25.44,+0.56
+Tom Hiddleston,Film and TV,Actors,26.00,21.45,+4.55
+Anthony Mackie,Film and TV,Actors,24.00,23.38,+0.62
+Paul Mescal,Film and TV,Actors,24.00,17.17,+6.83
+Sebastian Stan,Film and TV,Actors,24.00,19.88,+4.12
+Aaron Taylor-Johnson,Film and TV,Actors,22.00,19.77,+2.23
+Alexander Skarsgård,Film and TV,Actors,22.00,21.23,+0.77
+Barry Keoghan,Film and TV,Actors,22.00,16.73,+5.27
+David Corenswet,Film and TV,Actors,22.00,22.39,-0.39
+Joe Keery,Film and TV,Actors,22.00,23.03,-1.03
+Michael Cera,Film and TV,Actors,22.00,24.73,-2.73
+Nicholas Hoult,Film and TV,Actors,22.00,22.76,-0.76
+Walton Goggins,Film and TV,Actors,22.00,24.12,-2.12
+Adam Scott,Film and TV,Actors,20.00,26.83,-6.83
+Chiwetel Ejiofor,Film and TV,Actors,16.00,16.11,-0.11
+Harris Dickinson,Film and TV,Actors,16.00,17.43,-1.43
+Josh O'Connor,Film and TV,Actors,16.00,15.11,+0.89
+Miles Caton,Film and TV,Actors,16.00,0.68,+15.32
+Patrick Schwarzenegger,Film and TV,Actors,16.00,5.53,+10.47
+Will Poulter,Film and TV,Actors,16.00,21.52,-5.52
+Dominic Sessa,Film and TV,Actors,10.00,15.72,-5.72
+Joseph Zada,Film and TV,Actors,10.00,0.09,+9.91
+Selena Gomez,Film and TV,Actresses,46.00,38.59,+7.41
+Scarlett Johansson,Film and TV,Actresses,42.00,37.27,+4.73
+Zendaya,Film and TV,Actresses,42.00,36.14,+5.86
+Julia Roberts,Film and TV,Actresses,40.00,41.57,-1.57
+Margot Robbie,Film and TV,Actresses,40.00,35.71,+4.29
+Meryl Streep,Film and TV,Actresses,40.00,37.07,+2.93
+Anne Hathaway,Film and TV,Actresses,38.00,36.29,+1.71
+Jennifer Lawrence,Film and TV,Actresses,38.00,36.37,+1.63
+Sydney Sweeney,Film and TV,Actresses,38.00,27.83,+10.17
+Emma Stone,Film and TV,Actresses,36.00,32.93,+3.07
+Emma Watson,Film and TV,Actresses,36.00,36.53,-0.53
+Nicole Kidman,Film and TV,Actresses,36.00,36.03,-0.03
+Sandra Bullock,Film and TV,Actresses,36.00,35.97,+0.03
+Gal Gadot,Film and TV,Actresses,34.00,35.23,-1.23
+Jenna Ortega,Film and TV,Actresses,34.00,22.04,+11.96
+Millie Bobby Brown,Film and TV,Actresses,34.00,35.67,-1.67
+Blake Lively,Film and TV,Actresses,32.00,29.97,+2.03
+Demi Moore,Film and TV,Actresses,32.00,34.83,-2.83
+Florence Pugh,Film and TV,Actresses,32.00,31.07,+0.93
+Ana de Armas,Film and TV,Actresses,30.00,28.08,+1.92
+Zoe Saldaña,Film and TV,Actresses,30.00,22.35,+7.65
+Kristen Stewart,Film and TV,Actresses,28.00,35.13,-7.13
+Elizabeth Olsen,Film and TV,Actresses,24.00,27.43,-3.43
+Zoë Kravitz,Film and TV,Actresses,24.00,19.75,+4.25
+Elle Fanning,Film and TV,Actresses,22.00,20.93,+1.07
+Sadie Sink,Film and TV,Actresses,22.00,25.36,-3.36
+Margaret Qualley,Film and TV,Actresses,20.00,22.13,-2.13
+Ayo Edebiri,Film and TV,Actresses,18.00,17.87,+0.13
+Bella Ramsey,Film and TV,Actresses,18.00,13.21,+4.79
+Rachel Zegler,Film and TV,Actresses,18.00,16.34,+1.66
+Emma Myers,Film and TV,Actresses,16.00,4.23,+11.77
+Hunter Schafer,Film and TV,Actresses,16.00,14.96,+1.04
+Maya Hawke,Film and TV,Actresses,16.00,14.95,+1.05
+Mia Goth,Film and TV,Actresses,16.00,17.98,-1.98
+Mikey Madison,Film and TV,Actresses,16.00,13.58,+2.42
+Cailee Spaeny,Film and TV,Actresses,14.00,16.52,-2.52
+Sophie Thatcher,Film and TV,Actresses,14.00,6.34,+7.66
+Chase Infiniti,Film and TV,Actresses,10.00,16.06,-6.06
+Gordon Ramsay,Film and TV,Chef,38.00,33.87,+4.13
+Steven Spielberg,Film and TV,Directors,42.00,43.91,-1.91
+Christopher Nolan,Film and TV,Directors,38.00,37.62,+0.38
+Martin Scorsese,Film and TV,Directors,38.00,41.87,-3.87
+Quentin Tarantino,Film and TV,Directors,36.00,36.94,-0.94
+Denis Villeneuve,Film and TV,Directors,26.00,30.87,-4.87
+Greta Gerwig,Film and TV,Directors,24.00,14.93,+9.07
+Jordan Peele,Film and TV,Directors,24.00,19.43,+4.57
+Ryan Coogler,Film and TV,Directors,24.00,18.72,+5.28
+James Gunn,Film and TV,Directors,22.00,21.67,+0.33
+Wes Anderson,Film and TV,Directors,22.00,20.40,+1.60
+Robert Eggers,Film and TV,Directors,16.00,20.13,-4.13
+Chloe Zhao,Film and TV,Directors,14.00,10.15,+3.85
+Kane Parsons,Film and TV,Directors,12.00,16.71,-4.71
+Curry Barker,Film and TV,Directors,6.00,11.01,-5.01
+MrBeast,Influencers,,52.00,46.21,+5.79
+IShowSpeed,Influencers,,40.00,35.07,+4.93
+Kai Cenat,Influencers,,34.00,27.54,+6.46
+PewDiePie,Influencers,,34.00,14.83,+19.17
+Logan Paul,Influencers,,32.00,22.28,+9.72
+Andrew Tate,Influencers,,28.00,18.91,+9.09
+Druski,Influencers,,22.00,16.66,+5.34
+Adin Ross,Influencers,,20.00,14.47,+5.53
+Livvy Dunne,Influencers,,18.00,6.58,+11.42
+xQc,Influencers,,18.00,14.49,+3.51
+MoistCr1TiKaL,Influencers,,16.00,11.50,+4.50
+Ludwig,Influencers,,14.00,9.75,+4.25
+Pokimane,Influencers,,14.00,8.51,+5.49
+Asmongold,Influencers,,12.00,8.40,+3.60
+Bobbi Althoff,Influencers,,12.00,17.37,-5.37
+CaseOh,Influencers,,12.00,7.85,+4.15
+Coffeezilla,Influencers,,12.00,0.52,+11.48
+Fanum,Influencers,,12.00,6.75,+5.25
+Jynxzi,Influencers,,12.00,5.60,+6.40
+N3on,Influencers,,12.00,4.36,+7.64
+SteveWillDoIt,Influencers,,12.00,1.33,+10.67
+Barron Trump,Influencers,,10.00,4.56,+5.44
+FaZe Banks,Influencers,,10.00,3.68,+6.32
+Sketch,Influencers,,10.00,6.90,+3.10
+Stable Ronaldo,Influencers,,10.00,1.28,+8.72
+iDubbbz,Influencers,,10.00,0.60,+9.40
+Myron Gaines,Influencers,,8.00,0.94,+7.06
+Sneako,Influencers,,8.00,6.98,+1.02
+TrainwrecksTV,Influencers,,8.00,0.55,+7.45
+Clavicular,Influencers,,6.00,14.72,-8.72
+Joe Bartolozzi,Influencers,,6.00,5.81,+0.19
+Robby Berger,Influencers,,6.00,2.45,+3.55
+TheBurntPeanut,Influencers,,6.00,4.16,+1.84
+Kim Kardashian,Influencers,Influencer,48.00,43.40,+4.60
+Kylie Jenner,Influencers,Influencer,44.00,41.93,+2.07
+Hailey Bieber,Influencers,Influencer,34.00,22.81,+11.19
+KSI,Influencers,Influencer,34.00,35.49,-1.49
+Khaby Lame,Influencers,Influencer,32.00,35.47,-3.47
+Addison Rae,Influencers,Influencer,28.00,27.67,+0.33
+Markiplier,Influencers,Influencer,24.00,22.55,+1.45
+Zach King,Influencers,Influencer,24.00,34.17,-10.17
+Hasbulla,Influencers,Influencer,16.00,11.97,+4.03
+Jay Shetty,Influencers,Influencer,16.00,26.27,-10.27
+Jeffree Star,Influencers,Influencer,16.00,27.63,-11.63
+James Charles,Influencers,Influencer,14.00,15.07,-1.07
+Ryan Trahan,Influencers,Influencer,14.00,15.89,-1.89
+Dr Disrespect,Influencers,Influencer,12.00,9.81,+2.19
+Duke Dennis,Influencers,Influencer,12.00,10.87,+1.13
+Ethan Klein,Influencers,Influencer,12.00,15.17,-3.17
+Kylie Kelce,Influencers,Influencer,12.00,4.50,+7.50
+Paige Spiranac,Influencers,Influencer,12.00,5.15,+6.85
+Tana Mongeau,Influencers,Influencer,12.00,13.09,-1.09
+Valkyrae,Influencers,Influencer,12.00,17.37,-5.37
+Brittany Broski,Influencers,Influencer,10.00,7.63,+2.37
+Clix,Influencers,Influencer,10.00,11.93,-1.93
+Danny Duncan,Influencers,Influencer,10.00,10.97,-0.97
+Tommyinnit,Influencers,Influencer,10.00,9.76,+0.24
+Agent 00,Influencers,Influencer,8.00,9.89,-1.89
+Haliey Welch,Influencers,Influencer,8.00,5.70,+2.30
+Jack Doherty,Influencers,Influencer,8.00,17.37,-9.37
+Jasontheween,Influencers,Influencer,8.00,6.17,+1.83
+2xRakai,Influencers,Influencer,6.00,1.05,+4.95
+Deshae Frost,Influencers,Influencer,6.00,0.07,+5.93
+ExtraEmily,Influencers,Influencer,6.00,0.06,+5.94
+Konvy,Influencers,Influencer,6.00,0.10,+5.90
+Peterbot,Influencers,Influencer,6.00,5.42,+0.58
+Silky,Influencers,Influencer,6.00,0.03,+5.97
+Tinx,Influencers,Influencer,6.00,9.43,-3.43
+Xandra Pohl,Influencers,Influencer,6.00,3.21,+2.79
+Kanel Joseph,Influencers,Influencer,5.00,0.09,+4.91
+Fat Perez,Influencers,Influencer,4.00,2.76,+1.24
+RayLiveee,Influencers,Influencer,4.00,0.04,+3.96
+Kendall Jenner,Influencers,Model,40.00,35.63,+4.37
+Paris Hilton,Influencers,Model,32.00,29.97,+2.03
+Haley Baylee,Influencers,Model,6.00,17.27,-11.27
+Stephen A. Smith,Media,,30.00,31.72,-1.72
+Pat McAfee,Media,,28.00,15.97,+12.03
+Shannon Sharpe,Media,,24.00,14.92,+9.08
+Shams Charania,Media,,16.00,15.78,+0.22
+Skip Bayless,Media,,16.00,10.77,+5.23
+Bill Simmons,Media,,14.00,13.67,+0.33
+Ernie Johnson,Media,,12.00,15.79,-3.79
+Joe Buck,Media,,12.00,12.65,-0.65
+Jimmy O'Brien,Media,,8.00,10.87,-2.87
+Jon Anik,Media,,8.00,16.54,-8.54
+Quavo,Music,,22.00,23.57,-1.57
+Joey Bada$$,Music,,16.00,16.99,-0.99
+Big Boogie,Music,,6.00,1.12,+4.88
+Morgan Wallen,Music,Country,40.00,39.86,+0.14
+Luke Combs,Music,Country,34.00,37.91,-3.91
+Zach Bryan,Music,Country,34.00,34.87,-0.87
+Chris Stapleton,Music,Country,28.00,33.45,-5.45
+Lainey Wilson,Music,Country,20.00,18.93,+1.07
+Shaboozey,Music,Country,18.00,15.34,+2.66
+Tyler Childers,Music,Country,18.00,22.09,-4.09
+Ella Langley,Music,Country,12.00,14.50,-2.50
+Koe Wetzel,Music,Country,12.00,17.83,-5.83
+Parker McCollum,Music,Country,12.00,15.45,-3.45
+Sturgill Simpson,Music,Country,12.00,11.34,+0.66
+Zach Top,Music,Country,12.00,2.32,+9.68
+Sam Barber,Music,Country,6.00,0.10,+5.90
+Calvin Harris,Music,DJ,32.00,36.77,-4.77
+DJ Khaled,Music,DJ,30.00,19.70,+10.30
+Marshmello,Music,DJ,28.00,32.47,-4.47
+Diplo,Music,DJ,26.00,36.57,-10.57
+Dom Dolla,Music,DJ,16.00,27.77,-11.77
+John Summit,Music,DJ,16.00,16.37,-0.37
+Noah Kahan,Music,Folk,28.00,30.97,-2.97
+Brandon Lake,Music,Folk,10.00,5.25,+4.75
+Lana Del Rey,Music,Indie,34.00,25.29,+8.71
+Gracie Abrams,Music,Indie,24.00,18.24,+5.76
+Tame Impala,Music,Indie,24.00,23.45,+0.55
+Clairo,Music,Indie,18.00,17.92,+0.08
+2hollis,Music,Indie,8.00,0.37,+7.63
+Bad Bunny,Music,Latin,50.00,31.36,+18.64
+J Balvin,Music,Latin,28.00,25.22,+2.78
+Rosalía,Music,Latin,28.00,41.27,-13.27
+Peso Pluma,Music,Latin,24.00,17.17,+6.83
+Taylor Swift,Music,Pop,62.00,46.31,+15.69
+Beyoncé,Music,Pop,52.00,30.25,+21.75
+Rihanna,Music,Pop,50.00,38.54,+11.46
+Justin Bieber,Music,Pop,48.00,52.64,-4.64
+Ariana Grande,Music,Pop,47.00,52.27,-5.27
+Lady Gaga,Music,Pop,46.00,46.17,-0.17
+Billie Eilish,Music,Pop,45.00,38.07,+6.93
+The Weeknd,Music,Pop,45.00,52.17,-7.17
+Adele,Music,Pop,44.00,43.99,+0.01
+Bruno Mars,Music,Pop,44.00,45.13,-1.13
+Ed Sheeran,Music,Pop,44.00,42.17,+1.83
+Dua Lipa,Music,Pop,42.00,39.67,+2.33
+Harry Styles,Music,Pop,42.00,46.87,-4.87
+Shakira,Music,Pop,42.00,46.07,-4.07
+Post Malone,Music,Pop,40.00,36.97,+3.03
+Sabrina Carpenter,Music,Pop,40.00,33.47,+6.53
+Elton John,Music,Pop,38.00,38.87,-0.87
+Jennifer Lopez,Music,Pop,38.00,32.87,+5.13
+Katy Perry,Music,Pop,38.00,41.97,-3.97
+Miley Cyrus,Music,Pop,38.00,32.17,+5.83
+Olivia Rodrigo,Music,Pop,38.00,33.13,+4.87
+Doja Cat,Music,Pop,36.00,38.77,-2.77
+Jimin,Music,Pop,36.00,34.19,+1.81
+Jungkook,Music,Pop,36.00,32.06,+3.94
+Mariah Carey,Music,Pop,36.00,32.46,+3.54
+Chappell Roan,Music,Pop,34.00,33.67,+0.33
+Jennie,Music,Pop,34.00,35.87,-1.87
+Justin Timberlake,Music,Pop,34.00,34.74,-0.74
+Lisa,Music,Pop,34.00,28.96,+5.04
+Charli XCX,Music,Pop,32.00,37.37,-5.37
+Karol G,Music,Pop,32.00,33.97,-1.97
+Rosé,Music,Pop,32.00,27.83,+4.17
+Frank Ocean,Music,Pop,30.00,33.87,-3.87
+Megan Thee Stallion,Music,Pop,30.00,35.93,-5.93
+Shawn Mendes,Music,Pop,30.00,39.87,-9.87
+Tate McRae,Music,Pop,27.00,30.77,-3.77
+Benson Boone,Music,Pop,26.00,10.97,+15.03
+Chris Martin,Music,Pop,26.00,26.75,-0.75
+Teddy Swims,Music,Pop,22.00,11.47,+10.53
+Tyla,Music,Pop,22.00,25.76,-3.76
+Kacey Musgraves,Music,Pop,20.00,7.39,+12.61
+PinkPantheress,Music,Pop,18.00,23.94,-5.94
+Lola Young,Music,Pop,16.00,6.39,+9.61
+Olivia Dean,Music,Pop,14.00,20.79,-6.79
+Sombr,Music,Pop,14.00,17.93,-3.93
+Gigi Perez,Music,Pop,12.00,0.17,+11.83
+Ravyn Lenae,Music,Pop,12.00,1.59,+10.41
+Myles Smith,Music,Pop,10.00,18.73,-8.73
+Role Model,Music,Pop,10.00,3.62,+6.38
+Dasha,Music,Pop,8.00,3.29,+4.71
+Dr. Dre,Music,Producers,38.00,36.43,+1.57
+Pharrell Williams,Music,Producers,34.00,31.77,+2.23
+Diddy,Music,Producers,30.00,16.03,+13.97
+Metro Boomin,Music,Producers,24.00,16.71,+7.29
+Timbaland,Music,Producers,18.00,14.78,+3.22
+Rick Rubin,Music,Producers,16.00,14.97,+1.03
+DJ Premier,Music,Producers,10.00,7.96,+2.04
+The Alchemist,Music,Producers,10.00,12.97,-2.97
+Madlib,Music,Producers,8.00,4.94,+3.06
+Pi'erre Bourne,Music,Producers,8.00,9.72,-1.72
+sza,Music,R&B,40.00,39.87,+0.13
+Chris Brown,Music,R&B,34.00,33.68,+0.32
+Usher,Music,R&B,34.00,34.37,-0.37
+Brent Faiyaz,Music,R&B,22.00,25.72,-3.72
+PARTYNEXTDOOR,Music,R&B,22.00,27.83,-5.83
+Steve Lacy,Music,R&B,22.00,31.45,-9.45
+Jhené Aiko,Music,R&B,20.00,17.93,+2.07
+Summer Walker,Music,R&B,20.00,21.73,-1.73
+Bryson Tiller,Music,R&B,18.00,25.37,-7.37
+Dijon,Music,R&B,8.00,6.07,+1.93
+Mk.gee,Music,R&B,8.00,5.76,+2.24
+Drake,Music,Rap,50.00,38.43,+11.57
+Kanye West,Music,Rap,50.00,50.06,-0.06
+Eminem,Music,Rap,46.00,34.17,+11.83
+Kendrick Lamar,Music,Rap,46.00,28.30,+17.70
+Jay-Z,Music,Rap,44.00,13.78,+30.22
+Snoop Dogg,Music,Rap,42.00,29.54,+12.46
+Nicki Minaj,Music,Rap,40.00,37.22,+2.78
+Cardi B,Music,Rap,38.00,33.76,+4.24
+Travis Scott,Music,Rap,38.00,30.44,+7.56
+Lil Wayne,Music,Rap,36.00,37.93,-1.93
+50 Cent,Music,Rap,34.00,21.31,+12.69
+J. Cole,Music,Rap,34.00,12.14,+21.86
+Tyler the Creator,Music,Rap,34.00,18.08,+15.92
+A$AP Rocky,Music,Rap,32.00,15.97,+16.03
+Playboi Carti,Music,Rap,32.00,16.59,+15.41
+Future,Music,Rap,30.00,24.28,+5.72
+21 Savage,Music,Rap,28.00,30.17,-2.17
+Lil Uzi Vert,Music,Rap,28.00,35.97,-7.97
+Burna Boy,Music,Rap,26.00,13.24,+12.76
+Jack Harlow,Music,Rap,26.00,30.87,-4.87
+Jelly Roll,Music,Rap,26.00,35.87,-9.87
+Lil Baby,Music,Rap,26.00,35.73,-9.73
+Lil Nas X,Music,Rap,26.00,15.43,+10.57
+Nas,Music,Rap,26.00,32.94,-6.94
+Rick Ross,Music,Rap,26.00,11.53,+14.47
+Central Cee,Music,Rap,24.00,30.19,-6.19
+Gunna,Music,Rap,24.00,34.84,-10.84
+Wiz Khalifa,Music,Rap,24.00,21.19,+2.81
+Doechii,Music,Rap,22.00,27.43,-5.43
+GloRilla,Music,Rap,22.00,16.93,+5.07
+Ice Spice,Music,Rap,22.00,12.75,+9.25
+Meek Mill,Music,Rap,22.00,18.73,+3.27
+Offset,Music,Rap,22.00,24.35,-2.35
+Lil Yachty,Music,Rap,20.00,20.16,-0.16
+Yeat,Music,Rap,20.00,32.10,-12.10
+Don Toliver,Music,Rap,18.00,18.37,-0.37
+Jaden Smith,Music,Rap,18.00,12.97,+5.03
+Kodak Black,Music,Rap,18.00,8.01,+9.99
+JID,Music,Rap,16.00,19.55,-3.55
+Ken Carson,Music,Rap,16.00,27.37,-11.37
+Pusha T,Music,Rap,16.00,16.86,-0.86
+Skepta,Music,Rap,16.00,11.87,+4.13
+Baby Keem,Music,Rap,14.00,22.31,-8.31
+BigXthaPlug,Music,Rap,14.00,16.94,-2.94
+Kevin Gates,Music,Rap,14.00,11.92,+2.08
+Lil Tecca,Music,Rap,14.00,17.32,-3.32
+NLE Choppa,Music,Rap,14.00,14.03,-0.03
+Denzel Curry,Music,Rap,12.00,18.99,-6.99
+Earl Sweatshirt,Music,Rap,12.00,14.72,-2.72
+Freddie Gibbs,Music,Rap,12.00,4.05,+7.95
+Skrilla,Music,Rap,12.00,0.05,+11.95
+That Mexican OT,Music,Rap,12.00,8.76,+3.24
+Vince Staples,Music,Rap,12.00,15.34,-3.34
+Bhad Bhabie,Music,Rap,10.00,17.23,-7.23
+BossMan Dlow,Music,Rap,10.00,8.35,+1.65
+Destroy Lonely,Music,Rap,10.00,1.41,+8.59
+JPEGMAFIA,Music,Rap,10.00,11.57,-1.57
+LiAngelo Ball,Music,Rap,10.00,4.46,+5.54
+Yung Lean,Music,Rap,10.00,8.96,+1.04
+Bladee,Music,Rap,8.00,3.32,+4.68
+Hunxho,Music,Rap,8.00,0.01,+7.99
+Lucki,Music,Rap,8.00,11.21,-3.21
+Nettspend,Music,Rap,8.00,4.07,+3.93
+EsDeeKid,Music,Rap,6.00,14.78,-8.78
+OsamaSon,Music,Rap,6.00,0.04,+5.96
+ian,Music,Rap,5.00,0.19,+4.81
+Che,Music,Rap,4.00,0.48,+3.52
+Fakemink,Music,Rap,4.00,3.27,+0.73
+Paul McCartney,Music,Rock,40.00,36.17,+3.83
+Mick Jagger,Music,Rock,36.00,33.38,+2.62
+Bruce Springsteen,Music,Rock,34.00,26.99,+7.01
+Dave Grohl,Music,Rock,28.00,12.97,+15.03
+Liam Gallagher,Music,Rock,24.00,6.51,+17.49
+Eddie Vedder,Music,Rock,20.00,7.94,+12.06
+Thom Yorke,Music,Rock,18.00,9.07,+8.93
+Michelle Obama,Politics,Commentators,40.00,29.77,+10.23
+Tucker Carlson,Politics,Commentators,32.00,22.85,+9.15
+Jordan Peterson,Politics,Commentators,28.00,5.69,+22.31
+Ben Shapiro,Politics,Commentators,26.00,13.94,+12.06
+Candace Owens,Politics,Commentators,24.00,7.52,+16.48
+Alex Jones,Politics,Commentators,22.00,10.47,+11.53
+Hasanabi,Politics,Commentators,16.00,5.48,+10.52
+Nick Fuentes,Politics,Commentators,16.00,13.15,+2.85
+Tim Pool,Politics,Commentators,14.00,0.66,+13.34
+Dean Withers,Politics,Commentators,6.00,3.74,+2.26
+Donald Trump,Politics,Politicians,68.00,65.65,+2.35
+Barack Obama,Politics,Politicians,52.00,42.85,+9.15
+Vladimir Putin,Politics,Politicians,45.00,32.38,+12.62
+JD Vance,Politics,Politicians,44.00,42.39,+1.61
+Joe Biden,Politics,Politicians,42.00,43.57,-1.57
+Kamala Harris,Politics,Politicians,40.00,15.61,+24.39
+Narendra Modi,Politics,Politicians,40.00,45.62,-5.62
+Volodymyr Zelensky,Politics,Politicians,40.00,46.57,-6.57
+Xi Jinping,Politics,Politicians,40.00,41.79,-1.79
+Emmanuel Macron,Politics,Politicians,36.00,45.53,-9.53
+Alexandria Ocasio-Cortez,Politics,Politicians,34.00,12.36,+21.64
+Bernie Sanders,Politics,Politicians,34.00,16.17,+17.83
+Bill Clinton,Politics,Politicians,34.00,36.17,-2.17
+Kim Jong Un,Politics,Politicians,32.00,26.44,+5.56
+Benjamin Netanyahu,Politics,Politicians,30.00,22.65,+7.35
+Justin Trudeau,Politics,Politicians,30.00,32.16,-2.16
+RFK Jr.,Politics,Politicians,28.00,17.65,+10.35
+Javier Milei,Politics,Politicians,24.00,27.27,-3.27
+Keir Starmer,Politics,Politicians,24.00,28.47,-4.47
+Mark Carney,Politics,Politicians,24.00,32.17,-8.17
+Ted Cruz,Politics,Politicians,22.00,15.27,+6.73
+Zohran Mamdani,Politics,Politicians,22.00,14.61,+7.39
+Pete Buttigieg,Politics,Politicians,20.00,16.57,+3.43
+Tulsi Gabbard,Politics,Politicians,20.00,17.23,+2.77
+Josh Shapiro,Politics,Politicians,18.00,16.77,+1.23
+Karoline Leavitt,Politics,Politicians,18.00,11.77,+6.23
+Mike Johnson,Politics,Politicians,18.00,40.19,-22.19
+Nikki Haley,Politics,Politicians,18.00,14.97,+3.03
+Vivek Ramaswamy,Politics,Politicians,18.00,6.14,+11.86
+Andrew Cuomo,Politics,Politicians,16.00,15.47,+0.53
+Jasmine Crockett,Politics,Politicians,16.00,12.07,+3.93
+Mitch McConnell,Politics,Politicians,16.00,16.37,-0.37
+Eric Adams,Politics,Politicians,14.00,14.07,-0.07
+Hakeem Jeffries,Politics,Politicians,14.00,15.37,-1.37
+Thomas Massie,Politics,Politicians,14.00,1.23,+12.77
+Wes Moore,Politics,Politicians,14.00,3.09,+10.91
+Lauren Boebert,Politics,Politicians,12.00,13.47,-1.47
+Chris Murphy,Politics,Politicians,10.00,2.14,+7.86
+James Talarico,Politics,Politicians,10.00,5.74,+4.26
+Graham Platner,Politics,Politicians,8.00,0.43,+7.57
+Kat Abughazaleh,Politics,Politicians,6.00,0.04,+5.96
+Mallory McMorrow,Politics,Politicians,6.00,0.08,+5.92
+Maxwell Frost,Politics,Politicians,6.00,4.29,+1.71
+Brandon Gill,Politics,Politicians,4.00,0.03,+3.97
+Deja Foxx,Politics,Politicians,4.00,0.02,+3.98
+James Fishback,Politics,Politicians,4.00,0.03,+3.97
+Bo Hines,Politics,Politicians,3.00,0.02,+2.98
+Pope Leo XIV,Politics,Religious figure,45.00,50.63,-5.63
+King Charles III,Politics,Royals,44.00,44.17,-0.17
+Kate Middleton,Politics,Royals,42.00,30.95,+11.05
+Prince William,Politics,Royals,42.00,43.27,-1.27
+Prince Harry,Politics,Royals,40.00,42.47,-2.47
+John Cena,Sports,,40.00,37.37,+2.63
+C.J. Stroud,Sports,,18.00,12.74,+5.26
+Jack Della Maddalena,Sports,,12.00,11.98,+0.02
+CJ Carr,Sports,,8.00,5.23,+2.77
+Malachi Toney,Sports,,6.00,0.32,+5.68
+Patrick Mahomes,Sports,American Football,46.00,48.43,-2.43
+Tom Brady,Sports,American Football,46.00,49.38,-3.38
+Travis Kelce,Sports,American Football,42.00,46.27,-4.27
+Aaron Rodgers,Sports,American Football,34.00,31.27,+2.73
+Josh Allen,Sports,American Football,34.00,32.27,+1.73
+Peyton Manning,Sports,American Football,34.00,34.18,-0.18
+Joe Burrow,Sports,American Football,32.00,29.87,+2.13
+Lamar Jackson,Sports,American Football,32.00,33.57,-1.57
+Jalen Hurts,Sports,American Football,30.00,28.61,+1.39
+Rob Gronkowski,Sports,American Football,30.00,24.98,+5.02
+Saquon Barkley,Sports,American Football,30.00,27.82,+2.18
+Christian McCaffrey,Sports,American Football,28.00,31.22,-3.22
+Dak Prescott,Sports,American Football,28.00,31.67,-3.67
+Jayden Daniels,Sports,American Football,28.00,9.52,+18.48
+Derrick Henry,Sports,American Football,26.00,30.89,-4.89
+Ja'Marr Chase,Sports,American Football,26.00,28.99,-2.99
+Justin Jefferson,Sports,American Football,26.00,27.29,-1.29
+Tyreek Hill,Sports,American Football,26.00,19.21,+6.79
+Caleb Williams,Sports,American Football,24.00,22.39,+1.61
+Justin Herbert,Sports,American Football,24.00,26.89,-2.89
+Micah Parsons,Sports,American Football,24.00,16.41,+7.59
+Aaron Donald,Sports,American Football,22.00,23.89,-1.89
+Arch Manning,Sports,American Football,22.00,11.05,+10.95
+Baker Mayfield,Sports,American Football,22.00,16.97,+5.03
+Bijan Robinson,Sports,American Football,22.00,28.98,-6.98
+CeeDee Lamb,Sports,American Football,22.00,27.77,-5.77
+Drake Maye,Sports,American Football,22.00,9.47,+12.53
+Matthew Stafford,Sports,American Football,22.00,32.73,-10.73
+Brock Purdy,Sports,American Football,20.00,18.49,+1.51
+George Kittle,Sports,American Football,20.00,17.49,+2.51
+Jahmyr Gibbs,Sports,American Football,20.00,28.34,-8.34
+Myles Garrett,Sports,American Football,20.00,24.93,-4.93
+Puka Nacua,Sports,American Football,20.00,28.12,-8.12
+T.J. Watt,Sports,American Football,20.00,19.80,+0.20
+Travis Hunter,Sports,American Football,20.00,14.12,+5.88
+A.J. Brown,Sports,American Football,18.00,14.21,+3.79
+Amon-Ra St. Brown,Sports,American Football,18.00,22.73,-4.73
+Cam Ward,Sports,American Football,18.00,6.26,+11.74
+Kyler Murray,Sports,American Football,18.00,20.32,-2.32
+Malik Nabers,Sports,American Football,18.00,6.76,+11.24
+Trevor Lawrence,Sports,American Football,18.00,18.32,-0.32
+Ashton Jeanty,Sports,American Football,16.00,19.78,-3.78
+Brock Bowers,Sports,American Football,16.00,13.92,+2.08
+Fernando Mendoza,Sports,American Football,16.00,15.43,+0.57
+Jeremiah Smith,Sports,American Football,16.00,11.93,+4.07
+Sauce Gardner,Sports,American Football,16.00,14.92,+1.08
+Aidan Hutchinson,Sports,American Football,14.00,14.82,-0.82
+Garrett Wilson,Sports,American Football,14.00,15.75,-1.75
+Jaxson Dart,Sports,American Football,14.00,10.39,+3.61
+Marvin Harrison Jr,Sports,American Football,14.00,11.92,+2.08
+Patrick Surtain II,Sports,American Football,14.00,17.89,-3.89
+Bryce Underwood,Sports,American Football,12.00,2.98,+9.02
+Jeremiyah Love,Sports,American Football,12.00,10.97,+1.03
+Kenneth Walker III,Sports,American Football,12.00,18.73,-6.73
+Kirk Herbstreit,Sports,American Football,12.00,14.37,-2.37
+Nico Collins,Sports,American Football,12.00,14.97,-2.97
+Rashee Rice,Sports,American Football,12.00,15.32,-3.32
+Ryan Williams,Sports,American Football,12.00,3.97,+8.03
+Trey McBride,Sports,American Football,12.00,16.48,-4.48
+Will Anderson Jr.,Sports,American Football,12.00,16.92,-4.92
+John Mateer,Sports,American Football,10.00,0.39,+9.61
+Julian Sayin,Sports,American Football,10.00,9.12,+0.88
+LaNorris Sellers,Sports,American Football,10.00,0.80,+9.20
+Rome Odunze,Sports,American Football,10.00,11.92,-1.92
+Ty Simpson,Sports,American Football,10.00,3.98,+6.02
+Caleb Downs,Sports,American Football,8.00,9.53,-1.53
+Carnell Tate,Sports,American Football,8.00,4.13,+3.87
+Chris Henry Jr.,Sports,American Football,8.00,0.09,+7.91
+Dante Moore,Sports,American Football,8.00,2.50,+5.50
+Darian Mensah,Sports,American Football,6.00,3.22,+2.78
+Jayden Maiava,Sports,American Football,6.00,1.12,+4.88
+Keelon Russell,Sports,American Football,6.00,0.86,+5.14
+Makai Lemon,Sports,American Football,6.00,3.98,+2.02
+Sam Leavitt,Sports,American Football,6.00,0.93,+5.07
+Ahmad Hardy,Sports,American Football,5.00,0.08,+4.92
+Collin Simmons,Sports,American Football,5.00,0.15,+4.85
+Kewan Lacy,Sports,American Football,5.00,1.59,+3.41
+Trinidad Chambliss,Sports,American Football,5.00,0.14,+4.86
+Shohei Ohtani,Sports,Baseball,44.00,45.93,-1.93
+Aaron Judge,Sports,Baseball,34.00,34.52,-0.52
+Derek Jeter,Sports,Baseball,34.00,31.98,+2.02
+Alex Rodriguez,Sports,Baseball,28.00,26.78,+1.22
+Mike Trout,Sports,Baseball,28.00,29.23,-1.23
+Bryce Harper,Sports,Baseball,26.00,29.78,-3.78
+Juan Soto,Sports,Baseball,26.00,30.83,-4.83
+Mookie Betts,Sports,Baseball,26.00,30.73,-4.73
+Clayton Kershaw,Sports,Baseball,24.00,27.24,-3.24
+David Ortiz,Sports,Baseball,22.00,24.89,-2.89
+Freddie Freeman,Sports,Baseball,22.00,26.74,-4.74
+Paul Skenes,Sports,Baseball,20.00,9.13,+10.87
+Fernando Tatis Jr.,Sports,Baseball,18.00,18.79,-0.79
+Ronald Acuña Jr.,Sports,Baseball,18.00,20.82,-2.82
+Bobby Witt Jr.,Sports,Baseball,16.00,16.51,-0.51
+Elly De La Cruz,Sports,Baseball,16.00,13.17,+2.83
+Francisco Lindor,Sports,Baseball,16.00,14.00,+2.00
+Vladimir Guerrero Jr.,Sports,Baseball,16.00,16.92,-0.92
+Yoshinobu Yamamoto,Sports,Baseball,16.00,14.78,+1.22
+Gunnar Henderson,Sports,Baseball,14.00,12.12,+1.88
+Jacob DeGrom,Sports,Baseball,14.00,14.10,-0.10
+Pete Crow-Armstrong,Sports,Baseball,14.00,16.98,-2.98
+Roki Sasaki,Sports,Baseball,14.00,12.19,+1.81
+Tarik Skubal,Sports,Baseball,14.00,12.82,+1.18
+Yordan Álvarez,Sports,Baseball,14.00,18.36,-4.36
+Corey Seager,Sports,Baseball,12.00,11.89,+0.11
+José Ramírez,Sports,Baseball,12.00,12.34,-0.34
+Julio Rodríguez,Sports,Baseball,12.00,13.89,-1.89
+Kyle Tucker,Sports,Baseball,12.00,12.31,-0.31
+Rafael Devers,Sports,Baseball,12.00,11.12,+0.88
+Roman Anthony,Sports,Baseball,12.00,8.12,+3.88
+Chris Sale,Sports,Baseball,10.00,10.89,-0.89
+Corbin Carroll,Sports,Baseball,10.00,11.16,-1.16
+Edwin Díaz,Sports,Baseball,10.00,8.13,+1.87
+Jackson Chourio,Sports,Baseball,10.00,10.74,-0.74
+Jackson Merrill,Sports,Baseball,10.00,10.14,-0.14
+James Wood,Sports,Baseball,10.00,10.31,-0.31
+Junior Caminero,Sports,Baseball,10.00,13.69,-3.69
+Zack Wheeler,Sports,Baseball,10.00,9.32,+0.68
+Dylan Cease,Sports,Baseball,8.00,10.52,-2.52
+Jacob Misiorowski,Sports,Baseball,8.00,8.79,-0.79
+Wyatt Langford,Sports,Baseball,8.00,8.32,-0.32
+Ben Rice,Sports,Baseball,6.00,7.32,-1.32
+Cam Schlittler,Sports,Baseball,6.00,9.06,-3.06
+Cristopher Sánchez,Sports,Baseball,6.00,8.31,-2.31
+Jordan Walker,Sports,Baseball,5.00,6.21,-1.21
+JJ Wetherholt,Sports,Baseball,4.00,6.39,-2.39
+Kevin McGonigle,Sports,Baseball,4.00,6.92,-2.92
+Otto Lopez,Sports,Baseball,3.00,5.21,-2.21
+LeBron James,Sports,Basketball,58.00,56.07,+1.93
+Michael Jordan,Sports,Basketball,52.00,45.87,+6.13
+Stephen Curry,Sports,Basketball,48.00,51.29,-3.29
+Shaquille O'Neal,Sports,Basketball,44.00,42.57,+1.43
+Caitlin Clark,Sports,Basketball,40.00,23.46,+16.54
+Kevin Durant,Sports,Basketball,40.00,43.97,-3.97
+Luka Dončić,Sports,Basketball,40.00,41.37,-1.37
+Giannis Antetokounmpo,Sports,Basketball,38.00,39.87,-1.87
+Victor Wembanyama,Sports,Basketball,38.00,28.13,+9.87
+Magic Johnson,Sports,Basketball,36.00,35.89,+0.11
+Nikola Jokić,Sports,Basketball,36.00,45.27,-9.27
+Anthony Edwards,Sports,Basketball,34.00,27.67,+6.33
+Charles Barkley,Sports,Basketball,34.00,34.59,-0.59
+Dwyane Wade,Sports,Basketball,34.00,37.47,-3.47
+Shai Gilgeous-Alexander,Sports,Basketball,34.00,34.97,-0.97
+Kyrie Irving,Sports,Basketball,32.00,27.93,+4.07
+Jayson Tatum,Sports,Basketball,30.00,31.87,-1.87
+Anthony Davis,Sports,Basketball,28.00,29.72,-1.72
+Carmelo Anthony,Sports,Basketball,28.00,26.88,+1.12
+Cooper Flagg,Sports,Basketball,28.00,16.50,+11.50
+James Harden,Sports,Basketball,28.00,30.87,-2.87
+Jimmy Butler,Sports,Basketball,28.00,32.17,-4.17
+Joel Embiid,Sports,Basketball,28.00,31.87,-3.87
+Russell Westbrook,Sports,Basketball,28.00,29.34,-1.34
+Angel Reese,Sports,Basketball,26.00,12.53,+13.47
+Chris Paul,Sports,Basketball,26.00,26.32,-0.32
+Damian Lillard,Sports,Basketball,26.00,31.77,-5.77
+Derrick Rose,Sports,Basketball,26.00,25.83,+0.17
+Devin Booker,Sports,Basketball,26.00,26.53,-0.53
+Dirk Nowitzki,Sports,Basketball,26.00,30.41,-4.41
+Ja Morant,Sports,Basketball,26.00,21.52,+4.48
+Kawhi Leonard,Sports,Basketball,26.00,30.16,-4.16
+Klay Thompson,Sports,Basketball,26.00,26.58,-0.58
+Draymond Green,Sports,Basketball,24.00,23.12,+0.88
+Jalen Brunson,Sports,Basketball,24.00,24.84,-0.84
+Kevin Garnett,Sports,Basketball,24.00,27.43,-3.43
+LaMelo Ball,Sports,Basketball,24.00,24.79,-0.79
+Paige Bueckers,Sports,Basketball,24.00,13.47,+10.53
+Scottie Pippen,Sports,Basketball,24.00,27.43,-3.43
+Cade Cunningham,Sports,Basketball,22.00,20.12,+1.88
+Donovan Mitchell,Sports,Basketball,22.00,22.97,-0.97
+Jaylen Brown,Sports,Basketball,22.00,24.98,-2.98
+Karl-Anthony Towns,Sports,Basketball,22.00,24.08,-2.08
+Paul George,Sports,Basketball,22.00,17.89,+4.11
+Trae Young,Sports,Basketball,22.00,23.82,-1.82
+Tyrese Haliburton,Sports,Basketball,22.00,21.86,+0.14
+Zion Williamson,Sports,Basketball,22.00,27.67,-5.67
+A'ja Wilson,Sports,Basketball,20.00,24.82,-4.82
+Bronny James,Sports,Basketball,20.00,11.89,+8.11
+Chet Holmgren,Sports,Basketball,18.00,16.34,+1.66
+JuJu Watkins,Sports,Basketball,18.00,13.98,+4.02
+Paolo Banchero,Sports,Basketball,18.00,19.11,-1.11
+Austin Reaves,Sports,Basketball,16.00,17.21,-1.21
+Bam Adebayo,Sports,Basketball,16.00,17.83,-1.83
+Dylan Harper,Sports,Basketball,16.00,2.82,+13.18
+Jalen Williams,Sports,Basketball,16.00,16.21,-0.21
+Jamal Murray,Sports,Basketball,16.00,15.87,+0.13
+Reggie Miller,Sports,Basketball,16.00,23.62,-7.62
+Sabrina Ionescu,Sports,Basketball,16.00,27.67,-11.67
+Stephon Castle,Sports,Basketball,16.00,3.56,+12.44
+Tyler Herro,Sports,Basketball,16.00,15.23,+0.77
+AJ Dybantsa,Sports,Basketball,14.00,6.50,+7.50
+Alperen Şengün,Sports,Basketball,14.00,16.28,-2.28
+Amen Thompson,Sports,Basketball,14.00,15.10,-1.10
+Breanna Stewart,Sports,Basketball,14.00,18.92,-4.92
+De'Aaron Fox,Sports,Basketball,14.00,13.76,+0.24
+Evan Mobley,Sports,Basketball,14.00,15.65,-1.65
+Jalen Green,Sports,Basketball,14.00,14.12,-0.12
+Jaren Jackson Jr.,Sports,Basketball,14.00,14.46,-0.46
+Julius Randle,Sports,Basketball,14.00,12.98,+1.02
+Scottie Barnes,Sports,Basketball,14.00,15.31,-1.31
+Zach LaVine,Sports,Basketball,14.00,14.87,-0.87
+Ace Bailey,Sports,Basketball,12.00,6.98,+5.02
+Brandon Miller,Sports,Basketball,12.00,13.12,-1.12
+Cameron Boozer,Sports,Basketball,12.00,5.57,+6.43
+Darius Garland,Sports,Basketball,12.00,13.27,-1.27
+Darryn Peterson,Sports,Basketball,12.00,5.29,+6.71
+Domantas Sabonis,Sports,Basketball,12.00,13.93,-1.93
+Franz Wagner,Sports,Basketball,12.00,14.21,-2.21
+Josh Hart,Sports,Basketball,12.00,6.91,+5.09
+Kelsey Plum,Sports,Basketball,12.00,14.97,-2.97
+Kon Knueppel,Sports,Basketball,12.00,8.13,+3.87
+Mikal Bridges,Sports,Basketball,12.00,8.81,+3.19
+Napheesa Collier,Sports,Basketball,12.00,16.12,-4.12
+OG Anunoby,Sports,Basketball,12.00,7.91,+4.09
+VJ Edgecombe,Sports,Basketball,12.00,8.37,+3.63
+Azzi Fudd,Sports,Basketball,10.00,9.38,+0.62
+CJ McCollum,Sports,Basketball,10.00,12.76,-2.76
+Cameron Brink,Sports,Basketball,10.00,12.72,-2.72
+Lauri Markkanen,Sports,Basketball,10.00,13.63,-3.63
+Marcus Smart,Sports,Basketball,10.00,10.63,-0.63
+Aliyah Boston,Sports,Basketball,8.00,12.45,-4.45
+Bobby Portis,Sports,Basketball,8.00,9.32,-1.32
+Derik Queen,Sports,Basketball,8.00,5.63,+2.37
+Hailey Van Lith,Sports,Basketball,8.00,9.53,-1.53
+Harrison Barnes,Sports,Basketball,8.00,8.60,-0.60
+Ivica Zubac,Sports,Basketball,8.00,8.72,-0.72
+Jaime Jaquez Jr.,Sports,Basketball,8.00,8.95,-0.95
+Jeremiah Fears,Sports,Basketball,8.00,5.12,+2.88
+Jon Scheyer,Sports,Basketball,8.00,8.78,-0.78
+Koa Peat,Sports,Basketball,8.00,4.82,+3.18
+Lu Dort,Sports,Basketball,8.00,9.34,-1.34
+Mitchell Robinson,Sports,Basketball,8.00,6.05,+1.95
+Norman Powell,Sports,Basketball,8.00,8.45,-0.45
+Reed Sheppard,Sports,Basketball,8.00,1.69,+6.31
+Sarah Strong,Sports,Basketball,8.00,10.78,-2.78
+Tobias Harris,Sports,Basketball,8.00,8.12,-0.12
+Tre Johnson,Sports,Basketball,8.00,6.78,+1.22
+Tyran Stokes,Sports,Basketball,8.00,0.46,+7.54
+Alijah Arenas,Sports,Basketball,6.00,0.07,+5.93
+Caleb Wilson,Sports,Basketball,6.00,7.03,-1.03
+Cam Whitmore,Sports,Basketball,6.00,6.19,-0.19
+Collin Murray-Boyles,Sports,Basketball,6.00,3.78,+2.22
+Devin Vassell,Sports,Basketball,6.00,6.21,-0.21
+Egor Demin,Sports,Basketball,6.00,4.46,+1.54
+Guerschon Yabusele,Sports,Basketball,6.00,1.67,+4.33
+Kasparas Jakučionis,Sports,Basketball,6.00,7.25,-1.25
+Keldon Johnson,Sports,Basketball,6.00,5.82,+0.18
+Miles McBride,Sports,Basketball,6.00,2.72,+3.28
+Nate Ament,Sports,Basketball,6.00,0.28,+5.72
+Nic Claxton,Sports,Basketball,6.00,8.32,-2.32
+Walker Kessler,Sports,Basketball,6.00,8.79,-2.79
+Aaron Wiggins,Sports,Basketball,5.00,5.72,-0.72
+Boogie Fland,Sports,Basketball,5.00,0.06,+4.94
+Chris Cenac Jr.,Sports,Basketball,5.00,4.12,+0.88
+Darius Acuff Jr.,Sports,Basketball,5.00,5.89,-0.89
+Devin Carter,Sports,Basketball,5.00,4.87,+0.13
+Kelly Olynyk,Sports,Basketball,5.00,6.08,-1.08
+Mikel Brown Jr.,Sports,Basketball,5.00,6.16,-1.16
+Peyton Watson,Sports,Basketball,5.00,6.12,-1.12
+Kingston Flemings,Sports,Basketball,4.00,5.37,-1.37
+Morez Johnson,Sports,Basketball,4.00,3.58,+0.42
+Ryan Nembhard,Sports,Basketball,4.00,5.98,-1.98
+Arnold Schwarzenegger,Sports,Bodybuilding,44.00,35.48,+8.52
+Cbum,Sports,Bodybuilding,18.00,3.22,+14.78
+Sam Sulek,Sports,Bodybuilding,12.00,3.53,+8.47
+Mike O'Hearn,Sports,Bodybuilding,8.00,1.04,+6.96
+Noel Deyzel,Sports,Bodybuilding,6.00,1.22,+4.78
+Mike Tyson,Sports,Boxer,42.00,33.97,+8.03
+Canelo Álvarez,Sports,Boxer,34.00,33.97,+0.03
+Tyson Fury,Sports,Boxer,32.00,32.87,-0.87
+Anthony Joshua,Sports,Boxer,26.00,27.67,-1.67
+Oleksandr Usyk,Sports,Boxer,26.00,33.47,-7.47
+Anna Cramling,Sports,Chess,6.00,2.80,+3.20
+Bill Belichick,Sports,Coaches,32.00,35.98,-3.98
+Deion Sanders,Sports,Coaches,32.00,17.13,+14.87
+Nick Saban,Sports,Coaches,30.00,33.43,-3.43
+Andy Reid,Sports,Coaches,24.00,26.89,-2.89
+Sean McVay,Sports,Coaches,20.00,23.98,-3.98
+Steve Kerr,Sports,Coaches,20.00,18.24,+1.76
+Dan Campbell,Sports,Coaches,18.00,16.92,+1.08
+Christian Horner,Sports,Coaches,16.00,14.61,+1.39
+JJ Redick,Sports,Coaches,16.00,13.78,+2.22
+John Calipari,Sports,Coaches,16.00,14.98,+1.02
+Lane Kiffin,Sports,Coaches,16.00,13.15,+2.85
+Toto Wolff,Sports,Coaches,16.00,13.49,+2.51
+Doc Rivers,Sports,Coaches,14.00,11.79,+2.21
+Erik Spoelstra,Sports,Coaches,14.00,14.76,-0.76
+Kirby Smart,Sports,Coaches,14.00,12.36,+1.64
+Curt Cignetti,Sports,Coaches,12.00,18.83,-6.83
+Dan Hurley,Sports,Coaches,12.00,12.14,-0.14
+Dave Roberts,Sports,Coaches,12.00,12.19,-0.19
+Guenther Steiner,Sports,Coaches,12.00,10.21,+1.79
+Marcus Freeman,Sports,Coaches,12.00,9.89,+2.11
+Ryan Day,Sports,Coaches,12.00,13.42,-1.42
+Steve Sarkisian,Sports,Coaches,12.00,12.87,-0.87
+Aaron Boone,Sports,Coaches,10.00,11.87,-1.87
+Adrian Newey,Sports,Coaches,10.00,11.43,-1.43
+Ben Johnson,Sports,Coaches,10.00,14.42,-4.42
+Dan Lanning,Sports,Coaches,10.00,9.92,+0.08
+Joe Mazzulla,Sports,Coaches,10.00,10.17,-0.17
+Ty Lue,Sports,Coaches,10.00,9.79,+0.21
+Bruce Bochy,Sports,Coaches,8.00,9.17,-1.17
+Craig Counsell,Sports,Coaches,8.00,9.76,-1.76
+Mike Brown,Sports,Coaches,8.00,12.98,-4.98
+Rick Carlisle,Sports,Coaches,8.00,6.98,+1.02
+Zak Brown,Sports,Coaches,8.00,8.73,-0.73
+Fred Vasseur,Sports,Coaches,6.00,7.29,-1.29
+Helmut Marko,Sports,Coaches,6.00,6.54,-0.54
+Rob Thomson,Sports,Coaches,6.00,7.13,-1.13
+Cristiano Ronaldo,Sports,Football (Soccer),62.00,47.63,+14.37
+Lionel Messi,Sports,Football (Soccer),60.00,33.72,+26.28
+Kylian Mbappé,Sports,Football (Soccer),42.00,29.12,+12.88
+Neymar,Sports,Football (Soccer),40.00,32.59,+7.41
+Lamine Yamal,Sports,Football (Soccer),34.00,26.92,+7.08
+Erling Haaland,Sports,Football (Soccer),32.00,20.91,+11.09
+Jude Bellingham,Sports,Football (Soccer),30.00,20.82,+9.18
+Mohamed Salah,Sports,Football (Soccer),30.00,16.53,+13.47
+Harry Kane,Sports,Football (Soccer),28.00,20.08,+7.92
+Vinícius Júnior,Sports,Football (Soccer),28.00,23.77,+4.23
+Kevin De Bruyne,Sports,Football (Soccer),26.00,14.03,+11.97
+Luka Modrić,Sports,Football (Soccer),26.00,10.43,+15.57
+Son Heung-min,Sports,Football (Soccer),24.00,13.52,+10.48
+Christian Pulisic,Sports,Football (Soccer),22.00,13.69,+8.31
+Bruno Fernandes,Sports,Football (Soccer),20.00,15.54,+4.46
+Bukayo Saka,Sports,Football (Soccer),20.00,11.46,+8.54
+Cole Palmer,Sports,Football (Soccer),20.00,11.37,+8.63
+Ousmane Dembélé,Sports,Football (Soccer),20.00,11.37,+8.63
+Virgil van Dijk,Sports,Football (Soccer),20.00,11.03,+8.97
+Florian Wirtz,Sports,Football (Soccer),18.00,10.78,+7.22
+Jamal Musiala,Sports,Football (Soccer),18.00,8.80,+9.20
+Pedri,Sports,Football (Soccer),18.00,19.87,-1.87
+Phil Foden,Sports,Football (Soccer),18.00,10.90,+7.10
+Rodri,Sports,Football (Soccer),18.00,18.72,-0.72
+Achraf Hakimi,Sports,Football (Soccer),16.00,8.72,+7.28
+Alexander Isak,Sports,Football (Soccer),16.00,10.93,+5.07
+James Rodríguez,Sports,Football (Soccer),16.00,11.91,+4.09
+Julián Álvarez,Sports,Football (Soccer),16.00,11.15,+4.85
+Lautaro Martínez,Sports,Football (Soccer),16.00,11.54,+4.46
+Martin Ødegaard,Sports,Football (Soccer),16.00,8.37,+7.63
+Raphinha,Sports,Football (Soccer),16.00,10.93,+5.07
+Sadio Mané,Sports,Football (Soccer),16.00,8.45,+7.55
+Alejandro Garnacho,Sports,Football (Soccer),14.00,9.60,+4.40
+Bernardo Silva,Sports,Football (Soccer),14.00,11.85,+2.15
+Emiliano Martínez,Sports,Football (Soccer),14.00,11.13,+2.87
+Enzo Fernández,Sports,Football (Soccer),14.00,11.40,+2.60
+Federico Valverde,Sports,Football (Soccer),14.00,11.43,+2.57
+Joshua Kimmich,Sports,Football (Soccer),14.00,11.68,+2.32
+Thibaut Courtois,Sports,Football (Soccer),14.00,11.50,+2.50
+Viktor Gyökeres,Sports,Football (Soccer),14.00,9.02,+4.98
+Alexis Mac Allister,Sports,Football (Soccer),12.00,11.15,+0.85
+Alphonso Davies,Sports,Football (Soccer),12.00,8.02,+3.98
+Arda Güler,Sports,Football (Soccer),12.00,9.87,+2.13
+Darwin Núñez,Sports,Football (Soccer),12.00,11.25,+0.75
+David Alaba,Sports,Football (Soccer),12.00,11.69,+0.31
+Désiré Doué,Sports,Football (Soccer),12.00,7.85,+4.15
+Endrick,Sports,Football (Soccer),12.00,5.16,+6.84
+Frenkie de Jong,Sports,Football (Soccer),12.00,8.31,+3.69
+João Félix,Sports,Football (Soccer),12.00,8.03,+3.97
+Kai Havertz,Sports,Football (Soccer),12.00,11.28,+0.72
+Kenan Yıldız,Sports,Football (Soccer),12.00,6.02,+5.98
+Lee Kang-in,Sports,Football (Soccer),12.00,10.63,+1.37
+Memphis Depay,Sports,Football (Soccer),12.00,11.00,+1.00
+Nico Williams,Sports,Football (Soccer),12.00,11.06,+0.94
+Rafael Leão,Sports,Football (Soccer),12.00,11.35,+0.65
+Riyad Mahrez,Sports,Football (Soccer),12.00,11.69,+0.31
+Scott McTominay,Sports,Football (Soccer),12.00,10.52,+1.48
+Cody Gakpo,Sports,Football (Soccer),10.00,10.84,-0.84
+Dani Olmo,Sports,Football (Soccer),10.00,11.02,-1.02
+Joško Gvardiol,Sports,Football (Soccer),10.00,11.29,-1.29
+Kim Min-jae,Sports,Football (Soccer),10.00,10.59,-0.59
+Leroy Sané,Sports,Football (Soccer),10.00,9.57,+0.43
+Michael Olise,Sports,Football (Soccer),10.00,8.15,+1.85
+Moisés Caicedo,Sports,Football (Soccer),10.00,10.68,-0.68
+Raúl Jiménez,Sports,Football (Soccer),10.00,10.18,-0.18
+Rodrigo De Paul,Sports,Football (Soccer),10.00,10.75,-0.75
+Rúben Dias,Sports,Football (Soccer),10.00,9.80,+0.20
+Santiago Giménez,Sports,Football (Soccer),10.00,8.13,+1.87
+Takefusa Kubo,Sports,Football (Soccer),10.00,9.87,+0.13
+Vitinha,Sports,Football (Soccer),10.00,8.12,+1.88
+Weston McKennie,Sports,Football (Soccer),10.00,10.36,-0.36
+William Saliba,Sports,Football (Soccer),10.00,10.14,-0.14
+Xavi Simons,Sports,Football (Soccer),10.00,10.47,-0.47
+Amad Diallo,Sports,Football (Soccer),8.00,7.32,+0.68
+Andy Robertson,Sports,Football (Soccer),8.00,7.51,+0.49
+Brahim Díaz,Sports,Football (Soccer),8.00,8.97,-0.97
+Bruno Guimarães,Sports,Football (Soccer),8.00,10.44,-2.44
+Cristian Romero,Sports,Football (Soccer),8.00,9.01,-1.01
+Edin Džeko,Sports,Football (Soccer),8.00,10.14,-2.14
+Edson Álvarez,Sports,Football (Soccer),8.00,8.82,-0.82
+Folarin Balogun,Sports,Football (Soccer),8.00,7.33,+0.67
+Gilberto Mora,Sports,Football (Soccer),8.00,11.20,-3.20
+Granit Xhaka,Sports,Football (Soccer),8.00,10.54,-2.54
+Hakan Çalhanoğlu,Sports,Football (Soccer),8.00,10.67,-2.67
+Jonathan David,Sports,Football (Soccer),8.00,9.56,-1.56
+Jérémy Doku,Sports,Football (Soccer),8.00,10.75,-2.75
+Kaoru Mitoma,Sports,Football (Soccer),8.00,10.96,-2.96
+Matheus Cunha,Sports,Football (Soccer),8.00,7.24,+0.76
+Mike Maignan,Sports,Football (Soccer),8.00,7.18,+0.82
+Mohammed Kudus,Sports,Football (Soccer),8.00,10.86,-2.86
+Nicolas Jackson,Sports,Football (Soccer),8.00,9.14,-1.14
+Omar Marmoush,Sports,Football (Soccer),8.00,6.37,+1.63
+Rayan Cherki,Sports,Football (Soccer),8.00,6.18,+1.82
+Aaron Wan-Bissaka,Sports,Football (Soccer),6.00,9.31,-3.31
+Iñaki Williams,Sports,Football (Soccer),6.00,9.77,-3.77
+Jhon Durán,Sports,Football (Soccer),6.00,4.94,+1.06
+Manuel Akanji,Sports,Football (Soccer),6.00,9.59,-3.59
+Mikel Merino,Sports,Football (Soccer),6.00,10.00,-4.00
+Thomas Partey,Sports,Football (Soccer),6.00,10.17,-4.17
+Abdukodir Khusanov,Sports,Football (Soccer),5.00,1.79,+3.21
+Chris Wood,Sports,Football (Soccer),5.00,8.15,-3.15
+Kendry Páez,Sports,Football (Soccer),5.00,3.58,+1.42
+Akram Afif,Sports,Football (Soccer),4.00,7.01,-3.01
+Antonio Nusa,Sports,Football (Soccer),4.00,4.02,-0.02
+Ayase Ueda,Sports,Football (Soccer),4.00,6.17,-2.17
+Julio Enciso,Sports,Football (Soccer),4.00,4.81,-0.81
+Marcel Sabitzer,Sports,Football (Soccer),4.00,9.85,-5.85
+Mehdi Taremi,Sports,Football (Soccer),4.00,9.06,-5.06
+Miguel Almirón,Sports,Football (Soccer),4.00,8.23,-4.23
+Patrik Schick,Sports,Football (Soccer),4.00,9.71,-5.71
+Salem Al-Dawsari,Sports,Football (Soccer),4.00,8.13,-4.13
+Sébastien Haller,Sports,Football (Soccer),4.00,9.10,-5.10
+Tomáš Souček,Sports,Football (Soccer),4.00,7.94,-3.94
+Yoane Wissa,Sports,Football (Soccer),4.00,5.19,-1.19
+Hannibal Mejbri,Sports,Football (Soccer),3.00,4.10,-1.10
+Lyle Foster,Sports,Football (Soccer),3.00,3.68,-0.68
+Mat Ryan,Sports,Football (Soccer),3.00,7.15,-4.15
+Musa Al-Taamari,Sports,Football (Soccer),3.00,2.54,+0.46
+Percy Tau,Sports,Football (Soccer),3.00,6.17,-3.17
+Tiger Woods,Sports,Golf,45.00,46.17,-1.17
+Bryson DeChambeau,Sports,Golf,22.00,9.18,+12.82
+Grant Horvat,Sports,Golf,8.00,0.95,+7.05
+Simone Biles,Sports,Gymnastics,38.00,30.77,+7.23
+Sidney Crosby,Sports,Hockey,28.00,27.37,+0.63
+Connor McDavid,Sports,Hockey,26.00,27.57,-1.57
+Auston Matthews,Sports,Hockey,18.00,13.13,+4.87
+Gavin McKenna,Sports,Hockey,8.00,5.19,+2.81
+Conor McGregor,Sports,Martial Arts,40.00,31.08,+8.92
+Jake Paul,Sports,Martial Arts,34.00,24.05,+9.95
+Khabib Nurmagomedov,Sports,Martial Arts,32.00,29.82,+2.18
+Jon Jones,Sports,Martial Arts,28.00,29.17,-1.17
+Islam Makhachev,Sports,Martial Arts,24.00,17.50,+6.50
+Alex Pereira,Sports,Martial Arts,22.00,18.75,+3.25
+Georges St-Pierre,Sports,Martial Arts,22.00,20.84,+1.16
+Ilia Topuria,Sports,Martial Arts,22.00,19.70,+2.30
+Ryan Garcia,Sports,Martial Arts,22.00,19.19,+2.81
+Sean O'Malley,Sports,Martial Arts,22.00,12.13,+9.87
+Israel Adesanya,Sports,Martial Arts,20.00,17.24,+2.76
+Khamzat Chimaev,Sports,Martial Arts,20.00,14.52,+5.48
+Alexander Volkanovski,Sports,Martial Arts,18.00,19.46,-1.46
+Daniel Cormier,Sports,Martial Arts,18.00,25.43,-7.43
+Max Holloway,Sports,Martial Arts,18.00,14.62,+3.38
+Nate Diaz,Sports,Martial Arts,18.00,17.21,+0.79
+Paddy Pimblett,Sports,Martial Arts,18.00,13.42,+4.58
+Tom Aspinall,Sports,Martial Arts,18.00,15.48,+2.52
+Amanda Nunes,Sports,Martial Arts,16.00,17.21,-1.21
+Anderson Silva,Sports,Martial Arts,16.00,17.27,-1.27
+Charles Oliveira,Sports,Martial Arts,16.00,18.78,-2.78
+Dustin Poirier,Sports,Martial Arts,16.00,17.26,-1.26
+Justin Gaethje,Sports,Martial Arts,16.00,18.75,-2.75
+Merab Dvalishvili,Sports,Martial Arts,16.00,15.79,+0.21
+Dricus Du Plessis,Sports,Martial Arts,14.00,13.89,+0.11
+Jorge Masvidal,Sports,Martial Arts,14.00,9.87,+4.13
+Kamaru Usman,Sports,Martial Arts,14.00,15.42,-1.42
+Sean Strickland,Sports,Martial Arts,14.00,15.09,-1.09
+Chael Sonnen,Sports,Martial Arts,12.00,12.82,-0.82
+Colby Covington,Sports,Martial Arts,12.00,8.93,+3.07
+Michael Chandler,Sports,Martial Arts,12.00,10.18,+1.82
+Tony Ferguson,Sports,Martial Arts,12.00,12.98,-0.98
+Valentina Shevchenko,Sports,Martial Arts,12.00,13.97,-1.97
+Zhang Weili,Sports,Martial Arts,12.00,12.14,-0.14
+Arman Tsarukyan,Sports,Martial Arts,10.00,13.98,-3.98
+Belal Muhammad,Sports,Martial Arts,10.00,10.89,-0.89
+Diego Lopes,Sports,Martial Arts,10.00,14.32,-4.32
+Jiří Procházka,Sports,Martial Arts,10.00,14.21,-4.21
+Kayla Harrison,Sports,Martial Arts,10.00,12.67,-2.67
+Mackenzie Dern,Sports,Martial Arts,10.00,15.89,-5.89
+Robert Whittaker,Sports,Martial Arts,10.00,11.46,-1.46
+Rose Namajunas,Sports,Martial Arts,10.00,12.87,-2.87
+Shavkat Rakhmonov,Sports,Martial Arts,10.00,11.19,-1.19
+Alexa Grasso,Sports,Martial Arts,8.00,12.85,-4.85
+Alexandre Pantoja,Sports,Martial Arts,8.00,10.98,-2.98
+Bo Nickal,Sports,Martial Arts,8.00,8.92,-0.92
+Carlos Ulberg,Sports,Martial Arts,8.00,13.79,-5.79
+Magomed Ankalaev,Sports,Martial Arts,8.00,9.13,-1.13
+Paulo Costa,Sports,Martial Arts,8.00,11.23,-3.23
+Petr Yan,Sports,Martial Arts,8.00,12.98,-4.98
+Umar Nurmagomedov,Sports,Martial Arts,8.00,9.12,-1.12
+Joshua Van,Sports,Martial Arts,6.00,11.78,-5.78
+Song Yadong,Sports,Martial Arts,6.00,9.89,-3.89
+Movsar Evloev,Sports,Martial Arts,5.00,8.21,-3.21
+Lewis Hamilton,Sports,Racing,44.00,43.97,+0.03
+Max Verstappen,Sports,Racing,40.00,21.37,+18.63
+Michael Schumacher,Sports,Racing,36.00,39.42,-3.42
+Lando Norris,Sports,Racing,30.00,25.59,+4.41
+Charles Leclerc,Sports,Racing,28.00,24.43,+3.57
+Fernando Alonso,Sports,Racing,26.00,22.87,+3.13
+Oscar Piastri,Sports,Racing,24.00,19.85,+4.15
+Sebastian Vettel,Sports,Racing,24.00,24.12,-0.12
+Valentino Rossi,Sports,Racing,24.00,22.13,+1.87
+Dale Earnhardt Jr,Sports,Racing,22.00,22.54,-0.54
+Daniel Ricciardo,Sports,Racing,22.00,18.98,+3.02
+George Russell,Sports,Racing,20.00,17.67,+2.33
+Carlos Sainz,Sports,Racing,18.00,16.78,+1.22
+Jeff Gordon,Sports,Racing,18.00,17.26,+0.74
+Marc Márquez,Sports,Racing,18.00,17.91,+0.09
+Danica Patrick,Sports,Racing,16.00,16.89,-0.89
+Jimmie Johnson,Sports,Racing,16.00,16.43,-0.43
+Sergio Pérez,Sports,Racing,16.00,14.65,+1.35
+Chase Elliott,Sports,Racing,14.00,13.92,+0.08
+Kimi Antonelli,Sports,Racing,14.00,25.87,-11.87
+Kyle Larson,Sports,Racing,14.00,14.12,-0.12
+Bubba Wallace,Sports,Racing,12.00,10.76,+1.24
+Denny Hamlin,Sports,Racing,12.00,11.54,+0.46
+Valtteri Bottas,Sports,Racing,12.00,12.14,-0.14
+Alex Albon,Sports,Racing,10.00,10.17,-0.17
+Franco Colapinto,Sports,Racing,10.00,9.34,+0.66
+Joey Logano,Sports,Racing,10.00,10.39,-0.39
+Pierre Gasly,Sports,Racing,10.00,10.82,-0.82
+Ryan Blaney,Sports,Racing,10.00,10.03,-0.03
+Yuki Tsunoda,Sports,Racing,10.00,9.73,+0.27
+Esteban Ocon,Sports,Racing,8.00,8.59,-0.59
+Gabriel Bortoleto,Sports,Racing,8.00,7.32,+0.68
+Isack Hadjar,Sports,Racing,8.00,9.17,-1.17
+Lance Stroll,Sports,Racing,8.00,7.89,+0.11
+Liam Lawson,Sports,Racing,8.00,7.58,+0.42
+Nico Hülkenberg,Sports,Racing,8.00,9.89,-1.89
+Oliver Bearman,Sports,Racing,8.00,7.43,+0.57
+Ty Gibbs,Sports,Racing,6.00,6.31,-0.31
+Arvid Lindblad,Sports,Racing,5.00,5.87,-0.87
+Ilona Maher,Sports,Rugby,16.00,9.43,+6.57
+Katie Ledecky,Sports,Swimmer,20.00,16.03,+3.97
+Serena Williams,Sports,Tennis,45.00,49.37,-4.37
+Novak Djokovic,Sports,Tennis,42.00,39.19,+2.81
+Rafael Nadal,Sports,Tennis,42.00,43.28,-1.28
+Roger Federer,Sports,Tennis,42.00,41.98,+0.02
+Carlos Alcaraz,Sports,Tennis,38.00,15.21,+22.79
+Jannik Sinner,Sports,Tennis,36.00,45.87,-9.87
+Coco Gauff,Sports,Tennis,30.00,16.57,+13.43
+Aryna Sabalenka,Sports,Tennis,26.00,17.87,+8.13
+Naomi Osaka,Sports,Tennis,26.00,17.23,+8.77
+Iga Swiatek,Sports,Tennis,24.00,22.79,+1.21
+Emma Raducanu,Sports,Tennis,16.00,11.72,+4.28
+Nick Kyrgios,Sports,Tennis,16.00,13.07,+2.93
+Taylor Fritz,Sports,Tennis,14.00,15.43,-1.43
+Ben Shelton,Sports,Tennis,12.00,12.21,-0.21
+Elena Rybakina,Sports,Tennis,10.00,13.71,-3.71
+Jessica Pegula,Sports,Tennis,10.00,13.21,-3.21
+Joao Fonseca,Sports,Tennis,10.00,6.70,+3.30
+Mirra Andreeva,Sports,Tennis,10.00,9.63,+0.37
+Learner Tien,Sports,Tennis,6.00,4.20,+1.80
+Usain Bolt,Sports,Track and Field,42.00,43.79,-1.79
+Noah Lyles,Sports,Track and Field,20.00,13.17,+6.83
+Sha'Carri Richardson,Sports,Track and Field,20.00,13.37,+6.63

@@ -54,6 +54,10 @@ const VidsSection = lazy(() =>
   import('./components/vids/VidsSection').then(m => ({ default: m.VidsSection }))
 );
 
+const PricerSection = lazy(() =>
+  import('./components/pricer/PricerSection').then(m => ({ default: m.PricerSection }))
+);
+
 function SectionLoader() {
   return (
     <div className="flex items-center justify-center h-full min-h-[200px]">
@@ -242,6 +246,11 @@ export function StudioShell() {
   // tab switches once the section has been opened.
   const [vidsEverVisited, setVidsEverVisited] = useState(false);
   useEffect(() => { if (activeSection === 'vids') setVidsEverVisited(true); }, [activeSection]);
+
+  // Pricer too: a pricing takes 30s to 5 minutes, so once opened the section
+  // stays mounted (hidden) and a run in progress keeps going off-tab.
+  const [pricerEverVisited, setPricerEverVisited] = useState(false);
+  useEffect(() => { if (activeSection === 'pricer') setPricerEverVisited(true); }, [activeSection]);
 
   // Board widget → generator. Replace the current rows with a single fresh entry
   // carrying this row's link/caption/context, then hand its id to CanvasGrid via
@@ -442,6 +451,17 @@ export function StudioShell() {
                   </Suspense>
                 </div>
               </div>
+            </ErrorBoundary>
+          </div>
+        )}
+
+        {pricerEverVisited && (
+          <div style={{ display: activeSection === 'pricer' ? undefined : 'none' }}>
+            <ErrorBoundary>
+              {/* Plain black like X Photo; the section scrolls its own body. */}
+              <Suspense fallback={<SectionLoader />}>
+                <PricerSection active={activeSection === 'pricer'} />
+              </Suspense>
             </ErrorBoundary>
           </div>
         )}

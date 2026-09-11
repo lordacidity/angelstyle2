@@ -12,6 +12,13 @@ if (fs.existsSync(rootEnv)) process.loadEnvFile(rootEnv);
 
 const nextConfig: NextConfig = {
   poweredByHeader: false,
+  // The Pricer reads its master list (and, once, its two seed CSVs) from disk at request time. Vercel only ships
+  // files the bundler can see, so list them for the three routes that read them (src/lib/pricer/pipeline.js).
+  outputFileTracingIncludes: {
+    '/api/pricer/config': ['./src/lib/pricer/data/*.csv'],
+    '/api/pricer/price': ['./src/lib/pricer/data/*.csv'],
+    '/api/pricer/log': ['./src/lib/pricer/data/*.csv'],
+  },
   serverExternalPackages: ['ffmpeg-static', 'ffprobe-static', 'fluent-ffmpeg', 'youtube-dl-exec', '@fal-ai/client'],
   // The Aier studio (YouTube download → freeze frame → Kling → render/export) shells out to
   // python3/yt-dlp + ffmpeg, writes to a persistent disk, and tracks long-running jobs in an

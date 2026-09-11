@@ -12,6 +12,7 @@
     "lint": "eslint"
   },
   "dependencies": {
+    "@anthropic-ai/sdk": "^0.124.0",
     "@distube/ytdl-core": "^4.16.12",
     "@fal-ai/client": "^1.6.2",
     "@imgly/background-removal": "^1.7.0",
