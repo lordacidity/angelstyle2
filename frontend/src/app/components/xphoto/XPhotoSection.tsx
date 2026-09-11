@@ -80,7 +80,9 @@ function triggerDownload(blob: Blob, filename: string) {
 function rosterLifetimePct(t: Talent): number | null {
   const raw = t.price.lifetimeChangePct;
   if (raw == null || !Number.isFinite(raw)) return null;
-  return (raw + 100) / 100 - 100;
+  // Rounded to a millionth of a percent: an unchanged price comes back as
+  // 9899.999999999998, which unrounded reads as a tiny loss (a red, falling strip).
+  return Math.round(((raw + 100) / 100 - 100) * 1e6) / 1e6;
 }
 
 // Rank: name/ticker prefix matches first, then anything containing the query.

@@ -119,6 +119,29 @@ const FLAT_FRAC = 0.01;
 const FLAT_NOISE_FRAC = 0.45;
 
 /**
+ * Re-space a history onto n evenly timed points, linear between trades.
+ * drawChart places points by time while dressSeries slopes and wobbles them by
+ * index, and real histories are bunched (several trades in the launch minute,
+ * then days of nothing) — dressed as-is, the bunch stacks a big share of the
+ * slope into one pixel column, a wall at the chart's left edge.
+ */
+function evenInTime(series: XPhotoPoint[], n: number): XPhotoPoint[] {
+  const t0 = series[0].timestamp;
+  const span = series[series.length - 1].timestamp - t0;
+  if (!(span > 0)) return series;
+  const out: XPhotoPoint[] = [];
+  let j = 0;
+  for (let i = 0; i < n; i++) {
+    const t = t0 + (span * i) / (n - 1);
+    while (j < series.length - 2 && series[j + 1].timestamp <= t) j++;
+    const a = series[j], b = series[j + 1];
+    const f = b.timestamp > a.timestamp ? Math.min(1, Math.max(0, (t - a.timestamp) / (b.timestamp - a.timestamp))) : 1;
+    out.push({ value: a.value + (b.value - a.value) * f, timestamp: t });
+  }
+  return out;
+}
+
+/**
  * Every chart gets seeded, smooth noise plus a slight slope in the direction
  * of the displayed change — a flat (or missing) history still draws as a
  * living line that tells the same story as the number next to it.
@@ -127,15 +150,17 @@ function dressSeries(series: XPhotoPoint[], key: string, pct: number): XPhotoPoi
   const rand = seededRand(key, 0x1234);
   const sign = pct >= 0 ? 1 : -1;
   const level = Math.abs(series.length ? series[series.length - 1].value : 0) || 1;
-  const pts = series.length >= 2
-    ? series
-    : Array.from({ length: SYNTH_POINTS }, (_, i) => ({ value: level, timestamp: i }));
-  const n = pts.length;
 
   let vMin = Infinity, vMax = -Infinity;
-  for (const p of pts) { if (p.value < vMin) vMin = p.value; if (p.value > vMax) vMax = p.value; }
-  const realRange = vMax - vMin;
+  for (const p of series) { if (p.value < vMin) vMin = p.value; if (p.value > vMax) vMax = p.value; }
+  const realRange = series.length >= 2 ? vMax - vMin : 0;
   const flat = realRange < level * FLAT_FRAC;
+  // A flat history gets the same 64 points as a missing one, so it draws the
+  // line the preview showed while the history was loading.
+  const pts = series.length >= 2
+    ? evenInTime(series, flat ? SYNTH_POINTS : Math.min(CHART_MAX_POINTS, Math.max(SYNTH_POINTS, series.length)))
+    : Array.from({ length: SYNTH_POINTS }, (_, i) => ({ value: level, timestamp: i }));
+  const n = pts.length;
   // Flat: the slope spans exactly the displayed % of the price level.
   const range = flat ? level * Math.abs(pct) / 100 : realRange;
   const drift = sign * range * (flat ? 1 : DRIFT_FRAC);
