@@ -26,6 +26,13 @@ const PRELOADED: Record<string, { label: string; durationMs: number }> = {
   'track-custom-1788980666860.mp3': { label: 'worry (ultra slowed)', durationMs: 60029 },
   'track-custom-1789056009934.mp3': { label: 'Yi Jian Mei (Xue hua piao piao)', durationMs: 143554 },
   'track-custom-1789065813191.mp3': { label: 'Hava Nagila',          durationMs: 157123 },
+  'track-custom-1789085506045.mp3': { label: 'Ella Joanna',          durationMs: 227354 },
+  'track-custom-1789085506046.mp3': { label: 'Ts Pmo',               durationMs: 168305 },
+  'track-custom-1789085506047.mp3': { label: 'Hot Milk',             durationMs: 202976 },
+  'track-custom-1789085506048.mp3': { label: 'Ocarina of Time Title Theme', durationMs: 78295 },
+  'track-custom-1789085506049.mp3': { label: 'Sybau',                durationMs: 114171 },
+  'track-custom-1789085506050.mp3': { label: 'Summer',               durationMs: 211090 },
+  'track-custom-1789085506051.mp3': { label: 'Hotline Bling',        durationMs: 206585 },
 };
 
 export async function GET() {
