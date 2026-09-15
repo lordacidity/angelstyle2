@@ -1,21 +1,24 @@
 // The "Movers this week" card — three people on one 3:2 card, faces first:
 // three tall photo columns (each reads like the photo column on the other
-// cards, not a thumbnail), and under each a compact name · industry ·
-// lifetime change · price. A small heading and a small footer leave the
-// height to the photos. Who the movers are is an editorial pick in the
-// studio; the card just presents them. The frame (hairline, header,
-// footnote) is ./card.ts.
+// cards, not a thumbnail). The foot of each photo fades into the card colour
+// and the person's sparkline sits in that faded band, so the chart rides
+// on the photo instead of taking height from it. Under each column a compact
+// name · industry · lifetime change · price. A small heading and a small
+// footer leave the height to the photos. Who the movers are is an editorial
+// pick in the studio; the card just presents them. The frame (hairline,
+// header, footnote) is ./card.ts; the sparkline is the strip's own chart
+// routine from ./render.ts drawn at a lighter weight.
 //
 // Colour: the heading is plain text (only NEW LISTING and UP/DOWN get the
-// accent, by rule); each mover's change takes green or red for their own
-// direction. Everything else is grey.
+// accent, by rule); each mover's change and line take green or red for their
+// own direction. Everything else is grey.
 
-import { formatPct, formatUsd } from './render';
+import { drawDressedChart, formatPct, formatUsd, type XPhotoPoint } from './render';
 import {
   beginCard, endCard, drawCover, drawFootnote, drawLockup, ellipsize, fillTracked, fitFontSize, font,
   formatCardDate, PAD, RIGHT, type CardChrome, type PhotoCrop, type PhotoRect,
 } from './card';
-import { MONO, SANS } from './shared';
+import { MONO, SANS, withAlpha } from './shared';
 
 export interface Mover {
   name: string;
@@ -25,6 +28,10 @@ export interface Mover {
   /** Lifetime change in percent — already floored by displayChangePct. */
   changePct: number;
   nowUsd: number | null;
+  /** Lifetime Pauv history; the sparkline dresses it. */
+  series: XPhotoPoint[];
+  /** Seed for the sparkline's noise (the ticker) so exports are repeatable. */
+  seedKey: string;
   /** Pre-loaded, CORS-clean photo. null → initials column. */
   photo: HTMLImageElement | null;
 }
@@ -50,6 +57,15 @@ const GAP = (RIGHT - PAD - COL_W * MOVERS_MAX) / (MOVERS_MAX - 1);
 const PHOTO_TOP = 188;
 const PHOTO_H = 440;
 const PHOTO_BOTTOM = PHOTO_TOP + PHOTO_H;
+// The foot of the photo fades into the card colour (black on dark, white on
+// light) over this height, and the sparkline sits in the faded band. The
+// fade is front-loaded so the line has a near-solid ground under it while
+// the face above stays untouched.
+const FADE_H = 200;
+const CHART_H = 76;
+const CHART_BOTTOM_PAD = 24;
+const CHART_TOP = PHOTO_BOTTOM - CHART_BOTTOM_PAD - CHART_H;
+const CHART_WEIGHT = 0.6;
 // Compact text block under each column.
 const NAME_BASELINE = PHOTO_BOTTOM + 36;
 const INDUSTRY_BASELINE = NAME_BASELINE + 22;
@@ -105,6 +121,15 @@ export function drawMoversCard(ctx: CanvasRenderingContext2D, d: MoversCardData)
       ctx.textAlign = 'left';
       ctx.textBaseline = 'alphabetic';
     }
+
+    // Fade the foot of the photo into the card, then draw the sparkline on it.
+    const fade = ctx.createLinearGradient(0, PHOTO_BOTTOM - FADE_H, 0, PHOTO_BOTTOM);
+    fade.addColorStop(0, withAlpha(C.card, 0));
+    fade.addColorStop(0.45, withAlpha(C.card, 0.7));
+    fade.addColorStop(1, withAlpha(C.card, 1));
+    ctx.fillStyle = fade;
+    ctx.fillRect(x, PHOTO_BOTTOM - FADE_H, COL_W, FADE_H);
+    drawDressedChart(ctx, m.series, m.seedKey, m.changePct, x, CHART_TOP, COL_W, CHART_H, accent, CHART_WEIGHT);
 
     // Name, then industry as a tracked caption.
     const nameSize = fitFontSize(ctx, m.name, SANS, 600, 26, 20, COL_W);

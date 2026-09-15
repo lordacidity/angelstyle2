@@ -56,6 +56,12 @@ export const COLOR_DOWN = PALETTES.dark.down;
 export const SANS = '"Inter", "Geist", system-ui, -apple-system, "Segoe UI", sans-serif';
 export const MONO = '"JetBrains Mono", "Geist Mono", ui-monospace, SFMono-Regular, Menlo, monospace';
 
+/** `#RRGGBB` → `rgba(r,g,b,alpha)`, for gradients that fade to a palette colour. */
+export function withAlpha(hex: string, alpha: number): string {
+  const n = parseInt(hex.slice(1, 7), 16);
+  return `rgba(${(n >> 16) & 255},${(n >> 8) & 255},${n & 255},${alpha})`;
+}
+
 // Recolour the white wordmark: draw it on an offscreen canvas at the target
 // pixel size, then 'source-in' fill so only the logo's own pixels take the tint.
 export function drawTintedLogo(ctx: CanvasRenderingContext2D, logo: HTMLImageElement, x: number, y: number, w: number, h: number, color: string) {
