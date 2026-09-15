@@ -310,6 +310,18 @@ export function XPhotoSection() {
     setMovers(prev => prev.filter(m => m.id !== t.id));
   }, []);
 
+  // Slot order is the card's left → right order; ‹ › on a chip shift it.
+  const moveMover = useCallback((t: Talent, dir: -1 | 1) => {
+    setMovers(prev => {
+      const from = prev.findIndex(m => m.id === t.id);
+      const to = from + dir;
+      if (from < 0 || to < 0 || to >= prev.length) return prev;
+      const next = [...prev];
+      [next[from], next[to]] = [next[to], next[from]];
+      return next;
+    });
+  }, []);
+
   // Deep links: /x-photo?g=<generator> opens it; ?t=<ticker>[,<ticker>…]
   // preselects once the roster is in (Movers takes up to three).
   useEffect(() => {
@@ -752,10 +764,34 @@ export function XPhotoSection() {
                   <span className="text-zinc-500 tabular-nums">{i + 1}</span>
                   <span>{t.name}</span>
                   {assets[t.ticker]?.loading && <SpinnerIcon size={11} className="animate-spin text-zinc-500" />}
+                  {/* Reorder: the chips' order is the card's left → right order. */}
+                  <span className="flex items-center ml-1">
+                    <button
+                      type="button"
+                      onClick={() => moveMover(t, -1)}
+                      disabled={i === 0}
+                      aria-label={`Move ${t.name} left`}
+                      title="Move left"
+                      className="px-1 text-zinc-500 hover:text-zinc-200 transition-colors disabled:opacity-25 disabled:hover:text-zinc-500"
+                    >
+                      ‹
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => moveMover(t, 1)}
+                      disabled={i === movers.length - 1}
+                      aria-label={`Move ${t.name} right`}
+                      title="Move right"
+                      className="px-1 text-zinc-500 hover:text-zinc-200 transition-colors disabled:opacity-25 disabled:hover:text-zinc-500"
+                    >
+                      ›
+                    </button>
+                  </span>
                   <button
                     type="button"
                     onClick={() => removeMover(t)}
                     aria-label={`Remove ${t.name}`}
+                    title="Remove"
                     className="text-zinc-500 hover:text-zinc-200 transition-colors"
                   >
                     ×
@@ -764,6 +800,9 @@ export function XPhotoSection() {
               ))}
               {movers.length < MOVERS_MAX && (
                 <span>{movers.length ? `${MOVERS_MAX - movers.length} more to go` : 'Pick three people — they read left to right in this order.'}</span>
+              )}
+              {movers.length > 1 && movers.length >= MOVERS_MAX && (
+                <span>‹ › reorder — the card reads left to right in this order.</span>
               )}
               {movers.length > 0 && (
                 <button type="button" onClick={() => setMovers([])} className="ml-auto text-zinc-500 hover:text-zinc-200 transition-colors">Clear</button>
