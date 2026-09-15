@@ -15,6 +15,7 @@
 
 import { useCallback, useEffect, useRef, useState, type FormEvent, type ReactNode } from 'react';
 import { DownloadIcon } from '@/lib/icons';
+import { PricerPhotos } from './PricerPhotos';
 import {
   isAnalystError,
   type AnalystData, type AnalystKey, type BioData, type Confidence, type DoneEvent, type FinalData,
@@ -453,7 +454,7 @@ export function PricerSection({ active }: { active: boolean }) {
         <div className="flex items-center justify-between gap-4">
           <div>
             <h1 className="text-lg font-semibold">Pricer</h1>
-            <p className="text-xs text-zinc-500">Type a name and six steps price them against the master list: a bio, three analysts in parallel, a judge.</p>
+            <p className="text-xs text-zinc-500">Type a name and six steps price them against the master list: a bio, three analysts in parallel, a judge. A free-to-use photo of them is found on the left.</p>
           </div>
           <div className="flex flex-wrap items-center justify-end gap-2">
             {cfg && <Chip>{cfg.models.fast} · {cfg.models.social} (social) · {cfg.models.judge} (judge)</Chip>}
@@ -470,7 +471,11 @@ export function PricerSection({ active }: { active: boolean }) {
         </div>
       </div>
 
-      <div className="min-h-0 flex-1 overflow-y-auto px-6 py-6">
+      <div className="flex min-h-0 flex-1">
+        {/* Free-to-use photos of whoever is being priced, cropped square and downloaded under their name. */}
+        <PricerPhotos person={run?.input.name ?? ''} />
+
+        <div className="min-h-0 flex-1 overflow-y-auto px-6 py-6">
         <div className="mx-auto flex w-full max-w-[960px] flex-col gap-4">
           <StepCard n={1} title="Name" state={nameState}>
             <form onSubmit={start} autoComplete="off" className="grid gap-3">
@@ -556,6 +561,7 @@ export function PricerSection({ active }: { active: boolean }) {
               ? <div className="text-sm text-red-400">{steps.final.error}</div>
               : run?.final ? <FinalBody d={run.final} run={run} cfg={cfg} savedTo={savedTo} /> : null}
           </StepCard>
+        </div>
         </div>
       </div>
     </div>
