@@ -473,7 +473,7 @@ export function PricerSection({ active }: { active: boolean }) {
 
       <div className="flex min-h-0 flex-1">
         {/* Free-to-use photos of whoever is being priced, cropped square and downloaded under their name. */}
-        <PricerPhotos person={run?.input.name ?? ''} />
+        <PricerPhotos person={run?.input.name ?? ''} canonical={run?.bio?.identified ? run.bio.canonical_name : undefined} />
 
         <div className="min-h-0 flex-1 overflow-y-auto px-6 py-6">
         <div className="mx-auto flex w-full max-w-[960px] flex-col gap-4">

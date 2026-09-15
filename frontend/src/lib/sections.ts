@@ -19,6 +19,7 @@ export const SECTION_PATHS: Record<AppSection, string> = {
   prompts: '/ai-prompts',
   chatgpt: '/chatgpt',
   pricer: '/pricer',
+  photos: '/photos',
   xphoto: '/x-photo',
 };
 

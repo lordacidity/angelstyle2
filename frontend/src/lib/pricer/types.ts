@@ -100,20 +100,3 @@ export interface PricerRun {
 
 export interface DoneEvent { logged: boolean; run: PricerRun }
 export interface PipelineErrorEvent { message: string }
-
-// What /api/pricer/photos returns: free-to-use photos of the person, for the Pricer's photo panel (PricerPhotos).
-export interface PricerPhoto {
-  id: string;
-  source: 'Wikimedia Commons' | 'Openverse';
-  provider?: string;        // Openverse only: where the photo actually lives (flickr, …)
-  title: string;
-  thumb: string;            // ~400px wide, for the grid
-  full: string;             // up to 1280px wide, what the crop is cut from
-  width: number;            // of the original file
-  height: number;
-  license: string;          // "CC BY-SA 4.0", "CC0", "Public domain"
-  licenseUrl: string;
-  creator: string;
-  page: string;             // the file's own page, where the licence can be checked
-}
-export interface PhotosResponse { query: string; photos: PricerPhoto[]; errors: { wikimedia?: string; openverse?: string } }

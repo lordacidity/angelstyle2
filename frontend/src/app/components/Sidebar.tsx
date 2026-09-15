@@ -118,6 +118,18 @@ const NAV: { id: AppSection; label: string; icon: React.ReactNode }[] = [
     ),
   },
   {
+    id: 'photos',
+    label: 'Photos',
+    // Portrait in a frame — a free-to-use photo for every name on a list, squared and saved one after another.
+    icon: (
+      <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+        <rect x="3" y="3" width="18" height="18" rx="3"/>
+        <circle cx="12" cy="10" r="3"/>
+        <path d="M6.5 20c1-3 3-4.5 5.5-4.5s4.5 1.5 5.5 4.5"/>
+      </svg>
+    ),
+  },
+  {
     id: 'prompts',
     label: 'AI Prompts',
     // Lightbulb — saved topics you turn into fresh trending-news overviews.

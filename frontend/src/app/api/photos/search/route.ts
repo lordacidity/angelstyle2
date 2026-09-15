@@ -1,18 +1,19 @@
-// GET /api/pricer/photos?q=… — free-to-use photos of a person, for the Pricer's photo panel (PricerPhotos).
+// GET /api/photos/search?source=wikimedia|openverse&q=… — free-to-use photos of a person, for the Pricer's photo
+// panel and the Photos section, one source per request so the panel can show each as it lands.
 //
-// Two sources, asked in parallel and merged: Wikimedia Commons (its own search API; every file carries its licence
-// and author) and Openverse (WordPress's index of Flickr, Wikimedia and others; asked for commercial-use licences
-// and photographs only). Openverse indexes Commons too, so a Commons file that turns up in both is kept once.
-// Neither needs a key. A source that fails is named in `errors` and the other's results still come back.
+// Wikimedia Commons: its own search API; every file carries its licence and author. Openverse: WordPress's index of
+// Flickr, Wikimedia and others, asked for commercial-use licences and photographs only; it indexes Commons too, so
+// the panel drops a file it already has. Neither needs a key. A failure answers 502 with { error }.
 //
 // Nothing here is a licence check. Most results are CC BY / BY-SA (credit the author), some are public domain;
 // the panel shows the licence on every tile and links to the file page. Behind the site gate like every /api/* route.
 
 import { NextRequest, NextResponse } from 'next/server';
-import type { PhotosResponse, PricerPhoto } from '@/lib/pricer/types';
+import type { FreePhoto, PhotoSource, PhotosResponse } from '@/lib/photos/types';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
+export const maxDuration = 30;
 
 // Wikimedia asks every API client to say who it is.
 const UA = 'PauvStudio/1.0 (https://pauv.com)';
@@ -20,7 +21,9 @@ const LIMIT = 24;         // per source
 const MIN_SIDE = 400;     // px — anything smaller makes a poor square
 const GRID_WIDTH = 400;   // px — Commons thumbnail for the grid
 const CROP_WIDTH = 1920;  // px — Commons thumbnail the crop is cut from (originals run to 8,000px and many MB)
-const TIMEOUT_MS = 12_000;
+// Commons answers in about a second. Openverse answers cached searches at once and fresh ones slowly, and during
+// its outages (seen 2026-09-15: its own /healthcheck/ hung) not at all — so give it longer, since nothing waits on it.
+const TIMEOUT_MS: Record<PhotoSource, number> = { wikimedia: 12_000, openverse: 25_000 };
 
 interface WmPage {
   pageid: number;
@@ -40,20 +43,16 @@ interface OvItem {
 const text = (html?: string) =>
   (html ?? '').replace(/<br\s*\/?>/gi, '\n').replace(/<[^>]+>/g, '').replace(/&amp;/g, '&').replace(/&quot;/g, '"').replace(/&#39;/g, "'")
     .split('\n').map(s => s.trim()).find(Boolean)?.slice(0, 80) ?? '';
-// The file behind a URL, so a Commons file seen through Openverse matches the same file from Commons.
-const fileKey = (u: string) => {
-  try { return decodeURIComponent(new URL(u).pathname.split('/').pop() ?? '').replace(/^\d+px-/, '').toLowerCase(); } catch { return u; }
-};
 const licenseLabel = (l: string, v?: string) =>
   l === 'cc0' ? 'CC0' : l === 'pdm' ? 'Public domain' : `CC ${l.toUpperCase()}${v ? ` ${v}` : ''}`;
 
-async function getJson<T>(url: URL): Promise<T> {
-  const r = await fetch(url, { headers: { 'User-Agent': UA, Accept: 'application/json' }, signal: AbortSignal.timeout(TIMEOUT_MS) });
+async function getJson<T>(url: URL, timeoutMs: number): Promise<T> {
+  const r = await fetch(url, { headers: { 'User-Agent': UA, Accept: 'application/json' }, signal: AbortSignal.timeout(timeoutMs) });
   if (!r.ok) throw new Error(`HTTP ${r.status}${await r.text().then(t => (t ? `: ${t.slice(0, 120)}` : ''), () => '')}`);
   return r.json() as Promise<T>;
 }
 
-async function wikimedia(q: string): Promise<PricerPhoto[]> {
+async function wikimedia(q: string): Promise<FreePhoto[]> {
   // Commons only serves thumbnail widths it has already rendered, and the API renders whatever it is asked for —
   // so ask twice, at grid size and at crop size, rather than editing the width in a URL (that answers 400).
   const ask = (width: number) => {
@@ -64,7 +63,7 @@ async function wikimedia(q: string): Promise<PricerPhoto[]> {
       prop: 'imageinfo', iiprop: 'url|size|mime|extmetadata', iiurlwidth: String(width),
       iiextmetadatafilter: 'LicenseShortName|LicenseUrl|Artist',
     }).toString();
-    return getJson<{ query?: { pages?: Record<string, WmPage> } }>(url);
+    return getJson<{ query?: { pages?: Record<string, WmPage> } }>(url, TIMEOUT_MS.wikimedia);
   };
   const [grid, crop] = await Promise.all([ask(GRID_WIDTH), ask(CROP_WIDTH)]);
   const cropInfo = new Map(Object.values(crop.query?.pages ?? {}).map(p => [p.pageid, p.imageinfo?.[0]]));
@@ -90,11 +89,11 @@ async function wikimedia(q: string): Promise<PricerPhoto[]> {
     });
 }
 
-async function openverse(q: string): Promise<PricerPhoto[]> {
+async function openverse(q: string): Promise<FreePhoto[]> {
   const url = new URL('https://api.openverse.org/v1/images/');
   // Anonymous requests may ask for at most 20 a page (more is answered 401).
   url.search = new URLSearchParams({ q, license_type: 'commercial', category: 'photograph', page_size: String(Math.min(LIMIT, 20)) }).toString();
-  const j = await getJson<{ results?: OvItem[] }>(url);
+  const j = await getJson<{ results?: OvItem[] }>(url, TIMEOUT_MS.openverse);
   return (j.results ?? [])
     .filter(i => i.url && Math.min(i.width ?? 0, i.height ?? 0) >= MIN_SIDE)
     .map(i => ({
@@ -114,24 +113,20 @@ async function openverse(q: string): Promise<PricerPhoto[]> {
 
 export async function GET(req: NextRequest) {
   const q = (req.nextUrl.searchParams.get('q') || '').trim();
+  const source = req.nextUrl.searchParams.get('source');
   if (!q) return NextResponse.json({ error: 'q is required' }, { status: 400 });
-
-  const [wm, ov] = await Promise.allSettled([wikimedia(q), openverse(q)]);
-  const errors: PhotosResponse['errors'] = {};
-  const reason = (r: PromiseRejectedResult) => (r.reason instanceof Error ? r.reason.message : String(r.reason));
-  const a = wm.status === 'fulfilled' ? wm.value : [];
-  if (wm.status === 'rejected') errors.wikimedia = reason(wm);
-  const seen = new Set(a.map(p => fileKey(p.full)));
-  const b = ov.status === 'fulfilled' ? ov.value.filter(p => !seen.has(fileKey(p.full))) : [];
-  if (ov.status === 'rejected') errors.openverse = reason(ov);
-
-  // Interleave so the top of the grid mixes both sources.
-  const photos: PricerPhoto[] = [];
-  for (let i = 0; i < Math.max(a.length, b.length); i++) {
-    if (a[i]) photos.push(a[i]);
-    if (b[i]) photos.push(b[i]);
+  if (source !== 'wikimedia' && source !== 'openverse') {
+    return NextResponse.json({ error: 'source must be wikimedia or openverse' }, { status: 400 });
   }
-  if (errors.wikimedia || errors.openverse) console.warn(`[pricer photos] "${q}":`, errors);
-  const body: PhotosResponse = { query: q, photos, errors };
-  return NextResponse.json(body);
+
+  try {
+    const photos = source === 'wikimedia' ? await wikimedia(q) : await openverse(q);
+    const body: PhotosResponse = { query: q, source, photos };
+    return NextResponse.json(body);
+  } catch (e) {
+    const timedOut = e instanceof Error && (e.name === 'TimeoutError' || e.name === 'AbortError');
+    const error = timedOut ? `didn't answer within ${TIMEOUT_MS[source] / 1000}s` : e instanceof Error ? e.message : String(e);
+    console.warn(`[pricer photos] ${source} "${q}": ${error}`);
+    return NextResponse.json({ error }, { status: 502 });
+  }
 }

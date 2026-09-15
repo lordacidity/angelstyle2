@@ -58,6 +58,10 @@ const PricerSection = lazy(() =>
   import('./components/pricer/PricerSection').then(m => ({ default: m.PricerSection }))
 );
 
+const PhotosSection = lazy(() =>
+  import('./components/photos/PhotosSection').then(m => ({ default: m.PhotosSection }))
+);
+
 function SectionLoader() {
   return (
     <div className="flex items-center justify-center h-full min-h-[200px]">
@@ -251,6 +255,10 @@ export function StudioShell() {
   // stays mounted (hidden) and a run in progress keeps going off-tab.
   const [pricerEverVisited, setPricerEverVisited] = useState(false);
   useEffect(() => { if (activeSection === 'pricer') setPricerEverVisited(true); }, [activeSection]);
+
+  // Photos too: a list of names in progress keeps its place while you look elsewhere.
+  const [photosEverVisited, setPhotosEverVisited] = useState(false);
+  useEffect(() => { if (activeSection === 'photos') setPhotosEverVisited(true); }, [activeSection]);
 
   // Board widget → generator. Replace the current rows with a single fresh entry
   // carrying this row's link/caption/context, then hand its id to CanvasGrid via
@@ -461,6 +469,16 @@ export function StudioShell() {
               {/* Plain black like X Photo; the section scrolls its own body. */}
               <Suspense fallback={<SectionLoader />}>
                 <PricerSection active={activeSection === 'pricer'} />
+              </Suspense>
+            </ErrorBoundary>
+          </div>
+        )}
+
+        {photosEverVisited && (
+          <div style={{ display: activeSection === 'photos' ? undefined : 'none' }}>
+            <ErrorBoundary>
+              <Suspense fallback={<SectionLoader />}>
+                <PhotosSection active={activeSection === 'photos'} />
               </Suspense>
             </ErrorBoundary>
           </div>
