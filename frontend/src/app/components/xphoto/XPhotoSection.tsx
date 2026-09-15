@@ -8,8 +8,8 @@
 //                    starting price · call to action). ./renderListed.ts.
 //   · Price change — 3:2 call-out of a big move (photo · UP/DOWN · name ·
 //                    lifetime change · chart · was/now). ./renderChange.ts.
-//   · Movers       — 3:2 card with three hand-picked people (face · name ·
-//                    industry · sparkline · change · price). ./renderMovers.ts.
+//   · Movers       — 3:2 card with three hand-picked people (tall photo ·
+//                    name · industry · change · price). ./renderMovers.ts.
 // The 3:2 cards share a frame (./card.ts) and can be drawn light or dark.
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
@@ -45,7 +45,7 @@ const GENERATORS: { id: Generator; label: string; blurb: string }[] = [
   { id: 'strip', label: 'Price strip', blurb: 'Search anyone on Pauv, pick them, download a long thin price strip for X.' },
   { id: 'listed', label: 'Newly listed', blurb: 'Announce a fresh listing — photo, name, starting price, call to action. Newest listings first.' },
   { id: 'change', label: 'Price change', blurb: 'Call out a big move — photo, UP or DOWN, how far they have moved, and their Pauv chart.' },
-  { id: 'movers', label: 'Movers', blurb: 'Three people you choose, faces first — name, industry, sparkline, change and price.' },
+  { id: 'movers', label: 'Movers', blurb: 'Three people you choose, faces first — a tall photo each, name, industry, change and price.' },
 ];
 
 const THEMES: { id: CardTheme; label: string }[] = [
@@ -480,8 +480,6 @@ export function XPhotoSection() {
             // Same floor the strip applies, so a quiet market still draws a living line.
             changePct: displayChangePct(lifetimePct(t, a.series), t.ticker),
             nowUsd: nowUsdOf(t, a.series),
-            series: a.series,
-            seedKey: t.ticker,
             photo: a.photo,
             crop: crops[t.ticker],
           };
@@ -907,7 +905,7 @@ export function XPhotoSection() {
                   : generator === 'change'
                     ? 'Photo · UP or DOWN · name · how far they have moved · their Pauv chart — 3:2, light or dark.'
                     : isMovers
-                      ? 'Three faces · names · industries · sparklines · change and price — 3:2, light or dark.'
+                      ? 'Three tall photos · names · industries · change and price — 3:2, light or dark.'
                       : 'Avatar · name · ticker · price · lifetime chart — ready to download.'}
               </p>
             </div>

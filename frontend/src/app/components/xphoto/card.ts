@@ -170,17 +170,24 @@ export function beginCard(ctx: CanvasRenderingContext2D, chrome: CardChrome): Ca
   ctx.fillStyle = C.card;
   ctx.fillRect(0, 0, CARD_W, CARD_H);
 
-  if (photo) {
-    drawCover(ctx, photo, 0, 0, PHOTO_W, CARD_H, chrome.photoCrop);
-    ctx.fillStyle = C.hairline;
-    ctx.fillRect(PHOTO_W, 0, 1, CARD_H);
-  }
-
   // Inset hairline: the PNG lands on a timeline close to its own background
-  // (black on X's dark theme, white on light), so give it an edge.
+  // (black on X's dark theme, white on light), so give it an edge. The photo
+  // bleeds to the card edge with nothing drawn over or beside it — no
+  // divider, no hairline — so on a photo card the line only runs round the
+  // text side.
   ctx.strokeStyle = C.hairline;
   ctx.lineWidth = 2;
-  ctx.strokeRect(1, 1, CARD_W - 2, CARD_H - 2);
+  if (photo) {
+    drawCover(ctx, photo, 0, 0, PHOTO_W, CARD_H, chrome.photoCrop);
+    ctx.beginPath();
+    ctx.moveTo(PHOTO_W, 1);
+    ctx.lineTo(CARD_W - 1, 1);
+    ctx.lineTo(CARD_W - 1, CARD_H - 1);
+    ctx.lineTo(PHOTO_W, CARD_H - 1);
+    ctx.stroke();
+  } else {
+    ctx.strokeRect(1, 1, CARD_W - 2, CARD_H - 2);
+  }
 
   if (usable(chrome.logo)) {
     const logoW = LOGO_H * (chrome.logo.naturalWidth / chrome.logo.naturalHeight);
@@ -211,9 +218,9 @@ export type LockupGlyph = (ctx: CanvasRenderingContext2D, x: number, cy: number,
  * word's cap height and centred on its cap band, so word and glyph read as
  * one lockup rather than an icon parked next to text.
  */
-export function drawLockup(f: CardFrame, label: string, baseline: number, color: string, glyph: LockupGlyph) {
+export function drawLockup(f: CardFrame, label: string, baseline: number, color: string, glyph: LockupGlyph, size = 46) {
   const { ctx, LEFT } = f;
-  ctx.font = font(700, 46);
+  ctx.font = font(700, size);
   ctx.fillStyle = color;
   fillTracked(ctx, label, LEFT, baseline, 3);
   const caps = ctx.measureText(label).actualBoundingBoxAscent;
@@ -250,22 +257,26 @@ export function drawHero(
  * wide for the column the whole row steps down together before the left
  * side gets ellipsized.
  */
-export function drawFootnote(f: CardFrame, left: string, right: string) {
+export function drawFootnote(
+  f: CardFrame, left: string, right: string,
+  // A card can pull the footnote in (Movers runs a much smaller one).
+  { ruleY = FOOT_RULE_Y, baseline = BOTTOM, size: maxSize = 22, minSize = 18 } = {},
+) {
   const { ctx, LEFT, COL } = f;
   ctx.fillStyle = f.C.hairline;
-  ctx.fillRect(LEFT, FOOT_RULE_Y, COL, 1);
+  ctx.fillRect(LEFT, ruleY, COL, 1);
   const l = left.trim();
   const rowWidth = (size: number) => {
     ctx.font = font(400, size);
     return ctx.measureText(right).width + (l ? FOOT_GAP + ctx.measureText(l).width : 0);
   };
-  let size = 22;
-  while (rowWidth(size) > COL && size > 18) size -= 1;
+  let size = maxSize;
+  while (rowWidth(size) > COL && size > minSize) size -= 1;
   ctx.font = font(400, size);
   ctx.fillStyle = f.C.secondary;
   const rightW = ctx.measureText(right).width;
   ctx.textAlign = 'right';
-  ctx.fillText(right, RIGHT, BOTTOM);
+  ctx.fillText(right, RIGHT, baseline);
   ctx.textAlign = 'left';
-  if (l) ctx.fillText(ellipsize(ctx, l, COL - rightW - FOOT_GAP), LEFT, BOTTOM);
+  if (l) ctx.fillText(ellipsize(ctx, l, COL - rightW - FOOT_GAP), LEFT, baseline);
 }
