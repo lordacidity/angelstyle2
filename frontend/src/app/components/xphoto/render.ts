@@ -247,10 +247,10 @@ function thin(series: XPhotoPoint[], max: number): XPhotoPoint[] {
   return out;
 }
 
-function drawChart(ctx: CanvasRenderingContext2D, seriesIn: XPhotoPoint[], x: number, y: number, w: number, h: number, color: string) {
+function drawChart(ctx: CanvasRenderingContext2D, seriesIn: XPhotoPoint[], x: number, y: number, w: number, h: number, color: string, weight = 1) {
   const series = thin(seriesIn.filter(p => Number.isFinite(p.value)), CHART_MAX_POINTS);
   const midY = y + h / 2;
-  const lineW = 5;
+  const lineW = 5 * weight;
 
   if (series.length < 2) {
     ctx.beginPath();
@@ -261,7 +261,7 @@ function drawChart(ctx: CanvasRenderingContext2D, seriesIn: XPhotoPoint[], x: nu
     ctx.lineCap = 'round';
     ctx.stroke();
     ctx.beginPath();
-    ctx.arc(x + w, midY, 6, 0, Math.PI * 2);
+    ctx.arc(x + w, midY, 6 * weight, 0, Math.PI * 2);
     ctx.fillStyle = color;
     ctx.fill();
     return;
@@ -291,7 +291,7 @@ function drawChart(ctx: CanvasRenderingContext2D, seriesIn: XPhotoPoint[], x: nu
   };
 
   // Soft fill under the line so the strip reads as a chart, not a squiggle.
-  const fillBottom = y + h + CHART_BOTTOM_PAD;
+  const fillBottom = y + h + CHART_BOTTOM_PAD * weight;
   tracePath();
   ctx.lineTo(pts[pts.length - 1].x, fillBottom);
   ctx.lineTo(pts[0].x, fillBottom);
@@ -312,11 +312,11 @@ function drawChart(ctx: CanvasRenderingContext2D, seriesIn: XPhotoPoint[], x: nu
   // End marker with a faint halo.
   const last = pts[pts.length - 1];
   ctx.beginPath();
-  ctx.arc(last.x, last.y, 15, 0, Math.PI * 2);
+  ctx.arc(last.x, last.y, 15 * weight, 0, Math.PI * 2);
   ctx.fillStyle = `${color}33`;
   ctx.fill();
   ctx.beginPath();
-  ctx.arc(last.x, last.y, 7, 0, Math.PI * 2);
+  ctx.arc(last.x, last.y, 7 * weight, 0, Math.PI * 2);
   ctx.fillStyle = color;
   ctx.fill();
 }
@@ -328,10 +328,10 @@ function drawChart(ctx: CanvasRenderingContext2D, seriesIn: XPhotoPoint[], x: nu
  */
 export function drawDressedChart(
   ctx: CanvasRenderingContext2D, series: XPhotoPoint[], key: string, pct: number,
-  x: number, y: number, w: number, h: number, color: string,
+  x: number, y: number, w: number, h: number, color: string, weight = 1,
 ) {
   const clean = thin(series.filter(p => Number.isFinite(p.value)), CHART_MAX_POINTS);
-  drawChart(ctx, dressSeries(clean, key, pct), x, y, w, h, color);
+  drawChart(ctx, dressSeries(clean, key, pct), x, y, w, h, color, weight);
 }
 
 /** Draws the full strip. Expects ctx.canvas to be XPHOTO_W×XPHOTO_H times any uniform scale. */

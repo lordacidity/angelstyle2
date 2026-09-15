@@ -1,14 +1,16 @@
 'use client';
 
 // X Photo — search anyone on Pauv, pick them, and get a downloadable PNG for
-// posting on X. Three generators share the one picker:
+// posting on X. Four generators share the one picker:
 //   · Price strip  — long thin ticker card (avatar · name · ticker / price /
 //                    lifetime change · lifetime chart). Drawing in ./render.ts.
 //   · Newly listed — 3:2 announcement card (photo · NEW LISTING · name ·
 //                    starting price · call to action). ./renderListed.ts.
 //   · Price change — 3:2 call-out of a big move (photo · UP/DOWN · name ·
 //                    lifetime change · chart · was/now). ./renderChange.ts.
-// The two 3:2 cards share a frame (./card.ts) and can be drawn light or dark.
+//   · Movers       — 3:2 card with three hand-picked people (face · name ·
+//                    industry · sparkline · change · price). ./renderMovers.ts.
+// The 3:2 cards share a frame (./card.ts) and can be drawn light or dark.
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { DownloadIcon, SpinnerIcon } from '@/lib/icons';
@@ -20,6 +22,7 @@ import {
 import { CARD_W, CARD_H, CARD_EXPORT_SCALES, formatCardDate, type CardExportScale } from './card';
 import { drawListedCard } from './renderListed';
 import { drawChangeCard } from './renderChange';
+import { drawMoversCard, MOVERS_MAX } from './renderMovers';
 import type { CardTheme } from './shared';
 
 interface Talent {
@@ -33,12 +36,13 @@ interface Talent {
   price: { usd: number | null; startUsd: number | null; lifetimeChangePct: number | null; holders: number | null };
 }
 
-type Generator = 'strip' | 'listed' | 'change';
+type Generator = 'strip' | 'listed' | 'change' | 'movers';
 
 const GENERATORS: { id: Generator; label: string; blurb: string }[] = [
   { id: 'strip', label: 'Price strip', blurb: 'Search anyone on Pauv, pick them, download a long thin price strip for X.' },
   { id: 'listed', label: 'Newly listed', blurb: 'Announce a fresh listing — photo, name, starting price, call to action. Newest listings first.' },
   { id: 'change', label: 'Price change', blurb: 'Call out a big move — photo, UP or DOWN, how far they have moved, and their Pauv chart.' },
+  { id: 'movers', label: 'Movers', blurb: 'Three people you choose, faces first — name, industry, sparkline, change and price.' },
 ];
 
 const THEMES: { id: CardTheme; label: string }[] = [
@@ -52,6 +56,9 @@ const FONT_LINK_ID = 'gfont-xphoto';
 // No scheme on purpose — the copied text is the bare "pauv.com/profile/<ticker>".
 const PROFILE_URL_BASE = 'pauv.com/profile/';
 const COPIED_TOAST_MS = 2500;
+
+/** Per-person assets the cards draw: a CORS-clean photo and lifetime history. */
+interface TalentAssets { photo: HTMLImageElement | null; series: XPhotoPoint[]; loading: boolean }
 
 function profileUrl(t: { ticker: string }): string {
   return PROFILE_URL_BASE + t.ticker.toLowerCase();
@@ -81,7 +88,7 @@ function loadFonts(): Promise<void> {
     const link = document.createElement('link');
     link.id = FONT_LINK_ID;
     link.rel = 'stylesheet';
-    link.href = 'https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@500&display=swap';
+    link.href = 'https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap';
     document.head.appendChild(link);
   }
   return Promise.all([
@@ -89,6 +96,7 @@ function loadFonts(): Promise<void> {
     document.fonts.load('500 30px "Inter"'),
     document.fonts.load('600 42px "Inter"'),
     document.fonts.load('700 30px "Inter"'),
+    document.fonts.load('400 22px "JetBrains Mono"'),
     document.fonts.load('500 104px "JetBrains Mono"'),
   ]).then(() => undefined, () => undefined);
 }
@@ -108,16 +116,52 @@ function triggerDownload(blob: Blob, filename: string) {
   setTimeout(() => URL.revokeObjectURL(url), 1000);
 }
 
+// Photos go through the image proxy so the canvas stays exportable.
+function loadPhoto(t: Talent): Promise<HTMLImageElement | null> {
+  if (!t.photo_url) return Promise.resolve(null);
+  return new Promise(resolve => {
+    const img = new Image();
+    img.crossOrigin = 'anonymous';
+    img.onload = () => resolve(img);
+    img.onerror = () => resolve(null);
+    img.src = `/api/charts/image-proxy?url=${encodeURIComponent(t.photo_url!)}`;
+  });
+}
+
+// Lifetime Pauv history, one slug per request (batch-history's row cap is
+// shared across the slugs in a call).
+async function loadHistory(t: Talent): Promise<XPhotoPoint[]> {
+  try {
+    const r = await fetch(`/api/markets/batch-history?slugs=${encodeURIComponent(t.ticker)}&window=all`);
+    const data: Record<string, Array<{ price: number; timestamp: string }>> = await r.json();
+    return (data?.[t.ticker] ?? [])
+      .map(p => ({ value: p.price, timestamp: new Date(p.timestamp).getTime() }))
+      .filter(p => Number.isFinite(p.value) && Number.isFinite(p.timestamp));
+  } catch {
+    return [];
+  }
+}
+
 // The roster's lifetimeChangePct compares latest_price_cents against a p0 that
 // is stored in dollars, so every value comes back ≈ +9900%. Undo the unit
-// mismatch here. The strip itself prefers the real first→last of the history
-// series and only falls back to this when there is no history.
+// mismatch here. The cards prefer the real first→last of the history series
+// and only fall back to this when there is no history.
 function rosterLifetimePct(t: Talent): number | null {
   const raw = t.price.lifetimeChangePct;
   if (raw == null || !Number.isFinite(raw)) return null;
   // Rounded to a millionth of a percent: an unchanged price comes back as
   // 9899.999999999998, which unrounded reads as a tiny loss (a red, falling strip).
   return Math.round(((raw + 100) / 100 - 100) * 1e6) / 1e6;
+}
+
+// Real first→last of the lifetime history, so a figure agrees with the line
+// drawn under it; the roster's figure only stands in when there is no history.
+function lifetimePct(t: Talent, series: XPhotoPoint[]): number | null {
+  return series.length >= 2 ? deriveChangePct(series) : rosterLifetimePct(t);
+}
+
+function nowUsdOf(t: Talent, series: XPhotoPoint[]): number | null {
+  return t.price.usd ?? (series.length ? series[series.length - 1].value : null);
 }
 
 // Rank: name/ticker prefix matches first, then anything containing the query.
@@ -131,7 +175,7 @@ function scoreTalent(t: Talent, q: string): number {
   return -1;
 }
 
-// Small labelled pill group — the footer's Size / Window / Theme controls.
+// Small labelled pill group — the footer's Size / Theme controls.
 function Segmented<T extends string | number>({ label, options, value, onChange }: {
   label: string; options: readonly { id: T; label: string }[]; value: T; onChange: (id: T) => void;
 }) {
@@ -166,10 +210,11 @@ export function XPhotoSection() {
   const [open, setOpen] = useState(false);
   const [highlight, setHighlight] = useState(0);
 
+  // Single-subject generators pick one person; Movers collects up to three.
   const [selected, setSelected] = useState<Talent | null>(null);
-  const [series, setSeries] = useState<XPhotoPoint[]>([]);
-  const [seriesLoading, setSeriesLoading] = useState(false);
-  const [avatar, setAvatar] = useState<HTMLImageElement | null>(null);
+  const [movers, setMovers] = useState<Talent[]>([]);
+  // Photo + history per ticker, loaded once per pick and kept for the session.
+  const [assets, setAssets] = useState<Record<string, TalentAssets>>({});
   const [logo, setLogo] = useState<HTMLImageElement | null>(null);
   const [stripScale, setStripScale] = useState<XPhotoExportScale>(4);
   const [cardScale, setCardScale] = useState<CardExportScale>(2);
@@ -185,11 +230,13 @@ export function XPhotoSection() {
   const inputRef = useRef<HTMLInputElement>(null);
   const searchWrapRef = useRef<HTMLDivElement>(null);
   const listRef = useRef<HTMLDivElement>(null);
-  // Bumped on every selection so a slow avatar fetch for a previous pick
-  // can't overwrite the current one.
-  const selectionSeq = useRef(0);
+  // Tickers whose assets are loading or loaded — a ref so the effect below
+  // never double-fetches across renders.
+  const assetsRequested = useRef(new Set<string>());
 
-  const isCard = generator === 'listed' || generator === 'change';
+  const isMovers = generator === 'movers';
+  const isListed = generator === 'listed';
+  const isCard = generator !== 'strip';
 
   const loadTalents = useCallback(async () => {
     setTalentsLoading(true);
@@ -220,22 +267,61 @@ export function XPhotoSection() {
     return () => { on = false; };
   }, []);
 
-  // Deep links: /x-photo?g=listed|change opens that generator; ?t=<ticker>
-  // preselects that person once the roster is in.
+  // Fetch photo + history for anyone the cards need, once per ticker.
+  const ensureAssets = useCallback((t: Talent) => {
+    if (assetsRequested.current.has(t.ticker)) return;
+    assetsRequested.current.add(t.ticker);
+    setAssets(a => ({ ...a, [t.ticker]: { photo: null, series: [], loading: true } }));
+    void loadPhoto(t).then(photo => setAssets(a => ({ ...a, [t.ticker]: { ...(a[t.ticker] ?? { series: [], loading: true }), photo } })));
+    void loadHistory(t).then(series => setAssets(a => ({ ...a, [t.ticker]: { ...(a[t.ticker] ?? { photo: null }), series, loading: false } })));
+  }, []);
+
+  const choose = useCallback((t: Talent) => {
+    ensureAssets(t);
+    setQuery('');
+    setHighlight(0);
+    if (generator === 'movers') {
+      // Keep the picker open until the third slot is filled.
+      setMovers(prev => {
+        if (prev.some(m => m.id === t.id)) return prev;
+        if (prev.length >= MOVERS_MAX) return prev;
+        const next = [...prev, t];
+        if (next.length >= MOVERS_MAX) { setOpen(false); inputRef.current?.blur(); }
+        return next;
+      });
+      return;
+    }
+    setSelected(t);
+    setOpen(false);
+    inputRef.current?.blur();
+  }, [generator, ensureAssets]);
+
+  const removeMover = useCallback((t: Talent) => {
+    setMovers(prev => prev.filter(m => m.id !== t.id));
+  }, []);
+
+  // Deep links: /x-photo?g=<generator> opens it; ?t=<ticker>[,<ticker>…]
+  // preselects once the roster is in (Movers takes up to three).
   useEffect(() => {
     const g = new URLSearchParams(window.location.search).get('g');
-    if (g === 'listed' || g === 'change') setGenerator(g);
+    if (g === 'listed' || g === 'change' || g === 'movers') setGenerator(g);
   }, []);
   const deepLinked = useRef(false);
   useEffect(() => {
     if (deepLinked.current || !talents.length) return;
-    const want = new URLSearchParams(window.location.search).get('t')?.trim().toLowerCase();
-    if (!want) { deepLinked.current = true; return; }
-    const hit = talents.find(t => t.ticker.toLowerCase() === want);
     deepLinked.current = true;
-    if (hit) choose(hit);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [talents]);
+    const wants = (new URLSearchParams(window.location.search).get('t') ?? '')
+      .split(',').map(s => s.trim().toLowerCase()).filter(Boolean);
+    const hits = wants.map(w => talents.find(t => t.ticker.toLowerCase() === w)).filter((t): t is Talent => !!t);
+    if (!hits.length) return;
+    if (new URLSearchParams(window.location.search).get('g') === 'movers') {
+      hits.slice(0, MOVERS_MAX).forEach(ensureAssets);
+      setMovers(hits.slice(0, MOVERS_MAX));
+    } else {
+      ensureAssets(hits[0]);
+      setSelected(hits[0]);
+    }
+  }, [talents, ensureAssets]);
 
   // The listing generator exists to announce whoever just went live, so with
   // no query it lists the roster newest first (and breaks search ties the
@@ -273,61 +359,43 @@ export function XPhotoSection() {
     return () => document.removeEventListener('mousedown', onDown);
   }, [open]);
 
-  const choose = useCallback((t: Talent) => {
-    const seq = ++selectionSeq.current;
-    setSelected(t);
-    setOpen(false);
-    setQuery('');
-    setAvatar(null);
-    inputRef.current?.blur();
-
-    if (t.photo_url) {
-      const img = new Image();
-      img.crossOrigin = 'anonymous';
-      img.onload = () => { if (seq === selectionSeq.current) setAvatar(img); };
-      img.onerror = () => { if (seq === selectionSeq.current) setAvatar(null); };
-      img.src = `/api/charts/image-proxy?url=${encodeURIComponent(t.photo_url)}`;
-    }
-  }, []);
-
-  // Lifetime Pauv history for the pick — the strip's chart and the change
-  // card's chart both draw it (the change card is deliberately never a
-  // timeframe). Keyed on the pick; a stale response for an earlier pick is dropped.
-  useEffect(() => {
-    if (!selected) return;
-    let on = true;
-    setSeries([]);
-    setSeriesLoading(true);
-    fetch(`/api/markets/batch-history?slugs=${encodeURIComponent(selected.ticker)}&window=all`)
-      .then(r => r.json())
-      .then((data: Record<string, Array<{ price: number; timestamp: string }>>) => {
-        if (!on) return;
-        const pts = (data?.[selected.ticker] ?? [])
-          .map(p => ({ value: p.price, timestamp: new Date(p.timestamp).getTime() }))
-          .filter(p => Number.isFinite(p.value) && Number.isFinite(p.timestamp));
-        setSeries(pts);
-      })
-      .catch(() => { if (on) setSeries([]); })
-      .finally(() => { if (on) setSeriesLoading(false); });
-    return () => { on = false; };
-  }, [selected]);
-
-  // Real first→last of the lifetime history, so the figure agrees with the
-  // line drawn under it; the roster's figure only stands in when there is no
-  // history yet.
-  const rawPct = selected
-    ? (series.length >= 2 ? deriveChangePct(series) : rosterLifetimePct(selected))
-    : null;
-  const nowUsd = selected ? (selected.price.usd ?? (series.length ? series[series.length - 1].value : null)) : null;
+  const selectedAssets: TalentAssets = (selected && assets[selected.ticker]) || { photo: null, series: [], loading: false };
+  const series = selectedAssets.series;
+  const rawPct = selected ? lifetimePct(selected, series) : null;
+  const nowUsd = selected ? nowUsdOf(selected, series) : null;
 
   const draw = useCallback(() => {
     const canvas = canvasRef.current;
     const ctx = canvas?.getContext('2d');
-    if (!canvas || !ctx || !selected) return;
+    if (!canvas || !ctx) return;
+    if (generator === 'movers') {
+      if (!movers.length) return;
+      drawMoversCard(ctx, {
+        theme: cardTheme,
+        logo,
+        asOf: Date.now(),
+        cta,
+        movers: movers.map(t => {
+          const a = assets[t.ticker] ?? { photo: null, series: [], loading: false };
+          return {
+            name: t.name,
+            industry: t.industry,
+            // Same floor the strip applies, so a quiet market still draws a living line.
+            changePct: displayChangePct(lifetimePct(t, a.series), t.ticker),
+            nowUsd: nowUsdOf(t, a.series),
+            series: a.series,
+            seedKey: t.ticker,
+            photo: a.photo,
+          };
+        }),
+      });
+      return;
+    }
+    if (!selected) return;
     if (generator === 'listed') {
       drawListedCard(ctx, {
         theme: cardTheme,
-        photo: avatar,
+        photo: selectedAssets.photo,
         logo,
         name: selected.name,
         startUsd: selected.price.startUsd ?? selected.price.usd,
@@ -340,10 +408,9 @@ export function XPhotoSection() {
     if (generator === 'change') {
       drawChangeCard(ctx, {
         theme: cardTheme,
-        photo: avatar,
+        photo: selectedAssets.photo,
         logo,
         name: selected.name,
-        // Same floor the strip applies, so a quiet market still draws a living line.
         changePct: displayChangePct(rawPct, selected.ticker),
         fromUsd: series.length >= 2 ? series[0].value : null,
         nowUsd,
@@ -360,10 +427,10 @@ export function XPhotoSection() {
       priceUsd: nowUsd,
       changePct: rawPct,
       series,
-      avatar,
+      avatar: selectedAssets.photo,
       logo,
     });
-  }, [selected, series, avatar, logo, rawPct, nowUsd, generator, cardTheme, cta]);
+  }, [selected, selectedAssets.photo, series, movers, assets, logo, rawPct, nowUsd, generator, cardTheme, cta]);
 
   const exportW = isCard ? CARD_W * cardScale : XPHOTO_EXPORT_W * stripScale;
   const exportH = isCard ? CARD_H * cardScale : XPHOTO_EXPORT_H * stripScale;
@@ -379,19 +446,30 @@ export function XPhotoSection() {
   }, []);
   useEffect(() => () => { if (copyTimer.current) clearTimeout(copyTimer.current); }, []);
 
+  const hasSubject = isMovers ? movers.length > 0 : !!selected;
+  const moversLoading = movers.some(t => assets[t.ticker]?.loading ?? true);
+  // The listing card has no chart, so it never waits on the history.
+  const waiting = isMovers ? moversLoading : (!isListed && selectedAssets.loading);
+  const canDownload = hasSubject && fontsReady && !waiting && !exporting;
+
   const handleDownload = () => {
     const canvas = canvasRef.current;
-    if (!canvas || !selected || exporting) return;
+    if (!canvas || !hasSubject || exporting) return;
     // Copy first, while the click's user activation still covers the clipboard.
-    void copyProfileLink(selected);
+    // Movers has no single profile to copy.
+    if (selected && !isMovers) void copyProfileLink(selected);
     setExporting(true);
     draw();
     canvas.toBlob(blob => {
       setExporting(false);
       if (!blob) return;
-      const suffix = generator === 'listed' ? 'new-listing' : generator === 'change' ? 'price-change' : 'x-photo';
       const theme = isCard && cardTheme === 'light' ? '-light' : '';
-      triggerDownload(blob, `${safeFile(selected.name)}-${selected.ticker.toLowerCase()}-${suffix}${theme}.png`);
+      const name = isMovers
+        ? `movers-${movers.map(t => t.ticker.toLowerCase()).join('-')}${theme}.png`
+        : `${safeFile(selected!.name)}-${selected!.ticker.toLowerCase()}-${
+            generator === 'listed' ? 'new-listing' : generator === 'change' ? 'price-change' : 'x-photo'
+          }${theme}.png`;
+      triggerDownload(blob, name);
     }, 'image/png');
   };
 
@@ -403,20 +481,23 @@ export function XPhotoSection() {
     else if (e.key === 'Escape') { setOpen(false); }
   };
 
-  const isListed = generator === 'listed';
   const firstTs = series.length ? series[0].timestamp : null;
-  // The listing card has no chart, so it never waits on the history.
-  const canDownload = !!selected && fontsReady && (isListed || !seriesLoading) && !exporting;
   const blurb = GENERATORS.find(g => g.id === generator)?.blurb ?? '';
   const scaleOptions = isCard
     ? CARD_EXPORT_SCALES.map(k => ({ id: k, label: `${CARD_W * k}×${CARD_H * k}` }))
     : XPHOTO_EXPORT_SCALES.map(k => ({ id: k, label: `${XPHOTO_EXPORT_W * k}×${XPHOTO_EXPORT_H * k}` }));
 
-  const historyNote = seriesLoading
+  const historyNote = selectedAssets.loading
     ? 'Loading lifetime history…'
     : series.length > 1
       ? `Lifetime · ${series.length.toLocaleString()} points since ${firstTs ? formatCardDate(firstTs) : '—'}`
       : 'No price history yet — synthesized line';
+
+  const placeholder = isMovers
+    ? (movers.length >= MOVERS_MAX ? 'Three picked — remove one to swap' : `Pick ${MOVERS_MAX - movers.length} ${movers.length ? 'more' : 'people'} — name, ticker or industry…`)
+    : isListed
+      ? 'Newest listings first — or search a name, ticker or industry…'
+      : 'Search anyone on Pauv — name, ticker or industry…';
 
   return (
     <div className="flex h-screen flex-col bg-black text-white">
@@ -457,7 +538,7 @@ export function XPhotoSection() {
               data-xphoto-download=""
               onClick={handleDownload}
               disabled={!canDownload}
-              title={selected ? `Downloads the PNG and copies ${profileUrl(selected)}` : undefined}
+              title={selected && !isMovers ? `Downloads the PNG and copies ${profileUrl(selected)}` : undefined}
               className="flex items-center gap-2 h-9 px-4 rounded-md text-xs font-semibold bg-emerald-500 text-black hover:bg-emerald-400 transition-colors disabled:opacity-30 disabled:cursor-not-allowed"
             >
               {exporting ? <SpinnerIcon size={14} className="animate-spin" /> : <DownloadIcon size={14} />}
@@ -482,9 +563,7 @@ export function XPhotoSection() {
                 onChange={e => { setQuery(e.target.value); setOpen(true); setHighlight(0); }}
                 onFocus={() => { setOpen(true); setHighlight(0); }}
                 onKeyDown={onKeyDown}
-                placeholder={isListed
-                  ? 'Newest listings first — or search a name, ticker or industry…'
-                  : 'Search anyone on Pauv — name, ticker or industry…'}
+                placeholder={placeholder}
                 className="flex-1 min-w-0 bg-transparent text-sm text-zinc-100 placeholder-zinc-600 outline-none"
                 autoComplete="off"
                 spellCheck={false}
@@ -512,6 +591,7 @@ export function XPhotoSection() {
                       // Same floor the strip applies, so the list agrees with the card.
                       const pct = displayChangePct(rosterLifetimePct(t), t.ticker);
                       const listed = listedMs(t);
+                      const picked = isMovers && movers.some(m => m.id === t.id);
                       return (
                         <button
                           key={t.id}
@@ -519,7 +599,7 @@ export function XPhotoSection() {
                           onMouseDown={ev => ev.preventDefault()}
                           onMouseEnter={() => setHighlight(i)}
                           onClick={() => choose(t)}
-                          className={`w-full flex items-center gap-3 px-3 py-2 text-left transition-colors ${i === highlight ? 'bg-zinc-800' : 'hover:bg-zinc-800/60'}`}
+                          className={`w-full flex items-center gap-3 px-3 py-2 text-left transition-colors ${i === highlight ? 'bg-zinc-800' : 'hover:bg-zinc-800/60'} ${picked ? 'opacity-40' : ''}`}
                         >
                           {t.photo_url ? (
                             // eslint-disable-next-line @next/next/no-img-element
@@ -530,7 +610,7 @@ export function XPhotoSection() {
                             </div>
                           )}
                           <div className="flex-1 min-w-0">
-                            <p className="text-sm text-zinc-100 truncate">{t.name}</p>
+                            <p className="text-sm text-zinc-100 truncate">{t.name}{picked ? ' · picked' : ''}</p>
                             {t.industry && <p className="text-[11px] text-zinc-500 truncate">{t.industry}</p>}
                           </div>
                           <div className="text-right shrink-0">
@@ -557,8 +637,41 @@ export function XPhotoSection() {
             )}
           </div>
 
+          {/* Movers: the three slots, in card order. */}
+          {isMovers && (
+            <div className="flex items-center gap-2 flex-wrap text-[11px] text-zinc-500">
+              {movers.map((t, i) => (
+                <span key={t.id} className="flex items-center gap-2 pl-1 pr-2 h-8 rounded-full bg-zinc-900 border border-zinc-800 text-xs text-zinc-200">
+                  {t.photo_url ? (
+                    // eslint-disable-next-line @next/next/no-img-element
+                    <img src={t.photo_url} alt="" className="w-6 h-6 rounded-full object-cover bg-zinc-800" />
+                  ) : (
+                    <span className="w-6 h-6 rounded-full bg-zinc-800 flex items-center justify-center text-[10px] font-bold text-zinc-400">{t.name.charAt(0).toUpperCase()}</span>
+                  )}
+                  <span className="text-zinc-500 tabular-nums">{i + 1}</span>
+                  <span>{t.name}</span>
+                  {assets[t.ticker]?.loading && <SpinnerIcon size={11} className="animate-spin text-zinc-500" />}
+                  <button
+                    type="button"
+                    onClick={() => removeMover(t)}
+                    aria-label={`Remove ${t.name}`}
+                    className="text-zinc-500 hover:text-zinc-200 transition-colors"
+                  >
+                    ×
+                  </button>
+                </span>
+              ))}
+              {movers.length < MOVERS_MAX && (
+                <span>{movers.length ? `${MOVERS_MAX - movers.length} more to go` : 'Pick three people — they read left to right in this order.'}</span>
+              )}
+              {movers.length > 0 && (
+                <button type="button" onClick={() => setMovers([])} className="ml-auto text-zinc-500 hover:text-zinc-200 transition-colors">Clear</button>
+              )}
+            </div>
+          )}
+
           {/* Preview */}
-          {selected ? (
+          {hasSubject ? (
             <div className="flex flex-col gap-3">
               <div className={`rounded-xl bg-zinc-950 border border-zinc-900 p-4 ${isCard ? 'w-full max-w-[880px] mx-auto' : ''}`}>
                 {/* Keyed on the generator so a switch remounts the canvas at its size. */}
@@ -574,35 +687,43 @@ export function XPhotoSection() {
               </div>
               <div className="flex items-center justify-between gap-4 text-[11px] text-zinc-500">
                 <div className="flex items-center gap-3 min-w-0">
-                  <span className="text-zinc-300 truncate">{selected.name}</span>
-                  <span className="font-mono text-zinc-500">{selected.ticker.toUpperCase()}</span>
-                  <button
-                    type="button"
-                    onClick={() => void copyProfileLink(selected)}
-                    title="Copy profile link"
-                    className="flex items-center gap-1 text-zinc-400 hover:text-zinc-200 transition-colors"
-                  >
-                    <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                      <rect x="9" y="9" width="13" height="13" rx="2" />
-                      <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1" />
-                    </svg>
-                    <span className="font-mono">{profileUrl(selected)}</span>
-                  </button>
-                  {isListed ? (
-                    // Market facts stay UNDER the card — the card is the part that leaves.
+                  {isMovers ? (
                     <span className="tabular-nums">
-                      {listedMs(selected) ? `Listed ${formatCardDate(listedMs(selected))}` : 'Listing date unknown'}
-                      {' · '}
-                      {(selected.price.startUsd ?? selected.price.usd) != null ? `Starting ${formatUsd((selected.price.startUsd ?? selected.price.usd)!)}` : 'No starting price'}
-                      {' · '}
-                      {selected.price.holders ?? 0} holders
+                      {moversLoading ? 'Loading photos and histories…' : `${movers.length} of ${MOVERS_MAX} picked · lifetime change and price for each`}
                     </span>
-                  ) : (
-                    <span className="tabular-nums">{historyNote}</span>
+                  ) : selected && (
+                    <>
+                      <span className="text-zinc-300 truncate">{selected.name}</span>
+                      <span className="font-mono text-zinc-500">{selected.ticker.toUpperCase()}</span>
+                      <button
+                        type="button"
+                        onClick={() => void copyProfileLink(selected)}
+                        title="Copy profile link"
+                        className="flex items-center gap-1 text-zinc-400 hover:text-zinc-200 transition-colors"
+                      >
+                        <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                          <rect x="9" y="9" width="13" height="13" rx="2" />
+                          <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1" />
+                        </svg>
+                        <span className="font-mono">{profileUrl(selected)}</span>
+                      </button>
+                      {isListed ? (
+                        // Market facts stay UNDER the card — the card is the part that leaves.
+                        <span className="tabular-nums">
+                          {listedMs(selected) ? `Listed ${formatCardDate(listedMs(selected))}` : 'Listing date unknown'}
+                          {' · '}
+                          {(selected.price.startUsd ?? selected.price.usd) != null ? `Starting ${formatUsd((selected.price.startUsd ?? selected.price.usd)!)}` : 'No starting price'}
+                          {' · '}
+                          {selected.price.holders ?? 0} holders
+                        </span>
+                      ) : (
+                        <span className="tabular-nums">{historyNote}</span>
+                      )}
+                    </>
                   )}
                 </div>
                 <div className="flex items-center gap-4 shrink-0">
-                  {isListed && (
+                  {(isListed || isMovers) && (
                     <label className="flex items-center gap-1.5">
                       <span>CTA</span>
                       <input
@@ -642,6 +763,14 @@ export function XPhotoSection() {
                     <path d="M5 15l4-4 3 3 5-6" />
                     <path d="M14 8h3v3" />
                   </svg>
+                ) : isMovers ? (
+                  <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" className="text-zinc-500">
+                    <rect x="2" y="4" width="20" height="16" rx="3" />
+                    <circle cx="7" cy="10" r="2" />
+                    <circle cx="12" cy="10" r="2" />
+                    <circle cx="17" cy="10" r="2" />
+                    <path d="M5 16h4M10 16h4M15 16h4" />
+                  </svg>
                 ) : (
                   <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" className="text-zinc-500">
                     <rect x="2" y="6" width="20" height="12" rx="4" />
@@ -651,14 +780,22 @@ export function XPhotoSection() {
                 )}
               </div>
               <p className="text-sm font-medium text-zinc-400">
-                {isListed ? 'Pick someone to announce their listing' : generator === 'change' ? 'Pick someone to call out their move' : 'Pick someone to build their strip'}
+                {isListed
+                  ? 'Pick someone to announce their listing'
+                  : generator === 'change'
+                    ? 'Pick someone to call out their move'
+                    : isMovers
+                      ? 'Pick three movers'
+                      : 'Pick someone to build their strip'}
               </p>
               <p className="text-xs text-zinc-600">
                 {isListed
                   ? 'Photo · NEW LISTING · name · starting price · call to action — 3:2, light or dark.'
                   : generator === 'change'
                     ? 'Photo · UP or DOWN · name · how far they have moved · their Pauv chart — 3:2, light or dark.'
-                    : 'Avatar · name · ticker · price · lifetime chart — ready to download.'}
+                    : isMovers
+                      ? 'Three faces · names · industries · sparklines · change and price — 3:2, light or dark.'
+                      : 'Avatar · name · ticker · price · lifetime chart — ready to download.'}
               </p>
             </div>
           )}

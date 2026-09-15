@@ -106,7 +106,7 @@ function usable(img: HTMLImageElement | null): img is HTMLImageElement {
 
 /** Cover-crop `img` into the box, biased upward — these are head shots, and a
  *  dead-centre crop tends to cut the top of the head. */
-function drawCover(ctx: CanvasRenderingContext2D, img: HTMLImageElement, x: number, y: number, w: number, h: number) {
+export function drawCover(ctx: CanvasRenderingContext2D, img: HTMLImageElement, x: number, y: number, w: number, h: number) {
   const scale = Math.max(w / img.naturalWidth, h / img.naturalHeight);
   const dw = img.naturalWidth * scale;
   const dh = img.naturalHeight * scale;
