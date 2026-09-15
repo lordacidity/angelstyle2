@@ -42,8 +42,7 @@ const LOCKUP_BASELINE = 214;
 const NAME_BASELINE = 300;
 const HERO_BASELINE = 404;
 const CAPTION_BASELINE = 446;
-// The chart's soft fill runs 40 below its box (drawChart's own bottom pad),
-// so the box stops well short of the footnote rule at 670.
+// The chart box stops well short of the footnote rule at 670.
 const CHART_TOP = 486;
 const CHART_H = 134;
 
@@ -88,6 +87,7 @@ export function drawChangeCard(ctx: CanvasRenderingContext2D, d: ChangeCardData)
   const f = beginCard(ctx, {
     theme: d.theme,
     photo: d.photo,
+    photoCrop: d.photoCrop,
     logo: d.logo,
     headerRight: formatCardDate(d.asOf),
   });

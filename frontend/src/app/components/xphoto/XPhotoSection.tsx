@@ -19,10 +19,13 @@ import {
   XPHOTO_EXPORT_W, XPHOTO_EXPORT_H, XPHOTO_EXPORT_SCALES,
   type XPhotoExportScale, type XPhotoPoint,
 } from './render';
-import { CARD_W, CARD_H, CARD_EXPORT_SCALES, formatCardDate, type CardExportScale } from './card';
+import {
+  CARD_W, CARD_H, CARD_EXPORT_SCALES, DEFAULT_CROP, MAX_ZOOM, PHOTO_RECT, coverGeometry, formatCardDate,
+  type CardExportScale, type PhotoCrop, type PhotoRect,
+} from './card';
 import { drawListedCard } from './renderListed';
 import { drawChangeCard } from './renderChange';
-import { drawMoversCard, MOVERS_MAX } from './renderMovers';
+import { drawMoversCard, moverPhotoRect, MOVERS_MAX } from './renderMovers';
 import type { CardTheme } from './shared';
 
 interface Talent {
@@ -220,6 +223,12 @@ export function XPhotoSection() {
   const [cardScale, setCardScale] = useState<CardExportScale>(2);
   const [cardTheme, setCardTheme] = useState<CardTheme>('dark');
   const [cta, setCta] = useState(DEFAULT_CTA);
+  // Photo placement per ticker (drag to pan, scroll to zoom, double-click to
+  // reset); absent → the default crop. Kept for the session, like assets.
+  const [crops, setCrops] = useState<Record<string, PhotoCrop>>({});
+  const [hoverPhoto, setHoverPhoto] = useState(false);
+  const [dragging, setDragging] = useState(false);
+  const dragRef = useRef<{ ticker: string; rect: PhotoRect; img: HTMLImageElement; lastX: number; lastY: number } | null>(null);
   const [fontsReady, setFontsReady] = useState(false);
   const [exporting, setExporting] = useState(false);
   // Transient "Copied …" / "Couldn't copy" notice next to the Download button.
@@ -364,6 +373,94 @@ export function XPhotoSection() {
   const rawPct = selected ? lifetimePct(selected, series) : null;
   const nowUsd = selected ? nowUsdOf(selected, series) : null;
 
+  // ── photo placement on the 3:2 cards ─────────────────────────────────
+  // Pointer position → design units on the card (the canvas is CSS-scaled).
+  const toDesign = (canvas: HTMLCanvasElement, e: { clientX: number; clientY: number }) => {
+    const r = canvas.getBoundingClientRect();
+    return { x: ((e.clientX - r.left) / r.width) * CARD_W, y: ((e.clientY - r.top) / r.height) * CARD_H };
+  };
+  // Which photo, if any, sits under a design-unit point on the current card.
+  const photoAt = useCallback((x: number, y: number): { ticker: string; rect: PhotoRect; img: HTMLImageElement } | null => {
+    const inside = (r: PhotoRect) => x >= r.x && x < r.x + r.w && y >= r.y && y < r.y + r.h;
+    if (generator === 'movers') {
+      for (let i = 0; i < movers.length; i++) {
+        const rect = moverPhotoRect(i);
+        const img = assets[movers[i].ticker]?.photo;
+        if (img && inside(rect)) return { ticker: movers[i].ticker, rect, img };
+      }
+      return null;
+    }
+    if ((generator === 'listed' || generator === 'change') && selected && selectedAssets.photo && inside(PHOTO_RECT)) {
+      return { ticker: selected.ticker, rect: PHOTO_RECT, img: selectedAssets.photo };
+    }
+    return null;
+  }, [generator, movers, assets, selected, selectedAssets.photo]);
+
+  const onCanvasPointerDown = (e: React.PointerEvent<HTMLCanvasElement>) => {
+    const p = toDesign(e.currentTarget, e);
+    const hit = photoAt(p.x, p.y);
+    if (!hit) return;
+    e.preventDefault();
+    e.currentTarget.setPointerCapture(e.pointerId);
+    dragRef.current = { ...hit, lastX: p.x, lastY: p.y };
+    setDragging(true);
+  };
+  const onCanvasPointerMove = (e: React.PointerEvent<HTMLCanvasElement>) => {
+    const p = toDesign(e.currentTarget, e);
+    const d = dragRef.current;
+    if (!d) { setHoverPhoto(!!photoAt(p.x, p.y)); return; }
+    const dx = p.x - d.lastX, dy = p.y - d.lastY;
+    d.lastX = p.x;
+    d.lastY = p.y;
+    // The photo follows the pointer 1:1: a design-unit of drag is a
+    // design-unit of image, expressed as a fraction of the cover overflow.
+    setCrops(c => {
+      const cur = c[d.ticker] ?? DEFAULT_CROP;
+      const { dw, dh } = coverGeometry(d.img, d.rect.w, d.rect.h, cur.zoom);
+      const ox = dw - d.rect.w, oy = dh - d.rect.h;
+      const clamp01 = (v: number) => Math.min(1, Math.max(0, v));
+      return {
+        ...c,
+        [d.ticker]: {
+          ...cur,
+          px: ox > 0 ? clamp01(cur.px - dx / ox) : cur.px,
+          py: oy > 0 ? clamp01(cur.py - dy / oy) : cur.py,
+        },
+      };
+    });
+  };
+  const onCanvasPointerUp = (e: React.PointerEvent<HTMLCanvasElement>) => {
+    if (!dragRef.current) return;
+    e.currentTarget.releasePointerCapture(e.pointerId);
+    dragRef.current = null;
+    setDragging(false);
+  };
+  const onCanvasDoubleClick = (e: React.MouseEvent<HTMLCanvasElement>) => {
+    const p = toDesign(e.currentTarget, e);
+    const hit = photoAt(p.x, p.y);
+    if (!hit) return;
+    setCrops(c => { const next = { ...c }; delete next[hit.ticker]; return next; });
+  };
+  // Wheel zoom over a photo. A native listener, because React's onWheel is
+  // passive and could not stop the page from scrolling under the card.
+  useEffect(() => {
+    const canvas = canvasRef.current;
+    if (!canvas || generator === 'strip') return;
+    const onWheel = (e: WheelEvent) => {
+      const p = toDesign(canvas, e);
+      const hit = photoAt(p.x, p.y);
+      if (!hit) return;
+      e.preventDefault();
+      const factor = e.deltaY < 0 ? 1.1 : 1 / 1.1;
+      setCrops(c => {
+        const cur = c[hit.ticker] ?? DEFAULT_CROP;
+        return { ...c, [hit.ticker]: { ...cur, zoom: Math.min(MAX_ZOOM, Math.max(1, cur.zoom * factor)) } };
+      });
+    };
+    canvas.addEventListener('wheel', onWheel, { passive: false });
+    return () => canvas.removeEventListener('wheel', onWheel);
+  }, [generator, photoAt]);
+
   const draw = useCallback(() => {
     const canvas = canvasRef.current;
     const ctx = canvas?.getContext('2d');
@@ -386,6 +483,7 @@ export function XPhotoSection() {
             series: a.series,
             seedKey: t.ticker,
             photo: a.photo,
+            crop: crops[t.ticker],
           };
         }),
       });
@@ -396,6 +494,7 @@ export function XPhotoSection() {
       drawListedCard(ctx, {
         theme: cardTheme,
         photo: selectedAssets.photo,
+        photoCrop: crops[selected.ticker],
         logo,
         name: selected.name,
         startUsd: selected.price.startUsd ?? selected.price.usd,
@@ -409,6 +508,7 @@ export function XPhotoSection() {
       drawChangeCard(ctx, {
         theme: cardTheme,
         photo: selectedAssets.photo,
+        photoCrop: crops[selected.ticker],
         logo,
         name: selected.name,
         changePct: displayChangePct(rawPct, selected.ticker),
@@ -430,7 +530,7 @@ export function XPhotoSection() {
       avatar: selectedAssets.photo,
       logo,
     });
-  }, [selected, selectedAssets.photo, series, movers, assets, logo, rawPct, nowUsd, generator, cardTheme, cta]);
+  }, [selected, selectedAssets.photo, series, movers, assets, crops, logo, rawPct, nowUsd, generator, cardTheme, cta]);
 
   const exportW = isCard ? CARD_W * cardScale : XPHOTO_EXPORT_W * stripScale;
   const exportH = isCard ? CARD_H * cardScale : XPHOTO_EXPORT_H * stripScale;
@@ -681,8 +781,18 @@ export function XPhotoSection() {
                   data-xphoto-canvas=""
                   width={exportW}
                   height={exportH}
+                  onPointerDown={isCard ? onCanvasPointerDown : undefined}
+                  onPointerMove={isCard ? onCanvasPointerMove : undefined}
+                  onPointerUp={isCard ? onCanvasPointerUp : undefined}
+                  onPointerCancel={isCard ? onCanvasPointerUp : undefined}
+                  onPointerLeave={() => { if (!dragRef.current) setHoverPhoto(false); }}
+                  onDoubleClick={isCard ? onCanvasDoubleClick : undefined}
                   className="block w-full h-auto"
-                  style={{ aspectRatio: `${exportW} / ${exportH}` }}
+                  style={{
+                    aspectRatio: `${exportW} / ${exportH}`,
+                    cursor: dragging ? 'grabbing' : hoverPhoto ? 'grab' : undefined,
+                    touchAction: isCard ? 'none' : undefined,
+                  }}
                 />
               </div>
               <div className="flex items-center justify-between gap-4 text-[11px] text-zinc-500">
@@ -720,6 +830,9 @@ export function XPhotoSection() {
                         <span className="tabular-nums">{historyNote}</span>
                       )}
                     </>
+                  )}
+                  {isCard && (
+                    <span className="text-zinc-600 truncate">Drag a photo to reposition · scroll to zoom · double-click to reset</span>
                   )}
                 </div>
                 <div className="flex items-center gap-4 shrink-0">

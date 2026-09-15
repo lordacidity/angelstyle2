@@ -290,18 +290,7 @@ function drawChart(ctx: CanvasRenderingContext2D, seriesIn: XPhotoPoint[], x: nu
     ctx.lineTo(pts[pts.length - 1].x, pts[pts.length - 1].y);
   };
 
-  // Soft fill under the line so the strip reads as a chart, not a squiggle.
-  const fillBottom = y + h + CHART_BOTTOM_PAD * weight;
-  tracePath();
-  ctx.lineTo(pts[pts.length - 1].x, fillBottom);
-  ctx.lineTo(pts[0].x, fillBottom);
-  ctx.closePath();
-  const grad = ctx.createLinearGradient(0, y, 0, fillBottom);
-  grad.addColorStop(0, `${color}38`);
-  grad.addColorStop(1, `${color}00`);
-  ctx.fillStyle = grad;
-  ctx.fill();
-
+  // Just the line — no fill under it (by request); the end marker carries "now".
   tracePath();
   ctx.strokeStyle = color;
   ctx.lineWidth = lineW;
@@ -324,7 +313,7 @@ function drawChart(ctx: CanvasRenderingContext2D, seriesIn: XPhotoPoint[], x: nu
 /**
  * Cleans, thins and dresses `series`, then draws it in the box — the strip's
  * own chart, for any card that wants the same line (see ./renderChange.ts).
- * The soft fill runs CHART_BOTTOM_PAD below the box.
+ * `weight` scales the stroke and the end marker for smaller boxes.
  */
 export function drawDressedChart(
   ctx: CanvasRenderingContext2D, series: XPhotoPoint[], key: string, pct: number,

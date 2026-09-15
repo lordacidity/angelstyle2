@@ -60,6 +60,7 @@ export function drawListedCard(ctx: CanvasRenderingContext2D, d: ListedCardData)
   const f = beginCard(ctx, {
     theme: d.theme,
     photo: d.photo,
+    photoCrop: d.photoCrop,
     logo: d.logo,
     headerRight: d.listedAt != null ? `Listed ${formatCardDate(d.listedAt)}` : null,
   });

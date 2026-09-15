@@ -5,19 +5,22 @@
 // header, footnote) is ./card.ts; the sparkline is the strip's own chart
 // routine from ./render.ts drawn at a lighter weight.
 //
-// Colour: the lockup carries the brand accent; each mover's change and line
-// take green or red for their own direction. Everything else is grey.
+// Colour: the headline is plain text (only NEW LISTING and UP/DOWN get the
+// accent, by rule); each mover's change and line take green or red for their
+// own direction. Everything else is grey.
 
 import { drawDressedChart, formatPct, formatUsd, type XPhotoPoint } from './render';
 import {
   beginCard, endCard, drawCover, drawFootnote, drawLockup, ellipsize, fillTracked, fitFontSize, font,
-  formatCardDate, PAD, RIGHT, type CardChrome,
+  formatCardDate, PAD, RIGHT, type CardChrome, type PhotoCrop, type PhotoRect,
 } from './card';
 import { MONO, SANS } from './shared';
 
 export interface Mover {
   name: string;
   industry: string | null;
+  /** Where the photo sits in its tile. Omitted → DEFAULT_CROP. */
+  crop?: PhotoCrop;
   /** Lifetime change in percent — already floored by displayChangePct. */
   changePct: number;
   nowUsd: number | null;
@@ -52,11 +55,16 @@ const NAME_BASELINE = PHOTO_TOP + PHOTO_H + 44;
 const INDUSTRY_BASELINE = NAME_BASELINE + 30;
 const CHART_TOP = INDUSTRY_BASELINE + 14;
 const CHART_H = 48;
-// The sparkline's fill runs 40 × CHART_WEIGHT below its box and stops just
-// above the figure's cap height; the figure sits above the footnote rule at 670.
+// Thinner stroke and marker for the small box; the figure sits under the
+// sparkline, above the footnote rule at 670.
 const CHART_WEIGHT = 0.6;
 const FIGURE_BASELINE = 640;
 const FIGURE_GAP = 16;
+
+/** The i-th mover's photo tile — where the studio lets the user drag it. */
+export function moverPhotoRect(i: number): PhotoRect {
+  return { x: PAD + i * (COL_W + GAP), y: PHOTO_TOP, w: COL_W, h: PHOTO_H };
+}
 
 function initialsFor(name: string): string {
   const parts = name.trim().split(/\s+/).filter(Boolean);
@@ -76,18 +84,19 @@ export function drawMoversCard(ctx: CanvasRenderingContext2D, d: MoversCardData)
   });
   const { C } = f;
 
-  // No glyph: movers go both ways, so neither arrow would be honest.
-  drawLockup(f, LOCKUP, LOCKUP_BASELINE, C.up, () => undefined);
+  // Plain headline, no glyph: movers go both ways, so neither arrow would be
+  // honest and the accent is reserved for NEW LISTING and UP/DOWN.
+  drawLockup(f, LOCKUP, LOCKUP_BASELINE, C.primary, () => undefined);
 
   d.movers.slice(0, MOVERS_MAX).forEach((m, i) => {
-    const x = PAD + i * (COL_W + GAP);
+    const { x } = moverPhotoRect(i);
     const up = m.changePct >= 0;
     const accent = up ? C.up : C.down;
 
     // Photo tile — a landscape crop of the head shot, hairlined so it keeps
     // an edge on the light card.
     if (m.photo && m.photo.naturalWidth > 0 && m.photo.naturalHeight > 0) {
-      drawCover(ctx, m.photo, x, PHOTO_TOP, COL_W, PHOTO_H);
+      drawCover(ctx, m.photo, x, PHOTO_TOP, COL_W, PHOTO_H, m.crop);
     } else {
       ctx.fillStyle = C.hairline;
       ctx.fillRect(x, PHOTO_TOP, COL_W, PHOTO_H);

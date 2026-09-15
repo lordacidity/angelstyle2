@@ -45,11 +45,27 @@ export interface CardFrame {
   COL: number;
 }
 
+/** A box on the card, in design units. */
+export interface PhotoRect { x: number; y: number; w: number; h: number }
+
+/**
+ * How a photo sits in its box: `px` / `py` pick which part of the cover-fit
+ * overflow shows (0 = left/top edge, 1 = right/bottom edge) and `zoom` scales
+ * beyond cover-fit. The studio lets the user drag and scroll these.
+ */
+export interface PhotoCrop { px: number; py: number; zoom: number }
+/** Centred, biased upward — these are head shots, and a dead-centre crop
+ *  tends to cut the top of the head. */
+export const DEFAULT_CROP: PhotoCrop = { px: 0.5, py: 0.35, zoom: 1 };
+export const MAX_ZOOM = 4;
+
 /** What every card has around its middle. */
 export interface CardChrome {
   theme: CardTheme;
   /** Pre-loaded, CORS-clean photo. null → full-width text layout. */
   photo: HTMLImageElement | null;
+  /** Where the photo sits in its column. Omitted → DEFAULT_CROP. */
+  photoCrop?: PhotoCrop;
   /** Pre-loaded /pauvlogo.png (white wordmark on transparent). null → no wordmark. */
   logo: HTMLImageElement | null;
   /** Small right-aligned line beside the wordmark (a dateline). null → none. */
@@ -104,19 +120,28 @@ function usable(img: HTMLImageElement | null): img is HTMLImageElement {
   return !!img && img.naturalWidth > 0 && img.naturalHeight > 0;
 }
 
-/** Cover-crop `img` into the box, biased upward — these are head shots, and a
- *  dead-centre crop tends to cut the top of the head. */
-export function drawCover(ctx: CanvasRenderingContext2D, img: HTMLImageElement, x: number, y: number, w: number, h: number) {
-  const scale = Math.max(w / img.naturalWidth, h / img.naturalHeight);
-  const dw = img.naturalWidth * scale;
-  const dh = img.naturalHeight * scale;
+/** Drawn size of `img` cover-fitted to a w×h box at `zoom`; the overflow
+ *  (dw − w, dh − h) is what a crop's px/py pan across. */
+export function coverGeometry(img: HTMLImageElement, w: number, h: number, zoom = 1) {
+  const scale = Math.max(w / img.naturalWidth, h / img.naturalHeight) * zoom;
+  return { dw: img.naturalWidth * scale, dh: img.naturalHeight * scale };
+}
+
+/** Cover-crop `img` into the box, panned and zoomed per `crop`. */
+export function drawCover(
+  ctx: CanvasRenderingContext2D, img: HTMLImageElement, x: number, y: number, w: number, h: number, crop: PhotoCrop = DEFAULT_CROP,
+) {
+  const { dw, dh } = coverGeometry(img, w, h, crop.zoom);
   ctx.save();
   ctx.beginPath();
   ctx.rect(x, y, w, h);
   ctx.clip();
-  ctx.drawImage(img, x - (dw - w) / 2, y - (dh - h) * 0.35, dw, dh);
+  ctx.drawImage(img, x - (dw - w) * crop.px, y - (dh - h) * crop.py, dw, dh);
   ctx.restore();
 }
+
+/** The photo column's box — where the studio lets the user drag the photo. */
+export const PHOTO_RECT: PhotoRect = { x: 0, y: 0, w: PHOTO_W, h: CARD_H };
 
 /**
  * Clears the canvas, scales to design units and draws everything around the
@@ -146,7 +171,7 @@ export function beginCard(ctx: CanvasRenderingContext2D, chrome: CardChrome): Ca
   ctx.fillRect(0, 0, CARD_W, CARD_H);
 
   if (photo) {
-    drawCover(ctx, photo, 0, 0, PHOTO_W, CARD_H);
+    drawCover(ctx, photo, 0, 0, PHOTO_W, CARD_H, chrome.photoCrop);
     ctx.fillStyle = C.hairline;
     ctx.fillRect(PHOTO_W, 0, 1, CARD_H);
   }
