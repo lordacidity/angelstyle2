@@ -15,20 +15,39 @@ function getClient() {
   );
 }
 
+// PostgREST caps every response at 1,000 rows. Pauv lists more people than
+// that, so a single name-ordered query silently dropped everyone after about
+// "Tom H" (Zendaya among them). Page through until a short page comes back.
+const PAGE = 1000;
+
+async function fetchAll<T>(
+  page: (from: number, to: number) => PromiseLike<{ data: T[] | null; error: { message: string } | null }>,
+): Promise<T[]> {
+  const rows: T[] = [];
+  for (let from = 0; ; from += PAGE) {
+    const { data, error } = await page(from, from + PAGE - 1);
+    if (error) throw new Error(error.message);
+    rows.push(...(data ?? []));
+    if (!data || data.length < PAGE) return rows;
+  }
+}
+
 export async function GET() {
   try {
     const sb = getClient();
-    const [{ data: profiles, error: pErr }, { data: markets, error: mErr }] = await Promise.all([
-      sb.from('profiles')
+    // Each query needs a unique ordering, or rows can shift between pages.
+    const [profiles, markets] = await Promise.all([
+      fetchAll((from, to) => sb.from('profiles')
         .select('id,ticker,name,bio,photo_url,industry,info_subcategory,info_location,claim_status')
         .is('delisted_at', null)
-        .order('name'),
-      sb.from('markets')
-        .select('profile_id,latest_price_cents,p0,holders_count,total_volume_lifetime_cents,latest_tick_at,frozen'),
+        .order('name')
+        .order('id')
+        .range(from, to)),
+      fetchAll((from, to) => sb.from('markets')
+        .select('profile_id,latest_price_cents,p0,holders_count,total_volume_lifetime_cents,latest_tick_at,frozen')
+        .order('profile_id')
+        .range(from, to)),
     ]);
-
-    if (pErr) throw new Error(pErr.message);
-    if (mErr) throw new Error(mErr.message);
 
     type ProfileRow = { id: string; ticker: string; name: string; bio: string | null; photo_url: string | null; industry: string | null; info_subcategory: string | null; info_location: string | null; claim_status: string | null };
     type MarketRow = { profile_id: string; latest_price_cents: number | null; p0: number | null; holders_count: number | null; total_volume_lifetime_cents: number | null; latest_tick_at: string | null; frozen: boolean | null };
