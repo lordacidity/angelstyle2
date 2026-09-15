@@ -62,8 +62,8 @@ const PHOTO_BOTTOM = PHOTO_TOP + PHOTO_H;
 // fade is front-loaded so the line has a near-solid ground under it while
 // the face above stays untouched.
 const FADE_H = 200;
-const CHART_H = 76;
-const CHART_BOTTOM_PAD = 24;
+const CHART_H = 64;
+const CHART_BOTTOM_PAD = 10;
 const CHART_TOP = PHOTO_BOTTOM - CHART_BOTTOM_PAD - CHART_H;
 const CHART_WEIGHT = 0.6;
 // Compact text block under each column.
