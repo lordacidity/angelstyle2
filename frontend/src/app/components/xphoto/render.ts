@@ -3,6 +3,8 @@
 // line. React-free so the section can call it for both the live preview and
 // the PNG export and get pixel-identical output.
 
+import { COLOR_CARD, COLOR_DOWN, COLOR_LOGO, COLOR_MUTED, COLOR_UP, COLOR_WHITE, SANS, drawTintedLogo } from './shared';
+
 export interface XPhotoPoint { value: number; timestamp: number }
 
 export interface XPhotoData {
@@ -29,17 +31,10 @@ export const XPHOTO_H = XPHOTO_EXPORT_H * 2;
 export const XPHOTO_EXPORT_SCALES = [1, 2, 4] as const;
 export type XPhotoExportScale = typeof XPHOTO_EXPORT_SCALES[number];
 
-const COLOR_CARD = '#0A0A0A';
-const COLOR_LOGO = '#A1A1AA';
-const COLOR_WHITE = '#FFFFFF';
-const COLOR_MUTED = '#71717A';
-const COLOR_UP = '#0CDF9D';
-const COLOR_DOWN = '#FF4B4B';
 const COLOR_FLAT = '#A1A1AA';
 const COLOR_AVATAR_BG = '#1E1E1E';
 const COLOR_AVATAR_BORDER = '#2A2A2A';
 const COLOR_AVATAR_INITIALS = '#52525B';
-const SANS = '"Inter", "Geist", system-ui, -apple-system, "Segoe UI", sans-serif';
 
 // Layout, in design px (1220×240). Square, opaque card that is the whole image.
 const AVATAR_D = 152;
@@ -184,24 +179,6 @@ function dressSeries(series: XPhotoPoint[], key: string, pct: number): XPhotoPoi
   });
 }
 
-// Recolour the white wordmark: draw it on an offscreen canvas at the target
-// pixel size, then 'source-in' fill so only the logo's own pixels take the tint.
-function drawTintedLogo(ctx: CanvasRenderingContext2D, logo: HTMLImageElement, x: number, y: number, w: number, h: number, color: string) {
-  const s = ctx.getTransform().a || 1;
-  const pw = Math.max(1, Math.round(w * s));
-  const ph = Math.max(1, Math.round(h * s));
-  const off = document.createElement('canvas');
-  off.width = pw;
-  off.height = ph;
-  const octx = off.getContext('2d');
-  if (!octx) return;
-  octx.drawImage(logo, 0, 0, pw, ph);
-  octx.globalCompositeOperation = 'source-in';
-  octx.fillStyle = color;
-  octx.fillRect(0, 0, pw, ph);
-  ctx.drawImage(off, x, y, w, h);
-}
-
 function font(weight: number, size: number) {
   return `${weight} ${size}px ${SANS}`;
 }
@@ -344,6 +321,19 @@ function drawChart(ctx: CanvasRenderingContext2D, seriesIn: XPhotoPoint[], x: nu
   ctx.fill();
 }
 
+/**
+ * Cleans, thins and dresses `series`, then draws it in the box — the strip's
+ * own chart, for any card that wants the same line (see ./renderChange.ts).
+ * The soft fill runs CHART_BOTTOM_PAD below the box.
+ */
+export function drawDressedChart(
+  ctx: CanvasRenderingContext2D, series: XPhotoPoint[], key: string, pct: number,
+  x: number, y: number, w: number, h: number, color: string,
+) {
+  const clean = thin(series.filter(p => Number.isFinite(p.value)), CHART_MAX_POINTS);
+  drawChart(ctx, dressSeries(clean, key, pct), x, y, w, h, color);
+}
+
 /** Draws the full strip. Expects ctx.canvas to be XPHOTO_W×XPHOTO_H times any uniform scale. */
 export function drawXPhoto(ctx: CanvasRenderingContext2D, data: XPhotoData) {
   const { canvas } = ctx;
@@ -409,8 +399,7 @@ export function drawXPhoto(ctx: CanvasRenderingContext2D, data: XPhotoData) {
   const chartX = textX + TEXT_MAX_W + CHART_GAP;
   const chartW = W - CHART_RIGHT_PAD - chartX;
   if (chartW > 40) {
-    const clean = thin(data.series.filter(p => Number.isFinite(p.value)), CHART_MAX_POINTS);
-    drawChart(ctx, dressSeries(clean, data.ticker, pct), chartX, CHART_TOP, chartW, H - CHART_BOTTOM_PAD - CHART_TOP, color);
+    drawDressedChart(ctx, data.series, data.ticker, pct, chartX, CHART_TOP, chartW, H - CHART_BOTTOM_PAD - CHART_TOP, color);
   }
 
   ctx.restore();

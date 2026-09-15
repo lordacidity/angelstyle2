@@ -1,8 +1,14 @@
 'use client';
 
-// X Photo — search anyone on Pauv, pick them, and get a long thin price strip
-// (avatar · name · ticker / price / lifetime change · lifetime chart) as a
-// downloadable PNG sized for posting on X. Drawing lives in ./render.ts.
+// X Photo — search anyone on Pauv, pick them, and get a downloadable PNG for
+// posting on X. Three generators share the one picker:
+//   · Price strip  — long thin ticker card (avatar · name · ticker / price /
+//                    lifetime change · lifetime chart). Drawing in ./render.ts.
+//   · Newly listed — 3:2 announcement card (photo · NEW LISTING · name ·
+//                    starting price · call to action). ./renderListed.ts.
+//   · Price change — 3:2 call-out of a big move (photo · UP/DOWN · name ·
+//                    lifetime change · chart · was/now). ./renderChange.ts.
+// The two 3:2 cards share a frame (./card.ts) and can be drawn light or dark.
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { DownloadIcon, SpinnerIcon } from '@/lib/icons';
@@ -11,6 +17,10 @@ import {
   XPHOTO_EXPORT_W, XPHOTO_EXPORT_H, XPHOTO_EXPORT_SCALES,
   type XPhotoExportScale, type XPhotoPoint,
 } from './render';
+import { CARD_W, CARD_H, CARD_EXPORT_SCALES, formatCardDate, type CardExportScale } from './card';
+import { drawListedCard } from './renderListed';
+import { drawChangeCard } from './renderChange';
+import type { CardTheme } from './shared';
 
 interface Talent {
   id: string;
@@ -18,17 +28,39 @@ interface Talent {
   name: string;
   photo_url: string | null;
   industry: string | null;
-  price: { usd: number | null; lifetimeChangePct: number | null };
+  /** profiles.created_at — when they went live on Pauv. */
+  listedAt: string | null;
+  price: { usd: number | null; startUsd: number | null; lifetimeChangePct: number | null; holders: number | null };
 }
 
+type Generator = 'strip' | 'listed' | 'change';
+
+const GENERATORS: { id: Generator; label: string; blurb: string }[] = [
+  { id: 'strip', label: 'Price strip', blurb: 'Search anyone on Pauv, pick them, download a long thin price strip for X.' },
+  { id: 'listed', label: 'Newly listed', blurb: 'Announce a fresh listing — photo, name, starting price, call to action. Newest listings first.' },
+  { id: 'change', label: 'Price change', blurb: 'Call out a big move — photo, UP or DOWN, how far they have moved, and their Pauv chart.' },
+];
+
+const THEMES: { id: CardTheme; label: string }[] = [
+  { id: 'dark', label: 'Dark' },
+  { id: 'light', label: 'Light' },
+];
+
+const DEFAULT_CTA = 'Forecast up or down';
 const MAX_RESULTS = 40;
-const FONT_LINK_ID = 'gfont-Inter-xphoto';
+const FONT_LINK_ID = 'gfont-xphoto';
 // No scheme on purpose — the copied text is the bare "pauv.com/profile/<ticker>".
 const PROFILE_URL_BASE = 'pauv.com/profile/';
 const COPIED_TOAST_MS = 2500;
 
 function profileUrl(t: { ticker: string }): string {
   return PROFILE_URL_BASE + t.ticker.toLowerCase();
+}
+
+// Listing time as epoch ms; 0 when unknown so a sort still has a number.
+function listedMs(t: Talent): number {
+  const ms = t.listedAt ? new Date(t.listedAt).getTime() : NaN;
+  return Number.isFinite(ms) ? ms : 0;
 }
 
 async function copyText(text: string): Promise<boolean> {
@@ -40,21 +72,24 @@ async function copyText(text: string): Promise<boolean> {
   }
 }
 
-// The canvas draws with "Inter" by family name; next/font registers it under a
-// hashed name, so pull the real face from Google Fonts and wait for it.
-function loadInter(): Promise<void> {
+// The canvases draw with "Inter" / "JetBrains Mono" by family name; next/font
+// registers the app's copies under hashed names, so pull the real faces from
+// Google Fonts and wait for them before the first draw.
+function loadFonts(): Promise<void> {
   if (typeof document === 'undefined') return Promise.resolve();
   if (!document.getElementById(FONT_LINK_ID)) {
     const link = document.createElement('link');
     link.id = FONT_LINK_ID;
     link.rel = 'stylesheet';
-    link.href = 'https://fonts.googleapis.com/css2?family=Inter:wght@500;600;700&display=swap';
+    link.href = 'https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@500&display=swap';
     document.head.appendChild(link);
   }
   return Promise.all([
+    document.fonts.load('400 22px "Inter"'),
     document.fonts.load('500 30px "Inter"'),
     document.fonts.load('600 42px "Inter"'),
     document.fonts.load('700 30px "Inter"'),
+    document.fonts.load('500 104px "JetBrains Mono"'),
   ]).then(() => undefined, () => undefined);
 }
 
@@ -96,11 +131,37 @@ function scoreTalent(t: Talent, q: string): number {
   return -1;
 }
 
+// Small labelled pill group — the footer's Size / Window / Theme controls.
+function Segmented<T extends string | number>({ label, options, value, onChange }: {
+  label: string; options: readonly { id: T; label: string }[]; value: T; onChange: (id: T) => void;
+}) {
+  return (
+    <div className="flex items-center gap-1.5">
+      <span>{label}</span>
+      <div className="flex rounded-md border border-zinc-800 overflow-hidden">
+        {options.map(o => (
+          <button
+            key={o.id}
+            type="button"
+            onClick={() => onChange(o.id)}
+            className={`px-2 h-6 text-[10px] tabular-nums transition-colors ${
+              value === o.id ? 'bg-zinc-800 text-zinc-100' : 'text-zinc-500 hover:text-zinc-300'
+            }`}
+          >
+            {o.label}
+          </button>
+        ))}
+      </div>
+    </div>
+  );
+}
+
 export function XPhotoSection() {
   const [talents, setTalents] = useState<Talent[]>([]);
   const [talentsLoading, setTalentsLoading] = useState(false);
   const [talentsError, setTalentsError] = useState<string | null>(null);
 
+  const [generator, setGenerator] = useState<Generator>('strip');
   const [query, setQuery] = useState('');
   const [open, setOpen] = useState(false);
   const [highlight, setHighlight] = useState(0);
@@ -110,7 +171,10 @@ export function XPhotoSection() {
   const [seriesLoading, setSeriesLoading] = useState(false);
   const [avatar, setAvatar] = useState<HTMLImageElement | null>(null);
   const [logo, setLogo] = useState<HTMLImageElement | null>(null);
-  const [exportScale, setExportScale] = useState<XPhotoExportScale>(4);
+  const [stripScale, setStripScale] = useState<XPhotoExportScale>(4);
+  const [cardScale, setCardScale] = useState<CardExportScale>(2);
+  const [cardTheme, setCardTheme] = useState<CardTheme>('dark');
+  const [cta, setCta] = useState(DEFAULT_CTA);
   const [fontsReady, setFontsReady] = useState(false);
   const [exporting, setExporting] = useState(false);
   // Transient "Copied …" / "Couldn't copy" notice next to the Download button.
@@ -121,9 +185,11 @@ export function XPhotoSection() {
   const inputRef = useRef<HTMLInputElement>(null);
   const searchWrapRef = useRef<HTMLDivElement>(null);
   const listRef = useRef<HTMLDivElement>(null);
-  // Bumped on every selection so a slow history/avatar fetch for a previous
-  // pick can't overwrite the current one.
+  // Bumped on every selection so a slow avatar fetch for a previous pick
+  // can't overwrite the current one.
   const selectionSeq = useRef(0);
+
+  const isCard = generator === 'listed' || generator === 'change';
 
   const loadTalents = useCallback(async () => {
     setTalentsLoading(true);
@@ -141,10 +207,10 @@ export function XPhotoSection() {
   }, []);
 
   useEffect(() => { void loadTalents(); }, [loadTalents]);
-  useEffect(() => { let on = true; loadInter().then(() => { if (on) setFontsReady(true); }); return () => { on = false; }; }, []);
+  useEffect(() => { let on = true; loadFonts().then(() => { if (on) setFontsReady(true); }); return () => { on = false; }; }, []);
   useEffect(() => { inputRef.current?.focus(); }, []);
 
-  // Same-origin wordmark for the strip's top-right corner.
+  // Same-origin wordmark for the cards' Pauv logo.
   useEffect(() => {
     let on = true;
     const img = new Image();
@@ -154,7 +220,12 @@ export function XPhotoSection() {
     return () => { on = false; };
   }, []);
 
-  // Deep link: /x-photo?t=<ticker> preselects that person once the roster is in.
+  // Deep links: /x-photo?g=listed|change opens that generator; ?t=<ticker>
+  // preselects that person once the roster is in.
+  useEffect(() => {
+    const g = new URLSearchParams(window.location.search).get('g');
+    if (g === 'listed' || g === 'change') setGenerator(g);
+  }, []);
   const deepLinked = useRef(false);
   useEffect(() => {
     if (deepLinked.current || !talents.length) return;
@@ -166,16 +237,25 @@ export function XPhotoSection() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [talents]);
 
+  // The listing generator exists to announce whoever just went live, so with
+  // no query it lists the roster newest first (and breaks search ties the
+  // same way); the others keep the roster's name order.
   const results = useMemo(() => {
     const q = query.trim().toLowerCase();
-    if (!q) return talents.slice(0, MAX_RESULTS);
+    const byName = (a: Talent, b: Talent) => a.name.localeCompare(b.name);
+    const newestFirst = (a: Talent, b: Talent) => listedMs(b) - listedMs(a) || byName(a, b);
+    const tieBreak = generator === 'listed' ? newestFirst : byName;
+    if (!q) {
+      const base = generator === 'listed' ? [...talents].sort(newestFirst) : talents;
+      return base.slice(0, MAX_RESULTS);
+    }
     return talents
       .map(t => ({ t, s: scoreTalent(t, q) }))
       .filter(x => x.s >= 0)
-      .sort((a, b) => a.s - b.s || a.t.name.localeCompare(b.t.name))
+      .sort((a, b) => a.s - b.s || tieBreak(a.t, b.t))
       .slice(0, MAX_RESULTS)
       .map(x => x.t);
-  }, [talents, query]);
+  }, [talents, query, generator]);
 
   // Keep the highlighted row scrolled into view for keyboard navigation.
   useEffect(() => {
@@ -198,22 +278,8 @@ export function XPhotoSection() {
     setSelected(t);
     setOpen(false);
     setQuery('');
-    setSeries([]);
     setAvatar(null);
     inputRef.current?.blur();
-
-    setSeriesLoading(true);
-    fetch(`/api/markets/batch-history?slugs=${encodeURIComponent(t.ticker)}&window=all`)
-      .then(r => r.json())
-      .then((data: Record<string, Array<{ price: number; timestamp: string }>>) => {
-        if (seq !== selectionSeq.current) return;
-        const pts = (data?.[t.ticker] ?? [])
-          .map(p => ({ value: p.price, timestamp: new Date(p.timestamp).getTime() }))
-          .filter(p => Number.isFinite(p.value) && Number.isFinite(p.timestamp));
-        setSeries(pts);
-      })
-      .catch(() => { if (seq === selectionSeq.current) setSeries([]); })
-      .finally(() => { if (seq === selectionSeq.current) setSeriesLoading(false); });
 
     if (t.photo_url) {
       const img = new Image();
@@ -224,27 +290,85 @@ export function XPhotoSection() {
     }
   }, []);
 
-  const changePct = selected
+  // Lifetime Pauv history for the pick — the strip's chart and the change
+  // card's chart both draw it (the change card is deliberately never a
+  // timeframe). Keyed on the pick; a stale response for an earlier pick is dropped.
+  useEffect(() => {
+    if (!selected) return;
+    let on = true;
+    setSeries([]);
+    setSeriesLoading(true);
+    fetch(`/api/markets/batch-history?slugs=${encodeURIComponent(selected.ticker)}&window=all`)
+      .then(r => r.json())
+      .then((data: Record<string, Array<{ price: number; timestamp: string }>>) => {
+        if (!on) return;
+        const pts = (data?.[selected.ticker] ?? [])
+          .map(p => ({ value: p.price, timestamp: new Date(p.timestamp).getTime() }))
+          .filter(p => Number.isFinite(p.value) && Number.isFinite(p.timestamp));
+        setSeries(pts);
+      })
+      .catch(() => { if (on) setSeries([]); })
+      .finally(() => { if (on) setSeriesLoading(false); });
+    return () => { on = false; };
+  }, [selected]);
+
+  // Real first→last of the lifetime history, so the figure agrees with the
+  // line drawn under it; the roster's figure only stands in when there is no
+  // history yet.
+  const rawPct = selected
     ? (series.length >= 2 ? deriveChangePct(series) : rosterLifetimePct(selected))
     : null;
+  const nowUsd = selected ? (selected.price.usd ?? (series.length ? series[series.length - 1].value : null)) : null;
 
   const draw = useCallback(() => {
     const canvas = canvasRef.current;
     const ctx = canvas?.getContext('2d');
     if (!canvas || !ctx || !selected) return;
+    if (generator === 'listed') {
+      drawListedCard(ctx, {
+        theme: cardTheme,
+        photo: avatar,
+        logo,
+        name: selected.name,
+        startUsd: selected.price.startUsd ?? selected.price.usd,
+        listedAt: listedMs(selected) || null,
+        cta,
+        profileUrl: profileUrl(selected),
+      });
+      return;
+    }
+    if (generator === 'change') {
+      drawChangeCard(ctx, {
+        theme: cardTheme,
+        photo: avatar,
+        logo,
+        name: selected.name,
+        // Same floor the strip applies, so a quiet market still draws a living line.
+        changePct: displayChangePct(rawPct, selected.ticker),
+        fromUsd: series.length >= 2 ? series[0].value : null,
+        nowUsd,
+        asOf: Date.now(),
+        series,
+        seedKey: selected.ticker,
+        profileUrl: profileUrl(selected),
+      });
+      return;
+    }
     drawXPhoto(ctx, {
       name: selected.name,
       ticker: selected.ticker,
-      priceUsd: selected.price.usd ?? (series.length ? series[series.length - 1].value : null),
-      changePct,
+      priceUsd: nowUsd,
+      changePct: rawPct,
       series,
       avatar,
       logo,
     });
-  }, [selected, series, avatar, logo, changePct]);
+  }, [selected, series, avatar, logo, rawPct, nowUsd, generator, cardTheme, cta]);
 
-  // exportScale is a dep because changing the canvas size wipes its bitmap.
-  useEffect(() => { if (fontsReady) draw(); }, [draw, fontsReady, exportScale]);
+  const exportW = isCard ? CARD_W * cardScale : XPHOTO_EXPORT_W * stripScale;
+  const exportH = isCard ? CARD_H * cardScale : XPHOTO_EXPORT_H * stripScale;
+  // The export size is a dep because changing the canvas size wipes its bitmap.
+  useEffect(() => { if (fontsReady) draw(); }, [draw, fontsReady, exportW, exportH]);
 
   const copyProfileLink = useCallback(async (t: Talent) => {
     const url = profileUrl(t);
@@ -265,7 +389,9 @@ export function XPhotoSection() {
     canvas.toBlob(blob => {
       setExporting(false);
       if (!blob) return;
-      triggerDownload(blob, `${safeFile(selected.name)}-${selected.ticker.toLowerCase()}-x-photo.png`);
+      const suffix = generator === 'listed' ? 'new-listing' : generator === 'change' ? 'price-change' : 'x-photo';
+      const theme = isCard && cardTheme === 'light' ? '-light' : '';
+      triggerDownload(blob, `${safeFile(selected.name)}-${selected.ticker.toLowerCase()}-${suffix}${theme}.png`);
     }, 'image/png');
   };
 
@@ -277,18 +403,50 @@ export function XPhotoSection() {
     else if (e.key === 'Escape') { setOpen(false); }
   };
 
+  const isListed = generator === 'listed';
   const firstTs = series.length ? series[0].timestamp : null;
-  const canDownload = !!selected && fontsReady && !seriesLoading && !exporting;
+  // The listing card has no chart, so it never waits on the history.
+  const canDownload = !!selected && fontsReady && (isListed || !seriesLoading) && !exporting;
+  const blurb = GENERATORS.find(g => g.id === generator)?.blurb ?? '';
+  const scaleOptions = isCard
+    ? CARD_EXPORT_SCALES.map(k => ({ id: k, label: `${CARD_W * k}×${CARD_H * k}` }))
+    : XPHOTO_EXPORT_SCALES.map(k => ({ id: k, label: `${XPHOTO_EXPORT_W * k}×${XPHOTO_EXPORT_H * k}` }));
+
+  const historyNote = seriesLoading
+    ? 'Loading lifetime history…'
+    : series.length > 1
+      ? `Lifetime · ${series.length.toLocaleString()} points since ${firstTs ? formatCardDate(firstTs) : '—'}`
+      : 'No price history yet — synthesized line';
 
   return (
     <div className="flex h-screen flex-col bg-black text-white">
       <div className="shrink-0 border-b border-zinc-900 px-6 py-4">
-        <div className="flex items-center justify-between">
-          <div>
-            <h1 className="text-lg font-semibold">X Photo</h1>
-            <p className="text-xs text-zinc-500">Search anyone on Pauv, pick them, download a long thin price strip for X.</p>
+        <div className="flex items-center justify-between gap-6">
+          <div className="flex items-center gap-5 min-w-0">
+            <div className="min-w-0">
+              <h1 className="text-lg font-semibold">X Photo</h1>
+              <p className="text-xs text-zinc-500 truncate">{blurb}</p>
+            </div>
+            {/* Generator switch — every card shares the picker below. */}
+            <div className="flex rounded-md border border-zinc-800 overflow-hidden shrink-0" role="tablist" aria-label="Generator">
+              {GENERATORS.map(g => (
+                <button
+                  key={g.id}
+                  type="button"
+                  role="tab"
+                  aria-selected={generator === g.id}
+                  data-xphoto-generator={g.id}
+                  onClick={() => setGenerator(g.id)}
+                  className={`px-3 h-8 text-xs font-medium transition-colors ${
+                    generator === g.id ? 'bg-zinc-800 text-zinc-100' : 'text-zinc-500 hover:text-zinc-300'
+                  }`}
+                >
+                  {g.label}
+                </button>
+              ))}
+            </div>
           </div>
-          <div className="flex items-center gap-3">
+          <div className="flex items-center gap-3 shrink-0">
             {copyNotice && (
               <span className={`text-[11px] tabular-nums ${copyNotice.ok ? 'text-emerald-400' : 'text-red-400'}`}>
                 {copyNotice.text}
@@ -324,7 +482,9 @@ export function XPhotoSection() {
                 onChange={e => { setQuery(e.target.value); setOpen(true); setHighlight(0); }}
                 onFocus={() => { setOpen(true); setHighlight(0); }}
                 onKeyDown={onKeyDown}
-                placeholder="Search anyone on Pauv — name, ticker or industry…"
+                placeholder={isListed
+                  ? 'Newest listings first — or search a name, ticker or industry…'
+                  : 'Search anyone on Pauv — name, ticker or industry…'}
                 className="flex-1 min-w-0 bg-transparent text-sm text-zinc-100 placeholder-zinc-600 outline-none"
                 autoComplete="off"
                 spellCheck={false}
@@ -351,6 +511,7 @@ export function XPhotoSection() {
                     results.map((t, i) => {
                       // Same floor the strip applies, so the list agrees with the card.
                       const pct = displayChangePct(rosterLifetimePct(t), t.ticker);
+                      const listed = listedMs(t);
                       return (
                         <button
                           key={t.id}
@@ -374,10 +535,18 @@ export function XPhotoSection() {
                           </div>
                           <div className="text-right shrink-0">
                             <p className="text-[11px] font-mono text-zinc-400">{t.ticker.toUpperCase()}</p>
-                            <p className="text-[11px] tabular-nums">
-                              <span className="text-zinc-200">{t.price.usd != null ? formatUsd(t.price.usd) : '—'}</span>
-                              <span className={`ml-1.5 ${pct > 0 ? 'text-[#0CDF9D]' : 'text-[#FF4B4B]'}`}>{formatPct(pct)}</span>
-                            </p>
+                            {isListed ? (
+                              // What the listing card shows: when, and the starting price.
+                              <p className="text-[11px] tabular-nums">
+                                <span className="text-zinc-500">{listed ? `Listed ${formatCardDate(listed)}` : 'Listing date unknown'}</span>
+                                <span className="ml-1.5 text-zinc-200">{t.price.startUsd != null ? formatUsd(t.price.startUsd) : '—'}</span>
+                              </p>
+                            ) : (
+                              <p className="text-[11px] tabular-nums">
+                                <span className="text-zinc-200">{t.price.usd != null ? formatUsd(t.price.usd) : '—'}</span>
+                                <span className={`ml-1.5 ${pct > 0 ? 'text-[#0CDF9D]' : 'text-[#FF4B4B]'}`}>{formatPct(pct)}</span>
+                              </p>
+                            )}
                           </div>
                         </button>
                       );
@@ -391,14 +560,16 @@ export function XPhotoSection() {
           {/* Preview */}
           {selected ? (
             <div className="flex flex-col gap-3">
-              <div className="rounded-xl bg-zinc-950 border border-zinc-900 p-4">
+              <div className={`rounded-xl bg-zinc-950 border border-zinc-900 p-4 ${isCard ? 'w-full max-w-[880px] mx-auto' : ''}`}>
+                {/* Keyed on the generator so a switch remounts the canvas at its size. */}
                 <canvas
+                  key={generator}
                   ref={canvasRef}
                   data-xphoto-canvas=""
-                  width={XPHOTO_EXPORT_W * exportScale}
-                  height={XPHOTO_EXPORT_H * exportScale}
+                  width={exportW}
+                  height={exportH}
                   className="block w-full h-auto"
-                  style={{ aspectRatio: `${XPHOTO_EXPORT_W} / ${XPHOTO_EXPORT_H}` }}
+                  style={{ aspectRatio: `${exportW} / ${exportH}` }}
                 />
               </div>
               <div className="flex items-center justify-between gap-4 text-[11px] text-zinc-500">
@@ -417,46 +588,78 @@ export function XPhotoSection() {
                     </svg>
                     <span className="font-mono">{profileUrl(selected)}</span>
                   </button>
-                  <span className="tabular-nums">
-                    {seriesLoading
-                      ? 'Loading lifetime history…'
-                      : series.length > 1
-                        ? `Lifetime · ${series.length.toLocaleString()} points since ${firstTs ? new Date(firstTs).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }) : '—'}`
-                        : 'No price history yet — synthesized line'}
-                  </span>
+                  {isListed ? (
+                    // Market facts stay UNDER the card — the card is the part that leaves.
+                    <span className="tabular-nums">
+                      {listedMs(selected) ? `Listed ${formatCardDate(listedMs(selected))}` : 'Listing date unknown'}
+                      {' · '}
+                      {(selected.price.startUsd ?? selected.price.usd) != null ? `Starting ${formatUsd((selected.price.startUsd ?? selected.price.usd)!)}` : 'No starting price'}
+                      {' · '}
+                      {selected.price.holders ?? 0} holders
+                    </span>
+                  ) : (
+                    <span className="tabular-nums">{historyNote}</span>
+                  )}
                 </div>
-                <div className="flex items-center shrink-0">
-                  <div className="flex items-center gap-1.5">
-                    <span>Size</span>
-                    <div className="flex rounded-md border border-zinc-800 overflow-hidden">
-                      {XPHOTO_EXPORT_SCALES.map(k => (
-                        <button
-                          key={k}
-                          type="button"
-                          onClick={() => setExportScale(k)}
-                          className={`px-2 h-6 text-[10px] tabular-nums transition-colors ${
-                            exportScale === k ? 'bg-zinc-800 text-zinc-100' : 'text-zinc-500 hover:text-zinc-300'
-                          }`}
-                        >
-                          {XPHOTO_EXPORT_W * k}×{XPHOTO_EXPORT_H * k}
-                        </button>
-                      ))}
-                    </div>
-                  </div>
+                <div className="flex items-center gap-4 shrink-0">
+                  {isListed && (
+                    <label className="flex items-center gap-1.5">
+                      <span>CTA</span>
+                      <input
+                        value={cta}
+                        onChange={e => setCta(e.target.value)}
+                        placeholder="Blank to leave it off"
+                        className="h-6 w-[200px] rounded-md border border-zinc-800 bg-zinc-950 px-2 text-[11px] text-zinc-200 placeholder-zinc-600 outline-none focus:border-zinc-600 transition-colors"
+                        spellCheck={false}
+                      />
+                    </label>
+                  )}
+                  {isCard && (
+                    <Segmented label="Theme" options={THEMES} value={cardTheme} onChange={setCardTheme} />
+                  )}
+                  {isCard ? (
+                    <Segmented label="Size" options={scaleOptions as { id: CardExportScale; label: string }[]} value={cardScale} onChange={setCardScale} />
+                  ) : (
+                    <Segmented label="Size" options={scaleOptions as { id: XPhotoExportScale; label: string }[]} value={stripScale} onChange={setStripScale} />
+                  )}
                 </div>
               </div>
             </div>
           ) : (
             <div className="flex flex-col items-center justify-center gap-3 py-20 rounded-xl border border-dashed border-zinc-800">
               <div className="w-12 h-12 rounded-xl bg-zinc-900 border border-zinc-800 flex items-center justify-center">
-                <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" className="text-zinc-500">
-                  <rect x="2" y="6" width="20" height="12" rx="4" />
-                  <circle cx="7" cy="12" r="2.2" />
-                  <path d="M11.5 12.5l2-1.5 1.5 2 2.5-3 2 2.5" />
-                </svg>
+                {isListed ? (
+                  <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" className="text-zinc-500">
+                    <rect x="2" y="4" width="20" height="16" rx="3" />
+                    <path d="M2 20V4" />
+                    <circle cx="7.5" cy="10" r="2.2" />
+                    <path d="M4.5 17c.6-1.8 1.7-2.6 3-2.6s2.4.8 3 2.6" />
+                    <path d="M14 9h5M14 13h5M14 17h3" />
+                  </svg>
+                ) : generator === 'change' ? (
+                  <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" className="text-zinc-500">
+                    <rect x="2" y="4" width="20" height="16" rx="3" />
+                    <path d="M5 15l4-4 3 3 5-6" />
+                    <path d="M14 8h3v3" />
+                  </svg>
+                ) : (
+                  <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" className="text-zinc-500">
+                    <rect x="2" y="6" width="20" height="12" rx="4" />
+                    <circle cx="7" cy="12" r="2.2" />
+                    <path d="M11.5 12.5l2-1.5 1.5 2 2.5-3 2 2.5" />
+                  </svg>
+                )}
               </div>
-              <p className="text-sm font-medium text-zinc-400">Pick someone to build their strip</p>
-              <p className="text-xs text-zinc-600">Avatar · name · ticker · price · lifetime chart — ready to download.</p>
+              <p className="text-sm font-medium text-zinc-400">
+                {isListed ? 'Pick someone to announce their listing' : generator === 'change' ? 'Pick someone to call out their move' : 'Pick someone to build their strip'}
+              </p>
+              <p className="text-xs text-zinc-600">
+                {isListed
+                  ? 'Photo · NEW LISTING · name · starting price · call to action — 3:2, light or dark.'
+                  : generator === 'change'
+                    ? 'Photo · UP or DOWN · name · how far they have moved · their Pauv chart — 3:2, light or dark.'
+                    : 'Avatar · name · ticker · price · lifetime chart — ready to download.'}
+              </p>
             </div>
           )}
         </div>

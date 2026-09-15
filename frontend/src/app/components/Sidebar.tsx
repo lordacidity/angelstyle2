@@ -181,11 +181,12 @@ export function Sidebar({
           <span className="text-[9px] font-medium leading-none">Emojis</span>
         </button>
 
-        {/* X Photo — long thin price strip for posting on X. A real route, placed
-            right after Emojis so it reads as the next tool in the list. */}
+        {/* X Photo — downloadable cards for posting on X (price strip, newly
+            listed). A real route, placed right after Emojis so it reads as the
+            next tool in the list. */}
         <Link
           href={pathForSection('xphoto')}
-          title="X Photo — downloadable price strip"
+          title="X Photo — price strip and newly listed cards"
           className={`w-full flex flex-col items-center gap-2 py-2.5 px-1 rounded-lg transition-colors ${
             active === 'xphoto' ? 'text-white' : 'text-zinc-700 hover:text-zinc-200'
           }`}

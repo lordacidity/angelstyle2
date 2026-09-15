@@ -38,7 +38,7 @@ export async function GET() {
     // Each query needs a unique ordering, or rows can shift between pages.
     const [profiles, markets] = await Promise.all([
       fetchAll((from, to) => sb.from('profiles')
-        .select('id,ticker,name,bio,photo_url,industry,info_subcategory,info_location,claim_status')
+        .select('id,ticker,name,bio,photo_url,industry,info_subcategory,info_location,claim_status,created_at')
         .is('delisted_at', null)
         .order('name')
         .order('id')
@@ -49,7 +49,7 @@ export async function GET() {
         .range(from, to)),
     ]);
 
-    type ProfileRow = { id: string; ticker: string; name: string; bio: string | null; photo_url: string | null; industry: string | null; info_subcategory: string | null; info_location: string | null; claim_status: string | null };
+    type ProfileRow = { id: string; ticker: string; name: string; bio: string | null; photo_url: string | null; industry: string | null; info_subcategory: string | null; info_location: string | null; claim_status: string | null; created_at: string | null };
     type MarketRow = { profile_id: string; latest_price_cents: number | null; p0: number | null; holders_count: number | null; total_volume_lifetime_cents: number | null; latest_tick_at: string | null; frozen: boolean | null };
 
     const byProfile = new Map<string, MarketRow>(
@@ -70,8 +70,12 @@ export async function GET() {
         subcategory: p.info_subcategory,
         location: p.info_location,
         claimStatus: p.claim_status,
+        // When the profile went live — the "newly listed" ordering and dateline.
+        listedAt: p.created_at,
         price: {
           usd: cents != null ? cents / 100 : null,
+          // The listing price. Unlike latest_price_cents, p0 is stored in dollars.
+          startUsd: p0,
           lifetimeChangePct: cents != null && p0 != null && p0 > 0 ? ((cents - p0) / p0) * 100 : null,
           holders: m?.holders_count ?? null,
           volumeLifetimeUsd: m?.total_volume_lifetime_cents != null ? m.total_volume_lifetime_cents / 100 : null,
