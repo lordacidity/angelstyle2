@@ -7,7 +7,7 @@
 
 import type {
   ClipableKind, CreateVideoInput, SignUploadResponse, VidClipablePatch, VidContextPatch, VidEdit, VidFolder, VidLink,
-  VidMark, VidPersona, VidRow, CreateRecipeInput, VideoProbe, VidRecipe, VidsLibraryPayload,
+  VidMark, VidPersona, VidRow, VidTheme, VidThemePatch, CreateRecipeInput, VideoProbe, VidRecipe, VidsLibraryPayload,
 } from '@/lib/vids-types';
 
 /** The clip ids on a persona — all optional, so one part can be re-pointed alone. */
@@ -63,9 +63,9 @@ export const deletePersona = (id: string) =>
 export const renameVideo = (id: string, name: string) =>
   api<VidRow>(`/videos/${id}`, { method: 'PATCH', body: JSON.stringify({ name }) });
 
-/** Say what a clip is showing, and whether it was shot light or dark. Carries a
- *  `name` alongside, because saying what a clip shows is what names it. */
-export const setVideoContext = (id: string, patch: VidContextPatch & { name?: string }) =>
+/** Say what a clip is showing, and which way Pauv was on it. Carries a `name`
+ *  alongside, because saying what a clip shows is what names it. */
+export const setVideoContext = (id: string, patch: VidContextPatch & VidThemePatch & { name?: string }) =>
   api<VidRow>(`/videos/${id}`, { method: 'PATCH', body: JSON.stringify(patch) });
 
 /** Replace a clip's per-stretch marks. */
@@ -143,13 +143,11 @@ export interface CaptionRequest {
 
 /** The written lines. A marked clip's array lines up with its marks by index;
  *  the only '' is Bottom B's first when the seam was merged into A's last.
- *  `payoff` and `end` are the two lines over the closing clip, in that order:
- *  that he made the money, then the comment line. */
+ *  `end` is the one line over the closing clip: the comment line. */
 export interface CaptionDraft {
   start: string;
   bottomA: string[];
   bottomB: string[];
-  payoff: string;
   end: string;
   /** When Bottom A was placed: the second into its window each line goes up. */
   bottomAAt?: number[];
@@ -313,6 +311,8 @@ export interface UploadVideoOptions {
   context?: string;
   marks?: VidMark[];
   hasSfx?: boolean;
+  /** Which way Pauv was, for a Bottom B — see VidTheme. */
+  theme?: VidTheme | null;
   /** When the file going up is a render: the recording it was made from, and
    *  the edit that made it. Both go up with it, so the clip can be re-edited
    *  from the recording later — see VidEdit. */
@@ -431,6 +431,7 @@ export async function uploadVideo(file: Blob, opts: UploadVideoOptions): Promise
     context: opts.context,
     marks: opts.marks,
     hasSfx: opts.hasSfx,
+    theme: opts.theme,
     ...(sourcePath ? { sourcePath, edit: opts.edit ?? null } : {}),
   };
   return api<VidRow>('/videos', { method: 'POST', body: JSON.stringify(row) });

@@ -9,8 +9,14 @@
 // out — plus the question ChatGPT gets asked. Go hands the three to the
 // builder and closes: the model, the render and the upload run behind it,
 // with the progress on the Bottom card, so the rest of the build can go on.
+//
+// Who is searched for rather than picked off a list: there are as many people
+// as there are Bottom B clips, and landing on whoever comes first alphabetically
+// only ever meant scrolling past them. The box opens on the whole list when you
+// press it and narrows as you type; nobody is chosen until you choose them, so
+// Go stays off until you have.
 
-import { useRef, useState } from 'react';
+import { useEffect, useRef, useState, type KeyboardEvent } from 'react';
 import { CLIP_SECONDS, VIDEO_H, VIDEO_W } from '@/app/components/chatgpt/chatgpt-video';
 import type { BottomPerson, Direction } from '@/lib/vidsBottom';
 import { BTN_TEXT } from '@/lib/ui-constants';
@@ -37,8 +43,10 @@ export function VidsBottomPopup({ people, current, onGo, onClose }: {
   onGo: (person: BottomPerson, direction: Direction, question: string) => void;
   onClose: () => void;
 }) {
+  // Whoever is already on the stage carries over; otherwise nobody, and the
+  // search starts empty rather than on the first name alphabetically.
   const [key, setKey] = useState(() => (
-    current && people.some((p) => p.key === current.key) ? current.key : people[0]?.key ?? ''
+    current && people.some((p) => p.key === current.key) ? current.key : ''
   ));
   const person = people.find((p) => p.key === key) ?? null;
   const [direction, setDirection] = useState<Direction>(() => firstDirection(person, current?.direction ?? null));
@@ -52,6 +60,58 @@ export function VidsBottomPopup({ people, current, onGo, onClose }: {
     setKey(k);
     setDirection(firstDirection(people.find((p) => p.key === k) ?? null, direction));
   };
+
+  // ── Searching for who ───────────────────────────────────────────────────────
+  const [query, setQuery] = useState(() => person?.label ?? '');
+  const [open, setOpen] = useState(false);
+  const [active, setActive] = useState(0);
+  const listRef = useRef<HTMLDivElement>(null);
+
+  const needle = query.trim().toLowerCase();
+  // A box still reading as whoever is chosen is not somebody narrowing the list
+  // down, so pressing it shows everyone rather than just them. `key` is the
+  // label lower-cased and squeezed (lib/vidsBottom personKey), which is what
+  // makes it the thing to match against.
+  const matches = !needle || needle === person?.key
+    ? people
+    : people.filter((p) => p.key.includes(needle));
+
+  const openList = () => { setOpen(true); setActive(0); };
+  /** Put the list away and leave the box reading as whoever is actually chosen,
+   *  so a half-typed name never sits there looking like a choice. */
+  const closeList = () => { setOpen(false); setQuery(person?.label ?? ''); };
+  const choose = (p: BottomPerson) => {
+    choosePerson(p.key);
+    setQuery(p.label);
+    setOpen(false);
+  };
+
+  const onSearchKey = (e: KeyboardEvent<HTMLInputElement>) => {
+    if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
+      e.preventDefault();
+      if (!open) { openList(); return; }
+      const step = e.key === 'ArrowDown' ? 1 : -1;
+      setActive((i) => (matches.length ? (i + step + matches.length) % matches.length : 0));
+      return;
+    }
+    if (e.key === 'Enter' && open) {
+      e.preventDefault();
+      if (matches[active]) choose(matches[active]);
+      return;
+    }
+    // Escape puts the list away and leaves the popup open. Shell closes on
+    // Escape from anywhere (VidsPicker), so it must not see this one.
+    if (e.key === 'Escape' && open) {
+      e.preventDefault();
+      e.stopPropagation();
+      closeList();
+    }
+  };
+
+  // Keep the highlighted row in view when it is walked past the fold.
+  useEffect(() => {
+    if (open) listRef.current?.querySelector('[data-active]')?.scrollIntoView({ block: 'nearest' });
+  }, [active, open]);
 
   const clip = person?.[direction] ?? null;
   const canGo = !!person && !!clip && !!question.trim();
@@ -74,17 +134,57 @@ export function VidsBottomPopup({ people, current, onGo, onClose }: {
         </Empty>
       ) : (
         <div className="space-y-3">
-          <label className="block">
+          {/* Not a <label>: it wraps the dropdown, and a label would hand every
+              click on a row back to the input. */}
+          <div
+            className="relative"
+            onBlur={(e) => { if (!e.currentTarget.contains(e.relatedTarget as Node | null)) closeList(); }}
+          >
             <span className="mb-1 block text-[10px] uppercase tracking-wide text-zinc-500">Who</span>
-            <select
-              value={key}
-              onChange={(e) => choosePerson(e.target.value)}
-              className="h-9 w-full rounded-md border border-zinc-700 bg-zinc-900 px-2 text-[12px] text-zinc-100 outline-none focus:border-zinc-500"
-            >
-              {people.map((p) => <option key={p.key} value={p.key}>{p.label}</option>)}
-            </select>
+            <input
+              value={query}
+              onChange={(e) => { setQuery(e.target.value); setActive(0); setOpen(true); }}
+              onFocus={openList}
+              onPointerDown={openList}
+              onKeyDown={onSearchKey}
+              placeholder="Search who…"
+              spellCheck={false}
+              autoComplete="off"
+              className="h-9 w-full rounded-md border border-zinc-700 bg-zinc-900 px-2 text-[12px] text-zinc-100 outline-none placeholder:text-zinc-600 focus:border-zinc-500"
+            />
+            {open && (
+              <div
+                ref={listRef}
+                className="absolute inset-x-0 top-full z-10 mt-1 max-h-44 overflow-y-auto rounded-md border border-zinc-700 bg-zinc-900 py-0.5 shadow-xl"
+              >
+                {matches.length === 0 ? (
+                  <p className="px-2 py-2 text-[11px] text-zinc-500">
+                    No Bottom B clip of anyone called “{query.trim()}”
+                  </p>
+                ) : matches.map((p, i) => (
+                  <button
+                    key={p.key}
+                    type="button"
+                    data-active={i === active || undefined}
+                    // Keeps the focus on the box, so picking a row is not a blur.
+                    onMouseDown={(e) => e.preventDefault()}
+                    onMouseEnter={() => setActive(i)}
+                    onClick={() => choose(p)}
+                    className={`flex w-full items-center gap-2 px-2 py-1.5 text-left text-[12px] ${
+                      i === active ? 'bg-zinc-800 text-zinc-100' : 'text-zinc-300'
+                    }`}
+                  >
+                    <span className="min-w-0 flex-1 truncate">{p.label}</span>
+                    <span className="shrink-0 text-[9px] text-zinc-500">
+                      {[p.up && 'up', p.down && 'down'].filter(Boolean).join(' · ')}
+                    </span>
+                    {p.key === key && <span className="shrink-0 text-[9px] text-zinc-400">✓</span>}
+                  </button>
+                ))}
+              </div>
+            )}
             <span className="mt-1 block text-[9px] text-zinc-600">everyone there is a Bottom B clip of</span>
-          </label>
+          </div>
 
           <div>
             <span className="mb-1 block text-[10px] uppercase tracking-wide text-zinc-500">Which way</span>

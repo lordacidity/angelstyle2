@@ -26,9 +26,9 @@
 
 import { useEffect, useMemo, useState } from 'react';
 import type { DragEvent } from 'react';
-import { PERSONA_PARTS, PERSONA_PART_LABEL, type VidContext } from '@/lib/vids-types';
+import { PERSONA_PARTS, PERSONA_PART_LABEL, VID_THEMES, type VidContext, type VidTheme } from '@/lib/vids-types';
 import type { VidRow } from '@/lib/vids-types';
-import { VID_DRAG_MIME } from '@/lib/vidsPlan';
+import { VID_DRAG_MIME, slotForFolderName } from '@/lib/vidsPlan';
 import { probeVideoFile } from '@/lib/vids-client';
 import { CONTEXT_PLACEHOLDER } from './VidsContext';
 import { ArrowRightIcon, CloseIcon, SpinnerIcon, UploadIcon, VideoIcon } from '@/lib/icons';
@@ -191,8 +191,9 @@ interface StageProps {
   onStartPersona: (name: string, context: VidContext, order: File[]) => void;
   /** Three files that aren't a persona after all — file them as ordinary clips. */
   onFileAsClips: () => void;
-  /** Context for the clip the run is on — then straight into the editor. */
-  onContext: (name: string, context: VidContext) => void;
+  /** Context for the clip the run is on — then straight into the editor. The
+   *  theme is a Bottom B's alone (see VidTheme); null everywhere else. */
+  onContext: (name: string, context: VidContext, theme: VidTheme | null) => void;
   onCancel: () => void;
   /** The run's clip is open in the editor and this stage is showing anyway
    *  (the Upload tab was opened over it) — go back to the editor. */
@@ -516,27 +517,46 @@ function PersonaStep({ intake, onStart, onFileAsClips, onCancel }: {
 type Direction = 'up' | 'down';
 const DIRECTIONS: readonly Direction[] = ['up', 'down'];
 
+/** The light/dark pick, remembered between runs: a session of filing is nearly
+ *  always all one way, so the last answer is the next one's default. */
+const THEME_KEY = 'vids-bottom-b-theme-v1';
+const THEME_LABEL: Record<VidTheme, string> = { light: '☀ Light', dark: '🌙 Dark' };
+const lastTheme = (): VidTheme => {
+  try { return localStorage.getItem(THEME_KEY) === 'light' ? 'light' : 'dark'; } catch { return 'dark'; }
+};
+
 /** Two things about this clip, in this order: what to call it, and what it is
  *  showing. The name has one shape in this flow — who it is on, then which way
  *  he traded: "elon up", "trump down" — so every clip filed this way reads the
  *  same in the library and is found by the name and the direction alone. Both
  *  halves are required; a clip can be renamed to anything afterwards by
  *  right-clicking it. The context is the sentence the caption writer reads,
- *  and that one can stay empty. */
+ *  and that one can stay empty.
+ *
+ *  A Bottom B is asked one thing more: which way Pauv was on the screen while
+ *  it was recorded (see VidTheme). It is a fact about the footage rather than
+ *  something to decide, so it always has an answer — the one you gave last —
+ *  and changing it is one click. */
 function ContextStep({ intake, onNext, onCancel }: {
   intake: Intake;
-  onNext: (name: string, context: VidContext) => void;
+  onNext: (name: string, context: VidContext, theme: VidTheme | null) => void;
   onCancel: () => void;
 }) {
   const [who, setWho] = useState('');
   const [direction, setDirection] = useState<Direction | null>(null);
   const [text, setText] = useState('');
+  const bottomB = slotForFolderName(intake.folderName) === 'bottomB';
+  const [theme, setTheme] = useState<VidTheme>(lastTheme);
   const file = intake.files[intake.index];
   // A photo has nothing to edit, so this step is the whole of filing it.
   const photo = !!file && file.type.startsWith('image/');
   const name = who.trim() && direction ? `${who.trim()} ${direction}` : '';
   const ready = !!name && !intake.saving;
-  const next = () => { if (ready) onNext(name, { context: text.trim() }); };
+  const next = () => {
+    if (!ready) return;
+    if (bottomB) { try { localStorage.setItem(THEME_KEY, theme); } catch { /* ignore */ } }
+    onNext(name, { context: text.trim() }, bottomB ? theme : null);
+  };
 
   return (
     <Card
@@ -585,6 +605,34 @@ function ContextStep({ intake, onNext, onCancel }: {
           ? <>Filed as <span className="font-medium text-zinc-300">{name}</span></>
           : <>Type who it is on, then pick up or down — &quot;elon up&quot;, &quot;trump down&quot;.</>}
       </p>
+
+      {bottomB && (
+        <>
+          <p className="mb-1 mt-2.5 text-[9px] font-semibold uppercase tracking-wider text-zinc-500">
+            Which way was Pauv
+          </p>
+          <div className="grid grid-cols-2 gap-1.5">
+            {VID_THEMES.map((t) => (
+              <button
+                key={t}
+                type="button"
+                onClick={() => setTheme(t)}
+                title={`Pauv was in ${t} mode in this recording`}
+                className={`rounded border py-1.5 text-[11px] font-medium transition-colors ${
+                  theme === t
+                    ? t === 'light'
+                      ? 'border-zinc-300 bg-zinc-200 text-black'
+                      : 'border-sky-500 bg-sky-500/20 text-sky-200'
+                    : 'border-zinc-800 text-zinc-500 hover:border-zinc-600 hover:text-zinc-300'
+                }`}
+              >
+                {THEME_LABEL[t]}
+              </button>
+            ))}
+          </div>
+          <p className="mt-1 text-[9px] text-zinc-600">Kept on the clip so you can see which you have.</p>
+        </>
+      )}
 
       <p className="mb-1 mt-2.5 text-[9px] font-semibold uppercase tracking-wider text-zinc-500">What it shows</p>
       <textarea

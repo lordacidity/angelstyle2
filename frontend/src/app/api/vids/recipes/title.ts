@@ -67,7 +67,7 @@ function buildPrompt(build: VidBuildSpec, brief: RecipeTitleBrief): string {
   const { lines } = build.captions;
   const captions = [
     lines.start.text, ...lines.bottomA.map((l) => l.text), ...lines.bottomB.map((l) => l.text),
-    lines.payoff?.text ?? '', lines.end.text,
+    lines.end.text,
   ]
     .map((t) => t.trim())
     .filter(Boolean);

@@ -19,6 +19,7 @@ import type { PersonaParts, PersonaUpdate } from '@/lib/vids-client';
 import { PERSONA_PARTS, PERSONA_PART_LABEL } from '@/lib/vids-types';
 import type {
   ClipableKind, VidClipableFlag, VidContextPatch, VidEdit, VidFolder, VidLink, VidMark, VidPersona, VidRow,
+  VidTheme, VidThemePatch,
 } from '@/lib/vids-types';
 
 export interface UploadItem {
@@ -54,6 +55,8 @@ export interface UploadExtras {
   context?: string;
   marks?: VidMark[];
   hasSfx?: boolean;
+  /** Which way Pauv was, for a Bottom B — see VidTheme. */
+  theme?: VidTheme | null;
   /** A render's recording and the edit that made it — see CreateVideoInput. */
   source?: Blob;
   sourceName?: string;
@@ -315,15 +318,18 @@ export function useVidsLibrary(active: boolean) {
     }
   }, [refresh, tracked]);
 
-  // What a clip is showing, in your words — and its name, when the right-click
-  // popup asks for both at once. Optimistic like every other patch: the field
-  // you are typing in must not wait on a round trip. A blank name is dropped
-  // rather than sent, since a clip can't be called nothing. A persona's context
-  // doesn't come through here — it lives on the persona itself.
-  const setVideoContext = useCallback(async (id: string, patch: VidContextPatch & { name?: string }) => {
+  // What a clip is showing, in your words — its name, when the right-click
+  // popup asks for both at once, and which way Pauv was on it. Optimistic like
+  // every other patch: the field you are typing in must not wait on a round
+  // trip. A blank name is dropped rather than sent, since a clip can't be
+  // called nothing. A persona's context doesn't come through here — it lives on
+  // the persona itself.
+  const setVideoContext = useCallback(async (
+    id: string, patch: VidContextPatch & VidThemePatch & { name?: string },
+  ) => {
     const { name, ...rest } = patch;
     const clean = name?.trim();
-    const next: VidContextPatch & { name?: string } = clean ? { ...rest, name: clean } : rest;
+    const next: VidContextPatch & VidThemePatch & { name?: string } = clean ? { ...rest, name: clean } : rest;
     setVideos((prev) => prev.map((v) => (v.id === id ? { ...v, ...next } : v)));
     try {
       await tracked(client.setVideoContext(id, next));
@@ -412,10 +418,10 @@ export function useVidsLibrary(active: boolean) {
   }, [tracked]);
 
   // ── Links ───────────────────────────────────────────────────────────────────
-  // The Bottom Bs that follow on from one Bottom A, replaced as a whole set: the
-  // Link page ticks and unticks tiles, and each tick sends the list as it now
-  // stands. Optimistic like everything else here — a tick must not wait on a
-  // round trip — and put back from the server if the write didn't take.
+  // The Bottom Bs that follow on from one Bottom A, replaced as a whole set —
+  // the Bottom card writes the one pair it just made. Optimistic like
+  // everything else here — the stage must not wait on a round trip — and put
+  // back from the server if the write didn't take.
 
   const setLinks = useCallback(async (bottomAId: string, bottomBIds: string[]) => {
     const wanted = Array.from(new Set(bottomBIds)).filter((id) => id !== bottomAId);

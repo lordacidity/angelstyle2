@@ -59,8 +59,8 @@ export const BuildSpecSchema = z.object({
       start: Line,
       bottomA: z.array(Line).max(24),
       bottomB: z.array(Line).max(24),
-      // Missing from records written before End carried two lines.
-      payoff: Line.optional(),
+      // End carries the comment line and nothing else. Records written while it
+      // also held a pay-off still parse: the extra key is simply dropped.
       end: Line,
     }),
     styleId: z.string().max(32),

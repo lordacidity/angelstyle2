@@ -14,14 +14,16 @@
 //                                       caption timed inside Bottom A's share
 //                                       lines up with Bottom A by construction,
 //                                       and likewise for Bottom B.
-//   End      [endStart, total)          two captions in turn, a line each.
+//   End      [endStart, total)          one caption, across the whole of it.
 //                                       Every build finishes on him showing
-//                                       what he made: over the first half the
-//                                       pay-off, a line that says he made it
-//                                       ("just made bands off ronaldo"), and
-//                                       over the second the same call to action
-//                                       every time — comment "<word>" for the
-//                                       link, the word matched to the video.
+//                                       what he made, and over all of that the
+//                                       same call to action every time —
+//                                       comment "<word>" for the link, the word
+//                                       matched to the video. It is up from the
+//                                       first frame of End to the last: the one
+//                                       thing the viewer has to leave holding
+//                                       gets the whole closing phase, and never
+//                                       shares it with a line about the money.
 //
 // Top B has no window of its own: it plays across exactly the same stretch as
 // End, and a caption is drawn on the whole frame anyway, so the End line is the
@@ -43,20 +45,24 @@
 // However it started, a line stays up until the next line comes up, so there
 // is always a caption on screen: the hook holds until the first direction,
 // each direction until the next, and the closing line to the very end (see
-// `hold`). The one place two marks may share a line is the seam between
-// Bottom A and Bottom B: when A's last stretch or B's first is too brief to
-// carry a line of its own, the writer is asked for one line across both
-// (seamNeedsMerge), and A's last line simply holds across the seam until B's
-// next.
+// `hold`). The exception is the seam between Bottom A and Bottom B, which is a
+// hard cut — the two are different screen recordings, and a line written for
+// one reads as a lie over the other. No Bottom A line is ever on screen over
+// Bottom B: A's last comes down exactly where A ends, and B's first comes up
+// exactly where B starts, pulled back off its mark when that mark is a beat in
+// so the cut swaps the words rather than leaving B bare. The one place two
+// marks may share a line is that same seam: when A's last stretch or B's first
+// is too brief to carry a line of its own, the writer is asked for one line
+// across both (seamNeedsMerge), and it plays over A's tail while B's next line
+// takes the cut.
 //
 // One line may be two captions: a " / " in its text splits it, and the parts
 // take turns across the stretch that line had — a marked moment's own span, or
 // an unmarked clip's share — so "go to chatgpt / see who's trending rn" puts
 // the first up where the moment starts and the second halfway through it. The
 // writer is told to do this where a step is really two, and it is what to type
-// by hand for the same effect. Start's hook and the two End lines never split:
-// the pay-off and the comment line are written lines of their own, and each has
-// its half of the End window (see buildCaptions).
+// by hand for the same effect. Start's hook and End's comment line never split:
+// each is one written line with a window to itself (see buildCaptions).
 //
 // Emoji in a caption are painted from the app's own Apple images (lib/emoji,
 // the PNGs under /public/emoji) rather than the OS's glyph for them, so the
@@ -90,24 +96,25 @@ export interface CaptionLine {
 export const capLine = (text: string, oneLine = false): CaptionLine => ({ text, oneLine });
 
 /** The groups of written lines — the sections of the build that carry text.
- *  `payoff` and `end` are the two lines over the closing clip: the money made,
- *  then the comment line. */
-export type CaptionGroup = 'start' | 'bottomA' | 'bottomB' | 'payoff' | 'end';
+ *  `end` is the one line over the closing clip: the comment line. */
+export type CaptionGroup = 'start' | 'bottomA' | 'bottomB' | 'end';
 
 /** Which written line a caption came from, so a drag on the stage knows what to
  *  move. Start, Payoff and End carry one line each, so their index is always 0. */
 export interface CaptionRef { group: CaptionGroup; index: number }
 
-/** One line by default over the screen recordings and the pay-off: those are
- *  directions and a sign-off, and a wrapped block covers the very thing on
+/** One line by default over the screen recordings and the sign-off: those are
+ *  directions and a call to action, and a wrapped block covers the very thing on
  *  screen it is pointing at. The hook is left to wrap — it is the long one. */
 export const ONE_LINE_DEFAULT: Record<CaptionGroup, boolean> = {
-  start: false, bottomA: true, bottomB: true, payoff: true, end: true,
+  start: false, bottomA: true, bottomB: true, end: true,
 };
 
-/** Where on the frame a line sits. Everything is centred except Start's hook:
- *  Start plays full screen with the persona in the middle of it, so its one line
- *  goes across the top rather than over their face. */
+/** Where on the frame a line sits. 'middle' is the middle of the black bar
+ *  between the two halves rather than the middle of the frame, so the line
+ *  reads off the black instead of over either picture. Start's hook is the
+ *  exception: Start plays full screen with the persona in the middle of it, so
+ *  its one line goes across the top rather than over their face. */
 export type CaptionPlace = 'middle' | 'top';
 
 /** A line and the stretch of finished video it sits over, in timeline seconds. */
@@ -153,11 +160,8 @@ export interface CaptionWindows {
   bottomA: CaptionWindow | null;
   /** Bottom B's share of it. */
   bottomB: CaptionWindow | null;
-  /** The closing phase — End on the bottom, Top B above it — as the pay-off
-   *  line sees it: the same window as `end`, listed once per line that shares
-   *  it so every group has a window of its own to be held against. */
-  payoff: CaptionWindow | null;
-  /** The closing phase again, for the comment line. */
+  /** The closing phase — End on the bottom, Top B above it — carrying the one
+   *  comment line across the whole of it. */
   end: CaptionWindow | null;
 }
 
@@ -195,13 +199,11 @@ function windowFor(plan: Plan, slot: 'start' | 'bottomA' | 'bottomB' | 'end'): C
  *  are used as-is: Top A rides exactly across the pair of them, so their own
  *  spans are the alignment. */
 export function captionWindows(plan: Plan): CaptionWindows {
-  const end = windowFor(plan, 'end');
   return {
     start: windowFor(plan, 'start'),
     bottomA: windowFor(plan, 'bottomA'),
     bottomB: windowFor(plan, 'bottomB'),
-    payoff: end,
-    end,
+    end: windowFor(plan, 'end'),
   };
 }
 
@@ -255,15 +257,25 @@ export const wantedCount = (w: CaptionWindow | null): number =>
  *  own: the line before it stays up over that stretch. A split line takes
  *  turns across the mark's own stretch, so its second half is still up while
  *  the moment it describes is on screen. */
-function onMarks(lines: CaptionLine[], w: CaptionWindow, place: CaptionPlace, group: CaptionGroup): Caption[] {
+function onMarks(
+  lines: CaptionLine[],
+  w: CaptionWindow,
+  place: CaptionPlace,
+  group: CaptionGroup,
+  /** Anchor the first line that gets written at the window's own start rather
+   *  than at its mark — what Bottom B needs, since nothing before it may hold
+   *  across the seam to cover the beat before its first mark. */
+  fromWindowStart = false,
+): Caption[] {
   const out: Caption[] = [];
   w.marks.forEach((mark, index) => {
     const l = lines[index];
     if (!l?.text.trim()) return;
-    const span = mark.end - mark.start;
+    const head = fromWindowStart && !out.length ? Math.min(w.start, mark.start) : mark.start;
+    const span = mark.end - head;
     const parts = fitParts(splitParts(l.text), span);
     parts.forEach((text, j) => {
-      out.push({ ...l, text, start: mark.start + (span * j) / parts.length, end: w.end, place, ref: { group, index } });
+      out.push({ ...l, text, start: head + (span * j) / parts.length, end: w.end, place, ref: { group, index } });
     });
   });
   return out;
@@ -334,7 +346,8 @@ export function layoutCaptions(
   if (!window) return [];
   if (lines.some((l) => l.at != null)) return placed(lines, window, place, group);
   return window.marks.length
-    ? onMarks(lines, window, place, group)
+    // Bottom B opens on its own first line — see the seam note in the header.
+    ? onMarks(lines, window, place, group, group === 'bottomB')
     : spread(lines, window, place, group);
 }
 
@@ -348,9 +361,7 @@ export interface CaptionLines {
   start: CaptionLine;
   bottomA: CaptionLine[];
   bottomB: CaptionLine[];
-  /** Over the winnings, first: that he made the money. One line. */
-  payoff: CaptionLine;
-  /** Over the winnings, after it: the comment line. One line. */
+  /** Over the winnings: the comment line, and nothing else. One line. */
   end: CaptionLine;
 }
 
@@ -358,7 +369,6 @@ export const EMPTY_LINES: CaptionLines = {
   start: capLine('', ONE_LINE_DEFAULT.start),
   bottomA: [],
   bottomB: [],
-  payoff: capLine('', ONE_LINE_DEFAULT.payoff),
   end: capLine('', ONE_LINE_DEFAULT.end),
 };
 
@@ -368,27 +378,28 @@ export interface LaidOutCaptions {
   start: Caption[];
   bottomA: Caption[];
   bottomB: Caption[];
-  payoff: Caption[];
   end: Caption[];
   /** Every caption on the build, in timeline order. */
   all: Caption[];
 }
 
-/** A window that carries exactly one line — Start's hook, the two End lines.
- *  If that clip happens to be marked up the line goes over the first mark,
- *  which is where the moment was said to be; otherwise it opens the window. */
+/** A window that carries exactly one line — Start's hook, End's comment line.
+ *  `onMark` lets it wait for the clip's first mark, which is where the moment
+ *  was said to be; without one it simply opens the window and runs to the end. */
 function single(
   line: CaptionLine,
   w: CaptionWindow | null,
   group: CaptionGroup,
   place: CaptionPlace = 'middle',
+  onMark = true,
 ): Caption[] {
   if (!w || !line.text.trim()) return [];
-  return [{ ...line, start: w.marks[0]?.start ?? w.start, end: w.end, place, ref: { group, index: 0 } }];
+  const start = onMark ? w.marks[0]?.start ?? w.start : w.start;
+  return [{ ...line, start, end: w.end, place, ref: { group, index: 0 } }];
 }
 
 /** The order the windows play in. */
-const GROUP_ORDER: readonly CaptionGroup[] = ['start', 'bottomA', 'bottomB', 'payoff', 'end'];
+const GROUP_ORDER: readonly CaptionGroup[] = ['start', 'bottomA', 'bottomB', 'end'];
 
 /** Settle when each line comes down: the moment the next one comes up, so
  *  there is always a caption on screen. Within a window that is simply the
@@ -411,7 +422,10 @@ function hold(all: Caption[], windows: CaptionWindows): void {
     if (!next) { c.end = own.end; return; }
     if (next.ref.group === c.ref.group) { c.end = next.start; return; }
     const following = present[present.indexOf(c.ref.group) + 1];
-    c.end = next.ref.group === following ? next.start : own.end;
+    const across = next.ref.group === following ? next.start : own.end;
+    // Bottom A stops dead at its own end whatever comes next: the A → B seam is
+    // a hard cut (see the header). Every other seam may still be held across.
+    c.end = c.ref.group === 'bottomA' ? Math.min(across, own.end) : across;
   });
 }
 
@@ -420,25 +434,135 @@ export function buildCaptions(windows: CaptionWindows, lines: CaptionLines): Lai
   const start = single(lines.start, windows.start, 'start', 'top');
   const bottomA = layoutCaptions(lines.bottomA, windows.bottomA, 'bottomA');
   const bottomB = layoutCaptions(lines.bottomB, windows.bottomB, 'bottomB');
-  // The closing clip carries two lines in turn: the pay-off from where the
-  // window opens, and the comment line from halfway — or from the start, when
-  // there is no pay-off written to go before it. `hold` then runs the pay-off
-  // until the comment line comes up, and whichever is last to the very end.
-  const payoff = single(lines.payoff, windows.payoff, 'payoff');
-  const endW = windows.end;
-  const from = endW ? (endW.marks[0]?.start ?? endW.start) : 0;
-  const commentW = endW && payoff.length ? { ...endW, start: from + (endW.end - from) / 2, marks: [] } : endW;
-  const end = single(lines.end, commentW, 'end');
+  // The closing clip carries the comment line and nothing else, across the whole
+  // of it: it is up from End's first frame (`onMark` off, so a marked-up closing
+  // clip doesn't hold it back) and `hold` runs it to the very last.
+  const end = single(lines.end, windows.end, 'end', 'middle', false);
   // The per-group arrays hold the same objects `all` does, so settling the
   // ends here settles them everywhere.
-  const all = [...start, ...bottomA, ...bottomB, ...payoff, ...end].sort((a, b) => a.start - b.start);
+  const all = [...start, ...bottomA, ...bottomB, ...end].sort((a, b) => a.start - b.start);
   hold(all, windows);
-  return { start, bottomA, bottomB, payoff, end, all };
+  return { start, bottomA, bottomB, end, all };
 }
 
 /** The line on screen at time `t`, if any. */
 export const captionAt = (captions: Caption[], t: number): Caption | undefined =>
   captions.find((c) => t >= c.start && t < c.end);
+
+// ── Fixed lines ───────────────────────────────────────────────────────────────
+// Three of a build's captions are chosen rather than written. Bottom A is always
+// the rendered ChatGPT recording now, marked by the renderer beat for beat
+// (search, wait, pick — lib/vidsBottom bottomAMarks), and its middle two beats
+// say nothing that changes from one build to the next: the answer is loading,
+// then he takes the name off it. A model writing those fresh each time only
+// finds new ways to say the same thing, so they come from a fixed set instead —
+// one at random, swapped by hand from the dropdown beside the line in the
+// captions rail. Bottom B's opener is fixed outright: it is the line that has to
+// carry the address, and it is the same every build.
+//
+// Bottom A's two are rolled an emoji as well as a line — the hourglass half the
+// time on the wait, one of three faces a fifth each on the pick — so the same
+// words don't land the same way twice. Bottom B's opener never takes one: it is
+// the address, and it reads as an instruction.
+
+/** Where the person's name goes in a fixed line. */
+const NAME = '{name}';
+
+/** Bottom A's second caption — waiting on the answer to load. */
+export const BOTTOM_A_WAIT: readonly string[] = [
+  'let it cook...',
+  'wait for it to load',
+  'patience...',
+  'let it marinate',
+  'give it a sec...',
+];
+
+/** Bottom A's third caption — taking the name off the answer. The ones without
+ *  {name} in them stand on their own, which is what a build with no name to
+ *  fill in is left to choose from. */
+export const BOTTOM_A_PICK: readonly string[] = [
+  `choose ${NAME}`,
+  'target acquired',
+  `lock in ${NAME}`,
+  `eyes on ${NAME}`,
+  'locked in',
+  `${NAME} it is`,
+  `going with ${NAME}`,
+  'pick your fighter',
+];
+
+/** Bottom B's first caption, every build: the address, then the search. Two
+ *  captions out of the one line — the " / " splits it (see splitParts) — so
+ *  "go to pauv.com" opens the clip and "search <name>" follows on the same
+ *  moment. Without a name there is nothing to search, so it is the address
+ *  alone. */
+export const bottomBOpen = (name: string): string =>
+  (name ? `go to pauv.com / search ${name}` : 'go to pauv.com');
+
+const needsName = (line: string) => line.includes(NAME);
+const withName = (line: string, name: string) => line.split(NAME).join(name);
+
+/** What each of Bottom A's chosen lines may end on, listed once per share so
+ *  taking one at random gives the odds asked for: the wait line ends on the
+ *  hourglass half the time, the pick line on one of three faces a fifth each and
+ *  on nothing the other two fifths. `null` is no emoji.
+ *
+ *  Stored as the plain character and nothing more: the stage and the exporter
+ *  paint every caption emoji from the app's own Apple images (see the note at
+ *  the top of this file), so that is already the Apple one wherever it is
+ *  drawn. All four are in the app's set, with a PNG under /public/emoji. */
+const FIXED_EMOJI: Record<number, readonly (string | null)[]> = {
+  1: ['⏳', null],
+  2: ['👀', '😤', '🎯', null, null],
+};
+
+const anyOf = <T,>(xs: readonly T[]): T => xs[Math.floor(Math.random() * xs.length)];
+
+/** Every emoji a fixed line can end up carrying, longest first so a line ending
+ *  on one is matched by the whole of it. */
+const ROLLED = Object.values(FIXED_EMOJI).flat()
+  .filter((e): e is string => !!e)
+  .sort((a, b) => b.length - a.length);
+
+/** A fixed line with whatever emoji was rolled onto it taken back off — what the
+ *  dropdown matches on, so a line that came up with an hourglass still shows as
+ *  the line it is. */
+export function bareFixedLine(text: string): string {
+  const t = text.trimEnd();
+  const hit = ROLLED.find((e) => t.endsWith(e));
+  return hit ? t.slice(0, -hit.length).trimEnd() : t;
+}
+
+/** Swap the words of a fixed line for another of the set, keeping whatever emoji
+ *  this one was rolled — picking different words is not a re-roll. */
+export function swapFixedLine(current: string, line: string): string {
+  const bare = bareFixedLine(current);
+  const emoji = current.trimEnd().slice(bare.length).trim();
+  return emoji ? `${line} ${emoji}` : line;
+}
+
+/** The fixed lines a row may be swapped between, the name already filled in —
+ *  null for a row that is written rather than chosen. Bottom A's first line
+ *  still describes what he searched, so it is the model's to write. */
+export function fixedChoices(group: CaptionGroup, index: number, name: string): readonly string[] | null {
+  const bank = group !== 'bottomA' ? null
+    : index === 1 ? BOTTOM_A_WAIT
+    : index === 2 ? BOTTOM_A_PICK
+    : null;
+  if (!bank) return null;
+  const usable = name ? bank : bank.filter((l) => !needsName(l));
+  return (usable.length ? usable : bank).map((l) => withName(l, name));
+}
+
+/** One of a row's fixed lines at random, with its emoji rolled on the side —
+ *  null where the row is written rather than chosen. */
+export function fixedLine(group: CaptionGroup, index: number, name: string): string | null {
+  const choices = fixedChoices(group, index, name);
+  if (!choices?.length) return null;
+  const line = anyOf(choices);
+  const emoji = group === 'bottomA' ? anyOf(FIXED_EMOJI[index] ?? [null]) : null;
+  return emoji ? `${line} ${emoji}` : line;
+}
 
 // ── Look ──────────────────────────────────────────────────────────────────────
 // Four presets rather than a pile of controls: the point is to pick one and get
@@ -594,10 +718,17 @@ export function layoutCaption(
   // (START_DROP), and the line belongs against that edge rather than floating
   // over the black.
   const pictureTop = regionRect('full', W, H, bars).y;
+  // A middle-placed caption sits on the black bar between the two halves, not
+  // at the middle of the frame — that is what keeps it off both pictures. Taken
+  // from the regions themselves rather than worked out here, so it follows the
+  // split wherever that moves (lib/vidsPlan TOP_SHORTER). With the middle bar
+  // turned off the two regions meet, and the line lands on the seam.
+  const topRect = regionRect('top', W, H, bars);
+  const barMiddle = (topRect.y + topRect.h + regionRect('bottom', W, H, bars).y) / 2;
   const cy = caption.pos
     ? H * caption.pos.y
     : caption.place === 'top' ? pictureTop + H * TOP_GAP + step / 2 + blockH / 2
-    : H / 2;
+    : barMiddle;
   const top = cy - blockH / 2;
 
   return {

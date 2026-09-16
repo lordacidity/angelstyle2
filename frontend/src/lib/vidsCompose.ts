@@ -19,7 +19,10 @@
 
 import type * as MB from 'mediabunny';
 import { isPhoto } from '@/lib/vids-types';
-import { drawInRegion, regionRect, smoothScaling, videoBitrate, type Plan, type PlanItem } from '@/lib/vidsPlan';
+import {
+  drawInRegion, itemBacking, itemTransform, regionRect, smoothScaling, videoBitrate,
+  type Plan, type PlanItem,
+} from '@/lib/vidsPlan';
 import {
   captionAt, captionStyle, drawCaption, preloadCaptionEmoji, DEFAULT_CAPTION_STYLE, type Caption, type CaptionStyle,
 } from '@/lib/vidsCaptions';
@@ -360,7 +363,8 @@ export async function composeSequence(opts: ComposeOptions): Promise<Blob> {
           if (f < p.first || f >= p.last || !p.hasFrame) continue;
           drawInRegion(
             ctx, p.canvas, p.canvas.width, p.canvas.height,
-            regionRect(p.item.region, width, height, plan.bars), p.item.fit, p.item.align, p.item.transform,
+            regionRect(p.item.region, width, height, plan.bars), p.item.fit, p.item.align,
+            itemTransform(p.item, width), itemBacking(p.item),
           );
         }
         const cap = captionAt(captions, f / fps);

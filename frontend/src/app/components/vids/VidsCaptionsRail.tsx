@@ -19,7 +19,8 @@
 import { useRef, type KeyboardEvent, type ReactNode } from 'react';
 import { useEmojiField } from '../EmojiPicker';
 import {
-  CAPTION_STYLES, type Caption, type CaptionGroup, type CaptionLine, type CaptionLines,
+  CAPTION_STYLES, bareFixedLine, fixedChoices, swapFixedLine,
+  type Caption, type CaptionGroup, type CaptionLine, type CaptionLines,
   type CaptionRef, type CaptionWindows, type LaidOutCaptions,
 } from '@/lib/vidsCaptions';
 import { fmtTime } from '@/lib/utils';
@@ -95,7 +96,7 @@ function Section({ title, children }: { title: string; children: ReactNode }) {
  *  A marked clip shows a row per mark, so a mark left blank — Bottom B's first,
  *  when the seam was merged into A's last line — is still there, its words as
  *  the placeholder, for you to give a line of its own. */
-function CaptionRows({ label, hint, group, laid, lines, moments = [], onChange, onResetPos }: {
+function CaptionRows({ label, hint, group, laid, lines, moments = [], name = null, onChange, onResetPos }: {
   label: string;
   hint: string;
   group: CaptionGroup;
@@ -103,6 +104,9 @@ function CaptionRows({ label, hint, group, laid, lines, moments = [], onChange, 
   lines: CaptionLine[];
   /** The clip's marks, in the order the lines are in — empty when unmarked. */
   moments?: string[];
+  /** The person the build trades on, for the fixed lines that name them. null
+   *  where this window has no fixed lines at all, so no row gets a dropdown. */
+  name?: string | null;
   onChange: (i: number, patch: Partial<CaptionLine>) => void;
   onResetPos: (ref: CaptionRef) => void;
 }) {
@@ -123,6 +127,9 @@ function CaptionRows({ label, hint, group, laid, lines, moments = [], onChange, 
           const at = parts[0];
           const span = (c: Caption) => `${c.start.toFixed(1)}s → ${c.end.toFixed(1)}s`;
           const moment = moments[i];
+          // A chosen line rather than a written one — the dropdown swaps it for
+          // another of the set (lib/vidsCaptions fixedChoices).
+          const choices = name == null ? null : fixedChoices(group, i, name);
           const why = at
             ? parts.length > 1
               ? `${parts.length} captions, one after the other: ${parts.map(span).join(', ')}`
@@ -144,6 +151,21 @@ function CaptionRows({ label, hint, group, laid, lines, moments = [], onChange, 
                   at ? 'border-zinc-800 text-zinc-100' : 'border-zinc-900 text-zinc-600'
                 }`}
               />
+              {choices && (
+                <select
+                  // Matched on the words alone: the line may have been rolled an
+                  // emoji, and swapping the words keeps it.
+                  value={choices.includes(bareFixedLine(l.text)) ? bareFixedLine(l.text) : ''}
+                  onChange={(e) => e.target.value && onChange(i, { text: swapFixedLine(l.text, e.target.value) })}
+                  title="This line is chosen, not written — swap it for another of the set"
+                  className="w-5 shrink-0 appearance-none rounded border border-zinc-800 bg-black text-center text-[9px] leading-none text-zinc-500 outline-none hover:border-zinc-600 hover:text-zinc-300 focus:border-zinc-500"
+                >
+                  {/* Edited by hand into something outside the set — shown as
+                      blank so the set is still one click away. */}
+                  {!choices.includes(bareFixedLine(l.text)) && <option value="">—</option>}
+                  {choices.map((c) => <option key={c} value={c}>{c}</option>)}
+                </select>
+              )}
               {l.pos && (
                 <button
                   onClick={() => onResetPos({ group, index: i })}
@@ -196,11 +218,13 @@ interface Props {
   setStyleId: (id: string) => void;
   /** Forget where a line was dragged to on the stage. */
   onResetPos: (ref: CaptionRef) => void;
+  /** The person the build trades on — what the fixed lines name. */
+  name: string;
 }
 
 export function VidsCaptionsRail({
   canCaption, lines, setLines, laid, windows, hasLines, writing, error,
-  onWrite, onClear, notes, setNotes, emojis, setEmojis, styleId, setStyleId, onResetPos,
+  onWrite, onClear, notes, setNotes, emojis, setEmojis, styleId, setStyleId, onResetPos, name,
 }: Props) {
   const momentsOf = (w: CaptionWindows['bottomA']) => (w?.marks ?? []).map((m) => m.text);
   // Bottom A on Fast: two lines the writer put where it chose, not one per mark.
@@ -293,6 +317,7 @@ export function VidsCaptionsRail({
                   // Placed lines go where the writer put them, not one per
                   // mark, so the marks are not theirs to show.
                   moments={placedA ? [] : momentsOf(windows.bottomA)}
+                  name={placedA ? null : name}
                   onChange={patchLine('bottomA')}
                   onResetPos={onResetPos}
                 />
@@ -307,17 +332,8 @@ export function VidsCaptionsRail({
                   onResetPos={onResetPos}
                 />
                 <CaptionRows
-                  label="End · money"
-                  hint="he made it · first half of End"
-                  group="payoff"
-                  laid={laid.payoff}
-                  lines={[lines.payoff]}
-                  onChange={(_i, patch) => setLines((l) => ({ ...l, payoff: { ...l.payoff, ...patch } }))}
-                  onResetPos={onResetPos}
-                />
-                <CaptionRows
-                  label="End · comment"
-                  hint="comment “…” for the link · second half"
+                  label="End"
+                  hint="comment “…” for the link · all of End"
                   group="end"
                   laid={laid.end}
                   lines={[lines.end]}

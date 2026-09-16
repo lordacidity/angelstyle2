@@ -14,16 +14,23 @@
 // An ordinary clip carries its own. A persona's three clips do not — they are
 // one performance, so the persona holds the context for all three and you set it
 // by right-clicking the persona (or any of its parts).
+//
+// The popup is also where a Bottom B's light/dark is changed after the fact —
+// which way Pauv was on the screen when it was recorded (VidTheme), asked when
+// the clip is filed. Nothing else carries one, so nothing else is asked.
 
 import { useEffect, useRef, useState } from 'react';
-import type { VidContext, VidContextPatch } from '@/lib/vids-types';
+import { VID_THEMES } from '@/lib/vids-types';
+import type { VidContext, VidContextPatch, VidTheme, VidThemePatch } from '@/lib/vids-types';
 import { CloseIcon } from '@/lib/icons';
 
 export const CONTEXT_PLACEHOLDER = 'chatgpt looking up ronaldo';
 
-/** What a save from the popup can change: the context, and the name when it
- *  was edited. */
-export type VidsContextSave = VidContextPatch & { name?: string };
+const THEME_LABEL: Record<VidTheme, string> = { light: '☀ Light', dark: '🌙 Dark' };
+
+/** What a save from the popup can change: the context, the name when it was
+ *  edited, and — on a Bottom B — which way Pauv was. */
+export type VidsContextSave = VidContextPatch & VidThemePatch & { name?: string };
 
 interface DialogProps {
   /** Whose name and context these are — the heading says which. */
@@ -33,6 +40,10 @@ interface DialogProps {
   /** One line under the heading — which clips this actually covers. */
   hint: string;
   value: VidContext;
+  /** Which way Pauv was on this clip, for the ones that carry it (a Bottom B —
+   *  see VidTheme); `null` there means nobody has said yet. Left undefined for
+   *  everything else, and then the popup doesn't ask. */
+  theme?: VidTheme | null;
   onSave: (patch: VidsContextSave) => void;
   onClose: () => void;
 }
@@ -41,16 +52,23 @@ interface DialogProps {
  *  until Save, so Escape or a click outside leaves both exactly as they were;
  *  a name wiped blank is left as it was too, since nothing can be called
  *  nothing. */
-export function VidsContextDialog({ kind, name, hint, value, onSave, onClose }: DialogProps) {
+export function VidsContextDialog({ kind, name, hint, value, theme, onSave, onClose }: DialogProps) {
   const [title, setTitle] = useState(name);
   const [text, setText] = useState(value.context);
+  // Undefined means this thing doesn't carry a theme at all — see the prop.
+  const asks = theme !== undefined;
+  const [mode, setMode] = useState<VidTheme | null>(theme ?? null);
   const areaRef = useRef<HTMLTextAreaElement>(null);
 
   useEffect(() => { areaRef.current?.focus(); }, []);
 
   const save = () => {
     const clean = title.trim();
-    onSave({ ...(clean && clean !== name ? { name: clean } : {}), context: text.trim() });
+    onSave({
+      ...(clean && clean !== name ? { name: clean } : {}),
+      ...(asks && mode !== theme ? { theme: mode } : {}),
+      context: text.trim(),
+    });
     onClose();
   };
 
@@ -90,6 +108,33 @@ export function VidsContextDialog({ kind, name, hint, value, onSave, onClose }: 
           maxLength={kind === 'persona' ? 120 : 200}
           className="mb-2 w-full rounded border border-zinc-700 bg-black px-2 py-1.5 text-[11px] text-zinc-100 outline-none placeholder:text-zinc-600 focus:border-zinc-400"
         />
+
+        {asks && (
+          <>
+            <p className="mb-1 text-[9px] font-semibold uppercase tracking-wider text-zinc-500">Which way was Pauv</p>
+            <div className="mb-2 grid grid-cols-2 gap-1.5">
+              {VID_THEMES.map((t) => (
+                <button
+                  key={t}
+                  type="button"
+                  // Pressing the one that is already on takes it back off — a
+                  // clip nobody has looked at is better than a wrong answer.
+                  onClick={() => setMode((m) => (m === t ? null : t))}
+                  title={`Pauv was in ${t} mode in this recording — press again to unsay it`}
+                  className={`rounded border py-1.5 text-[11px] font-medium transition-colors ${
+                    mode === t
+                      ? t === 'light'
+                        ? 'border-zinc-300 bg-zinc-200 text-black'
+                        : 'border-sky-500 bg-sky-500/20 text-sky-200'
+                      : 'border-zinc-800 text-zinc-500 hover:border-zinc-600 hover:text-zinc-300'
+                  }`}
+                >
+                  {THEME_LABEL[t]}
+                </button>
+              ))}
+            </div>
+          </>
+        )}
 
         <p className="mb-1 text-[9px] font-semibold uppercase tracking-wider text-zinc-500">
           {kind === 'persona' ? 'What he is doing' : 'What it shows'}

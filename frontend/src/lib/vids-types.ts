@@ -17,6 +17,38 @@ export interface VidContext {
  *  the name and everything else a row carries. */
 export type VidContextPatch = Partial<VidContext>;
 
+// ── Theme ─────────────────────────────────────────────────────────────────────
+// Which way Pauv was on the screen when a Bottom B was recorded — the site has
+// a light mode and a dark one, and the same trade looks like two different
+// clips depending on which was up. Said once, when the clip is filed, and kept
+// beside it so you can see at a glance which you have.
+//
+// Nothing reads it yet: it is there to be looked at, and to be there when
+// something does want it. Null means nobody has said — everything filed before
+// the toggle existed, and every clip that isn't a Pauv recording.
+
+export type VidTheme = 'light' | 'dark';
+export const VID_THEMES: readonly VidTheme[] = ['light', 'dark'];
+
+export interface VidThemed {
+  theme: VidTheme | null;
+}
+
+/** A theme change, posted alongside the name and the context. */
+export type VidThemePatch = Partial<VidThemed>;
+
+/** A theme off the wire or up from a row. Anything that isn't one of the two
+ *  reads as nobody having said — including a value left over from an older
+ *  column. */
+export const cleanTheme = (v: unknown): VidTheme | null =>
+  (v === 'light' || v === 'dark' ? v : null);
+
+/** Folds `theme` out of a request body into a patch, leaving it alone when the
+ *  body didn't mention it. `null` is a real answer: it unsays it. */
+export function readThemePatch(body: Record<string, unknown>, patch: VidThemePatch): void {
+  if (body.theme !== undefined) patch.theme = cleanTheme(body.theme);
+}
+
 // ── Clipable ──────────────────────────────────────────────────────────────────
 // Whether a thing is on offer to the clippers: the people who will make vids
 // of their own, in an app of their own, out of what we approve here. Every
@@ -219,6 +251,9 @@ export interface VidRow {
   /** On offer to the clippers — see VidClipable. Off until someone turns it
    *  on. Means nothing on a persona's three clips: the persona carries it. */
   clipable: boolean;
+  /** Which way Pauv was when this was recorded — see VidTheme. Asked of a
+   *  Bottom B as it is filed; null on everything else. */
+  theme: VidTheme | null;
 }
 
 /** A still filed among the footage. End takes photos as well as clips — every
@@ -257,11 +292,12 @@ export const PERSONA_PART_LABEL: Record<PersonaPart, string> = {
 
 // ── Links ─────────────────────────────────────────────────────────────────────
 // Which Bottom B clips follow on from which Bottom A. A screen recording of a
-// search only makes sense before the recording of the thing it found, and one
-// Bottom A often has two or three Bottom Bs that fit it and a dozen that don't
-// — so the pairs are written down here, on the Link page, and the builder
-// offers (and Random picks) only those. A Bottom A with no links yet is treated
-// as unlinked rather than unusable: its picker shows everything.
+// search only makes sense before the recording of the thing it found — so the
+// pair is written down the moment the Build page's Bottom card makes one (it
+// renders the ChatGPT search for the person whose Bottom B you picked, so it
+// knows the two go together), and the builder offers (and Random picks) only
+// those. A Bottom A with no pair yet is treated as unlinked rather than
+// unusable: its picker shows everything.
 
 /** One pair: this Bottom B may follow that Bottom A. Many-to-many. */
 export interface VidLink {
@@ -310,6 +346,8 @@ export interface CreateVideoInput {
   context?: string;
   marks?: VidMark[];
   hasSfx?: boolean;
+  /** Which way Pauv was, for a Bottom B — see VidTheme. */
+  theme?: VidTheme | null;
   /** The recording the uploaded render was made from, and the edit that made
    *  it — the intake run edits before it ever uploads, so both arrive together.
    *  Left off when the file going up is the recording itself. */
@@ -409,9 +447,7 @@ export interface VidBuildSpec {
       start: RecipeCaptionLine;
       bottomA: RecipeCaptionLine[];
       bottomB: RecipeCaptionLine[];
-      /** The pay-off over the closing clip, before the comment line. Absent on
-       *  builds written down before End carried two lines. */
-      payoff?: RecipeCaptionLine;
+      /** The comment line, the only one over the closing clip. */
       end: RecipeCaptionLine;
     };
     styleId: string;

@@ -3,14 +3,15 @@
 // "Vids" — a shared cloud video library (folders + clips in Supabase Storage)
 // beside the stacked-sequence builder, in three pages:
 //
-//   Edit & file   three pages of its own. Upload: drop footage on the middle
+//   Edit & file   two pages of its own. Upload: drop footage on the middle
 //                 and it runs the whole errand — folder, context, edit, save —
 //                 with three files at once taken to be a persona, named once,
 //                 given one context, and trimmed clip by clip. Edit: a clip
 //                 open in the editor — trim it, cut chunks out of the middle,
 //                 change its speed, drop its sound; saving puts the edit back
-//                 over that clip. Link: which Bottom Bs follow on from which
-//                 Bottom A, which is what the builder goes by below.
+//                 over that clip. Bottom A isn't filed from here at all — see
+//                 the Bottom card on Build — so footage dropped in by hand is
+//                 a Bottom B, an End or a persona.
 //   Build         pick a persona plus the bottom clips, stack them into one
 //                 video, and caption it. Three rails on the right: placement
 //                 and sound in one, the captions and how they look in the
@@ -23,7 +24,7 @@
 //                 That is Advanced. Simple, the other half of the switch top
 //                 right, is the same builder with two questions on it — which
 //                 persona, which vid — and everything else left to fill itself
-//                 in: the second bottom clip off the Link page, End, a song,
+//                 in: the second bottom clip off the pair, End, a song,
 //                 the bars, the captions. Play, download, push to Phonedeck,
 //                 nothing to adjust. Switching to Advanced opens that very
 //                 build with every control on it.
@@ -40,12 +41,15 @@
 // Four top-level folders feed the six slots of the sequence:
 //   Persona   a bundle of three clips — Start, Top A, Top B — chosen together.
 //   Bottom A / Bottom B / End   picked one clip at a time, from the folder of
-//                               that name.
+//                               that name. Bottom A is the one nobody fills by
+//                               hand: the Bottom card renders the ChatGPT
+//                               search and files it there itself.
 // So a build chooses one persona plus up to three bottom clips, and the builder
 // plays the sequence: Start full screen → Top A over Bottom A → Bottom B, then
-// Top B over End. Bottom A and Bottom B go together only in the pairs the Link
-// page has ticked: once a Bottom A is on the stage its Bottom B picker offers
-// just those, and Random draws a linked pair rather than two clips at random. Export downloads the MP4 or sends it to Phonedeck's Incoming
+// Top B over End. Bottom A and Bottom B go together only in pairs, written down
+// as the Bottom card makes them: once a Bottom A is on the stage its Bottom B
+// picker offers just those, and Random draws a pair rather than two clips at
+// random. Export downloads the MP4 or sends it to Phonedeck's Incoming
 // list — where a Media export lands — to be pushed to the phones from the
 // Phonedeck panel. No AI, no captions: just footage in, video out.
 
@@ -230,10 +234,10 @@ export function VidsSection({ active }: { active: boolean }) {
     [clipsForSlot],
   );
 
-  // The Bottom card's ChatGPT recording is filed in the Bottom A folder like
-  // any other Bottom A, with the keyboard sound flagged — it is the only sound
-  // on it, which is what lets the builder play it — and the pair it makes
-  // with their Bottom B is written down on the Link page. See VidsBottom.
+  // The Bottom card's ChatGPT recording is filed in the Bottom A folder — the
+  // only thing that ever files one — with the keyboard sound flagged, it being
+  // the only sound on it, which is what lets the builder play it. The pair it
+  // makes with their Bottom B is written down at the same time. See VidsBottom.
   const { uploadBlob, setLinks } = lib;
   const bottomAFolderId = useMemo(
     () => folders.find((f) => !f.parentId && f.name.trim().toLowerCase() === SLOT_META.bottomA.folder.toLowerCase())?.id ?? null,

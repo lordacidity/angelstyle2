@@ -3,7 +3,10 @@
 // can't point a row at somebody else's object.
 import { NextRequest, NextResponse } from 'next/server';
 import { createVideo, errMessage, isUuid } from '@/lib/vids-db';
-import { cleanEdit, cleanMarks, readContextPatch, type CreateVideoInput, type VidContextPatch } from '@/lib/vids-types';
+import {
+  cleanEdit, cleanMarks, readContextPatch, readThemePatch,
+  type CreateVideoInput, type VidContextPatch, type VidThemePatch,
+} from '@/lib/vids-types';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -52,6 +55,9 @@ export async function POST(req: NextRequest) {
   const context: VidContextPatch = {};
   readContextPatch(b as Record<string, unknown>, context);
   if (context.context !== undefined) input.context = context.context;
+  const theme: VidThemePatch = {};
+  readThemePatch(b as Record<string, unknown>, theme);
+  if (theme.theme !== undefined) input.theme = theme.theme;
   if (b.marks !== undefined) input.marks = cleanMarks(b.marks);
   if (b.hasSfx === true) input.hasSfx = true;
   if (sourcePath !== null) input.sourcePath = sourcePath;

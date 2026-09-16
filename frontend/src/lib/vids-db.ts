@@ -16,10 +16,12 @@
 import { randomInt } from 'node:crypto';
 import pg from 'pg';
 import { createClient, type SupabaseClient } from '@supabase/supabase-js';
-import { RECIPE_CODE_ALPHABET, RECIPE_CODE_LENGTH, cleanEdit, cleanMarks, isClipableKind, recipeName } from '@/lib/vids-types';
+import {
+  RECIPE_CODE_ALPHABET, RECIPE_CODE_LENGTH, cleanEdit, cleanMarks, cleanTheme, isClipableKind, recipeName,
+} from '@/lib/vids-types';
 import type {
   ClipableKind, CreateVideoInput, VidBuildSpec, VidClipableFlag, VidClipablePatch, VidContextPatch, VidEdit,
-  VidFolder, VidLink, VidMark, VidPersona, VidRecipe, VidRow, VidsLibraryPayload,
+  VidFolder, VidLink, VidMark, VidPersona, VidRecipe, VidRow, VidThemePatch, VidsLibraryPayload,
 } from '@/lib/vids-types';
 
 export const VIDS_BUCKET = 'vids';
@@ -36,7 +38,7 @@ export const errMessage = (e: unknown) => (e instanceof Error ? e.message : 'une
 // reload in dev, or a long-lived server between deploys. Comparing the version
 // makes such a process re-run the (idempotent) DDL instead of trusting a
 // promise that was resolved against the older schema.
-const SCHEMA_VERSION = 10;
+const SCHEMA_VERSION = 11;
 
 const g = globalThis as unknown as {
   __vidsPool?: pg.Pool;
@@ -167,12 +169,19 @@ function ensureSchema(): Promise<void> {
       );
     `);
     // Likewise for context, on both tables: everything made before simply has
-    // nothing said about it yet, which is what the default means. (A `theme`
-    // column may still be there from when a clip said whether it was shot light
-    // or dark — nothing reads or writes it any more, and it defaults itself.)
+    // nothing said about it yet, which is what the default means.
     for (const table of ['vids_videos', 'vids_personas'] as const) {
       await pool.query(`ALTER TABLE ${table} ADD COLUMN IF NOT EXISTS context TEXT NOT NULL DEFAULT ''`);
     }
+    // Which way Pauv was when a Bottom B was recorded — see VidTheme. NULL is
+    // "nobody has said", which is right for everything filed before it was
+    // asked. A column of this name was here once and left behind; the two
+    // ALTERs below take whatever shape it was in (it carried a default, and may
+    // have been NOT NULL) back to a plain nullable one, and cleanTheme drops any
+    // value in it that isn't light or dark.
+    await pool.query('ALTER TABLE vids_videos ADD COLUMN IF NOT EXISTS theme TEXT NULL');
+    await pool.query('ALTER TABLE vids_videos ALTER COLUMN theme DROP DEFAULT');
+    await pool.query('ALTER TABLE vids_videos ALTER COLUMN theme DROP NOT NULL');
     // Per-stretch marks live on the clip only — a persona's context covers the
     // whole bundle, and its parts are marked up individually like any clip.
     await pool.query(
@@ -259,7 +268,7 @@ interface VideoDb {
   thumb_path: string | null; mime_type: string; size_bytes: string | number;
   duration_s: number | null; width: number | null; height: number | null;
   has_sfx: boolean; context: string; marks: unknown; source_path: string | null; edit: unknown;
-  clipable: boolean; created_at: Date;
+  clipable: boolean; theme: string | null; created_at: Date;
 }
 
 interface PersonaDb {
@@ -282,7 +291,7 @@ const RECIPE_COLS = 'code, title, video_id, build, created_at';
 const PERSONA_COLS = 'id, name, start_id, top_a_id, top_b_id, context, clipable, created_at';
 const VIDEO_COLS =
   'id, folder_id, name, storage_path, thumb_path, mime_type, size_bytes, duration_s, width, height, '
-  + 'has_sfx, context, marks, source_path, edit, clipable, created_at';
+  + 'has_sfx, context, marks, source_path, edit, clipable, theme, created_at';
 
 const toFolder = (r: FolderDb): VidFolder => ({
   id: r.id, parentId: r.parent_id, name: r.name, createdAt: r.created_at.toISOString(),
@@ -334,6 +343,7 @@ const toVideo = (r: VideoDb): VidRow => ({
   sourceUrl: r.source_path ? publicUrl(r.source_path) : null,
   edit: cleanEdit(r.edit),
   clipable: r.clipable === true,
+  theme: cleanTheme(r.theme),
   createdAt: r.created_at.toISOString(),
   url: publicUrl(r.storage_path),
   thumbUrl: r.thumb_path ? publicUrl(r.thumb_path) : null,
@@ -550,14 +560,15 @@ export async function createVideo(input: CreateVideoInput): Promise<VidRow> {
     const r = await getPool().query<VideoDb>(
       `INSERT INTO vids_videos
          (id, folder_id, name, storage_path, thumb_path, mime_type, size_bytes, duration_s, width, height,
-          has_sfx, context, marks, source_path, edit)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13::jsonb, $14, $15::jsonb)
+          has_sfx, context, marks, source_path, edit, theme)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13::jsonb, $14, $15::jsonb, $16)
        RETURNING ${VIDEO_COLS}`,
       [
         input.id, input.folderId, input.name, input.storagePath, input.thumbPath, input.mimeType,
         input.sizeBytes, input.duration, input.width, input.height,
         input.hasSfx ?? false, input.context ?? '', JSON.stringify(cleanMarks(input.marks ?? [])),
         input.sourcePath ?? null, input.edit ? JSON.stringify(input.edit) : null,
+        cleanTheme(input.theme),
       ],
     );
     return toVideo(r.rows[0]);
@@ -572,7 +583,7 @@ export async function createVideo(input: CreateVideoInput): Promise<VidRow> {
   }
 }
 
-export interface VideoPatch extends VidContextPatch, VidClipablePatch {
+export interface VideoPatch extends VidContextPatch, VidClipablePatch, VidThemePatch {
   name?: string;
   folderId?: string | null;
   marks?: VidMark[];
@@ -588,6 +599,7 @@ export async function updateVideo(id: string, patch: VideoPatch): Promise<VidRow
   if (patch.context !== undefined) put('context', patch.context);
   if (patch.marks !== undefined) put('marks', JSON.stringify(patch.marks));
   if (patch.clipable !== undefined) put('clipable', patch.clipable);
+  if (patch.theme !== undefined) put('theme', cleanTheme(patch.theme));
   vals.push(id);
   const r = await getPool().query<VideoDb>(
     `UPDATE vids_videos SET ${sets.join(', ')} WHERE id = $${vals.length} RETURNING ${VIDEO_COLS}`,

@@ -8,7 +8,7 @@
 //           panel up here any more — everything new comes in through the middle
 //           — but the pane still takes a drop that misses a folder, and files it
 //           in the Inbox.
-//   Right   three pages under one strip:
+//   Right   two pages under one strip:
 //           Upload   the intake stage: the whole middle is a drop target, and
 //                    a drop runs the pipeline in VidsIntake. One clip walks
 //                    folder → context → edit → save; three at once is taken
@@ -19,14 +19,18 @@
 //                    way in.
 //           Edit     the editor for the open clip — trim, cut, speed, sound,
 //                    save. Opening a clip from anywhere lands here.
-//           Link     which Bottom Bs follow on from which Bottom A
-//                    (VidsLinks) — what the builder's Bottom B picker and its
-//                    Random button go by.
 //           A run turns the page for you — Upload while it is asking
-//           something, Edit once it has a clip open — and all three stay
-//           mounted, so nothing half-done is lost to a look elsewhere.
+//           something, Edit once it has a clip open — and both stay mounted,
+//           so nothing half-done is lost to a look elsewhere.
 //           (What the clippers' app gets is its own page of the section,
 //           beside this one — see VidsClippers.)
+//
+// Bottom A is not here at all — not a folder, not somewhere to file, and no
+// Link page pairing one with its Bottom B. Nobody shoots a Bottom A: the Build
+// page's Bottom card renders the ChatGPT search itself, files it under Bottom A
+// and writes down the pair (see VidsBottom). So footage dropped in by hand is a
+// Bottom B, an End or a persona, and a Bottom B is asked one extra thing as it
+// is filed — which way Pauv was on the screen, light or dark (see VidTheme).
 //
 // Right-click says what a piece of footage is showing: a clip's thumbnail opens
 // the context popup for that clip, a persona row (or one of its part tiles) for
@@ -45,11 +49,13 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { DragEvent } from 'react';
-import type { PersonaPart, VidContext, VidEdit, VidFolder, VidMark, VidPersona, VidRow } from '@/lib/vids-types';
+import type {
+  PersonaPart, VidContext, VidEdit, VidFolder, VidMark, VidPersona, VidRow, VidTheme,
+} from '@/lib/vids-types';
 import { PERSONA_PARTS, PERSONA_PART_LABEL, isPhoto } from '@/lib/vids-types';
 import { MEDIA_ONLY, isMediaFile, isVideoFile, type VidsLib } from '../../hooks/useVidsLibrary';
 import {
-  LIBRARY_FOLDERS, PERSONA_FOLDER, SLOT_META, VID_DRAG_MIME, folderGroupIds, intakeSpeed,
+  PERSONA_FOLDER, PREP_FOLDERS, SLOT_META, VID_DRAG_MIME, folderGroupIds, intakeSpeed,
   isPersonaFolderName, slotForFolderName,
 } from '@/lib/vidsPlan';
 import { VidsClipEditor, type ContextOwner } from './VidsClipEditor';
@@ -59,7 +65,6 @@ import {
   type FolderChoice, type Intake, type LocalRow,
 } from './VidsIntake';
 import { VidPreview, fmtBytes } from './VidPreview';
-import { VidsLinks } from './VidsLinks';
 import { fmtTime } from '@/lib/utils';
 import { CloseIcon, SpinnerIcon, TrashIcon, UploadIcon, VideoIcon } from '@/lib/icons';
 
@@ -76,12 +81,11 @@ const personaOf = (list: string) => (list.startsWith('persona:') ? list.slice('p
 const LOCAL_PREFIX = 'local:';
 const isLocalId = (id: string | null | undefined): id is string => !!id && id.startsWith(LOCAL_PREFIX);
 
-/** The three pages on the right. */
-type Tab = 'upload' | 'edit' | 'link';
+/** The two pages on the right. */
+type Tab = 'upload' | 'edit';
 const TABS: { id: Tab; label: string }[] = [
   { id: 'upload', label: 'Upload' },
   { id: 'edit',   label: 'Edit' },
-  { id: 'link',   label: 'Link' },
 ];
 
 function FolderIcon({ open }: { open: boolean }) {
@@ -212,6 +216,12 @@ function ClipCard({ v, open, onOpen, onDelete, onContext }: {
         <p className="truncate text-[10px] text-zinc-200" title={v.name}>{v.name}</p>
         <p className="text-[9px] text-zinc-500">
           {isPhoto(v) ? 'Photo' : v.duration != null ? fmtTime(v.duration) : '–:––'} · {fmtBytes(v.sizeBytes)}
+          {/* Which way Pauv was on it, on the clips that were asked — see VidTheme. */}
+          {v.theme && (
+            <span title={`Pauv was in ${v.theme} mode in this recording`}>
+              {' · '}{v.theme === 'light' ? '☀ light' : '🌙 dark'}
+            </span>
+          )}
         </p>
         {v.context && (
           <p className="truncate text-[9px] italic text-sky-300/70" title={v.context}>{v.context}</p>
@@ -405,11 +415,12 @@ export function VidsPrep({ lib, active }: { lib: VidsLib; active: boolean }) {
   // highlight only drops once the pointer truly leaves the pane.
   const paneDepth = useRef(0);
 
-  // The four fixed folders, each standing for every same-named top-level folder
-  // plus anything nested under it — same rule the library pane uses, so a
-  // duplicate folder never strands clips out of sight.
+  // The fixed folders this page works in — Persona, Bottom B, End — each
+  // standing for every same-named top-level folder plus anything nested under
+  // it, so a duplicate folder never strands clips out of sight. (Bottom A is
+  // left out: it is filled by the Build page, not from here.)
   const groups = useMemo(
-    () => LIBRARY_FOLDERS.map((name) => ({
+    () => PREP_FOLDERS.map((name) => ({
       name,
       canonical: lib.folders
         .filter((f) => !f.parentId && sameName(f.name, name))
@@ -441,13 +452,16 @@ export function VidsPrep({ lib, active }: { lib: VidsLib; active: boolean }) {
     return g ? lib.videos.filter((v) => v.folderId && g.ids.has(v.folderId)) : [];
   }, [list, unfiled, groups, lib.videos]);
 
-  // What the Link page pairs up: everything filed under Bottom A and Bottom B.
-  const clipsIn = useCallback((name: string) => {
-    const g = groups.find((x) => sameName(x.name, name));
-    return g ? lib.videos.filter((v) => v.folderId && g.ids.has(v.folderId)) : [];
-  }, [groups, lib.videos]);
-  const bottomAClips = useMemo(() => clipsIn(SLOT_META.bottomA.folder), [clipsIn]);
-  const bottomBClips = useMemo(() => clipsIn(SLOT_META.bottomB.folder), [clipsIn]);
+  // The clips filed under Bottom B — the only ones that carry which way Pauv
+  // was, so the only ones asked about it or showing it.
+  const bottomBIds = useMemo(
+    () => groups.find((x) => sameName(x.name, SLOT_META.bottomB.folder))?.ids ?? new Set<string>(),
+    [groups],
+  );
+  const isBottomB = useCallback(
+    (v: VidRow) => !!v.folderId && bottomBIds.has(v.folderId),
+    [bottomBIds],
+  );
 
   // Clips filed under Persona that this persona isn't already using — what an
   // open persona offers as swap-ins for its three parts.
@@ -519,8 +533,11 @@ export function VidsPrep({ lib, active }: { lib: VidsLib; active: boolean }) {
       name: v.name,
       hint: 'What to call this clip, and what it is showing, in your words.',
       value: { context: v.context },
+      // Only a Bottom B is asked which way Pauv was; everything else leaves the
+      // row out of the popup entirely.
+      theme: isBottomB(v) ? v.theme : undefined,
     };
-  }, [ctxTarget, lib.personas, lib.videos]);
+  }, [ctxTarget, lib.personas, lib.videos, isBottomB]);
 
   const dropInto = (folderId: string | null) => (e: DragEvent) => {
     e.preventDefault();
@@ -595,6 +612,7 @@ export function VidsPrep({ lib, active }: { lib: VidsLib; active: boolean }) {
       sourceUrl: null,
       edit: null,
       clipable: false,
+      theme: null,
     };
   }, []);
 
@@ -624,7 +642,9 @@ export function VidsPrep({ lib, active }: { lib: VidsLib; active: boolean }) {
   }, [endRun]);
 
   /** Where a run can file footage: the Inbox, or one of the fixed folders with
-   *  the reason it exists said in the words the builder uses. */
+   *  the reason it exists said in the words the builder uses — except Bottom
+   *  B, whose own line places it after Bottom A, and Bottom A is not something
+   *  anyone files. Here it is said by what it is instead. */
   const folderChoices = useMemo<FolderChoice[]>(() => {
     const out: FolderChoice[] = [{ id: null, name: 'Inbox', hint: 'unfiled — decide later, on the left' }];
     for (const g of groups) {
@@ -633,7 +653,9 @@ export function VidsPrep({ lib, active }: { lib: VidsLib; active: boolean }) {
       out.push({
         id: g.canonical.id,
         name: g.name,
-        hint: slot ? SLOT_META[slot].hint : 'footage for the three clips a persona is made of',
+        hint: slot === 'bottomB'
+          ? 'the Pauv recording — bottom half, after the ChatGPT search'
+          : slot ? SLOT_META[slot].hint : 'footage for the three clips a persona is made of',
       });
     }
     return out;
@@ -713,11 +735,12 @@ export function VidsPrep({ lib, active }: { lib: VidsLib; active: boolean }) {
     });
   }, []);
 
-  /** The clip's name and what it is showing, kept on its local row for the
-   *  editor to open with — then straight into the editor. A photo has nothing
-   *  to trim, cut or listen to, so naming it is the whole of filing one: it is
-   *  saved right here, and the run goes on to the next. */
-  const intakeContext = useCallback(async (name: string, context: VidContext) => {
+  /** The clip's name, what it is showing and — for a Bottom B — which way Pauv
+   *  was, kept on its local row for the editor to open with and for the save to
+   *  send. Then straight into the editor. A photo has nothing to trim, cut or
+   *  listen to, so naming it is the whole of filing one: it is saved right
+   *  here, and the run goes on to the next. */
+  const intakeContext = useCallback(async (name: string, context: VidContext, theme: VidTheme | null) => {
     const cur = intakeRef.current;
     const row = cur?.local[cur.index];
     if (!cur || !row) return;
@@ -725,14 +748,14 @@ export function VidsPrep({ lib, active }: { lib: VidsLib; active: boolean }) {
       setIntake((prev) => (prev ? {
         ...prev,
         step: 'edit',
-        local: prev.local.map((r) => (r.id === row.id ? { ...r, name, context: context.context } : r)),
+        local: prev.local.map((r) => (r.id === row.id ? { ...r, name, context: context.context, theme } : r)),
       } : prev));
       return;
     }
     const token = runRef.current;
     const at = cur.index;
     setIntake((prev) => (prev ? { ...prev, saving: true } : prev));
-    const saved = await lib.uploadBlob(row.file, name, cur.folderId, { context: context.context });
+    const saved = await lib.uploadBlob(row.file, name, cur.folderId, { context: context.context, theme });
     if (runRef.current !== token) return;
     setIntake((prev) => (prev ? { ...prev, saving: false } : prev));
     // It failed — the upload list on the left says why, and the run stays put.
@@ -844,7 +867,7 @@ export function VidsPrep({ lib, active }: { lib: VidsLib; active: boolean }) {
     // as dropped goes up on its own: it is the recording.
     const file = cur.local[at].file;
     const row = await lib.uploadBlob(blob ?? file, name, cur.folderId, {
-      context: cur.local[at].context, marks, hasSfx,
+      context: cur.local[at].context, marks, hasSfx, theme: cur.local[at].theme,
       ...(blob ? { source: file, sourceName: file.name, edit } : {}),
     });
     if (!row) throw new Error('Saving failed — see the message on the left.');
@@ -890,9 +913,7 @@ export function VidsPrep({ lib, active }: { lib: VidsLib; active: boolean }) {
   /** One line beside the strip saying what the open page is for. */
   const tabHint = tab === 'upload'
     ? 'Drop footage in the middle. One clip walks through folder, name, edit and save; three at once make a persona.'
-    : tab === 'edit'
-      ? (openVideo ? `Editing ${openVideo.name}` : 'Click a clip on the left to open it here.')
-      : 'Pick a Bottom A, then tick the Bottom Bs that follow it. Build offers only those, and Random picks its pairs from here.';
+    : (openVideo ? `Editing ${openVideo.name}` : 'Click a clip on the left to open it here.');
 
   return (
     <div className="flex min-h-0 flex-1">
@@ -1107,10 +1128,10 @@ export function VidsPrep({ lib, active }: { lib: VidsLib; active: boolean }) {
 
       </div>
 
-      {/* Right: three pages under one strip — Upload (the intake stage, and the
-          questions a run asks), Edit (the open clip), Link (Bottom A → Bottom
-          B). All three stay mounted: switching away from a half-done edit, a
-          half-typed name or a chosen Bottom A must not lose it. */}
+      {/* Right: two pages under one strip — Upload (the intake stage, and the
+          questions a run asks) and Edit (the open clip). Both stay mounted:
+          switching away from a half-done edit or a half-typed name must not
+          lose it. */}
       <div className="flex min-h-0 min-w-0 flex-1 flex-col">
         <div className="flex shrink-0 items-center gap-3 border-b border-zinc-800 px-4 py-2">
           <div className="flex overflow-hidden rounded-md border border-zinc-700">
@@ -1193,15 +1214,6 @@ export function VidsPrep({ lib, active }: { lib: VidsLib; active: boolean }) {
             />
           )}
         </div>
-
-        <div className="flex min-h-0 flex-1 flex-col" style={{ display: tab === 'link' ? undefined : 'none' }}>
-          <VidsLinks
-            bottomA={bottomAClips}
-            bottomB={bottomBClips}
-            links={lib.links}
-            onSetLinks={(a, bs) => void lib.setLinks(a, bs)}
-          />
-        </div>
       </div>
 
       {openVideo && isPhoto(openVideo) && (
@@ -1214,6 +1226,7 @@ export function VidsPrep({ lib, active }: { lib: VidsLib; active: boolean }) {
           name={ctxDialog.name}
           hint={ctxDialog.hint}
           value={ctxDialog.value}
+          theme={ctxDialog.kind === 'clip' ? ctxDialog.theme : undefined}
           onSave={(patch) => saveContext(ctxTarget, patch)}
           onClose={() => setCtxTarget(null)}
         />

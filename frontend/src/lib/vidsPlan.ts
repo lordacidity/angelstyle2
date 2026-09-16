@@ -29,7 +29,7 @@
 // stored *relative* to that fit so toggling a bar re-fits without losing them.
 
 import { isPhoto } from '@/lib/vids-types';
-import type { PersonaPart, VidRow } from '@/lib/vids-types';
+import type { PersonaPart, VidRow, VidTheme } from '@/lib/vids-types';
 
 export type SlotId = 'start' | 'topA' | 'topB' | 'bottomA' | 'bottomB' | 'end';
 export type Region = 'full' | 'top' | 'bottom';
@@ -77,6 +77,13 @@ export const FOLDER_SLOTS = SLOTS.filter((s) => s.source === 'folder').map((s) =
 
 /** The four top-level folders the library keeps: Persona, Bottom A, Bottom B, End. */
 export const LIBRARY_FOLDERS: readonly string[] = [PERSONA_FOLDER, ...FOLDER_SLOTS.map((id) => SLOT_META[id].folder)];
+
+/** The folders Edit & file works in — everything but Bottom A. Nobody shoots a
+ *  Bottom A any more: the Build page's Bottom card renders the ChatGPT search
+ *  itself and files it there, so footage dropped in by hand is only ever a
+ *  Bottom B, an End or a persona. The folder still exists in the library and
+ *  still feeds the builder; it is just not somewhere you file anything. */
+export const PREP_FOLDERS: readonly string[] = LIBRARY_FOLDERS.filter((name) => name !== SLOT_META.bottomA.folder);
 
 export const isPersonaFolderName = (name: string) => name.trim().toLowerCase() === PERSONA_FOLDER.toLowerCase();
 
@@ -173,6 +180,14 @@ export const MIN_TRIM_LENGTH = 0.1;
  *  speed mean nothing to a photo, so it is this or the window it is fitted to. */
 export const PHOTO_LENGTH = 4;
 
+/** How long Top B plays, always: the closing phase is a fixed beat, not however
+ *  much of him showing off got recorded. A longer clip is trimmed from the end
+ *  down to this — the first TOP_B_LENGTH seconds of whatever was kept — and a
+ *  shorter one simply plays out. Because End is sized to Top B (see buildPlan),
+ *  capping it here is what makes every build's ending the same length, and what
+ *  the End caption is up over from first frame to last. */
+export const TOP_B_LENGTH = 5;
+
 export const DEFAULT_SPEED = 1;
 export const MIN_SPEED = 0.25;
 export const MAX_SPEED = 4;
@@ -203,9 +218,10 @@ export const fmtSpeed = (s: number) => `${s.toFixed(2).replace(/\.?0+$/, '')}×`
  *  recording — there to take off — and it never stacks: every render starts
  *  from the recording. */
 export const INTAKE_SPEED = 1.25;
-/** The slots that get it — the two screen recordings. Start, Top A and Top B
- *  are a person talking and play as shot; End is the pay-off and does too. */
-export const INTAKE_SPEED_SLOTS: readonly SlotId[] = ['bottomA', 'bottomB'];
+/** The slot that gets it — the screen recording you film yourself. Start, Top A
+ *  and Top B are a person talking and play as shot; End is the pay-off and does
+ *  too; Bottom A is rendered rather than filmed, and never comes in this way. */
+export const INTAKE_SPEED_SLOTS: readonly SlotId[] = ['bottomB'];
 /** The speed a clip on its way into `slot` opens at. Anything else — a
  *  persona part, an End, footage going to the Inbox — opens as shot. */
 export const intakeSpeed = (slot: SlotId | null): number =>
@@ -369,10 +385,15 @@ export function buildPlan(
   const range = (id: SlotId) => (photo(id)
     ? { start: 0, end: PHOTO_LENGTH }
     : trimmedRange(picks[id]?.trim ?? DEFAULT_TRIM, fullDur(id)));
-  /** Kept range in clip seconds. */
+  /** Kept range in clip seconds. Top B is capped at TOP_B_LENGTH: the ending is
+   *  a fixed beat, so anything past it is trimmed off the end rather than
+   *  stretching the whole closing phase. Capping it here rather than at the
+   *  timeline means the item's own sourceLength is capped too, so the preview,
+   *  the export and End's window all stop in the same place. */
   const kept = (id: SlotId): number => {
     const r = range(id);
-    return Math.max(0, r.end - r.start);
+    const len = Math.max(0, r.end - r.start);
+    return id === 'topB' ? Math.min(len, TOP_B_LENGTH) : len;
   };
   // Bottom A on Fast plays at whatever rate fits it — see slotSpeed.
   const rate = (id: SlotId) => (photo(id)
@@ -409,7 +430,8 @@ export function buildPlan(
   // Bottom half runs Bottom A → Bottom B → End back to back. End is the one
   // window that isn't sized by its own clip: Top B decides how long the closing
   // phase lasts, and End fills it — holding its last frame if it is shorter than
-  // Top B, cut off if it is longer. (Without a Top B there is nothing to match,
+  // Top B, cut off if it is longer. Top B is itself capped at TOP_B_LENGTH, so
+  // that phase is the same beat on every build. (Without a Top B there is nothing to match,
   // so End simply plays its own length.)
   let endStart: number | null = null;
   for (const s of ['bottomA', 'bottomB', 'end'] as const) {
@@ -454,6 +476,16 @@ export function buildPlan(
  *  same edge (lib/vidsCaptions), so it comes down with the picture. */
 export const START_DROP = 0.06;
 
+/** How much of its height the top half gives up, as a share of the frame. The
+ *  split phases used to be an even two halves either side of the middle bar;
+ *  the top is now this much shorter, and the middle bar and the whole bottom
+ *  half come up by exactly the same amount. The bottom KEEPS its height — the
+ *  screen recording is the same size as it ever was, just higher up the frame —
+ *  so what this leaves at the foot goes black, reading as a deeper bottom bar.
+ *  A share of the height rather than a pixel count, so every preset shifts by
+ *  the same proportion. */
+export const TOP_SHORTER = 0.04;
+
 export function regionRect(region: Region, W: number, H: number, bars: BarsLayout = DEFAULT_BARS): Rect {
   const o = bars.outer ? clamp(bars.outerSize, 0, H / 2 - 1) : 0;
   const innerY = o;
@@ -464,7 +496,12 @@ export function regionRect(region: Region, W: number, H: number, bars: BarsLayou
   }
   const m = bars.middle ? clamp(bars.middleSize, 0, innerH - 2) : 0;
   const half = (innerH - m) / 2;
-  return { x: 0, y: region === 'top' ? innerY : innerY + half + m, w: W, h: half };
+  // Taken off the top and off the top only: everything under it is the same
+  // size, shifted up by `up`.
+  const up = clamp(Math.round(H * TOP_SHORTER), 0, half - 1);
+  return region === 'top'
+    ? { x: 0, y: innerY, w: W, h: half - up }
+    : { x: 0, y: innerY + half - up + m, w: W, h: half };
 }
 
 // Where a sw×sh source lands inside `region` before any user adjustment:
@@ -521,6 +558,10 @@ export function drawInRegion(
   fit: Fit,
   align: Align,
   transform: Transform = DEFAULT_TRANSFORM,
+  /** Painted across the whole region before the clip goes on, so it shows
+   *  wherever the clip doesn't reach — see itemBacking. Null leaves whatever
+   *  the frame was cleared to. */
+  backing: string | null = null,
 ): void {
   if (!sw || !sh) return;
   const r = placedRect(sw, sh, region, fit, align, transform);
@@ -528,6 +569,41 @@ export function drawInRegion(
   ctx.beginPath();
   ctx.rect(region.x, region.y, region.w, region.h);
   ctx.clip();
+  if (backing) {
+    ctx.fillStyle = backing;
+    ctx.fillRect(region.x, region.y, region.w, region.h);
+  }
   ctx.drawImage(src, r.x, r.y, r.w, r.h);
   ctx.restore();
 }
+
+/** Pauv's own page colour, for the strips either side of a Bottom B. The
+ *  recording is a phone-width capture of the site played in a region wider than
+ *  it, so without this the clip sits between two black bars and reads as
+ *  footage dropped onto a frame. Filled with the colour the page itself was,
+ *  the strips read as more of the page. */
+export const BOTTOM_B_BACKING: Record<VidTheme, string> = { dark: '#0B0B0B', light: '#FFFFFF' };
+
+/** What to fill an item's region with before drawing it: Pauv's page colour
+ *  under a Bottom B whose theme was recorded, nothing anywhere else. A clip
+ *  filed before the theme toggle existed has none, and is left on the frame's
+ *  black rather than guessed at. */
+export const itemBacking = (item: PlanItem): string | null =>
+  (item.slot === 'bottomB' && item.video.theme ? BOTTOM_B_BACKING[item.video.theme] : null);
+
+/** How far left of centre Bottom B sits, as a share of the frame width. Dead
+ *  centre is not where the Pauv recording wants to be, so the picture is nudged
+ *  over and the strip of page colour beside it (BOTTOM_B_BACKING) comes up
+ *  wider on the right than the left. A share rather than a pixel count, so it
+ *  is the same nudge at every output size. */
+export const BOTTOM_B_LEFT = 0.05;
+
+/** A slot's transform with any nudge of the house's own folded in — what the
+ *  renderers draw with, and what the builder measures its drag handles from, so
+ *  what you can grab is where the picture actually is. The slot's own `dx` is
+ *  left to sit on top, which is what keeps dragging and Centre working from
+ *  here. `W` is the output width, since `Transform.dx` is in output px. */
+export const itemTransform = (item: PlanItem, W: number): Transform =>
+  (item.slot === 'bottomB'
+    ? { ...item.transform, dx: item.transform.dx - W * BOTTOM_B_LEFT }
+    : item.transform);

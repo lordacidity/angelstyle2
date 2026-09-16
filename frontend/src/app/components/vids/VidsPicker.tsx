@@ -69,8 +69,7 @@ export function Empty({ children }: { children: React.ReactNode }) {
 }
 
 // ── One clip tile ─────────────────────────────────────────────────────────────
-// Shared with the Link page, where `current` means linked rather than in use —
-// hence the badge is a prop.
+// `current` doesn't always mean "in use" — hence the badge is a prop.
 
 export function ClipTile({ video, current, badge = 'In use', tag, links, title, onChoose }: {
   video: VidRow;
@@ -80,10 +79,10 @@ export function ClipTile({ video, current, badge = 'In use', tag, links, title, 
   /** A word after the length — "Linked", when the list shows more than the
    *  linked ones. */
   tag?: string;
-  /** How many Bottom Bs the Link page pairs with this clip. Only ever given
-   *  for Bottom A, the one slot where that decides what can follow it — the
-   *  corner then carries a link mark, green once there is something linked.
-   *  Undefined leaves the corner alone. */
+  /** How many Bottom Bs are paired with this clip. Only ever given for Bottom
+   *  A, the one slot where that decides what can follow it — the corner then
+   *  carries a link mark, green once there is something linked. Undefined
+   *  leaves the corner alone. */
   links?: number;
   title?: string;
   onChoose: () => void;
@@ -144,15 +143,15 @@ export function ClipTile({ video, current, badge = 'In use', tag, links, title, 
       )}
       {/* Top right: how this clip stands. The link mark says whether anything
           follows on from it — green with a count once something does, dim
-          while nothing has been ticked for it on the Link page — so a Bottom
-          A that has never been linked up shows before you choose it. */}
+          while nothing is paired with it — so a Bottom A that has never been
+          linked up shows before you choose it. */}
       {(links != null || current) && (
         <div className="absolute right-1 top-1 flex items-center gap-1">
           {links != null && (
             <span
               title={links
-                ? `${links} Bottom B${links === 1 ? '' : 's'} linked to this one on Edit & file → Link`
-                : 'Nothing linked to this one yet — its Bottom B would come from the whole folder'}
+                ? `${links} Bottom B${links === 1 ? '' : 's'} paired with this one`
+                : 'Nothing paired with this one — its Bottom B would come from the whole folder'}
               className={`flex items-center gap-0.5 rounded px-1 py-px text-[9px] font-medium ${
                 links ? 'bg-emerald-600/90 text-white' : 'bg-black/75 text-zinc-500'
               }`}
@@ -183,8 +182,8 @@ export function VidsClipPicker({
   /** Where these came from, when it isn't simply the folder — Bottom B narrowed
    *  to what is linked to the Bottom A on the stage, say. */
   subtitle?: string;
-  /** The clips the Link page pairs with the Bottom A on the stage. Tagged, so
-   *  they still stand out once the list shows more than them. */
+  /** The clips paired with the Bottom A on the stage. Tagged, so they still
+   *  stand out once the list shows more than them. */
   linkedIds?: Set<string>;
   /** How many Bottom Bs each of these clips leads on to — Bottom A's list
    *  only. Puts the link mark in every tile's corner, so which ones have been

@@ -18,8 +18,8 @@
 // like any other.
 //
 // Random, top right beside Reset, runs the whole errand in one go: a persona
-// from the Persona folder, a Bottom A and a Bottom B that the Link page says
-// go together (any two, while nothing has been linked yet), an End, a song, a
+// from the Persona folder, a Bottom A and a Bottom B already paired up (any
+// two, while nothing has been paired yet), an End, a song, a
 // look for the captions, Bottom A back on Fast, and then the captions
 // themselves — the same call the
 // Write button makes, made once the clips it picked have loaded. Roll again as often as you like; only a stage that was
@@ -65,7 +65,8 @@ import {
   MIN_TRIM_LENGTH, PERSONA_DRAG_MIME, PERSONA_PART_SLOT, PERSONA_SLOTS, PHOTO_LENGTH, SLOTS, SLOT_META,
   SPEED_PRESETS,
   VID_DRAG_MIME, buildPlan, centredOffset, clampSpeed, cleanBottomAPace, drawInRegion, fittedRect, fmtSpeed,
-  freshPick, isDefaultSpeed, isDefaultTransform, isTrimmed, placedRect, regionRect, slotSpeed, smoothScaling,
+  freshPick, isDefaultSpeed, isDefaultTransform, isTrimmed, itemBacking, itemTransform, placedRect, regionRect,
+  slotSpeed, smoothScaling,
   timelineLength, trimmedLength, trimmedRange,
   type Align, type BarsLayout, type BottomAPace, type Fit, type Picks, type Plan, type PlanItem, type Rect,
   type Region, type SlotId, type SlotMeta, type SlotPick, type Transform, type Trim,
@@ -80,8 +81,9 @@ import { makeChatGptClip } from '@/app/components/chatgpt/chatgpt-video';
 import { composeSequence } from '@/lib/vidsCompose';
 import {
   CAPTION_STYLES, DEFAULT_CAPTION_STYLE, EMPTY_LINES, FAST_BOTTOM_A_CAPTIONS, MIN_SHARE, ONE_LINE_DEFAULT,
-  buildCaptions, capLine, captionAt,
-  captionStyle, captionWindows, drawCaption, layoutCaption, preloadCaptionEmoji, seamNeedsMerge, wantedCount,
+  bottomBOpen, buildCaptions, capLine, captionAt,
+  captionStyle, captionWindows, drawCaption, fixedLine, layoutCaption, preloadCaptionEmoji,
+  seamNeedsMerge, wantedCount,
   type CaptionLines, type CaptionPos, type CaptionRef, type CaptionWindow,
 } from '@/lib/vidsCaptions';
 import { VidsCaptionsRail } from './VidsCaptionsRail';
@@ -353,7 +355,7 @@ interface SlotCardProps {
   onClear: () => void;
   onDropVideoId: (id: string) => void;
   /** Something off about the pick that isn't a load failure — a Bottom B that
-   *  the Link page doesn't pair with the Bottom A on the stage. */
+   *  isn't paired with the Bottom A on the stage. */
   warn?: string | null;
 }
 
@@ -1005,7 +1007,7 @@ interface Props {
   /** The clips filed under a slot's folder — what its picker offers. */
   clipsForSlot: (slot: SlotId) => VidRow[];
   personas: VidPersona[];
-  /** Which Bottom Bs follow on from which Bottom A — the Link page's pairs. */
+  /** Which Bottom Bs follow on from which Bottom A — see VidLink. */
   links: VidLink[];
   /** The persona filling Start / Top A / Top B, if the three still match one. */
   appliedPersonaId: string | null;
@@ -1023,8 +1025,8 @@ interface Props {
    *  Bottom A, with the keyboard sound flagged and its three beats as marks.
    *  Null when the upload failed. */
   onUploadGenerated: (blob: Blob, name: string, context: string, marks: VidMark[]) => Promise<VidRow | null>;
-  /** Write down that this Bottom B follows that Bottom A — the Link page's
-   *  pair — so Random and the Link page know the two go together. */
+  /** Write down that this Bottom B follows that Bottom A — see VidLink — so
+   *  Random and Bottom B's picker know the two go together. */
   onLink: (bottomAId: string, bottomBId: string) => void;
 }
 
@@ -1189,8 +1191,17 @@ export function VidsBuilder({
   const canCaption = !!windows.start || !!windows.bottomA || !!windows.bottomB || !!windows.end;
   const hasLines = !!(
     lines.start.text.trim() || lines.bottomA.length || lines.bottomB.length
-    || lines.payoff.text.trim() || lines.end.text.trim()
+    || lines.end.text.trim()
   );
+  // Who the build trades on, read off the Bottom B clip's name the way the
+  // Bottom card reads it — what the fixed lines put in place of {name} ("lock in
+  // ronaldo", "search ronaldo"). Lower-cased, since that is how the written
+  // lines around them say a name. No Bottom B picked yet means no name, and the
+  // fixed lines fall back to the ones that stand without one.
+  const capName = useMemo(() => {
+    const b = picks.bottomB?.video;
+    return b ? personKey(parseBottomB(b).person) : '';
+  }, [picks.bottomB]);
 
   // What the writer is told about one screen recording: its overall context and,
   // when it has been marked up, the ordered steps — which is what makes the
@@ -1252,6 +1263,13 @@ export function VidsBuilder({
       });
       const atA = placeA ? draft.bottomAAt : undefined;
       const toClip = (at: number) => (aItem ? Math.round((aItem.trimStart + at * aItem.speed) * 100) / 100 : at);
+      // Three of the lines are not the model's to write — Bottom A's wait and
+      // pick, and Bottom B's opener — so whatever came back in those slots is
+      // dropped for one of the fixed lines (lib/vidsCaptions). Bottom A's are
+      // taken by mark, so they only stand in on a clip marked the way the
+      // rendered ChatGPT recording is: three beats, one line each, never the
+      // two placed lines Fast asks for.
+      const fixedA = !placeA && draft.bottomA.length >= 3;
       // A rewrite keeps whatever was set to one line, and wherever a line was
       // dragged to, matched up by position — both are about the shape and place
       // of the caption slot rather than its wording. A line that wasn't there
@@ -1261,16 +1279,17 @@ export function VidsBuilder({
         bottomA: draft.bottomA.map((t, i) => {
           const at = atA?.[i];
           return {
-            ...capLine(t, prev.bottomA[i]?.oneLine ?? ONE_LINE_DEFAULT.bottomA),
+            ...capLine((fixedA && fixedLine('bottomA', i, capName)) || t,
+              prev.bottomA[i]?.oneLine ?? ONE_LINE_DEFAULT.bottomA),
             pos: prev.bottomA[i]?.pos,
             ...(at != null && Number.isFinite(at) ? { at: toClip(at) } : {}),
           };
         }),
         bottomB: draft.bottomB.map((t, i) => ({
-          ...capLine(t, prev.bottomB[i]?.oneLine ?? ONE_LINE_DEFAULT.bottomB),
+          ...capLine(i === 0 ? bottomBOpen(capName) : t,
+            prev.bottomB[i]?.oneLine ?? ONE_LINE_DEFAULT.bottomB),
           pos: prev.bottomB[i]?.pos,
         })),
-        payoff: { ...capLine(draft.payoff, prev.payoff.oneLine), pos: prev.payoff.pos },
         end: { ...capLine(draft.end, prev.end.oneLine), pos: prev.end.pos },
       }));
     } catch (e) {
@@ -1379,7 +1398,8 @@ export function VidsBuilder({
     return {
       region,
       base: fittedRect(d.w, d.h, region, item.fit, item.align),
-      rect: placedRect(d.w, d.h, region, item.fit, item.align, item.transform),
+      // The nudged transform, so the handles land on the picture as drawn.
+      rect: placedRect(d.w, d.h, region, item.fit, item.align, itemTransform(item, outW)),
     };
   }, [sourceDims, outW, outH, bars]);
 
@@ -1405,7 +1425,10 @@ export function VidsBuilder({
     for (const item of activeAt(plan, t)) {
       const src = frameSource(item.slot);
       if (!src) continue;
-      drawInRegion(ctx, src.el, src.w, src.h, regionRect(item.region, outW, outH, plan.bars), item.fit, item.align, item.transform);
+      drawInRegion(
+        ctx, src.el, src.w, src.h, regionRect(item.region, outW, outH, plan.bars),
+        item.fit, item.align, itemTransform(item, outW), itemBacking(item),
+      );
     }
     // Last, so it sits over every region — the same call the exporter makes.
     const cap = captionAt(captions, t);
@@ -1716,7 +1739,6 @@ export function VidsBuilder({
     setLines((prev) => {
       switch (ref.group) {
         case 'start': return { ...prev, start: { ...prev.start, pos } };
-        case 'payoff': return { ...prev, payoff: { ...prev.payoff, pos } };
         case 'end': return { ...prev, end: { ...prev.end, pos } };
         case 'bottomA':
           return { ...prev, bottomA: prev.bottomA.map((l, i) => (i === ref.index ? { ...l, pos } : l)) };
@@ -2116,9 +2138,9 @@ export function VidsBuilder({
   };
 
   // ── Links ──
-  // The Bottom A → Bottom B pairs ticked on the Link page, narrowed to clips
-  // still filed where the builder looks for them — a pair with a side that has
-  // been moved or deleted is no pair.
+  // The Bottom A → Bottom B pairs written down as the Bottom card made them,
+  // narrowed to clips still filed where the builder looks for them — a pair
+  // with a side that has been moved or deleted is no pair.
   const linkedPairs = useMemo(() => {
     const as = new Map(clipsForSlot('bottomA').map((v) => [v.id, v]));
     const bs = new Map(clipsForSlot('bottomB').map((v) => [v.id, v]));
@@ -2173,7 +2195,7 @@ export function VidsBuilder({
    *  lengths (the same wait a roll makes). Rewriting by hand from the rail is
    *  unchanged, and a Bottom B swapped later simply writes again.
    *
-   *  A Bottom A that the Link page pairs with exactly one Bottom B brings that
+   *  A Bottom A paired with exactly one Bottom B brings that
    *  Bottom B with it — there is nothing to pick between — and that counts as
    *  choosing it: the captions start the same way. Bottom A stays the selected
    *  slot; the stage just fills in behind it. Two or more linked, or none, and
@@ -2222,8 +2244,8 @@ export function VidsBuilder({
   };
 
   /** The Bottom card's two clips, landed together: the ChatGPT recording for
-   *  Bottom A, theirs for Bottom B, and the pair written down on the Link page
-   *  so Random and the Link page know they go together. Bottom A goes back on
+   *  Bottom A, theirs for Bottom B, and the pair written down (see VidLink)
+   *  so Random and Bottom B's picker know they go together. Bottom A goes back on
    *  Fast, where every new video starts; Simple fills an End too if the stage
    *  hasn't got one; then the captions, once the clips have loaded — Simple
    *  says so on its card, Advanced just writes when they are ready. Lands on
@@ -2443,9 +2465,9 @@ export function VidsBuilder({
         if (video) next[slot] = freshPick(slot, video, picks[slot]);
       }
     }
-    // The bottom pair comes off the Link page once anything has been linked:
-    // one Bottom A among those with links, then one of the Bottom Bs ticked
-    // for it — never two clips that merely share a folder. Each Bottom A gets
+    // The bottom pair comes off those pairs once anything has been linked:
+    // one Bottom A among those with links, then one of the Bottom Bs paired
+    // with it — never two clips that merely share a folder. Each Bottom A gets
     // an even chance whether it leads on to one clip or five. With nothing
     // linked yet the two slots roll on their own, as End always does.
     const pair = (() => {
@@ -2667,7 +2689,7 @@ export function VidsBuilder({
                   title={rollable
                     ? (linkedPairs.length
                       ? 'Fill every slot at random — a persona, a Bottom A with one of the Bottom Bs linked to it, and End — and write the captions for them'
-                      : 'Fill every slot at random — a persona, Bottom A, Bottom B and End — and write the captions for them. Link Bottom As to Bottom Bs on Edit & file → Link and it will only pick pairs')
+                      : 'Fill every slot at random — a persona, Bottom A, Bottom B and End — and write the captions for them. Once the Bottom card has made a pair or two, it picks from those instead')
                     : 'Nothing to draw from yet — file a persona and some bottom clips first'}
                   className="flex items-center gap-1.5 rounded border border-zinc-700 bg-zinc-950/80 px-2 py-1 text-[10px] text-zinc-400 backdrop-blur transition-colors hover:border-zinc-500 hover:text-white disabled:cursor-default disabled:border-zinc-800 disabled:text-zinc-700 disabled:hover:border-zinc-800 disabled:hover:text-zinc-700"
                 >
@@ -3164,6 +3186,7 @@ export function VidsBuilder({
           styleId={styleId}
           setStyleId={setStyleId}
           onResetPos={(ref) => setLinePos(ref, undefined)}
+          name={capName}
         />
 
         <VidsExportRail
@@ -3199,13 +3222,13 @@ export function VidsBuilder({
       {picker?.kind === 'clip' && (() => {
         const slot = picker.slot;
         const meta = SLOT_META[slot];
-        // Bottom B is narrowed to what the Link page pairs with the Bottom A
-        // on the stage, until "Choose from any" opens it up. A Bottom A with
-        // nothing linked yet gets the whole folder, and the subtitle says so.
+        // Bottom B is narrowed to what is paired with the Bottom A on the
+        // stage, until "Choose from any" opens it up. A Bottom A with nothing
+        // linked yet gets the whole folder, and the subtitle says so.
         const narrowed = slot === 'bottomB' && !picker.all ? linkedBottomBs : null;
         const aName = picks.bottomA?.video.name;
         const subtitle = narrowed
-          ? `the ${narrowed.length} linked to “${aName}” on Edit & file → Link`
+          ? `the ${narrowed.length} paired with “${aName}”`
           : slot === 'bottomB' && aName
             ? (picker.all && linkedBottomBs
               ? `from the whole ${meta.folder} folder — the ones linked to “${aName}” are tagged`
