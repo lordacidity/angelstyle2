@@ -1,7 +1,7 @@
 'use client';
 
 // "Vids" — a shared cloud video library (folders + clips in Supabase Storage)
-// beside the stacked-sequence builder, in two pages:
+// beside the stacked-sequence builder, in three pages:
 //
 //   Edit & file   three pages of its own. Upload: drop footage on the middle
 //                 and it runs the whole errand — folder, context, edit, save —
@@ -27,8 +27,13 @@
 //                 the bars, the captions. Play, download, push to Phonedeck,
 //                 nothing to adjust. Switching to Advanced opens that very
 //                 build with every control on it.
+//   Clippers      what the clippers' app gets (VidsClippers): a switch on
+//                 every persona, bottom clip, song and caption look. Off is
+//                 ours alone — Build here uses everything regardless — and
+//                 on is theirs as well. Right-click renames a persona, clip
+//                 or song everywhere.
 //
-// Both pages share one library hook, and an edit keeps its clip's id, so the
+// All three share one library hook, and an edit keeps its clip's id, so the
 // build always uses the current footage — edit Top A and the persona that uses
 // it plays the edited Top A, with no re-picking.
 //
@@ -48,20 +53,23 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useVidsLibrary } from '../../hooks/useVidsLibrary';
 import { VidsBuilder } from './VidsBuilder';
 import { VidsPrep } from './VidsPrep';
+import { VidsClippers } from './VidsClippers';
 import {
   DEFAULT_TRIM, LIBRARY_FOLDERS, PERSONA_PART_SLOT, PERSONA_SLOTS, SLOT_META,
   folderGroupIds, freshPick, type Picks, type SlotId,
 } from '@/lib/vidsPlan';
 import { PERSONA_PARTS } from '@/lib/vids-types';
-import type { VidPersona, VidRow } from '@/lib/vids-types';
+import type { VidMark, VidPersona, VidRow } from '@/lib/vids-types';
 
-/** The two pages. Building is what you come here to do — the footage is already
- *  filed most days — so it leads, and Edit & file is where you go when there is
- *  new footage to put through. */
-type Page = 'prep' | 'build';
+/** The three pages. Building is what you come here to do — the footage is
+ *  already filed most days — so it leads; Edit & file is where you go when
+ *  there is new footage to put through; Clippers is where what the clippers'
+ *  app may use is switched on. */
+type Page = 'prep' | 'build' | 'clippers';
 const PAGES: { id: Page; label: string }[] = [
-  { id: 'build', label: 'Build' },
-  { id: 'prep',  label: 'Edit & file' },
+  { id: 'build',    label: 'Build' },
+  { id: 'prep',     label: 'Edit & file' },
+  { id: 'clippers', label: 'Clippers' },
 ];
 
 /** How much of the builder is on show, switched top right of the Build page.
@@ -215,6 +223,29 @@ export function VidsSection({ active }: { active: boolean }) {
     return videos.filter((v) => v.folderId && ids.has(v.folderId));
   }, [folders, videos]);
 
+  // What the Clippers page lists under each hand-picked slot — the same three
+  // folders the builder's pickers draw on.
+  const clipperClips = useMemo(
+    () => ({ bottomA: clipsForSlot('bottomA'), bottomB: clipsForSlot('bottomB'), end: clipsForSlot('end') }),
+    [clipsForSlot],
+  );
+
+  // The Bottom card's ChatGPT recording is filed in the Bottom A folder like
+  // any other Bottom A, with the keyboard sound flagged — it is the only sound
+  // on it, which is what lets the builder play it — and the pair it makes
+  // with their Bottom B is written down on the Link page. See VidsBottom.
+  const { uploadBlob, setLinks } = lib;
+  const bottomAFolderId = useMemo(
+    () => folders.find((f) => !f.parentId && f.name.trim().toLowerCase() === SLOT_META.bottomA.folder.toLowerCase())?.id ?? null,
+    [folders],
+  );
+  const uploadGenerated = useCallback(
+    (blob: Blob, name: string, context: string, marks: VidMark[]) =>
+      uploadBlob(blob, name, bottomAFolderId, { context, marks, hasSfx: true }),
+    [uploadBlob, bottomAFolderId],
+  );
+  const linkBottom = useCallback((bottomAId: string, bottomBId: string) => { void setLinks(bottomAId, [bottomBId]); }, [setLinks]);
+
   return (
     <div className="vids-scroll flex h-full flex-col text-white">
       <div className="flex items-center gap-4 border-b border-zinc-800 px-6 py-3">
@@ -224,10 +255,11 @@ export function VidsSection({ active }: { active: boolean }) {
             <button
               key={p.id}
               onClick={() => {
-                // Coming over to Build reads the library again, so whatever was
-                // just filed or edited is in the rack — once any upload or save
-                // still on its way has landed, not over the top of it.
-                if (p.id === 'build' && page !== 'build') refreshWhenIdle();
+                // Coming over to Build or Clippers reads the library again, so
+                // whatever was just filed or edited is in the rack and on the
+                // list — once any upload or save still on its way has landed,
+                // not over the top of it.
+                if (p.id !== 'prep' && page !== p.id) refreshWhenIdle();
                 setPage(p.id);
               }}
               className={`px-3 py-1.5 text-[11px] font-medium transition-colors ${
@@ -265,8 +297,8 @@ export function VidsSection({ active }: { active: boolean }) {
         )}
       </div>
 
-      {/* Both pages stay mounted — switching back must not lose an open edit or
-          the slots that have already been picked. */}
+      {/* All three pages stay mounted — switching back must not lose an open
+          edit or the slots that have already been picked. */}
       <div className="flex min-h-0 flex-1" style={{ display: page === 'build' ? undefined : 'none' }}>
         <VidsBuilder
           picks={livePicks}
@@ -284,10 +316,27 @@ export function VidsSection({ active }: { active: boolean }) {
           active={active && page === 'build'}
           libraryLoaded={loaded}
           simple={buildMode === 'simple'}
+          onUploadGenerated={uploadGenerated}
+          onLink={linkBottom}
         />
       </div>
       <div className="flex min-h-0 flex-1" style={{ display: page === 'prep' ? undefined : 'none' }}>
         <VidsPrep lib={lib} active={active && page === 'prep'} />
+      </div>
+      <div className="flex min-h-0 flex-1" style={{ display: page === 'clippers' ? undefined : 'none' }}>
+        <VidsClippers
+          active={active && page === 'clippers'}
+          personas={personas}
+          resolveVideo={(id) => (id ? resolveVideo(id) : undefined)}
+          clips={clipperClips}
+          flags={lib.clipable}
+          onPersona={(id, on) => void lib.updatePersona(id, { clipable: on })}
+          onClip={(id, on) => void lib.setVideoClipable(id, on)}
+          onFlag={(kind, key, on) => void lib.setClipable(kind, key, on)}
+          onRenamePersona={(id, name) => void lib.updatePersona(id, { name })}
+          onRenameClip={(id, name) => void lib.renameVideo(id, name)}
+          onRenameTrack={lib.renameTrack}
+        />
       </div>
     </div>
   );

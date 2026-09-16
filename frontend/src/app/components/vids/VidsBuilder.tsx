@@ -8,11 +8,14 @@
 // downloads or goes straight to Phonedeck's Incoming list, as a Media export
 // does, to be pushed to the phones from the Phonedeck panel.
 //
-// The rack is four cards, not six: Persona (which fills Start, Top A and Top B
-// in one go) plus Bottom A, Bottom B and End. Clicking a card opens a picker
-// showing exactly what that folder holds, so choosing footage never means
-// crossing to the library pane. Either way every slot ends up an ordinary pick,
-// so a persona's clips drag, zoom and trim on the stage like any other.
+// The rack is three cards, not six: Persona (which fills Start, Top A and Top
+// B in one go), Bottom (which fills Bottom A and Bottom B in one go: pick who,
+// from the people there are Bottom B clips of, which way, and the ChatGPT
+// question, and Go renders the ChatGPT recording — see VidsBottom — files it
+// under Bottom A and pairs it with their Bottom B), and End, whose card opens
+// a picker showing exactly what its folder holds. Either way every slot ends
+// up an ordinary pick, so a persona's clips drag, zoom and trim on the stage
+// like any other.
 //
 // Random, top right beside Reset, runs the whole errand in one go: a persona
 // from the Persona folder, a Bottom A and a Bottom B that the Link page says
@@ -36,8 +39,8 @@
 //             caption for Instagram — the person being traded, the position
 //             and the case for it, read off the screen recordings' context
 //             (VidsExportRail) — the Phonedeck list, and the export buttons.
-//   Simple    two choices and nothing else: a persona, and a vid (the Bottom
-//             A). Bottom B comes off the Link page, End fills itself, and the
+//   Simple    two choices and nothing else: a persona, and the bottom (made
+//             the same way, off the same popup). End fills itself, and the
 //             song, Bottom A's pace, the room tone, the bars and the captions
 //             are all what they
 //             would have been in Advanced anyway — you just don't see them.
@@ -54,7 +57,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { CSSProperties, DragEvent, KeyboardEvent, PointerEvent, ReactNode, SyntheticEvent } from 'react';
-import type { VidLink, VidPersona, VidRecipe, VidRow } from '@/lib/vids-types';
+import type { VidLink, VidMark, VidPersona, VidRecipe, VidRow } from '@/lib/vids-types';
 import { PERSONA_PARTS, isPhoto, parseRecipeCode } from '@/lib/vids-types';
 import {
   BOTTOM_A_PACES, DEFAULT_BARS, DEFAULT_BOTTOM_A_PACE, DEFAULT_SPEED, DEFAULT_TRANSFORM, DEFAULT_TRIM,
@@ -68,6 +71,12 @@ import {
   type Region, type SlotId, type SlotMeta, type SlotPick, type Transform, type Trim,
 } from '@/lib/vidsPlan';
 import { VidsClipPicker, VidsPersonaPicker } from './VidsPicker';
+import { VidsBottomPopup } from './VidsBottom';
+import {
+  bottomAContext, bottomAMarks, bottomAName, parseBottomB, peopleFromBottomB, personKey,
+  type BottomPerson, type Direction as BottomDirection,
+} from '@/lib/vidsBottom';
+import { makeChatGptClip } from '@/app/components/chatgpt/chatgpt-video';
 import { composeSequence } from '@/lib/vidsCompose';
 import {
   CAPTION_STYLES, DEFAULT_CAPTION_STYLE, EMPTY_LINES, FAST_BOTTOM_A_CAPTIONS, MIN_SHARE, ONE_LINE_DEFAULT,
@@ -465,6 +474,106 @@ function SimpleCard({ label, hint, name, thumbUrl, missing, disabled, onChoose }
       </div>
       <span className="shrink-0 text-[10px] text-zinc-500">{name ? 'Change' : 'Choose'}</span>
     </button>
+  );
+}
+
+// ── Bottom card (Bottom A + Bottom B, made as one) ───────────────────────────
+// The ChatGPT recording and the Pauv clip it leads to, side by side. Clicking
+// opens the popup that makes them (VidsBottom); Clear drops both.
+
+function BottomCard({ a, b, who, lengths, error, job, jobError, selected, onChoose, onClear, onCancelJob }: {
+  a: SlotPick | undefined;
+  b: SlotPick | undefined;
+  /** Who and which way, read off the Bottom B on the stage. */
+  who: { person: string; direction: 'up' | 'down' | null } | null;
+  lengths: { a: number | null; b: number | null };
+  error: string | null;
+  /** The bottom being made right now, behind the closed popup. */
+  job: { person: string; direction: 'up' | 'down'; label: string; frac: number | null } | null;
+  jobError: string | null;
+  selected: boolean;
+  onChoose: () => void;
+  onClear: () => void;
+  onCancelJob: () => void;
+}) {
+  const rows: { slot: SlotId; label: string; pick: SlotPick | undefined; length: number | null }[] = [
+    { slot: 'bottomA', label: 'A', pick: a, length: lengths.a },
+    { slot: 'bottomB', label: 'B', pick: b, length: lengths.b },
+  ];
+  return (
+    <div
+      data-vids-slot="bottom"
+      title="Click to make the bottom: who, up or down, and the ChatGPT question"
+      onClick={onChoose}
+      className={`mb-2 cursor-pointer rounded-md border p-2 transition-colors ${
+        selected ? 'border-white/70 bg-zinc-900' : 'border-zinc-800 hover:border-zinc-600'
+      }`}
+    >
+      <div className="flex items-baseline gap-2">
+        <span className={`h-2 w-2 shrink-0 rounded-sm ${SLOT_COLOR.bottomA}`} />
+        <p className="text-[11px] font-semibold text-zinc-200">Bottom</p>
+        <p className="min-w-0 flex-1 truncate text-[9px] text-zinc-600">
+          {who ? `${who.person}${who.direction ? ` · ${who.direction}` : ''}` : 'ChatGPT looks them up, then their Pauv clip'}
+        </p>
+        {(a || b) && !job && (
+          <button
+            onClick={(e) => { e.stopPropagation(); onClear(); }}
+            title="Clear both"
+            className="text-zinc-500 hover:text-red-400"
+          >
+            <CloseIcon size={13} />
+          </button>
+        )}
+      </div>
+      {/* The job on its way: what it is making and how far along, with a way
+          to drop it. The clips it replaces stay on the stage until it lands. */}
+      {job && (
+        <div className="mt-1.5 rounded border border-zinc-800 bg-zinc-950 px-2 py-1.5" onClick={(e) => e.stopPropagation()}>
+          <div className="flex items-center gap-2 text-[10px] text-zinc-300">
+            <SpinnerIcon size={10} className="shrink-0 animate-spin" />
+            <span className="min-w-0 flex-1 truncate">
+              Making {job.person} · {job.direction} — {job.label}
+            </span>
+            {job.frac != null && <span className="font-mono text-zinc-500">{Math.round(job.frac * 100)}%</span>}
+            <button onClick={onCancelJob} title="Drop it" className="text-zinc-500 hover:text-red-400"><CloseIcon size={11} /></button>
+          </div>
+          <div className="mt-1.5 h-1 w-full overflow-hidden rounded-full bg-zinc-800">
+            <div className="h-full bg-white transition-[width]" style={{ width: `${(job.frac ?? 0) * 100}%` }} />
+          </div>
+        </div>
+      )}
+      {jobError && !job && <p className="mt-1 text-[10px] text-red-400">Could not make it: {jobError}</p>}
+      {a || b ? (
+        <div className="mt-1.5 space-y-1">
+          {rows.map((r) => (
+            <div key={r.slot} className="flex items-center gap-2">
+              <span className={`h-2 w-2 shrink-0 rounded-sm ${SLOT_COLOR[r.slot]}`} />
+              <div className="h-7 w-7 shrink-0 overflow-hidden rounded bg-black">
+                {r.pick?.video.thumbUrl ? (
+                  // eslint-disable-next-line @next/next/no-img-element
+                  <img src={r.pick.video.thumbUrl} alt="" className="h-full w-full object-cover" draggable={false} />
+                ) : (
+                  <span className="flex h-full items-center justify-center text-zinc-700"><VideoIcon size={12} /></span>
+                )}
+              </div>
+              <div className="min-w-0 flex-1">
+                <p className="truncate text-[11px] text-zinc-200" title={r.pick?.video.name}>
+                  {r.pick ? r.pick.video.name : `no Bottom ${r.label}`}
+                </p>
+                <p className="truncate text-[10px] text-zinc-500">
+                  {r.pick ? (r.length != null ? fmtTime(r.length) : 'loading…') : ''}
+                </p>
+              </div>
+            </div>
+          ))}
+          {error && <p className="mt-1 text-[10px] text-red-400">{error}</p>}
+        </div>
+      ) : !job && (
+        <p className="mt-1.5 rounded border border-dashed border-zinc-800 px-2 py-2 text-center text-[10px] text-zinc-400">
+          Click to make it: who, up or down, and the ChatGPT question.
+        </p>
+      )}
+    </div>
   );
 }
 
@@ -910,12 +1019,19 @@ interface Props {
    *  rack, the code box, Random and every handle on the stage are Advanced's
    *  — what they set is still set, it just isn't shown or asked about. */
   simple: boolean;
+  /** File the Bottom card's rendered ChatGPT clip in the library, under
+   *  Bottom A, with the keyboard sound flagged and its three beats as marks.
+   *  Null when the upload failed. */
+  onUploadGenerated: (blob: Blob, name: string, context: string, marks: VidMark[]) => Promise<VidRow | null>;
+  /** Write down that this Bottom B follows that Bottom A — the Link page's
+   *  pair — so Random and the Link page know the two go together. */
+  onLink: (bottomAId: string, bottomBId: string) => void;
 }
 
 export function VidsBuilder({
   picks, onPicksChange, onAssign, selectedSlot, onSelectSlot, resolveVideo, clipsForSlot,
   personas, links, appliedPersonaId, onUsePersona, onClearPersona, active, libraryLoaded,
-  simple,
+  simple, onUploadGenerated, onLink,
 }: Props) {
   const [presetId, setPresetId] = useState<PresetId>('9:16');
   const preset = OUTPUT_PRESETS.find((p) => p.id === presetId) ?? OUTPUT_PRESETS[0];
@@ -980,10 +1096,23 @@ export function VidsBuilder({
     busy: false, loaded: null, problems: [], error: null,
   });
   const [trimPopup, setTrimPopup] = useState<{ slot: SlotId; x: number; y: number } | null>(null);
-  // Which rack card has its chooser open: the persona one, or a folder slot's.
-  // `all` is Bottom B's "Choose from any": the whole folder, links set aside,
-  // for this one opening.
-  const [picker, setPicker] = useState<{ kind: 'persona' } | { kind: 'clip'; slot: SlotId; all?: boolean } | null>(null);
+  // Which rack card has its chooser open: the persona one, the Bottom one, or
+  // a folder slot's. `all` is Bottom B's "Choose from any": the whole folder,
+  // links set aside, for this one opening.
+  const [picker, setPicker] = useState<
+    { kind: 'persona' } | { kind: 'bottom' } | { kind: 'clip'; slot: SlotId; all?: boolean } | null
+  >(null);
+  // The Bottom card's job, running on behind the popup once Go is pressed —
+  // the model, the render, the upload — and how the last one ended. Shown
+  // on the card, cancelled there.
+  const [bottomJob, setBottomJob] = useState<{ person: string; direction: BottomDirection; label: string; frac: number | null } | null>(null);
+  const [bottomJobError, setBottomJobError] = useState<string | null>(null);
+  const bottomJobRef = useRef<AbortController | null>(null);
+  useEffect(() => () => bottomJobRef.current?.abort(), []);
+  // The picks as they are now, for a job that lands its clips after the
+  // stage has moved on (a persona chosen while the render ran).
+  const picksRef = useRef(picks);
+  useEffect(() => { picksRef.current = picks; }, [picks]);
   // The words are waiting on the clips: `pendingWrite` holds the ids still to
   // report a length, and whether a roll is what put them there — a roll says so
   // on the Random button, a Bottom B chosen by hand just writes when it is
@@ -1080,9 +1209,17 @@ export function VidsBuilder({
     // says when each goes up as well as what it says: it is handed the clip's
     // moments on the sped-up window, and what comes back is put on the clip's
     // own clock, so a line stays on its moment whatever the pace does later.
+    // Except a marked clip Fast has not had to speed up — one that already
+    // fits, playing at its own speed, like the ChatGPT recording the Bottom
+    // card makes, marked by the renderer beat by beat (search, wait, pick).
+    // Its marks are exact and there is room for them, so it is captioned like
+    // any marked clip: one line each, on the mark.
     const aWin = windows.bottomA;
     const aItem = plan.items.find((i) => i.slot === 'bottomA') ?? null;
+    const aSped = !!aItem && !!picks.bottomA
+      && aItem.speed > slotSpeed('bottomA', picks.bottomA.speed, aItem.sourceLength, 'normal') + 1e-6;
     const placeA = bottomAPace === 'fast' && !!aWin && !!aItem
+      && (aSped || !aWin.marks.length)
       && aWin.end - aWin.start >= FAST_BOTTOM_A_CAPTIONS * MIN_SHARE;
     const briefA = clipBrief(aWin, picks.bottomA?.video.context);
     setWriting(true);
@@ -1399,6 +1536,12 @@ export function VidsBuilder({
       .then((ts) => {
         setTracks(ts);
         setTracksError(null);
+        // A song renamed since it was chosen (on the Clippers page) is chosen
+        // under its new name — that is the label the record is written with.
+        setMusic((m) => {
+          const t = m.url ? ts.find((x) => x.url === m.url) : undefined;
+          return t && t.label !== m.label ? { ...m, label: t.label } : m;
+        });
         // Arrive with something under it: a song nobody chose is easier to swap
         // than one nobody thought to add.
         if (!musicChosenRef.current) {
@@ -2012,6 +2155,11 @@ export function VidsBuilder({
 
   /** A fresh End, and not the one already on when there is another to be had —
    *  the same idea as rollMusic, for the slot that picks itself. */
+  // Who there are Bottom B clips of — the Bottom card's list — and who is on
+  // the stage now, read off its Bottom B.
+  const bottomPeople = useMemo(() => peopleFromBottomB(clipsForSlot('bottomB')), [clipsForSlot]);
+  const bottomCurrent = picks.bottomB ? parseBottomB(picks.bottomB.video) : null;
+
   const rollEnd = (): SlotPick | null => {
     const clips = clipsForSlot('end');
     const pool = clips.filter((v) => v.id !== picks.end?.video.id);
@@ -2073,33 +2221,87 @@ export function VidsBuilder({
     setRolling(true);
   };
 
-  /** Simple's vid. It goes to Bottom A, and everything that follows from it is
-   *  filled in without asking: a Bottom B the Link page pairs with it — any of
-   *  them, at random, since Simple has nobody to choose between them — or any
-   *  Bottom B at all while nothing is linked yet; an End, if the stage somehow
-   *  hasn't got one; Bottom A back on Fast, where every new video starts;
-   *  then the captions, once the clips have loaded. */
-  const chooseSimpleVid = (video: VidRow) => {
-    const next: Picks = { ...picks, bottomA: freshPick('bottomA', video, picks.bottomA) };
-    const linked = linkedPairs.filter((p) => p.a.id === video.id).map((p) => p.b);
-    const b = pickRandom(linked.length ? linked : clipsForSlot('bottomB'));
-    if (b) next.bottomB = freshPick('bottomB', b, picks.bottomB);
-    else delete next.bottomB;
-    if (!next.end) {
+  /** The Bottom card's two clips, landed together: the ChatGPT recording for
+   *  Bottom A, theirs for Bottom B, and the pair written down on the Link page
+   *  so Random and the Link page know they go together. Bottom A goes back on
+   *  Fast, where every new video starts; Simple fills an End too if the stage
+   *  hasn't got one; then the captions, once the clips have loaded — Simple
+   *  says so on its card, Advanced just writes when they are ready. Lands on
+   *  the stage as it is NOW, not as it was when the job was started. */
+  const chooseBottom = (a: VidRow, b: VidRow) => {
+    const now = picksRef.current;
+    const next: Picks = {
+      ...now,
+      bottomA: freshPick('bottomA', a, now.bottomA),
+      bottomB: freshPick('bottomB', b, now.bottomB),
+    };
+    if (simple && !next.end) {
       const end = rollEnd();
       if (end) next.end = end;
     }
     pause();
-    onSelectSlot(null);
-    setPicker(null);
+    onSelectSlot(simple ? null : 'bottomA');
     resetPace();
-    // The words were written about the vid that was there — they go with it.
+    // The words were written about what was there — they go with it.
     setLines(EMPTY_LINES);
     setCaptionError(null);
     timeRef.current = 0;
     setTime(0);
     onPicksChange(() => next);
-    queueWrite(clipIds(next));
+    onLink(a.id, b.id);
+    if (simple) queueWrite(clipIds(next));
+    else if (!writing && !exporting && !recall.busy) pendingWrite.current = { ids: clipIds(next), roll: false };
+  };
+
+  const cancelBottomJob = () => {
+    bottomJobRef.current?.abort();
+    bottomJobRef.current = null;
+    setBottomJob(null);
+  };
+
+  /** Go, on the Bottom popup. The popup closes and this runs on behind it:
+   *  the model answers with them on top, the recording renders, it is filed
+   *  under Bottom A with its three beats as marks — so the captions go
+   *  search this, wait for it, pick them, each on its moment — and both
+   *  clips land on the stage (chooseBottom). A Go while one is running drops
+   *  that one. */
+  const startBottomJob = (person: BottomPerson, direction: BottomDirection, question: string) => {
+    const b = person[direction];
+    if (!b) return;
+    cancelBottomJob();
+    const ctrl = new AbortController();
+    bottomJobRef.current = ctrl;
+    const who = { person: person.label, direction };
+    setBottomJobError(null);
+    setBottomJob({ ...who, label: 'Asking ChatGPT…', frac: null });
+    void (async () => {
+      try {
+        const { blob, reply, beats } = await makeChatGptClip({
+          name: person.label,
+          direction,
+          question,
+          signal: ctrl.signal,
+          onProgress: (p) => setBottomJob(p.stage === 'ask'
+            ? { ...who, label: 'Asking ChatGPT…', frac: null }
+            : { ...who, label: 'Rendering the recording', frac: p.frac }),
+        });
+        if (ctrl.signal.aborted) return;
+        setBottomJob({ ...who, label: 'Filing it under Bottom A…', frac: null });
+        // The name the answer led with ("Donald Trump" for "Trump") is what
+        // the context says the answer was.
+        const answer = reply.picks[0]?.name.trim() || person.label;
+        const row = await onUploadGenerated(
+          blob, bottomAName(person.label, direction), bottomAContext(question, answer), bottomAMarks(beats, question, answer),
+        );
+        if (ctrl.signal.aborted) return;
+        if (!row) throw new Error('The clip could not be saved to the library.');
+        chooseBottom(row, b);
+      } catch (e) {
+        if (!ctrl.signal.aborted) setBottomJobError(e instanceof Error ? e.message : String(e));
+      } finally {
+        if (bottomJobRef.current === ctrl) { bottomJobRef.current = null; setBottomJob(null); }
+      }
+    })();
   };
 
   /** Simple's persona. The hook is the persona's line, so choosing one over a
@@ -2303,16 +2505,21 @@ export function VidsBuilder({
   // What Simple has room to say. Advanced says all of this in five places at
   // once — the rack, the rails, the Random button, the timeline — and Simple
   // has one line for it.
-  const simpleBusy = rolling || writing;
+  const simpleBusy = rolling || writing || !!bottomJob;
   const simpleStatus = (() => {
+    if (bottomJob) {
+      return `Making ${bottomJob.person} · ${bottomJob.direction} — ${bottomJob.label}`
+        + `${bottomJob.frac != null ? ` ${Math.round(bottomJob.frac * 100)}%` : ''}. Choose the persona meanwhile.`;
+    }
+    if (bottomJobError) return `The bottom could not be made: ${bottomJobError}`;
     if (simpleBusy) return 'Putting it together — the rest of the clips, the sound and the captions.';
     if (!appliedPersonaId) {
       return picks.bottomA
         ? 'Now choose a persona.'
-        : 'Choose a persona and a vid — everything else fills itself in.';
+        : 'Choose a persona and make the bottom — everything else fills itself in.';
     }
-    if (!picks.bottomA) return 'Now choose a vid.';
-    if (broken.length) return 'One of these clips would not load — choose another vid.';
+    if (!picks.bottomA) return 'Now make the bottom.';
+    if (broken.length) return 'One of these clips would not load — make the bottom again.';
     return `Ready${total ? ` · ${fmtTime(total)}` : ''} — play it, then push it to the phones or download it.`;
   })();
 
@@ -2668,13 +2875,17 @@ export function VidsBuilder({
             onChoose={() => setPicker({ kind: 'persona' })}
           />
           <SimpleCard
-            label="Vid"
-            hint="the recording the video is about"
-            name={picks.bottomA?.video.name ?? null}
-            thumbUrl={picks.bottomA?.video.thumbUrl ?? null}
-            missing="No vid yet"
-            disabled={!libraryLoaded}
-            onChoose={() => setPicker({ kind: 'clip', slot: 'bottomA' })}
+            label="Bottom"
+            hint={bottomJob ? `${bottomJob.label}${bottomJob.frac != null ? ` ${Math.round(bottomJob.frac * 100)}%` : ''}` : 'ChatGPT looks them up, then their Pauv clip'}
+            name={bottomJob
+              ? `Making ${bottomJob.person} · ${bottomJob.direction}…`
+              : picks.bottomB
+                ? `${bottomCurrent?.person ?? picks.bottomB.video.name}${bottomCurrent?.direction ? ` · ${bottomCurrent.direction}` : ''}`
+                : null}
+            thumbUrl={picks.bottomA?.video.thumbUrl ?? picks.bottomB?.video.thumbUrl ?? null}
+            missing="Nothing yet"
+            disabled={!libraryLoaded || !bottomPeople.length}
+            onChoose={() => setPicker({ kind: 'bottom' })}
           />
 
           <div className="mb-3 mt-1 flex items-start gap-1.5 text-[10px] text-zinc-500">
@@ -2711,30 +2922,33 @@ export function VidsBuilder({
               onDropVideoId={(slot, id) => { const v = resolveVideo(id); if (v) chooseClip(slot, v); }}
             />
             <div className="h-2" />
-            {FOLDER_SLOTS.map((id) => {
-              const meta = SLOT_META[id];
-              const p = picks[id];
-              // A Bottom B the Link page doesn't pair with the Bottom A on the
-              // stage is still allowed — it is only said so, since the whole
-              // point of the links is that the two line up.
-              const unlinked = id === 'bottomB' && !!p && !!linkedBottomBs
-                && !linkedBottomBs.some((v) => v.id === p.video.id);
-              return (
-                <SlotCard
-                  key={id}
-                  meta={meta}
-                  pick={p}
-                  duration={p ? slotLength(id, p) : null}
-                  rate={p ? slotRate(id, p) : DEFAULT_SPEED}
-                  error={p ? (errors[p.video.id] ?? null) : null}
-                  warn={unlinked ? `Not linked to “${picks.bottomA?.video.name}” — click to pick one that is` : null}
-                  selected={selectedSlot === id}
-                  onChoose={() => setPicker({ kind: 'clip', slot: id })}
-                  onClear={() => clearSlot(id)}
-                  onDropVideoId={(vid) => { const v = resolveVideo(vid); if (v) chooseClip(id, v); }}
-                />
-              );
-            })}
+            <BottomCard
+              a={picks.bottomA}
+              b={picks.bottomB}
+              who={bottomCurrent}
+              lengths={{
+                a: picks.bottomA ? slotLength('bottomA', picks.bottomA) : null,
+                b: picks.bottomB ? slotLength('bottomB', picks.bottomB) : null,
+              }}
+              error={(picks.bottomA && errors[picks.bottomA.video.id]) || (picks.bottomB && errors[picks.bottomB.video.id]) || null}
+              job={bottomJob}
+              jobError={bottomJobError}
+              selected={selectedSlot === 'bottomA' || selectedSlot === 'bottomB'}
+              onChoose={() => setPicker({ kind: 'bottom' })}
+              onClear={() => { setBottomJobError(null); clearSlot('bottomA'); clearSlot('bottomB'); }}
+              onCancelJob={cancelBottomJob}
+            />
+            <SlotCard
+              meta={SLOT_META.end}
+              pick={picks.end}
+              duration={picks.end ? slotLength('end', picks.end) : null}
+              rate={picks.end ? slotRate('end', picks.end) : DEFAULT_SPEED}
+              error={picks.end ? (errors[picks.end.video.id] ?? null) : null}
+              selected={selectedSlot === 'end'}
+              onChoose={() => setPicker({ kind: 'clip', slot: 'end' })}
+              onClear={() => clearSlot('end')}
+              onDropVideoId={(vid) => { const v = resolveVideo(vid); if (v) chooseClip('end', v); }}
+            />
             {/* Bottom A's pace, last in the section and so just above Bars.
                 Every new video starts on Fast; this is where it shows, and
                 where it is switched for the build on the stage. */}
@@ -2973,6 +3187,15 @@ export function VidsBuilder({
         />
       )}
 
+      {picker?.kind === 'bottom' && (
+        <VidsBottomPopup
+          people={bottomPeople}
+          current={bottomCurrent ? { key: personKey(bottomCurrent.person), direction: bottomCurrent.direction } : null}
+          onGo={startBottomJob}
+          onClose={() => setPicker(null)}
+        />
+      )}
+
       {picker?.kind === 'clip' && (() => {
         const slot = picker.slot;
         const meta = SLOT_META[slot];
@@ -2990,9 +3213,7 @@ export function VidsBuilder({
             : undefined;
         return (
           <VidsClipPicker
-            // Simple never says "Bottom A": there is one vid to choose and
-            // that is what it is called there.
-            title={simple ? 'a vid' : meta.label}
+            title={meta.label}
             folder={meta.folder}
             clips={narrowed ?? clipsForSlot(slot)}
             subtitle={subtitle}
@@ -3000,7 +3221,7 @@ export function VidsBuilder({
             linkCounts={slot === 'bottomA' ? bottomALinks : undefined}
             onShowAll={narrowed ? () => setPicker({ kind: 'clip', slot, all: true }) : undefined}
             currentId={picks[slot]?.video.id ?? null}
-            onChoose={(v) => (simple ? chooseSimpleVid(v) : chooseClip(slot, v))}
+            onChoose={(v) => chooseClip(slot, v)}
             onClose={() => setPicker(null)}
           />
         );

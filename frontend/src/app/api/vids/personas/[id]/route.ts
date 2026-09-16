@@ -1,10 +1,11 @@
-// /api/vids/personas/:id — rename, re-point a part, or say what the bundle is
-// showing (PATCH { name?, startId?, topAId?, topBId?, context? }), or
-// delete the bundle (DELETE). Deleting drops only the
-// persona; its clips stay in the Persona folder as unassigned footage.
+// /api/vids/personas/:id — rename, re-point a part, say what the bundle is
+// showing, or put it on offer to the clippers (PATCH { name?, startId?,
+// topAId?, topBId?, context?, clipable? }), or delete the bundle (DELETE).
+// Deleting drops only the persona; its clips stay in the Persona folder as
+// unassigned footage.
 import { NextRequest, NextResponse } from 'next/server';
 import { deletePersona, errMessage, isUuid, updatePersona, type PersonaPatch } from '@/lib/vids-db';
-import { readContextPatch } from '@/lib/vids-types';
+import { readClipablePatch, readContextPatch } from '@/lib/vids-types';
 import { readParts } from '../parts';
 
 export const runtime = 'nodejs';
@@ -24,6 +25,7 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
   const bad = readParts(body, patch);
   if (bad) return NextResponse.json({ error: bad }, { status: 400 });
   readContextPatch(body, patch);
+  readClipablePatch(body, patch);
   if (Object.keys(patch).length === 0) {
     return NextResponse.json({ error: 'nothing to update' }, { status: 400 });
   }

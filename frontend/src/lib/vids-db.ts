@@ -3,7 +3,8 @@
 //   rows  → Railway Postgres (DATABASE_PUBLIC_URL, the same DB as the board);
 //           the tables self-create on first use, like board-db.ts. Folders,
 //           clips, personas — and recipes, a finished build written down under
-//           a short code so it can be brought back exactly.
+//           a short code so it can be brought back exactly — and which of it
+//           all is on offer to the clippers (see VidClipable in vids-types).
 //   files → the dedicated Vids Supabase project's public `vids` bucket, driven
 //           with its secret key (the bucket is auto-created). Browsers never
 //           hold a key for it: uploads go through short-lived signed URLs
@@ -15,10 +16,10 @@
 import { randomInt } from 'node:crypto';
 import pg from 'pg';
 import { createClient, type SupabaseClient } from '@supabase/supabase-js';
-import { RECIPE_CODE_ALPHABET, RECIPE_CODE_LENGTH, cleanEdit, cleanMarks, recipeName } from '@/lib/vids-types';
+import { RECIPE_CODE_ALPHABET, RECIPE_CODE_LENGTH, cleanEdit, cleanMarks, isClipableKind, recipeName } from '@/lib/vids-types';
 import type {
-  CreateVideoInput, VidBuildSpec, VidContextPatch, VidEdit, VidFolder, VidLink, VidMark, VidPersona, VidRecipe,
-  VidRow, VidsLibraryPayload,
+  ClipableKind, CreateVideoInput, VidBuildSpec, VidClipableFlag, VidClipablePatch, VidContextPatch, VidEdit,
+  VidFolder, VidLink, VidMark, VidPersona, VidRecipe, VidRow, VidsLibraryPayload,
 } from '@/lib/vids-types';
 
 export const VIDS_BUCKET = 'vids';
@@ -35,7 +36,7 @@ export const errMessage = (e: unknown) => (e instanceof Error ? e.message : 'une
 // reload in dev, or a long-lived server between deploys. Comparing the version
 // makes such a process re-run the (idempotent) DDL instead of trusting a
 // promise that was resolved against the older schema.
-const SCHEMA_VERSION = 8;
+const SCHEMA_VERSION = 10;
 
 const g = globalThis as unknown as {
   __vidsPool?: pg.Pool;
@@ -210,6 +211,36 @@ function ensureSchema(): Promise<void> {
         PRIMARY KEY (bottom_a_id, bottom_b_id)
       );
     `);
+    // Whether a persona or clip is on offer to the clippers — see VidClipable.
+    // Off for everything made before, which is the point: nothing reaches the
+    // clippers' app until someone here has said so.
+    for (const table of ['vids_videos', 'vids_personas'] as const) {
+      await pool.query(`ALTER TABLE ${table} ADD COLUMN IF NOT EXISTS clipable BOOLEAN NOT NULL DEFAULT false`);
+    }
+    // The same flag for the things that live in code rather than in a row —
+    // songs (public/audio) and caption looks (lib/vidsCaptions). A row here is
+    // a yes; turning one off deletes it. Keyed by kind and by what names the
+    // thing, so a song that leaves the library leaves a harmless stray row.
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS vids_clipable (
+        kind       TEXT        NOT NULL,
+        key        TEXT        NOT NULL,
+        created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+        PRIMARY KEY (kind, key)
+      );
+    `);
+    // What a song is called, when someone has renamed it. The audio library
+    // names its tracks in code (/api/charts/list-audio), and a row here
+    // stands in for that name wherever the library is listed — Vids, the
+    // charts, the carousel — so a rename on the Clippers page is the name
+    // everywhere. Keyed by the track's url like its clipable flag.
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS vids_track_names (
+        url        TEXT        PRIMARY KEY,
+        label      TEXT        NOT NULL,
+        updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+      );
+    `);
     await pool.query('CREATE INDEX IF NOT EXISTS vids_videos_folder_idx ON vids_videos (folder_id)');
     await pool.query('CREATE INDEX IF NOT EXISTS vids_folders_parent_idx ON vids_folders (parent_id)');
   })().catch((e) => {
@@ -228,13 +259,15 @@ interface VideoDb {
   thumb_path: string | null; mime_type: string; size_bytes: string | number;
   duration_s: number | null; width: number | null; height: number | null;
   has_sfx: boolean; context: string; marks: unknown; source_path: string | null; edit: unknown;
-  created_at: Date;
+  clipable: boolean; created_at: Date;
 }
 
 interface PersonaDb {
   id: string; name: string; start_id: string | null; top_a_id: string | null;
-  top_b_id: string | null; context: string; created_at: Date;
+  top_b_id: string | null; context: string; clipable: boolean; created_at: Date;
 }
+
+interface ClipableDb { kind: string; key: string }
 
 interface RecipeDb {
   code: string; title: string; video_id: string | null; build: unknown; created_at: Date;
@@ -244,11 +277,12 @@ interface LinkDb { bottom_a_id: string; bottom_b_id: string }
 
 const FOLDER_COLS = 'id, parent_id, name, created_at';
 const LINK_COLS = 'bottom_a_id, bottom_b_id';
+const CLIPABLE_COLS = 'kind, key';
 const RECIPE_COLS = 'code, title, video_id, build, created_at';
-const PERSONA_COLS = 'id, name, start_id, top_a_id, top_b_id, context, created_at';
+const PERSONA_COLS = 'id, name, start_id, top_a_id, top_b_id, context, clipable, created_at';
 const VIDEO_COLS =
   'id, folder_id, name, storage_path, thumb_path, mime_type, size_bytes, duration_s, width, height, '
-  + 'has_sfx, context, marks, source_path, edit, created_at';
+  + 'has_sfx, context, marks, source_path, edit, clipable, created_at';
 
 const toFolder = (r: FolderDb): VidFolder => ({
   id: r.id, parentId: r.parent_id, name: r.name, createdAt: r.created_at.toISOString(),
@@ -261,10 +295,17 @@ const toPersona = (r: PersonaDb): VidPersona => ({
   topAId: r.top_a_id,
   topBId: r.top_b_id,
   context: r.context ?? '',
+  clipable: r.clipable === true,
   createdAt: r.created_at.toISOString(),
 });
 
 const toLink = (r: LinkDb): VidLink => ({ bottomAId: r.bottom_a_id, bottomBId: r.bottom_b_id });
+
+/** A flag row, or null for one whose kind this build no longer knows — a row
+ *  written by a newer server, say. Dropped rather than passed on as a kind the
+ *  client can't place. */
+const toClipable = (r: ClipableDb): VidClipableFlag | null =>
+  (isClipableKind(r.kind) ? { kind: r.kind, key: r.key } : null);
 
 const toRecipe = (r: RecipeDb): VidRecipe => ({
   code: r.code,
@@ -292,6 +333,7 @@ const toVideo = (r: VideoDb): VidRow => ({
   sourcePath: r.source_path ?? null,
   sourceUrl: r.source_path ? publicUrl(r.source_path) : null,
   edit: cleanEdit(r.edit),
+  clipable: r.clipable === true,
   createdAt: r.created_at.toISOString(),
   url: publicUrl(r.storage_path),
   thumbUrl: r.thumb_path ? publicUrl(r.thumb_path) : null,
@@ -302,18 +344,59 @@ const toVideo = (r: VideoDb): VidRow => ({
 export async function listLibrary(): Promise<VidsLibraryPayload> {
   await ensureSchema();
   const pool = getPool();
-  const [f, v, p, l] = await Promise.all([
+  const [f, v, p, l, c] = await Promise.all([
     pool.query<FolderDb>(`SELECT ${FOLDER_COLS} FROM vids_folders ORDER BY name`),
     pool.query<VideoDb>(`SELECT ${VIDEO_COLS} FROM vids_videos ORDER BY created_at DESC`),
     pool.query<PersonaDb>(`SELECT ${PERSONA_COLS} FROM vids_personas ORDER BY name`),
     pool.query<LinkDb>(`SELECT ${LINK_COLS} FROM vids_links ORDER BY created_at`),
+    pool.query<ClipableDb>(`SELECT ${CLIPABLE_COLS} FROM vids_clipable ORDER BY created_at`),
   ]);
   return {
     folders: f.rows.map(toFolder),
     videos: v.rows.map(toVideo),
     personas: p.rows.map(toPersona),
     links: l.rows.map(toLink),
+    clipable: c.rows.map(toClipable).filter((x): x is VidClipableFlag => x !== null),
   };
+}
+
+// ── Clipable flags ────────────────────────────────────────────────────────────
+// For the things that have no row of their own — songs and caption looks. A
+// persona's or clip's flag is a column on it, set through updatePersona /
+// updateVideo like its name.
+
+// ── Track names ───────────────────────────────────────────────────────────────
+
+/** Every renamed song, url → what it is called now. Read by list-audio on
+ *  every listing, so it is one small query and nothing else. */
+export async function listTrackNames(): Promise<Map<string, string>> {
+  await ensureSchema();
+  const r = await getPool().query<{ url: string; label: string }>('SELECT url, label FROM vids_track_names');
+  return new Map(r.rows.map((row) => [row.url, row.label]));
+}
+
+/** Call a song something else, everywhere it is listed. */
+export async function setTrackName(url: string, label: string): Promise<void> {
+  await ensureSchema();
+  await getPool().query(
+    `INSERT INTO vids_track_names (url, label) VALUES ($1, $2)
+     ON CONFLICT (url) DO UPDATE SET label = EXCLUDED.label, updated_at = now()`,
+    [url, label],
+  );
+}
+
+/** Turn one song or caption look on or off for the clippers. Idempotent both
+ *  ways: turning on what is on, or off what is off, is nothing to do. */
+export async function setClipable(kind: ClipableKind, key: string, on: boolean): Promise<void> {
+  await ensureSchema();
+  if (on) {
+    await getPool().query(
+      'INSERT INTO vids_clipable (kind, key) VALUES ($1, $2) ON CONFLICT DO NOTHING',
+      [kind, key],
+    );
+  } else {
+    await getPool().query('DELETE FROM vids_clipable WHERE kind = $1 AND key = $2', [kind, key]);
+  }
 }
 
 // ── Links ─────────────────────────────────────────────────────────────────────
@@ -417,7 +500,7 @@ export async function deleteFolder(id: string): Promise<boolean> {
 // folder, where they show up as unassigned and can be reused or deleted by hand.
 // Same rule as folders — nothing about a stray click should destroy footage.
 
-export interface PersonaPatch extends VidContextPatch {
+export interface PersonaPatch extends VidContextPatch, VidClipablePatch {
   name?: string;
   startId?: string | null;
   topAId?: string | null;
@@ -444,6 +527,7 @@ export async function updatePersona(id: string, patch: PersonaPatch): Promise<Vi
   if (patch.topAId !== undefined) put('top_a_id', patch.topAId);
   if (patch.topBId !== undefined) put('top_b_id', patch.topBId);
   if (patch.context !== undefined) put('context', patch.context);
+  if (patch.clipable !== undefined) put('clipable', patch.clipable);
   vals.push(id);
   const r = await getPool().query<PersonaDb>(
     `UPDATE vids_personas SET ${sets.join(', ')} WHERE id = $${vals.length} RETURNING ${PERSONA_COLS}`,
@@ -488,7 +572,7 @@ export async function createVideo(input: CreateVideoInput): Promise<VidRow> {
   }
 }
 
-export interface VideoPatch extends VidContextPatch {
+export interface VideoPatch extends VidContextPatch, VidClipablePatch {
   name?: string;
   folderId?: string | null;
   marks?: VidMark[];
@@ -503,6 +587,7 @@ export async function updateVideo(id: string, patch: VideoPatch): Promise<VidRow
   if (patch.folderId !== undefined) put('folder_id', patch.folderId);
   if (patch.context !== undefined) put('context', patch.context);
   if (patch.marks !== undefined) put('marks', JSON.stringify(patch.marks));
+  if (patch.clipable !== undefined) put('clipable', patch.clipable);
   vals.push(id);
   const r = await getPool().query<VideoDb>(
     `UPDATE vids_videos SET ${sets.join(', ')} WHERE id = $${vals.length} RETURNING ${VIDEO_COLS}`,

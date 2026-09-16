@@ -1,5 +1,6 @@
 // /api/vids/videos/:id — rename / move / say what the clip is showing, as a
-// whole or stretch by stretch (PATCH { name?, folderId?, context?, marks? }),
+// whole or stretch by stretch, or put it on offer to the clippers (PATCH
+// { name?, folderId?, context?, marks?, clipable? }),
 // swap the bytes an edit produced in over the last render (PATCH { media,
 // name?, marks? } — `media.edit` is the edit they were rendered with, and the
 // recording itself is kept, see replaceVideoMedia), or delete (DELETE: row +
@@ -9,7 +10,7 @@ import {
   deleteVideo, errMessage, isUuid, replaceVideoMedia, updateVideo,
   type VideoMedia, type VideoPatch,
 } from '@/lib/vids-db';
-import { cleanEdit, cleanMarks, readContextPatch } from '@/lib/vids-types';
+import { cleanEdit, cleanMarks, readClipablePatch, readContextPatch } from '@/lib/vids-types';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -81,6 +82,7 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
     patch.folderId = body.folderId as string | null;
   }
   readContextPatch(body, patch);
+  readClipablePatch(body, patch);
   if (body.marks !== undefined) patch.marks = cleanMarks(body.marks);
   if (Object.keys(patch).length === 0) {
     return NextResponse.json({ error: 'nothing to update' }, { status: 400 });

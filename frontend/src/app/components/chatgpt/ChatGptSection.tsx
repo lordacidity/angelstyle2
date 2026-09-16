@@ -2,8 +2,13 @@
 
 // ChatGPT lookalike (Studio > ChatGPT).
 //
-// Two stages. The setup card takes a name, a direction (up / down), an optional
-// question and a Start button. The chat is a pixel-faithful copy of the logged-out chatgpt.com
+// Two stages. The setup card takes a name, a direction (up / down), the
+// question and a video format. Start asks the model once, renders the
+// 8-second "screen recording" of the chat right here in the browser (see
+// chatgpt-video.ts: the typing, the loading, the pointer clicking the name and
+// zooming in, all drawn frame by frame) and downloads it. "Open the chat"
+// plays the same thing live instead, from the same answer. The chat is a
+// pixel-faithful copy of the logged-out chatgpt.com
 // dark theme: the "Where should we begin?" landing, the composer pill, the user
 // bubble, the pulsing dot then the shimmering "Searching the web" status, and
 // the answer streaming in as bold numbered names with a few sentences each.
@@ -15,9 +20,9 @@
 // the answer is asked for the moment it starts typing itself out: by the time
 // it sends, the answer is usually back and the loading runs just its ~1.5s.
 //
-// These get screen-recorded, so the question is written ahead of time on the
-// setup card: the first click in the chat's search bar types it out at a human
-// pace, spelled right, and sends it. Enter mid-typing completes and sends.
+// The question is written ahead of time on the setup card, spelled right: in
+// the live chat the first click in the search bar types it out at a human
+// pace and sends it. Enter mid-typing completes and sends.
 //
 // Ways back to the setup card: click the ChatGPT wordmark top-left, the rail's
 // sidebar toggle, or press Esc. Start opens a fresh chat each time.
@@ -32,10 +37,8 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import s from './ChatGpt.module.css';
-
-type Direction = 'up' | 'down';
-interface Pick { name: string; text: string }
-interface Reply { intro: string; picks: Pick[]; outro: string }
+import { askChatGpt, buildBlocks, replyToText, totalLen, type Block, type Direction, type Reply, type Run } from './reply';
+import { CLIP_SECONDS, renderChatVideo, VIDEO_H, VIDEO_W } from './chatgpt-video';
 
 type AssistantStatus = 'loading' | 'streaming' | 'done' | 'error';
 interface UserMsg { id: string; role: 'user'; text: string }
@@ -121,55 +124,16 @@ function selectContents(el: HTMLElement) {
   sel.addRange(range);
 }
 
-// ── Inline markup → runs ────────────────────────────────────────────────────
-// The model may wrap titles in *asterisks*; nothing else is honoured.
-interface Run { text: string; em?: boolean; strong?: boolean; name?: boolean }
-function parseInline(text: string): Run[] {
-  const runs: Run[] = [];
-  const re = /\*\*([^*\n]+)\*\*|\*([^*\n]+)\*|_([^_\n]+)_/g;
-  let last = 0;
-  let m: RegExpExecArray | null;
-  while ((m = re.exec(text))) {
-    if (m.index > last) runs.push({ text: text.slice(last, m.index) });
-    if (m[1]) runs.push({ text: m[1], strong: true });
-    else runs.push({ text: m[2] ?? m[3], em: true });
-    last = m.index + m[0].length;
-  }
-  if (last < text.length) runs.push({ text: text.slice(last) });
-  return runs;
-}
-
-interface Block { kind: 'p' | 'li'; runs: Run[]; start: number; len: number }
-function buildBlocks(reply: Reply): Block[] {
-  const blocks: Block[] = [];
-  let pos = 0;
-  const push = (kind: Block['kind'], runs: Run[]) => {
-    const len = runs.reduce((n, r) => n + r.text.length, 0);
-    blocks.push({ kind, runs, start: pos, len });
-    pos += len;
-  };
-  if (reply.intro.trim()) push('p', parseInline(reply.intro.trim()));
-  // The number and the name are separate runs so a click can highlight the
-  // name alone.
-  reply.picks.forEach((p, i) => push('li', [
-    { text: `${i + 1}. `, strong: true },
-    { text: p.name.trim(), strong: true, name: true },
-    { text: ' — ' },
-    ...parseInline(p.text.trim()),
-  ]));
-  if (reply.outro.trim()) push('p', parseInline(reply.outro.trim()));
-  return blocks;
-}
-const totalLen = (blocks: Block[]) => blocks.reduce((n, b) => n + b.len, 0);
-
-// Plain-text rendering: what Copy puts on the clipboard and what goes back to
-// the route as an earlier assistant turn.
-function replyToText(reply: Reply): string {
-  const lines: string[] = [];
-  if (reply.intro.trim()) lines.push(reply.intro.trim(), '');
-  reply.picks.forEach((p, i) => lines.push(`${i + 1}. ${p.name.trim()} — ${p.text.trim()}`));
-  if (reply.outro.trim()) lines.push('', reply.outro.trim());
-  return lines.join('\n').replace(/\*\*?([^*\n]+)\*\*?/g, '$1');
+// Hand a rendered recording to the browser's downloads.
+function downloadBlob(blob: Blob, filename: string) {
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = filename;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 30_000);
 }
 
 // ── Icons (chatgpt.com's line icons, redrawn) ───────────────────────────────
@@ -289,7 +253,7 @@ function Composer({ value, onChange, onSend, onStop, onEngage, locked, generatin
     const el = inputRef.current;
     if (!el) return;
     el.style.height = 'auto';
-    el.style.height = `${Math.min(el.scrollHeight, 200)}px`;
+    el.style.height = `${Math.min(el.scrollHeight, 240)}px`;
   }, [value, inputRef]);
   return (
     <div className={s.composerWrap}>
@@ -329,6 +293,14 @@ export function ChatGptSection({ active }: { active: boolean }) {
   const [question, setQuestion] = useState(() => loadSetup().question);
   const [messages, setMessages] = useState<Msg[]>([]);
   const [input, setInput] = useState('');
+  // The recording being made (label + 0..1 once frames are going), and how the
+  // last one ended.
+  const [render, setRender] = useState<{ label: string; pct: number | null } | null>(null);
+  const [renderNote, setRenderNote] = useState<{ ok: boolean; text: string } | null>(null);
+  const renderCtrlRef = useRef<AbortController | null>(null);
+  // What the last recording was made from, so Open the chat can replay it.
+  const renderedRef = useRef<{ name: string; direction: Direction; question: string; reply: Reply } | null>(null);
+  const questionRef = useRef<HTMLTextAreaElement>(null);
 
   const abortRef = useRef<AbortController | null>(null);
   // The pre-written question's answer, asked for while it types itself out —
@@ -455,17 +427,71 @@ export function ChatGptSection({ active }: { active: boolean }) {
 
   const backToSetup = useCallback(() => { stop(); setStage('setup'); }, [stop]);
 
-  function start() {
+  function saveSetup(n: string, q: string) {
+    try { localStorage.setItem(SETUP_KEY, JSON.stringify({ name: n, direction, question: q })); } catch { /* ignore */ }
+  }
+
+  // Open the chat, to play the same thing live. The answer the last recording
+  // was rendered from is queued for the click-to-type, so the preview matches
+  // the file rather than asking the model again.
+  function openChat() {
     const n = name.trim();
     if (!n) { nameRef.current?.focus(); return; }
     const q = question.trim();
-    try { localStorage.setItem(SETUP_KEY, JSON.stringify({ name: n, direction, question: q })); } catch { /* ignore */ }
+    saveSetup(n, q);
     stop();
     scriptRef.current = q || null;
+    const r = renderedRef.current;
+    if (q && r && r.question === q && r.name === n && r.direction === direction) {
+      prefetchRef.current = { text: q, ctrl: new AbortController(), request: Promise.resolve(r.reply) };
+    }
     setMessages([]);
     setInput('');
     setView(VIEW_RESET);
     setStage('chat');
+  }
+
+  function cancelRender() {
+    renderCtrlRef.current?.abort();
+    renderCtrlRef.current = null;
+    setRender(null);
+  }
+
+  // Start: ask the model once, render the recording from its answer, download
+  // it. Stays on this card, so the next clip is a tweak and a click away.
+  async function start() {
+    const n = name.trim();
+    if (!n) { nameRef.current?.focus(); return; }
+    const q = question.trim();
+    if (!q) {
+      questionRef.current?.focus();
+      setRenderNote({ ok: false, text: 'Type the question first: it is what gets asked in the recording.' });
+      return;
+    }
+    saveSetup(n, q);
+    cancelRender();
+    const ctrl = new AbortController();
+    renderCtrlRef.current = ctrl;
+    setRenderNote(null);
+    setRender({ label: 'Asking ChatGPT…', pct: null });
+    try {
+      const reply = await requestReply([{ role: 'user', content: q }], ctrl.signal);
+      renderedRef.current = { name: n, direction, question: q, reply };
+      const { blob, filename } = await renderChatVideo({
+        name: n,
+        direction,
+        question: q,
+        reply,
+        signal: ctrl.signal,
+        onProgress: (done, total) => setRender({ label: `Rendering ${Math.round((done / total) * 100)}%`, pct: done / total }),
+      });
+      downloadBlob(blob, filename);
+      setRenderNote({ ok: true, text: `Saved ${filename}` });
+    } catch (err) {
+      if (!ctrl.signal.aborted) setRenderNote({ ok: false, text: err instanceof Error ? err.message : String(err) });
+    } finally {
+      if (renderCtrlRef.current === ctrl) { renderCtrlRef.current = null; setRender(null); }
+    }
   }
 
   // The top-right Reset: everything back to square one. Chat, zoom, width,
@@ -473,6 +499,9 @@ export function ChatGptSection({ active }: { active: boolean }) {
   // empty setup card.
   function resetAll() {
     stop();
+    cancelRender();
+    renderedRef.current = null;
+    setRenderNote(null);
     scriptRef.current = null;
     setMessages([]);
     setInput('');
@@ -496,11 +525,14 @@ export function ChatGptSection({ active }: { active: boolean }) {
     inputRef.current?.focus();
     // Ask for the answer now, while the question types itself out, so the
     // model's own couple of seconds are spent before it is sent rather than
-    // after; send() picks this up when the same question goes.
-    const ctrl = new AbortController();
-    const request = requestReply([{ role: 'user', content: script }], ctrl.signal);
-    request.catch(() => { /* aborted, or handled where it is awaited */ });
-    prefetchRef.current = { text: script, ctrl, request };
+    // after; send() picks this up when the same question goes. Unless the
+    // answer is already queued (Open the chat after a recording).
+    if (prefetchRef.current?.text !== script) {
+      const ctrl = new AbortController();
+      const request = requestReply([{ role: 'user', content: script }], ctrl.signal);
+      request.catch(() => { /* aborted, or handled where it is awaited */ });
+      prefetchRef.current = { text: script, ctrl, request };
+    }
     let i = 0;
     const step = () => {
       i++;
@@ -571,6 +603,7 @@ export function ChatGptSection({ active }: { active: boolean }) {
   useEffect(() => () => {
     abortRef.current?.abort();
     prefetchRef.current?.ctrl.abort();
+    renderCtrlRef.current?.abort();
     if (streamRef.current != null) cancelAnimationFrame(streamRef.current);
     if (typeTimerRef.current != null) clearTimeout(typeTimerRef.current);
   }, []);
@@ -588,16 +621,7 @@ export function ChatGptSection({ active }: { active: boolean }) {
 
   /** One answer from the route, for the chat so far. */
   function requestReply(history: { role: 'user' | 'assistant'; content: string }[], signal: AbortSignal): Promise<Reply> {
-    return fetch('/api/ai/chatgpt', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ name: name.trim(), direction, messages: history }),
-      signal,
-    }).then(async r => {
-      const j = await r.json().catch(() => ({})) as { error?: string } & Partial<Reply>;
-      if (!r.ok) throw new Error(j.error || `HTTP ${r.status}`);
-      return { intro: j.intro ?? '', picks: j.picks ?? [], outro: j.outro ?? '' } as Reply;
-    });
+    return askChatGpt(name.trim(), direction, history, signal);
   }
 
   // `base` is the chat the new message follows (defaults to the current one;
@@ -657,44 +681,45 @@ export function ChatGptSection({ active }: { active: boolean }) {
     return (
       <div className={s.root}>
         <button type="button" className={s.resetAll} title="Reset everything" onClick={resetAll}>Reset</button>
-        <div className="min-h-screen flex items-center justify-center p-8">
-          <div className="w-full max-w-md rounded-2xl border border-zinc-800 bg-[#111] p-8 flex flex-col gap-6">
+        <div className="min-h-screen flex items-center justify-center p-4 sm:p-8">
+          <div className="w-full max-w-lg rounded-2xl border border-zinc-800 bg-[#111] p-6 sm:p-8 flex flex-col gap-6">
             <div>
-              <h1 className="text-2xl font-semibold text-white">ChatGPT</h1>
-              <p className="text-sm text-zinc-500 mt-1">
+              <h1 className="text-3xl font-semibold text-white">ChatGPT</h1>
+              <p className="text-base text-zinc-500 mt-2">
                 Type a name and pick a direction. Whatever gets asked in the chat, ChatGPT argues it&apos;s them.
               </p>
             </div>
             <label className="flex flex-col gap-2">
-              <span className="text-xs uppercase tracking-wide text-zinc-500">Name</span>
+              <span className="text-sm uppercase tracking-wide text-zinc-500">Name</span>
               <input
                 ref={nameRef}
                 value={name}
                 onChange={e => setName(e.target.value)}
-                onKeyDown={e => { if (e.key === 'Enter') start(); }}
+                onKeyDown={e => { if (e.key === 'Enter') void start(); }}
                 placeholder="e.g. Trump"
-                className="h-12 rounded-xl bg-black border border-zinc-800 px-4 text-white text-lg outline-none focus:border-zinc-500"
+                className="h-14 rounded-xl bg-black border border-zinc-800 px-4 text-white text-xl outline-none focus:border-zinc-500"
               />
             </label>
             <label className="flex flex-col gap-2">
-              <span className="text-xs uppercase tracking-wide text-zinc-500">Question <span className="normal-case tracking-normal text-zinc-600">(optional)</span></span>
+              <span className="text-sm uppercase tracking-wide text-zinc-500">Question</span>
               <textarea
+                ref={questionRef}
                 value={question}
                 onChange={e => setQuestion(e.target.value)}
-                onKeyDown={e => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); start(); } }}
+                onKeyDown={e => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); void start(); } }}
                 placeholder="e.g. who is the most overrated musician of all time?"
                 rows={2}
-                className="rounded-xl bg-black border border-zinc-800 px-4 py-3 text-white text-base outline-none focus:border-zinc-500 resize-none"
+                className="rounded-xl bg-black border border-zinc-800 px-4 py-3 text-white text-lg outline-none focus:border-zinc-500 resize-none"
               />
-              <span className="text-xs text-zinc-600">
-                Written here so it&apos;s spelled right on the recording: the first click in the chat&apos;s search bar types it out and sends it.
+              <span className="text-sm text-zinc-600">
+                Typed out in the recording, spelled right. In the live chat, the first click in the search bar types it out and sends it.
               </span>
             </label>
             <div className="grid grid-cols-2 gap-3">
               <button
                 type="button"
                 onClick={() => setDirection('up')}
-                className={`h-14 rounded-xl border text-lg font-semibold transition-colors ${
+                className={`h-16 rounded-xl border text-xl font-semibold transition-colors ${
                   direction === 'up'
                     ? 'bg-emerald-500/15 border-emerald-500 text-emerald-300'
                     : 'bg-black border-zinc-800 text-zinc-500 hover:text-zinc-300'
@@ -705,7 +730,7 @@ export function ChatGptSection({ active }: { active: boolean }) {
               <button
                 type="button"
                 onClick={() => setDirection('down')}
-                className={`h-14 rounded-xl border text-lg font-semibold transition-colors ${
+                className={`h-16 rounded-xl border text-xl font-semibold transition-colors ${
                   direction === 'down'
                     ? 'bg-red-500/15 border-red-500 text-red-300'
                     : 'bg-black border-zinc-800 text-zinc-500 hover:text-zinc-300'
@@ -714,19 +739,42 @@ export function ChatGptSection({ active }: { active: boolean }) {
                 📉 Down
               </button>
             </div>
-            <button
-              type="button"
-              onClick={start}
-              disabled={!name.trim()}
-              className="h-12 rounded-xl bg-white text-black font-semibold text-base hover:bg-zinc-200 disabled:opacity-40 disabled:cursor-not-allowed"
-            >
-              Start
-            </button>
-            <p className="text-xs text-zinc-600 leading-relaxed">
-              In the chat, click the ChatGPT wordmark top-left or press Esc to come back here.
-              The pill at the bottom-right sets the chat&apos;s width. Ctrl + scroll (or Ctrl and +) zooms
-              just the chat, around whatever text is highlighted; click a name to highlight it. It never goes
-              below 100%. Ctrl 0 or the pill&apos;s ↺ resets it.
+            <div className="flex flex-col gap-3">
+              <button
+                type="button"
+                onClick={render ? undefined : () => void start()}
+                disabled={!render && !name.trim()}
+                className="relative overflow-hidden h-14 rounded-xl bg-white text-black font-semibold text-lg hover:bg-zinc-200 disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:bg-white"
+              >
+                {render?.pct != null && (
+                  <span className="absolute inset-y-0 left-0 bg-zinc-400/70" style={{ width: `${Math.round(render.pct * 100)}%` }} />
+                )}
+                <span className="relative">{render ? render.label : 'Start'}</span>
+              </button>
+              <div className="flex items-center justify-between gap-3 text-sm">
+                <button
+                  type="button"
+                  onClick={openChat}
+                  disabled={!!render || !name.trim()}
+                  className="text-zinc-400 hover:text-white underline underline-offset-2 disabled:opacity-40"
+                >
+                  Open the chat instead
+                </button>
+                {render && (
+                  <button type="button" onClick={cancelRender} className="text-zinc-400 hover:text-white">Cancel</button>
+                )}
+              </div>
+              {renderNote && (
+                <p className={`text-sm leading-relaxed ${renderNote.ok ? 'text-emerald-300' : 'text-red-300'}`}>{renderNote.text}</p>
+              )}
+            </div>
+            <p className="text-sm text-zinc-600 leading-relaxed">
+              Start renders the recording, about {CLIP_SECONDS} seconds at {VIDEO_W}×{VIDEO_H}, right here and
+              downloads it: the question typed out with the keyboard sound, the answer loading, then the pointer
+              selecting the name to zoom in on it before leaving.
+              Open the chat plays the same thing live (the first click in the search bar types the question;
+              Esc or the wordmark comes back here). In the chat, Ctrl + scroll zooms around highlighted text
+              and the pill at the bottom-right sets its width.
             </p>
           </div>
         </div>

@@ -25,6 +25,8 @@
 //           A run turns the page for you — Upload while it is asking
 //           something, Edit once it has a clip open — and all three stay
 //           mounted, so nothing half-done is lost to a look elsewhere.
+//           (What the clippers' app gets is its own page of the section,
+//           beside this one — see VidsClippers.)
 //
 // Right-click says what a piece of footage is showing: a clip's thumbnail opens
 // the context popup for that clip, a persona row (or one of its part tiles) for
@@ -222,8 +224,16 @@ function ClipCard({ v, open, onOpen, onDelete, onContext }: {
       >
         <TrashIcon size={12} />
       </button>
-      {open && (
+      {open ? (
         <span className="absolute left-1 top-1 rounded bg-sky-600/90 px-1 py-px text-[9px] font-medium text-white">Editing</span>
+      ) : v.clipable && (
+        // On offer to the clippers — switched on the Clippers page.
+        <span
+          title="On offer to the clippers — switch it on the Clippers page"
+          className="absolute left-1 top-1 rounded bg-emerald-600/90 px-1 py-px text-[9px] font-medium text-white"
+        >
+          Clipable
+        </span>
       )}
     </div>
   );
@@ -584,6 +594,7 @@ export function VidsPrep({ lib, active }: { lib: VidsLib; active: boolean }) {
       sourcePath: null,
       sourceUrl: null,
       edit: null,
+      clipable: false,
     };
   }, []);
 

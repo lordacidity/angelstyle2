@@ -24,7 +24,7 @@ function PlayBadge() {
   );
 }
 
-function Shell({ title, subtitle, action, onClose, children }: {
+export function Shell({ title, subtitle, action, onClose, children }: {
   title: string;
   subtitle: string;
   /** Something for the top right, beside Close — Bottom B's "Choose from any". */

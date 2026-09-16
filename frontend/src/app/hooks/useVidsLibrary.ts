@@ -15,8 +15,11 @@
 
 import { useCallback, useEffect, useRef, useState } from 'react';
 import * as client from '@/lib/vids-client';
-import type { PersonaParts } from '@/lib/vids-client';
-import type { VidContextPatch, VidEdit, VidFolder, VidLink, VidMark, VidPersona, VidRow } from '@/lib/vids-types';
+import type { PersonaParts, PersonaUpdate } from '@/lib/vids-client';
+import { PERSONA_PARTS, PERSONA_PART_LABEL } from '@/lib/vids-types';
+import type {
+  ClipableKind, VidClipableFlag, VidContextPatch, VidEdit, VidFolder, VidLink, VidMark, VidPersona, VidRow,
+} from '@/lib/vids-types';
 
 export interface UploadItem {
   id: string;
@@ -63,6 +66,9 @@ export function useVidsLibrary(active: boolean) {
   const [personas, setPersonas] = useState<VidPersona[]>([]);
   // Which Bottom Bs follow on from which Bottom A — see VidLink.
   const [links, setLinkRows] = useState<VidLink[]>([]);
+  // The songs and caption looks on offer to the clippers — see VidClipableFlag.
+  // (A persona's or clip's flag rides on its own row.)
+  const [clipable, setClipableRows] = useState<VidClipableFlag[]>([]);
   const [selectedFolderId, setSelectedFolderId] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const [loaded, setLoaded] = useState(false);
@@ -71,6 +77,11 @@ export function useVidsLibrary(active: boolean) {
   const loadedRef = useRef(false);
   const foldersRef = useRef<VidFolder[]>([]);
   useEffect(() => { foldersRef.current = folders; }, [folders]);
+  // Read from inside callbacks that would otherwise close over a render-old copy.
+  const videosRef = useRef<VidRow[]>([]);
+  useEffect(() => { videosRef.current = videos; }, [videos]);
+  const personasRef = useRef<VidPersona[]>([]);
+  useEffect(() => { personasRef.current = personas; }, [personas]);
 
   // Writes on their way to the server, and how many have finished — what keeps
   // a read from landing on top of one (see the header).
@@ -94,6 +105,7 @@ export function useVidsLibrary(active: boolean) {
         setVideos(lib.videos);
         setPersonas(lib.personas ?? []);
         setLinkRows(lib.links ?? []);
+        setClipableRows(lib.clipable ?? []);
         applied = true;
       }
       if (!applied) wantRefreshRef.current = true;
@@ -228,13 +240,35 @@ export function useVidsLibrary(active: boolean) {
     }
   }, [tracked]);
 
-  const updatePersona = useCallback(async (id: string, patch: PersonaParts & VidContextPatch & { name?: string }) => {
+  // A rename carries the persona's clips with it, where they are still called
+  // what they were called when they were filed ("Aiden — Start"): a persona
+  // renamed anywhere — the Clippers page, the right-click popup — is renamed
+  // everywhere, its three parts included. A part someone has named by hand is
+  // left as it is.
+  const updatePersona = useCallback(async (id: string, patch: PersonaUpdate) => {
     const clean = patch.name === undefined ? undefined : patch.name.trim();
     if (clean !== undefined && !clean) return;
     const next = { ...patch, ...(clean === undefined ? {} : { name: clean }) };
+    const before = personasRef.current.find((p) => p.id === id);
+    const parts: { id: string; name: string }[] = [];
+    if (clean !== undefined && before && before.name !== clean) {
+      for (const part of PERSONA_PARTS) {
+        const v = videosRef.current.find((x) => x.id === before[part]);
+        if (v && v.name === `${before.name} — ${PERSONA_PART_LABEL[part]}`) {
+          parts.push({ id: v.id, name: `${clean} — ${PERSONA_PART_LABEL[part]}` });
+        }
+      }
+    }
     setPersonas((prev) => personaSorted(prev.map((p) => (p.id === id ? { ...p, ...next } : p))));
+    if (parts.length) {
+      setVideos((prev) => prev.map((v) => {
+        const r = parts.find((x) => x.id === v.id);
+        return r ? { ...v, name: r.name } : v;
+      }));
+    }
     try {
       await tracked(client.updatePersona(id, next));
+      await Promise.all(parts.map((r) => tracked(client.renameVideo(r.id, r.name))));
     } catch (e) {
       setError(msg(e));
       void refresh();
@@ -331,6 +365,52 @@ export function useVidsLibrary(active: boolean) {
     }
   }, [refresh, tracked]);
 
+  // ── Clipable ────────────────────────────────────────────────────────────────
+  // What the clippers get — see VidClipable. A persona's flag goes through
+  // updatePersona like its name; a clip's and a song's or caption look's are
+  // here. Optimistic like everything else: a switch must flip as it is pressed,
+  // and comes back from the server if the write didn't take.
+
+  const setVideoClipable = useCallback(async (id: string, on: boolean) => {
+    setVideos((prev) => prev.map((v) => (v.id === id ? { ...v, clipable: on } : v)));
+    try {
+      await tracked(client.setVideoClipable(id, on));
+    } catch (e) {
+      setError(msg(e));
+      void refresh();
+    }
+  }, [refresh, tracked]);
+
+  const setClipable = useCallback(async (kind: ClipableKind, key: string, on: boolean) => {
+    setClipableRows((prev) => {
+      const rest = prev.filter((f) => !(f.kind === kind && f.key === key));
+      return on ? [...rest, { kind, key }] : rest;
+    });
+    try {
+      await tracked(client.setClipable(kind, key, on));
+    } catch (e) {
+      setError(msg(e));
+      void refresh();
+    }
+  }, [refresh, tracked]);
+
+  // ── Songs ───────────────────────────────────────────────────────────────────
+  // The audio library isn't part of the library payload — each page lists it
+  // for itself — so a rename hands back whether it took, and the page that
+  // asked keeps its own list right.
+
+  const renameTrack = useCallback(async (url: string, label: string): Promise<boolean> => {
+    const clean = label.trim();
+    if (!clean) return false;
+    try {
+      await tracked(client.renameTrack(url, clean));
+      return true;
+    } catch (e) {
+      setError(msg(e));
+      return false;
+    }
+  }, [tracked]);
+
   // ── Links ───────────────────────────────────────────────────────────────────
   // The Bottom Bs that follow on from one Bottom A, replaced as a whole set: the
   // Link page ticks and unticks tiles, and each tick sends the list as it now
@@ -425,12 +505,13 @@ export function useVidsLibrary(active: boolean) {
   }, []);
 
   return {
-    folders, videos, personas, links, selectedFolderId, setSelectedFolderId,
+    folders, videos, personas, links, clipable, selectedFolderId, setSelectedFolderId,
     loading, loaded, error, setError, uploads, dismissUpload, refresh, refreshWhenIdle,
     createFolder, ensureFolders, renameFolder, deleteFolder,
     createPersona, updatePersona, deletePersona,
     moveVideo, renameVideo, deleteVideo, setVideoContext, setVideoMarks,
     setLinks,
+    setVideoClipable, setClipable, renameTrack,
     uploadFiles, uploadBlob, replaceVideo,
   };
 }

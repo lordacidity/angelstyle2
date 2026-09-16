@@ -17,6 +17,50 @@ export interface VidContext {
  *  the name and everything else a row carries. */
 export type VidContextPatch = Partial<VidContext>;
 
+// ── Clipable ──────────────────────────────────────────────────────────────────
+// Whether a thing is on offer to the clippers: the people who will make vids
+// of their own, in an app of their own, out of what we approve here. Every
+// persona, clip, song and caption look carries the flag, and it is off until
+// someone here turns it on — so the clippers see only what has been signed
+// off, and this app (the admin side) goes on using everything regardless.
+//
+// Personas and clips are rows, so the flag is a column on each. Songs and
+// caption looks are defined in code rather than in the database (public/audio
+// and lib/vidsCaptions), so theirs is a row in a table of its own, keyed by
+// kind and by what names the thing: the song's url, the look's id. A row
+// there means yes; no row means no.
+
+export interface VidClipable {
+  clipable: boolean;
+}
+
+export type VidClipablePatch = Partial<VidClipable>;
+
+/** Folds `clipable` out of a request body into a patch, leaving it alone when
+ *  the body didn't mention it. Anything but `true` reads as off. */
+export function readClipablePatch(body: Record<string, unknown>, patch: VidClipablePatch): void {
+  if (body.clipable !== undefined) patch.clipable = body.clipable === true;
+}
+
+/** The kinds of thing whose flag lives in the flags table rather than on a
+ *  row of its own. */
+export const CLIPABLE_KINDS = ['music', 'captionStyle'] as const;
+export type ClipableKind = (typeof CLIPABLE_KINDS)[number];
+export const isClipableKind = (v: unknown): v is ClipableKind =>
+  typeof v === 'string' && (CLIPABLE_KINDS as readonly string[]).includes(v);
+
+/** One approved song or caption look: its kind, and what names it (a song's
+ *  url, a look's id). Only the approved ones are listed — absence means no. */
+export interface VidClipableFlag {
+  kind: ClipableKind;
+  key: string;
+}
+
+export const MAX_CLIPABLE_KEY = 300;
+
+export const isClipable = (flags: readonly VidClipableFlag[], kind: ClipableKind, key: string): boolean =>
+  flags.some((f) => f.kind === kind && f.key === key);
+
 // ── Marks ─────────────────────────────────────────────────────────────────────
 // A clip's context said moment by moment: select a stretch in the editor, press
 // G, type what is happening there. Times are in CLIP seconds, so a mark stays
@@ -172,6 +216,9 @@ export interface VidRow {
   /** The edit the file at `url` was rendered with, or null when it is the
    *  recording untouched. What Prep opens the clip with. */
   edit: VidEdit | null;
+  /** On offer to the clippers — see VidClipable. Off until someone turns it
+   *  on. Means nothing on a persona's three clips: the persona carries it. */
+  clipable: boolean;
 }
 
 /** A still filed among the footage. End takes photos as well as clips — every
@@ -194,6 +241,8 @@ export interface VidPersona {
   topBId: string | null;
   /** One context for the bundle — set by right-clicking the persona. */
   context: string;
+  /** On offer to the clippers, all three clips with it — see VidClipable. */
+  clipable: boolean;
   createdAt: string;
 }
 
@@ -226,6 +275,9 @@ export interface VidsLibraryPayload {
   personas: VidPersona[];
   /** Absent from a server that predates links — read as none. */
   links?: VidLink[];
+  /** The approved songs and caption looks — see VidClipableFlag. Absent from
+   *  a server that predates the flag — read as none approved. */
+  clipable?: VidClipableFlag[];
 }
 
 /** POST /api/vids/videos/sign → short-lived upload targets for one clip. */

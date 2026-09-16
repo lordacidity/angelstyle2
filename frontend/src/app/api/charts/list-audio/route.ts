@@ -1,9 +1,12 @@
 import { NextResponse } from 'next/server';
 import { readdirSync } from 'fs';
-import path from 'path';
 import { existsSync } from 'fs';
+import { AUDIO_DIR, isTrackFile, trackUrl } from '@/lib/audio-library';
+import { listTrackNames } from '@/lib/vids-db';
 
 export const runtime = 'nodejs';
+// Never cache: tracks are saved and renamed between requests.
+export const dynamic = 'force-dynamic';
 
 const PRELOADED: Record<string, { label: string; durationMs: number }> = {
   'track-1.mp3': { label: 'Track 1', durationMs: 20033 },
@@ -36,17 +39,26 @@ const PRELOADED: Record<string, { label: string; durationMs: number }> = {
 };
 
 export async function GET() {
-  const audioDir = path.join(process.cwd(), 'public', 'audio');
-  if (!existsSync(audioDir)) return NextResponse.json([]);
+  if (!existsSync(AUDIO_DIR)) return NextResponse.json([]);
 
   let files: string[];
   try {
     // Tracks only. public/audio also holds the beds the Vids builder lays under
     // a video (room-tone.mp3) — those are part of the app, not songs anyone
     // would pick, and they have no business in a track list.
-    files = readdirSync(audioDir).filter(f => f.endsWith('.mp3') && f.startsWith('track-'));
+    files = readdirSync(AUDIO_DIR).filter(isTrackFile);
   } catch {
     return NextResponse.json([]);
+  }
+
+  // Names given since, on the Vids Clippers page, which stand in for the ones
+  // above. Best effort: the list is the list even when the database is away
+  // for a moment — the charts must not lose their songs to a Vids table.
+  let names = new Map<string, string>();
+  try {
+    names = await listTrackNames();
+  } catch (err) {
+    console.error('[list-audio] track names unavailable:', err instanceof Error ? err.message : err);
   }
 
   // Sort: preloaded tracks first (track-1 … track-8), then custom by filename
@@ -58,13 +70,15 @@ export async function GET() {
   });
 
   const tracks = files.map(filename => {
+    const url = trackUrl(filename);
+    const renamed = names.get(url);
     if (PRELOADED[filename]) {
-      return { url: `/audio/${filename}`, ...PRELOADED[filename] };
+      return { url, ...PRELOADED[filename], ...(renamed ? { label: renamed } : {}) };
     }
     // Future custom track — duration unknown at list time, use placeholder
     const idx = parseInt(filename.replace('track-custom-', '').replace('.mp3', ''), 10);
-    const label = `Custom ${isNaN(idx) ? filename : new Date(idx).toLocaleDateString()}`;
-    return { url: `/audio/${filename}`, label, durationMs: 20000 };
+    const label = renamed ?? `Custom ${isNaN(idx) ? filename : new Date(idx).toLocaleDateString()}`;
+    return { url, label, durationMs: 20000 };
   });
 
   return NextResponse.json(tracks);

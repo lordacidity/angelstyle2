@@ -231,6 +231,7 @@ This build has no screen recording to carry the address, so ${hasEnd
 // other way round.
 const IMPERATIVE = `VOICE for the BOTTOM A and BOTTOM B captions — write them as INSTRUCTIONS to the viewer, not as narration of what is on screen. Every one starts with a plain command verb: "search", "go to", "type in", "look at", "trade up", "place a trade", "watch for", "pick", "check" — and says where: "search on chatgpt", "go to pauv.com", "trade up on pauv".
 NEVER start one with an -ing word. Not "typing the name" but "type in the name". Not "looking up ronaldo" but "look up ronaldo". Not "placing a trade" but "place a trade". Not "heading to pauv.com" but "go to pauv.com".
+THE PICK: a moment where he picks someone off what came back — the name chatgpt answers with, the one he highlights, the one he goes with from a list — is written as the pick, a command with the name in it: "pick drake", "choose drake from the answer", "go with drake". Never "see it's drake", "see that it's drake", "look at the answer", "read the answer" — the viewer is told what to do, not what to notice. Two moments in a row that are the search and then the pick read "search on chatgpt most hated ppl rn", then "pick drake from the answer".
 The START caption is the exception — the hook, written to START above. (END's pay-off is a statement, not an instruction — "got paid off ronaldo"; its comment line is fixed and you only pick the word.)`;
 
 /** Seconds as the writer is shown them: "3.5s". */
@@ -475,7 +476,7 @@ function buildPrompt(input: z.infer<typeof Schema>): string {
   const exLines = fastEx
     ? `bottomA: [{"text": "ask chatgpt who's trending rn${ex(1, '👀')}", "at": 0}, {"text": "pick ronaldo from the list", "at": 3.5}]\n`
       + `bottomB: ["search ronaldo on pauv.com", "trade up on him bc he's trending${ex(2, '📈')}"]`
-    : `bottomA: ["go to chatgpt / see who's trending rn${ex(1, '👀')}", ${mergeSeam ? '"go to pauv.com, search ronaldo"' : '"go to pauv.com"'}]\n`
+    : `bottomA: ["ask chatgpt who's trending rn${ex(1, '👀')} / pick ronaldo from the list", ${mergeSeam ? '"go to pauv.com, search ronaldo"' : '"go to pauv.com"'}]\n`
       + `bottomB: [${mergeSeam ? '""' : '"search ronaldo on pauv"'}, "trade up on him bc he's trending${ex(2, '📈')}"]`;
   const exShape = fastEx
     ? 'bottom a is on fast, so it is two captions: the search at 0, and the pick at 3.5, where that moment starts. '
@@ -484,7 +485,7 @@ function buildPrompt(input: z.infer<typeof Schema>): string {
       : 'one short line per moment, in its own slot. ';
   const exSite = fastEx
     ? '"pauv.com" is spelled out the once, on the first bottom b line, since neither bottom a caption is where he types it'
-    : '"go to pauv.com" spells the address out the once, on the moment he gets there. Moment 1 of bottom a is two things, so it is two short captions with " / " between them, one after the other';
+    : '"go to pauv.com" spells the address out the once, on the moment he gets there. Moment 1 of bottom a is two things — the search, then the pick — so it is two short captions with " / " between them, one after the other, and the pick names ronaldo';
 
   /** A marked clip is a numbered list of moments; an unmarked one is a sentence. */
   const describe = (label: string, clip: typeof bottomA, onPauv = false): string => {

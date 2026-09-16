@@ -6,8 +6,8 @@
 // (so Vercel's request-body cap is irrelevant and we get real progress).
 
 import type {
-  CreateVideoInput, SignUploadResponse, VidContextPatch, VidEdit, VidFolder, VidLink, VidMark, VidPersona, VidRow,
-  CreateRecipeInput, VideoProbe, VidRecipe, VidsLibraryPayload,
+  ClipableKind, CreateVideoInput, SignUploadResponse, VidClipablePatch, VidContextPatch, VidEdit, VidFolder, VidLink,
+  VidMark, VidPersona, VidRow, CreateRecipeInput, VideoProbe, VidRecipe, VidsLibraryPayload,
 } from '@/lib/vids-types';
 
 /** The clip ids on a persona — all optional, so one part can be re-pointed alone. */
@@ -50,7 +50,11 @@ export const deleteFolder = (id: string) =>
 export const createPersona = (name: string, parts: PersonaParts = {}) =>
   api<VidPersona>('/personas', { method: 'POST', body: JSON.stringify({ name, ...parts }) });
 
-export const updatePersona = (id: string, patch: PersonaParts & VidContextPatch & { name?: string }) =>
+/** Anything about a persona that can change on its own: a part, its name, its
+ *  context, whether the clippers get it. */
+export type PersonaUpdate = PersonaParts & VidContextPatch & VidClipablePatch & { name?: string };
+
+export const updatePersona = (id: string, patch: PersonaUpdate) =>
   api<VidPersona>(`/personas/${id}`, { method: 'PATCH', body: JSON.stringify(patch) });
 
 export const deletePersona = (id: string) =>
@@ -70,6 +74,21 @@ export const setVideoMarks = (id: string, marks: VidMark[]) =>
 
 export const moveVideo = (id: string, folderId: string | null) =>
   api<VidRow>(`/videos/${id}`, { method: 'PATCH', body: JSON.stringify({ folderId }) });
+
+/** Put a clip on offer to the clippers, or take it off — see VidClipable. */
+export const setVideoClipable = (id: string, clipable: boolean) =>
+  api<VidRow>(`/videos/${id}`, { method: 'PATCH', body: JSON.stringify({ clipable }) });
+
+/** The same for a song (keyed by its url) or a caption look (by its id) —
+ *  the things with no row of their own. */
+export const setClipable = (kind: ClipableKind, key: string, clipable: boolean) =>
+  api<{ kind: ClipableKind; key: string; clipable: boolean }>('/clipable', {
+    method: 'PUT', body: JSON.stringify({ kind, key, clipable }),
+  });
+
+/** Call a song something else, everywhere the audio library is listed. */
+export const renameTrack = (url: string, label: string) =>
+  api<{ url: string; label: string }>('/music', { method: 'PATCH', body: JSON.stringify({ url, label }) });
 
 export const deleteVideo = (id: string) =>
   api<{ ok: true }>(`/videos/${id}`, { method: 'DELETE' });
