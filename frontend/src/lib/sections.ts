@@ -18,6 +18,7 @@ export const SECTION_PATHS: Record<AppSection, string> = {
   schedule: '/schedule',
   prompts: '/ai-prompts',
   chatgpt: '/chatgpt',
+  trade: '/trade',
   pricer: '/pricer',
   photos: '/photos',
   xphoto: '/x-photo',
