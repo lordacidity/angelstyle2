@@ -25,18 +25,18 @@
 // — the chart's path, the views count, the positions — is made up on the
 // spot, seeded by the name so it never changes between renders.
 //
-// The script (no sound yet):
+// The script:
 //   1. the homepage; the pointer wanders the hero, then goes for the search
 //      pill and clicks it
 //   2. the search opens; the full name types itself out; the grid fills with
 //      them first and other faces after; the pointer circles their card and
 //      clicks it
 //   3. their page: the chart draws itself in
-//   4. the pointer reads the chart back and forth, with the site's hover: the
-//      crosshair, the axis line and dot, the date at the top, the price row
-//      following the point under it
-//   5. the trade card: the pointer clicks Down and Up a few times before
-//      landing on the chosen way, clicks the amount, $10 types in, the fee
+//   4. the pointer whips around the chart in frantic circles, with the site's
+//      hover: the crosshair, the axis line and dot, the date at the top, the
+//      price row following the point under it
+//   5. the trade card: the pointer clicks the chosen way, the other, then the
+//      chosen way again, clicks the amount, $10 types in, the fee
 //      updates, Place trade
 //   6. "Placing order..." while the pointer circles
 //   7. the card flips green — Trade confirmed — holds, and the pointer leaves
@@ -51,9 +51,10 @@
 // Bottom B made this way can be marked up like a hand-cut one.
 
 import { safeExportName } from '@/lib/canvasVideoExport';
-import { mixClicks, type ClickEvent } from '@/lib/clipSfx';
-import { decodeAudio, scheduleLoop, SFX_URL } from '@/lib/vidsAudio';
+import { mixClicks, mixKeys, type ClickEvent } from '@/lib/clipSfx';
+import { decodeAudio, SFX_URL } from '@/lib/vidsAudio';
 import { DEFAULT_SFX_GAIN } from '@/lib/vidsEdit';
+import { drawPointer, loadPointers, type PointerKind } from '@/lib/windowsCursor';
 
 export const VIDEO_W = 1000;
 export const VIDEO_H = 750;
@@ -72,6 +73,8 @@ const rem = (n: number) => n * REM;
 /** The viewport the page is laid out for; the frame shows it whole. */
 export const VIEWPORT_W = 1280;
 const SCALE = VIDEO_W / VIEWPORT_W;
+/** The pointer at half the ChatGPT clip's (windowsCursor POINTER_CELL). */
+const POINTER_SIZE = 0.5;
 const VIEW_H = VIDEO_H / SCALE;
 /** Each homepage screenshot (public/pauv-home-{theme}.png), measured off the
  *  file itself: where the page's centred container starts, and how wide that
@@ -150,8 +153,9 @@ export interface TradeClip {
   draw: (t: number) => void;
   seconds: number;
   beats: TradeBeats;
-  /** The stretches the keyboard is heard over: the name, then the amount. */
-  typing: Stretch[];
+  /** Every keystroke — the name's letters, then the amount's digits — on the
+   *  frame its character appears. */
+  keys: number[];
   /** Every time the mouse is pressed — see buildTradeAudio. */
   clicks: ClickEvent[];
 }
@@ -480,79 +484,17 @@ function drawCover(ctx: Ctx, img: HTMLImageElement | null, x: number, y: number,
 /** The app's own rate for these beds, so this clip and the ChatGPT one mix
  *  without resampling (lib/clipSfx). */
 export const AUDIO_RATE = 44100;
-/** The clip's whole sound in one buffer: the shared keyboard recording looped
- *  over the stretches the clip types for, with the mouse mixed over it. The
- *  same buffer the preview plays and the file carries. */
-export async function buildTradeAudio(clip: Pick<TradeClip, 'seconds' | 'typing' | 'clicks'>, seed: string): Promise<AudioBuffer> {
-  const octx = new OfflineAudioContext(2, Math.ceil(clip.seconds * AUDIO_RATE), AUDIO_RATE);
+/** The clip's whole sound in one buffer: a keystroke from the shared keyboard
+ *  recording on every character, and the mouse on every press. The same
+ *  buffer the preview plays and the file carries. */
+export async function buildTradeAudio(clip: Pick<TradeClip, 'seconds' | 'keys' | 'clicks'>, seed: string): Promise<AudioBuffer> {
+  const length = Math.ceil(clip.seconds * AUDIO_RATE);
+  const octx = new OfflineAudioContext(2, length, AUDIO_RATE);
   const sample = await decodeAudio(octx, SFX_URL);
-  const rnd = mulberry32(hashStr(seed) ^ 0x9e3779b9);
-  for (const span of clip.typing) {
-    // Each stretch opens somewhere else in the recording, so the two never
-    // type the same keys.
-    const from = rnd() * Math.max(0, sample.duration - (span.end - span.start) - 0.5);
-    scheduleLoop(octx, sample, { start: span.start, end: span.end + 0.12 }, DEFAULT_SFX_GAIN, { from });
-  }
-  const bed = await octx.startRendering();
+  const bed = octx.createBuffer(2, length, AUDIO_RATE);
+  mixKeys(bed, sample, clip.keys, hashStr(seed), DEFAULT_SFX_GAIN);
   mixClicks(bed, clip.clicks, hashStr(seed));
   return bed;
-}
-
-// ── The pointer ─────────────────────────────────────────────────────────────
-type CursorKind = 'arrow' | 'hand' | 'cross' | 'text';
-/** The pointer is drawn in FRAME px over the finished page, and the page is
- *  drawn at SCALE — so at SCALE the two are the same size, the way a real
- *  recording of that page would have them. */
-const CURSOR_SCALE = SCALE;
-// Drawn in frame px over the finished page, like a real recording's: the
-// Windows arrow (the ChatGPT clip's), the hand the site's links and buttons
-// get, the crosshair its chart shows while hovered, the beam over its amount
-// field — white with a black edge, the hot spot at (x, y).
-function drawCursor(ctx: Ctx, kind: CursorKind, x: number, y: number) {
-  ctx.save();
-  ctx.translate(x, y);
-  ctx.scale(CURSOR_SCALE, CURSOR_SCALE);
-  ctx.lineJoin = 'round';
-  ctx.lineCap = 'round';
-  if (kind === 'arrow') {
-    ctx.beginPath();
-    ctx.moveTo(0, 0); ctx.lineTo(0, 16.6); ctx.lineTo(4.3, 12.9); ctx.lineTo(7.2, 19.4);
-    ctx.lineTo(9.9, 18.2); ctx.lineTo(7, 11.9); ctx.lineTo(12.6, 11.9); ctx.closePath();
-    ctx.fillStyle = '#fff';
-    ctx.fill();
-    ctx.lineWidth = 1.1;
-    ctx.strokeStyle = '#000';
-    ctx.stroke();
-  } else if (kind === 'hand') {
-    // Fingers, palm and thumb as separate shapes: the black edge goes under
-    // all of them and the white fill over, so only the outline shows.
-    const shapes: (() => void)[] = [
-      () => ctx.roundRect(-2, 0, 4, 13, 2),
-      () => ctx.roundRect(2.2, 4.5, 3.6, 9, 1.8),
-      () => ctx.roundRect(5.9, 5.5, 3.4, 8.5, 1.7),
-      () => ctx.roundRect(9.2, 7, 3, 7.5, 1.5),
-      () => ctx.roundRect(-2.5, 9, 14.7, 11, [1, 1, 5, 5]),
-      () => ctx.ellipse(-4.2, 13.5, 2.3, 4.6, -0.55, 0, Math.PI * 2),
-    ];
-    ctx.strokeStyle = '#000';
-    ctx.lineWidth = 2.2;
-    for (const s of shapes) { ctx.beginPath(); s(); ctx.stroke(); }
-    ctx.fillStyle = '#fff';
-    for (const s of shapes) { ctx.beginPath(); s(); ctx.fill(); }
-  } else {
-    const path = kind === 'cross'
-      ? () => { ctx.beginPath(); ctx.moveTo(-8, 0); ctx.lineTo(8, 0); ctx.moveTo(0, -8); ctx.lineTo(0, 8); }
-      : () => { ctx.beginPath(); ctx.moveTo(0, -7.5); ctx.lineTo(0, 7.5); ctx.moveTo(-2.5, -7.5); ctx.lineTo(2.5, -7.5); ctx.moveTo(-2.5, 7.5); ctx.lineTo(2.5, 7.5); };
-    path();
-    ctx.strokeStyle = '#fff';
-    ctx.lineWidth = 3;
-    ctx.stroke();
-    path();
-    ctx.strokeStyle = '#000';
-    ctx.lineWidth = 1.2;
-    ctx.stroke();
-  }
-  ctx.restore();
 }
 
 // ── Numbers, the site's way (lib/utils/format.ts, index.ts) ─────────────────
@@ -742,7 +684,8 @@ async function loadHistoryChanges(ticker: string, signal?: AbortSignal): Promise
 const GRID_COUNT = 15;
 
 /** The roster, the person the name means, the faces around them, their
- *  photos, the homepage screenshot for the theme, the wordmark, the fonts. */
+ *  photos, the homepage screenshot for the theme, the wordmark, the fonts, the
+ *  pointer. */
 export async function loadTradeAssets(name: string, theme: Theme, signal?: AbortSignal): Promise<TradeAssets> {
   const r = await fetch('/api/ai/talents', { signal });
   const data = await r.json().catch(() => null) as TradeTalent[] | { error?: string } | null;
@@ -760,6 +703,7 @@ export async function loadTradeAssets(name: string, theme: Theme, signal?: Abort
     loadImage('/pauv-wordmark.png', false),
     loadHistoryChanges(person.ticker, signal),
     loadFonts(),
+    loadPointers(),
   ]);
   if (signal?.aborted) throw new DOMException('Cancelled', 'AbortError');
   const photos = new Map<string, HTMLImageElement>();
@@ -789,10 +733,6 @@ export function createTradeClip(ctx: Ctx, a: TradeAssets, direction: Direction):
   const changePct = (overall < 0 ? -1 : 1) * Math.max(Math.abs(monthPct), 0.005) * ACTIVITY;
   const inv = invent(person);
   const series = makeSeries(person, price, changePct);
-  // The week is that same history read closer in: from where the month had
-  // them seven days ago to the price now, at a finer grain.
-  const weekStart = series[Math.max(0, Math.round(series.length * (1 - 7 / 30)))];
-  const seriesW = makeSeries(person, price, ((price - weekStart) / weekStart) * 100, 90, 0x1f3d5b);
   const firstName = person.name.trim().split(/\s+/)[0] || person.name;
 
   // ── Timeline ──────────────────────────────────────────────────────────────
@@ -807,18 +747,12 @@ export function createTradeClip(ctx: Ctx, a: TradeAssets, direction: Direction):
   const T_CARD_LOOP: [number, number] = [T_TYPED + 0.3, T_TYPED + 1.2];
   const T_PICK = T_TYPED + 1.45;
   const T_CHART: [number, number] = [T_PICK + 0.15, T_PICK + 1.05];
-  // Reading the chart: one pass across the month, then 1M and 1W pressed one
-  // after the other — each redraws the line, the way the site's does — then
-  // out, back and out again across the week, and away to the toggle.
-  const T_SWEEP_A: [number, number] = [T_PICK + 1.2, T_PICK + 3.4];
-  const T_TAB_M = T_PICK + 3.8;
-  const T_TAB_W = T_PICK + 4.5;
-  const T_SWEEP_C: [number, number] = [T_PICK + 5.15, T_PICK + 6.95];
-  const REDRAW = 0.5;
-  const T_TRADE = T_PICK + 7.4;
-  // Flips: always Down first (the card opens on Up), landing on the chosen way.
+  // A frantic whip of circles over the chart, then straight to the toggle.
+  const T_CHART_LOOP: [number, number] = [T_PICK + 0.95, T_PICK + 2.15];
+  const T_TRADE = T_CHART_LOOP[1] + 0.4;
+  // Three presses: the chosen way, the other, the chosen way again.
   const FLIP_GAP = 0.45;
-  const flipOrder: Direction[] = direction === 'down' ? ['down', 'up', 'down'] : ['down', 'up', 'down', 'up'];
+  const flipOrder: Direction[] = direction === 'down' ? ['down', 'up', 'down'] : ['up', 'down', 'up'];
   const flips = flipOrder.map((to, i) => ({ t: T_TRADE + i * FLIP_GAP, to }));
   const T_LAST_FLIP = flips[flips.length - 1].t;
   // It clicks the amount, $10 types in, it clicks Place trade.
@@ -848,16 +782,15 @@ export function createTradeClip(ctx: Ctx, a: TradeAssets, direction: Direction):
   const typedCount = (t: number) => { let n = 0; while (n < charAt.length && charAt[n] <= t) n++; return n; };
   const T_FIRST_CHAR = charAt[0] ?? T_TYPE;
   const T_RESULTS = T_FIRST_CHAR + 0.45;
-  // What is heard: typing over the name and over the amount, and a click on
-  // everything the pointer presses — the search, their card, each period tab,
-  // each flip of the toggle, the amount field, and Place trade.
-  const typingSpans: Stretch[] = [
-    { start: T_TYPE, end: T_TYPED },
-    { start: amountAt[0], end: amountAt[amountAt.length - 1] + 0.1 },
-  ];
+  // What is heard: a key on every character of the name and the amount, and a
+  // click on everything the pointer presses — the search, their card, each
+  // flip of the toggle, the amount field, and Place trade. Each lands on the
+  // first frame that shows it, never a few ms ahead of the picture.
+  const onFrame = (t: number) => Math.ceil(t * FPS - 1e-6) / FPS;
+  const keystrokes = [...charAt, ...amountAt].map(onFrame);
   const clicks: ClickEvent[] = [
-    T_SEARCH, T_PICK, T_TAB_M, T_TAB_W, ...flips.map(f => f.t), T_AMOUNT_CLICK, T_PLACE,
-  ].map(t => ({ t, kind: 'full' as const }));
+    T_SEARCH, T_PICK, ...flips.map(f => f.t), T_AMOUNT_CLICK, T_PLACE,
+  ].map(t => ({ t: onFrame(t), kind: 'full' as const }));
 
   // ── Page geometry (pauv.com CSS px) ───────────────────────────────────────
   // ProfileClient: `mx-auto max-w-[81.25rem]`; left column `flex-1 md:pr-6`;
@@ -995,10 +928,6 @@ export function createTradeClip(ctx: Ctx, a: TradeAssets, direction: Direction):
     return { period, series: s, days, pts, min, range, first: s[0], color: s[s.length - 1] >= s[0] ? P.positive : P.negative, labels };
   }
   const VIEW_M = buildView('1M', series, 30);
-  const VIEW_W = buildView('1W', seriesW, 7);
-  const viewAt = (t: number) => (t >= T_TAB_W ? VIEW_W : VIEW_M);
-  // A press restarts the draw, as pressing a period on the site does.
-  const drawnAt = (t: number): [number, number] => (t >= T_TAB_W ? [T_TAB_W, T_TAB_W + REDRAW] : t >= T_TAB_M ? [T_TAB_M, T_TAB_M + REDRAW] : T_CHART);
   // Controls row `pt-6 pb-4`: the period tabs (body3) and the watermark.
   const tabsCY = chart.y + chart.h + rem(1.5) + (rem(0.75) * 1.5 + rem(0.25)) / 2;
   const TAB_F = sans(rem(0.75));
@@ -1011,10 +940,6 @@ export function createTradeClip(ctx: Ctx, a: TradeAssets, direction: Direction):
       return tab;
     });
   })();
-  const tabPt = (label: string) => {
-    const tab = TABS.find(x => x.label === label) ?? TABS[0];
-    return { x: tab.x + tab.w / 2, y: tabsCY };
-  };
   const TABS_HIT = { x: LCOL[0] - rem(0.5), y: tabsCY - rem(0.75), w: TABS[3].x + TABS[3].w - LCOL[0] + rem(1), h: rem(1.5) };
   const chartBottom = chart.y + chart.h + rem(1.5) + rem(0.75) * 1.5 + rem(0.25) + rem(1);
 
@@ -1281,7 +1206,7 @@ export function createTradeClip(ctx: Ctx, a: TradeAssets, direction: Direction):
 
   function drawChart(t: number, hover: Hover | null, cv: ChartView) {
     const { pts, range, min: minP, color: lineColor } = cv;
-    const [drawStart, drawEnd] = drawnAt(t);
+    const [drawStart, drawEnd] = T_CHART;
     const YL = mono(rem(0.625));
     for (const f of [0, 0.25, 0.5, 0.75]) {
       const y = chart.y + f * chart.h;
@@ -1359,21 +1284,8 @@ export function createTradeClip(ctx: Ctx, a: TradeAssets, direction: Direction):
     }
   }
 
-  // The tabs, with the site's press: the one under the finger shrinks to 0.88
-  // and springs back.
-  function drawTabs(t: number, cv: ChartView) {
-    const pressed = t >= T_TAB_W && t < T_TAB_W + 0.16 ? '1W' : t >= T_TAB_M && t < T_TAB_M + 0.16 ? '1M' : null;
-    for (const tab of TABS) {
-      const cx = tab.x + tab.w / 2;
-      ctx.save();
-      if (tab.label === pressed) {
-        ctx.translate(cx, tabsCY);
-        ctx.scale(0.88, 0.88);
-        ctx.translate(-cx, -tabsCY);
-      }
-      text(ctx, tab.label, tab.x, tabsCY, TAB_F, tab.label === cv.period ? P.text : P.secondary);
-      ctx.restore();
-    }
+  function drawTabs(cv: ChartView) {
+    for (const tab of TABS) text(ctx, tab.label, tab.x, tabsCY, TAB_F, tab.label === cv.period ? P.text : P.secondary);
     if (wordmarkMark) {
       ctx.globalAlpha = 0.3;
       ctx.drawImage(wordmarkMark, LCOL[1] - wordmarkMark.width / 2, tabsCY - rem(1.125) / 2, wordmarkMark.width / 2, rem(1.125));
@@ -1604,28 +1516,27 @@ export function createTradeClip(ctx: Ctx, a: TradeAssets, direction: Direction):
     return { x: card0.x + card0.w / 2 + (card0.w / 2 + 18) * Math.cos(ang), y: card0.y + card0.h / 2 + (card0.h / 2 + 12) * Math.sin(ang) };
   };
   const pickPt = { x: card0.x + card0.w / 2 - 10, y: card0.y + imgH * 0.55 };
-  // Reading the chart. Seconds into the pass against the fraction along the
-  // plot: the month is one crossing, the week is out, back, and out again.
-  const SWEEP_A: [number, number][] = [[0, 0.015], [2.2, 0.985]];
-  const SWEEP_C: [number, number][] = [
-    [0, 0.16], [0.6, 0.84], [1.2, 0.3], [1.8, 0.72],
-  ];
-  const sweepAt = (t: number, win: [number, number], table: [number, number][], cv: ChartView) => {
-    const u = clamp(t - win[0], 0, table[table.length - 1][0]);
-    let i = 0;
-    while (i < table.length - 2 && table[i + 1][0] <= u) i++;
-    const [ta, fa] = table[i];
-    const [tb, fb] = table[i + 1];
-    const f = lerp(fa, fb, tb === ta ? 1 : easeInOut((u - ta) / (tb - ta)));
-    const near = cv.pts[clamp(Math.round(f * (cv.pts.length - 1)), 0, cv.pts.length - 1)].y;
-    // Inset well clear of the edges: the tremor rides on top of this, and the
-    // hover only holds while the hand is over the plot.
-    return { x: chart.x + f * chart.plotW, y: clamp(near + 14 + 13 * Math.sin(2.4 * u + 1), chart.y + 24, chart.y + chart.h - 24) };
-  };
-  const chartSweep = (t: number) => {
-    if (t >= T_SWEEP_A[0] && t < T_SWEEP_A[1]) return sweepAt(t, T_SWEEP_A, SWEEP_A, VIEW_M);
-    if (t >= T_SWEEP_C[0] && t < T_SWEEP_C[1]) return sweepAt(t, T_SWEEP_C, SWEEP_C, VIEW_W);
-    return null;
+  // A crazed squirrel on the chart: about six laps a second with the speed
+  // lurching, the circle snapping between tight and wide, and its centre
+  // darting back and forth along the line. The sizes are kept inside the plot
+  // so the hover never drops (the tremor rides on top).
+  const loopRX = 105;
+  const loopRY = 52;
+  const loopDX = 150;
+  const loopDY = 22;
+  const loopC = (() => {
+    const f = 0.6;
+    const near = VIEW_M.pts[Math.round(f * (VIEW_M.pts.length - 1))].y;
+    const reachY = loopRY * 1.2 + loopDY + 24;
+    return { x: chart.x + f * chart.plotW, y: clamp(near, chart.y + reachY, chart.y + chart.h - reachY) };
+  })();
+  const chartLoopAt = (t: number) => {
+    const u = t - T_CHART_LOOP[0];
+    const ang = -Math.PI / 2 + 2 * Math.PI * (5.8 * u + 0.35 * Math.sin(9.3 * u) + 0.12 * Math.sin(23 * u));
+    const r = 0.85 + 0.35 * Math.sin(7.3 * u + 0.8);
+    const cx = loopC.x + loopDX * (0.75 * Math.sin(3.1 * u + 0.4) + 0.25 * Math.sin(11.3 * u));
+    const cy = loopC.y + loopDY * Math.sin(4.7 * u + 1.3);
+    return { x: cx + loopRX * r * Math.cos(ang), y: cy + loopRY * r * Math.sin(ang) };
   };
   const togglePt = (d: Direction) => ({ x: inner.x + (d === 'up' ? 1 : 3) * (inner.w / 4), y: tr.y + tr.h / 2 + 2 });
   const amountPt = { x: tcInnerX + tcInnerW - 26, y: amountCY + 4 };
@@ -1649,15 +1560,9 @@ export function createTradeClip(ctx: Ctx, a: TradeAssets, direction: Direction):
     { t: T_CARD_LOOP[0], ...cardLoopAt(T_CARD_LOOP[0]) },
     { t: T_CARD_LOOP[1], ...cardLoopAt(T_CARD_LOOP[1]) },
     { t: T_PICK, ...pickPt },
-    { t: T_PICK + 0.55, ...pickPt },
-    { t: T_SWEEP_A[0], ...sweepAt(T_SWEEP_A[0], T_SWEEP_A, SWEEP_A, VIEW_M) },
-    { t: T_SWEEP_A[1], ...sweepAt(T_SWEEP_A[1], T_SWEEP_A, SWEEP_A, VIEW_M) },
-    { t: T_TAB_M, ...tabPt('1M') },
-    { t: T_TAB_M + 0.18, ...tabPt('1M') },
-    { t: T_TAB_W, ...tabPt('1W') },
-    { t: T_TAB_W + 0.18, ...tabPt('1W') },
-    { t: T_SWEEP_C[0], ...sweepAt(T_SWEEP_C[0], T_SWEEP_C, SWEEP_C, VIEW_W) },
-    { t: T_SWEEP_C[1], ...sweepAt(T_SWEEP_C[1], T_SWEEP_C, SWEEP_C, VIEW_W) },
+    { t: T_PICK + 0.35, ...pickPt },
+    { t: T_CHART_LOOP[0], ...chartLoopAt(T_CHART_LOOP[0]) },
+    { t: T_CHART_LOOP[1], ...chartLoopAt(T_CHART_LOOP[1]) },
     ...flips.flatMap(f => [{ t: f.t, ...togglePt(f.to) }, { t: f.t + 0.15, ...togglePt(f.to) }]),
     { t: T_AMOUNT_CLICK, ...amountPt },
     { t: T_AMOUNT + 0.4, ...amountPt },
@@ -1671,15 +1576,21 @@ export function createTradeClip(ctx: Ctx, a: TradeAssets, direction: Direction):
     { t: seconds + 1, ...exitPt },
   ];
   // While the name is typing the hand is off the keyboard and nearly still;
-  // everywhere else it is going somewhere or twitching at where it landed.
+  // everywhere else it is going somewhere or twitching at where it landed —
+  // except for a press, which it settles into and holds still through.
   const TYPING: [number, number] = [T_SEARCH + 0.45, T_TYPED];
+  const pressCalm = (t: number) => {
+    let d = Infinity;
+    for (const c of clicks) d = Math.min(d, Math.abs(t - c.t - 0.03));
+    return easeInOut(clamp((d - 0.1) / 0.22, 0, 1));
+  };
   const cursorAt = (t: number): { x: number; y: number } => {
     let base: { x: number; y: number };
     let landed = true;
     if (t >= T_HOME_LOOP[0] && t < T_HOME_LOOP[1]) base = homeLoopAt(t);
     else if (t >= T_CARD_LOOP[0] && t < T_CARD_LOOP[1]) base = cardLoopAt(t);
+    else if (t >= T_CHART_LOOP[0] && t < T_CHART_LOOP[1]) base = chartLoopAt(t);
     else if (t >= T_WAIT[0] && t < T_WAIT[1]) base = waitLoopAt(t);
-    else if (chartSweep(t)) base = chartSweep(t)!;
     else {
       let i = 0;
       while (i < keys.length - 2 && keys[i + 1].t <= t) i++;
@@ -1692,7 +1603,7 @@ export function createTradeClip(ctx: Ctx, a: TradeAssets, direction: Direction):
       landed = u >= 1;
     }
     const amp = t >= TYPING[0] && t < TYPING[1] ? 1 : landed ? 7 : 3.4;
-    const f = fidget(t, amp);
+    const f = fidget(t, lerp(0.4, amp, pressCalm(t)));
     return { x: base.x + f.x, y: base.y + f.y };
   };
 
@@ -1700,11 +1611,10 @@ export function createTradeClip(ctx: Ctx, a: TradeAssets, direction: Direction):
   // line is drawn and while the pointer is over the plot, the last point at
   // or before it — never the very last one, as the site has it.
   const hoverAt = (t: number): Hover | null => {
-    const [, drawEnd] = drawnAt(t);
-    if (t < drawEnd) return null;
+    if (t < T_CHART[1]) return null;
     const c = cursorAt(t);
     if (c.x < chart.x || c.x > chart.x + chart.plotW || c.y < chart.y || c.y > chart.y + chart.h) return null;
-    const cv = viewAt(t);
+    const cv = VIEW_M;
     let lo = 0;
     let hi = cv.pts.length - 2;
     while (lo < hi) {
@@ -1727,25 +1637,25 @@ export function createTradeClip(ctx: Ctx, a: TradeAssets, direction: Direction):
     if (col < 0 || col >= GRID_COLS || row < 0 || row * GRID_COLS + col >= GRID_COUNT) return false;
     return inRect(p, { x: gridX + col * (cardW + rem(1)), y: gridY + row * (cardH + rem(1)), w: cardW, h: cardH });
   };
-  const cursorKind = (t: number, c: Pt): CursorKind => {
+  const cursorKind = (t: number, c: Pt): PointerKind => {
     if (t < T_PICK) return (t < T_SEARCH ? inRect(c, searchPill) : overCard(t, c)) ? 'hand' : 'arrow';
     if (hoverAt(t)) return 'cross';
     if (inRect(c, tr) || inRect(c, TABS_HIT)) return 'hand';
     if (t >= T_AMOUNT && t < T_PLACE && inRect(c, { x: tcInnerX, y: btn.y, w: tcInnerW, h: btn.h })) return 'hand';
-    if (inRect(c, { x: tcInnerX, y: amountCY - AMOUNT_ROW_H / 2, w: tcInnerW, h: AMOUNT_ROW_H })) return 'text';
+    if (inRect(c, { x: tcInnerX, y: amountCY - AMOUNT_ROW_H / 2, w: tcInnerW, h: AMOUNT_ROW_H })) return 'beam';
     return 'arrow';
   };
 
   function drawMarket(t: number) {
     const hover = hoverAt(t);
-    const cv = viewAt(t);
+    const cv = VIEW_M;
     ctx.fillStyle = P.background;
     ctx.fillRect(0, 0, VIEWPORT_W, VIEW_H);
     drawHeader();
     drawProfileCard();
     drawPriceRow(hover, cv);
     drawChart(t, hover, cv);
-    drawTabs(t, cv);
+    drawTabs(cv);
     drawStats();
     drawPositions();
     drawTradeCard(t);
@@ -1761,9 +1671,9 @@ export function createTradeClip(ctx: Ctx, a: TradeAssets, direction: Direction):
     else drawMarket(t);
     ctx.restore();
     const c = cursorAt(t);
-    drawCursor(ctx, cursorKind(t, c), c.x * SCALE, c.y * SCALE);
+    drawPointer(ctx, cursorKind(t, c), c.x * SCALE, c.y * SCALE, POINTER_SIZE);
   };
-  return { draw, seconds, beats, typing: typingSpans, clicks };
+  return { draw, seconds, beats, keys: keystrokes, clicks };
 }
 
 // ── Render + encode ─────────────────────────────────────────────────────────

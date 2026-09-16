@@ -20,6 +20,13 @@ const nextConfig: NextConfig = {
     '/api/pricer/log': ['./src/lib/pricer/data/*.csv'],
   },
   serverExternalPackages: ['ffmpeg-static', 'ffprobe-static', 'fluent-ffmpeg', 'youtube-dl-exec', '@fal-ai/client'],
+  // The password middleware sits in front of every route, and Next buffers a request body
+  // through it only up to 10MB by default — past that the route gets it cut short. The Music
+  // section uploads whole songs (a WAV runs to tens of MB) to /api/charts/upload-audio, so
+  // raise it here rather than take that route out from behind the password.
+  experimental: {
+    proxyClientMaxBodySize: '200mb',
+  },
   // The Aier studio (YouTube download → freeze frame → Kling → render/export) shells out to
   // python3/yt-dlp + ffmpeg, writes to a persistent disk, and tracks long-running jobs in an
   // in-process map — none of which exist on Vercel's serverless model (step 1 dies at

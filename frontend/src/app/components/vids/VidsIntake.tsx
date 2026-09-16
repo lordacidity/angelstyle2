@@ -42,6 +42,40 @@ export const hasFiles = (e: DragEvent) => Array.from(e.dataTransfer.types).inclu
 const PART_DRAG_MIME = 'application/x-pauv-persona-part';
 const hasPart = (e: DragEvent) => Array.from(e.dataTransfer.types).includes(PART_DRAG_MIME);
 
+/** Degen or not — asked of every persona as it is made (see VidPersona.degen),
+ *  with neither lit until somebody picks. The persona setup here keeps the
+ *  answer; the New persona row in the library makes the persona on the press. */
+export function DegenChoice({ value, onChange, disabled = false }: {
+  value: boolean | null;
+  onChange: (degen: boolean) => void;
+  disabled?: boolean;
+}) {
+  const option = (degen: boolean, label: string) => {
+    const on = value === degen;
+    return (
+      <button
+        type="button"
+        onClick={() => onChange(degen)}
+        disabled={disabled}
+        aria-pressed={on}
+        className={`flex-1 rounded border px-2 py-1 text-[11px] font-medium transition-colors disabled:opacity-40 ${
+          on
+            ? degen ? 'border-amber-500 bg-amber-950/40 text-amber-200' : 'border-zinc-400 bg-zinc-800 text-white'
+            : 'border-zinc-800 text-zinc-400 hover:border-zinc-600 hover:text-zinc-100'
+        }`}
+      >
+        {label}
+      </button>
+    );
+  };
+  return (
+    <div className="flex gap-1.5">
+      {option(true, '💀 Degen')}
+      {option(false, 'Not degen')}
+    </div>
+  );
+}
+
 /** Drop this many at once and it is taken to be a persona. */
 export const PERSONA_DROP = PERSONA_PARTS.length;
 
@@ -84,6 +118,8 @@ export interface Intake {
   /** The context the persona's three clips share, given at setup and written
    *  to the persona when it is made. */
   personaContext: string;
+  /** Degen or not, said at setup — the persona is made with it. */
+  personaDegen: boolean;
   /** A save is going up from outside the editor — a photo being filed. */
   saving: boolean;
 }
@@ -186,9 +222,9 @@ interface StageProps {
   /** A library clip was dragged onto the stage: open it in the editor. */
   onOpenClip: (id: string) => void;
   onChooseFolder: (choice: FolderChoice) => void;
-  /** Persona setup is done: its name, the context all three share, and the order
-   *  the three files play in. */
-  onStartPersona: (name: string, context: VidContext, order: File[]) => void;
+  /** Persona setup is done: its name, the context all three share, the order
+   *  the three files play in, and whether it is degen. */
+  onStartPersona: (name: string, context: VidContext, order: File[], degen: boolean) => void;
   /** Three files that aren't a persona after all — file them as ordinary clips. */
   onFileAsClips: () => void;
   /** Context for the clip the run is on — then straight into the editor. The
@@ -341,19 +377,21 @@ function FolderStep({ intake, choices, onChoose, onCancel }: {
   );
 }
 
-/** The only things a persona is asked for: a name, and the context its three
- *  clips share. The parts are handed out in drop order, which is rarely the
- *  order they play in, so each is shown as a frame from the middle of its clip
- *  — three file names look alike; three frames don't — and dragging one onto
- *  another's place puts it there. */
+/** The only things a persona is asked for: a name, the context its three clips
+ *  share, and whether it is degen — which has no default, so trimming can't
+ *  start until one of the two is pressed. The parts are handed out in drop
+ *  order, which is rarely the order they play in, so each is shown as a frame
+ *  from the middle of its clip — three file names look alike; three frames
+ *  don't — and dragging one onto another's place puts it there. */
 function PersonaStep({ intake, onStart, onFileAsClips, onCancel }: {
   intake: Intake;
-  onStart: (name: string, context: VidContext, order: File[]) => void;
+  onStart: (name: string, context: VidContext, order: File[], degen: boolean) => void;
   onFileAsClips: () => void;
   onCancel: () => void;
 }) {
   const [name, setName] = useState('');
   const [text, setText] = useState('');
+  const [degen, setDegen] = useState<boolean | null>(null);
   const [order, setOrder] = useState<File[]>(intake.files);
   /** Which part is being dragged, and which place it is held over. */
   const [dragging, setDragging] = useState<number | null>(null);
@@ -393,8 +431,8 @@ function PersonaStep({ intake, onStart, onFileAsClips, onCancel }: {
     });
   };
 
-  const ready = !!name.trim();
-  const start = () => { if (ready) onStart(name, { context: text.trim() }, order); };
+  const ready = !!name.trim() && degen !== null;
+  const start = () => { if (ready) onStart(name, { context: text.trim() }, order, degen); };
 
   return (
     <Card
@@ -496,9 +534,13 @@ function PersonaStep({ intake, onStart, onFileAsClips, onCancel }: {
         className="w-full resize-none rounded border border-zinc-800 bg-black px-2 py-1.5 text-[11px] leading-relaxed text-zinc-100 outline-none placeholder:text-zinc-600 focus:border-zinc-500"
       />
 
+      <p className="mb-1 mt-2.5 text-[9px] font-semibold uppercase tracking-wider text-zinc-500">Degen?</p>
+      <DegenChoice value={degen} onChange={setDegen} />
+
       <button
         onClick={start}
         disabled={!ready}
+        title={!name.trim() ? 'Name the persona first' : degen === null ? 'Say whether it is degen first' : undefined}
         className="mt-3 flex w-full items-center justify-center gap-1.5 rounded bg-white py-1.5 text-[11px] font-medium text-black hover:bg-zinc-200 disabled:opacity-30"
       >
         <UploadIcon size={12} /> Start trimming

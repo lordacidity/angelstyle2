@@ -53,6 +53,7 @@ import { safeExportName } from '@/lib/utils';
 import { decodeAudio, scheduleLoop, SFX_URL } from '@/lib/vidsAudio';
 import { DEFAULT_SFX_GAIN } from '@/lib/vidsEdit';
 import { smoothScaling, videoBitrate } from '@/lib/vidsPlan';
+import { drawPointer, loadPointers, type PointerKind } from '@/lib/windowsCursor';
 import { askChatGpt, buildBlocks, totalLen, type Block, type Direction, type Reply } from './reply';
 
 /** The screen, in CSS px: every number in `m` below is on this grid. */
@@ -297,24 +298,6 @@ function icon(ctx: Ctx, path: IconPath, cx: number, cy: number, size: number, co
   ctx.lineJoin = 'round';
   ctx.beginPath();
   path(ctx);
-  ctx.stroke();
-  ctx.restore();
-}
-
-// The pointer: a Windows arrow (white, black edge), tip at (x, y). It sits
-// outside the zoom, like the real one does over a zoomed stage.
-function drawCursor(ctx: Ctx, x: number, y: number) {
-  ctx.save();
-  ctx.translate(x, y);
-  ctx.scale(1.3, 1.3);
-  ctx.beginPath();
-  ctx.moveTo(0, 0); ctx.lineTo(0, 16.6); ctx.lineTo(4.3, 12.9); ctx.lineTo(7.2, 19.4);
-  ctx.lineTo(9.9, 18.2); ctx.lineTo(7, 11.9); ctx.lineTo(12.6, 11.9); ctx.closePath();
-  ctx.fillStyle = '#fff';
-  ctx.fill();
-  ctx.lineWidth = 1.1;
-  ctx.lineJoin = 'round';
-  ctx.strokeStyle = '#000';
   ctx.stroke();
   ctx.restore();
 }
@@ -620,6 +603,43 @@ function createClip(ctx: Ctx, o: RenderOptions): Clip {
     const f = easeOut((u - leg * PULSE) / PULSE);
     return leg % 2 === 0 ? 1 + (MAX_ZOOM - 1) * f : MAX_ZOOM - (MAX_ZOOM - 1) * f;
   };
+  // The zoom scales the page around the selection, which stays put on
+  // screen, never showing past the page's edges (the DOM's zoomTo).
+  const zoomShift = (z: number) => ({ x: clamp(selCX * (1 - z), W * (1 - z), 0), y: clamp(nameCY * (1 - z), H * (1 - z), 0) });
+
+  // What Chrome shows under the pointer: the I-beam over text — the search
+  // bar's field, the question, the answer as far as it has streamed — and
+  // the arrow everywhere else. The pointer sits outside the zoom, so the
+  // page under it is found back through the zoom.
+  const overText = (tb: TextBlock, x0: number, y0: number, px: number, py: number, limit = Infinity) => {
+    const i = Math.floor((py - y0) / tb.lh);
+    const ln = tb.lines[i];
+    return !!ln && ln.segs.length > 0 && ln.segs[0].start < limit && px >= x0 && px <= x0 + lineInk(ln);
+  };
+  const pointerAt = (t: number, p: { x: number; y: number }): PointerKind => {
+    if (t < T_SEND) {
+      const lines = Math.max(1, typedLayout(typedCount(t)).lines.length);
+      const g = landingGeom(lines);
+      const fieldH = lines * m.inputLH + 2 * m.inputPadY;
+      const fieldY = g.composerY + g.composerH / 2 - fieldH / 2;
+      const fieldX = inputX(cxL) - m.inputPadX;
+      return p.x >= fieldX && p.x <= fieldX + inputW(cwL) + 2 * m.inputPadX && p.y >= fieldY && p.y <= fieldY + fieldH ? 'beam' : 'arrow';
+    }
+    const z = zoomAt(t);
+    const s = z > 1 ? zoomShift(z) : { x: 0, y: 0 };
+    const px = (p.x - s.x) / z;
+    const py = (p.y - s.y) / z;
+    const shown = shownAt(t);
+    const done = t >= T_STREAMED;
+    if (py < threadTop || py > threadTop + visibleH(done)) return 'arrow';
+    const cy = py - threadTop + (t >= T_HALF ? frozenScroll : autoScroll(shown, done));
+    if (overText(bubbleText, bubbleX + m.bubblePadX, innerTop + m.bubblePadY, px, cy)) return 'beam';
+    for (const l of laid) {
+      if (l.block.start >= shown) break;
+      if (overText(l.tb, l.x, asstTop + l.y, px, cy, shown - l.block.start)) return 'beam';
+    }
+    return 'arrow';
+  };
 
   // ── Drawing ───────────────────────────────────────────────────────────────
   const pill = (x: number, y: number, w: number, h: number, r: number, fill: string | null, stroke?: string) => {
@@ -812,19 +832,16 @@ function createClip(ctx: Ctx, o: RenderOptions): Clip {
     ctx.setTransform(S, 0, 0, S, 0, 0);
     ctx.fillStyle = C.bg;
     ctx.fillRect(0, 0, W, H);
-    // The zoom scales the page around the selection, which stays put on
-    // screen, never showing past the page's edges (the DOM's zoomTo).
     const z = zoomAt(t);
     if (z > 1) {
-      const tx = clamp(selCX * (1 - z), W * (1 - z), 0);
-      const ty = clamp(nameCY * (1 - z), H * (1 - z), 0);
-      ctx.setTransform(z * S, 0, 0, z * S, tx * S, ty * S);
+      const s = zoomShift(z);
+      ctx.setTransform(z * S, 0, 0, z * S, s.x * S, s.y * S);
     }
     if (t < T_SEND) drawLanding(t);
     else drawChat(t);
     ctx.setTransform(S, 0, 0, S, 0, 0);
     const c = cursorAt(t);
-    drawCursor(ctx, c.x, c.y);
+    drawPointer(ctx, pointerAt(t, c), c.x, c.y);
   };
   return { draw, typing: { start: T_TYPE, end: T_TYPED }, seconds, beats };
 }
@@ -851,6 +868,7 @@ export async function renderChatVideo(o: RenderOptions): Promise<RenderResult> {
   canvas.height = VIDEO_H * RENDER_SCALE;
   const ctx = canvas.getContext('2d', { alpha: false });
   if (!ctx) throw new Error('Canvas 2D is unavailable.');
+  await loadPointers();
   const { draw, typing, seconds, beats } = createClip(ctx, o);
   const frames = Math.round(seconds * FPS);
 

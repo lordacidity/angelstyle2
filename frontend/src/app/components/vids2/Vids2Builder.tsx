@@ -133,6 +133,13 @@ const BOOM_PREVIEW_LAYER = boomLayer(BOOM_PREVIEW_ID);
 const pickRandom = <T,>(xs: readonly T[]): T | undefined =>
   (xs.length ? xs[Math.floor(Math.random() * xs.length)] : undefined);
 
+/** The songs the randomizer may reach for. A degen build can roll any song;
+ *  any other build never rolls one marked degen on the Music page. This is the
+ *  roll only — picking a degen song from the list by hand is open to every
+ *  build. */
+const rollableMusic = (tracks: readonly MusicTrack[], degen: boolean): MusicTrack[] =>
+  (degen ? [...tracks] : tracks.filter((t) => !t.degen));
+
 /** Volume moves in twentieths — five points of the readout per notch, and
  *  never a value off that grid, whatever the level started as. */
 const LEVEL_STEP = 0.05;
@@ -432,6 +439,10 @@ export function Vids2Builder({
   // a roll, or a build brought back by its code all count — after any of them
   // the list arriving (or arriving again) leaves the choice alone.
   const musicChosenRef = useRef(false);
+  // Whether this build is in degen mode, for the roll the list makes when it
+  // lands — which can be after the build it was asked for has changed.
+  const degenRef = useRef(build.mode === 'degen');
+  useEffect(() => { degenRef.current = build.mode === 'degen'; }, [build.mode]);
   // Likewise the captions' look: rolled once when the pane first opens, then
   // only by Reset or by picking one.
   const styleChosenRef = useRef(false);
@@ -668,7 +679,7 @@ export function Vids2Builder({
         // Degen mode moves exactly one line — the hook, written to DEGEN_HOOK
         // instead of HOOK (api/vids/captions). The step-by-step lines and the
         // closing word come back the same either way.
-        degen: build.degen,
+        degen: build.mode === 'degen',
       });
       const atA = placeA ? draft.bottomAAt : undefined;
       const toClip = (at: number) => (aItem ? Math.round((aItem.trimStart + at * aItem.speed) * 100) / 100 : at);
@@ -1081,9 +1092,9 @@ export function Vids2Builder({
           return t && t.label !== m.label ? { ...m, label: t.label } : m;
         });
         // Arrive with something under it: a song nobody chose is easier to swap
-        // than one nobody thought to add.
+        // than one nobody thought to add. Never a degen one outside degen mode.
         if (!musicChosenRef.current) {
-          const t = pickRandom(ts);
+          const t = pickRandom(rollableMusic(ts, degenRef.current));
           if (t) {
             musicChosenRef.current = true;
             setMusic((m) => ({ ...m, url: t.url, label: t.label }));
@@ -1606,7 +1617,7 @@ export function Vids2Builder({
    *  got leaves its BOOM silent rather than not laid. */
   const degenLaidFor = useRef(0);
   useEffect(() => {
-    if (!build.degen || degenLaidFor.current === buildId) return;
+    if (build.mode !== 'degen' || degenLaidFor.current === buildId) return;
     if (!boomSounds.length) return;
     const item = (slot: SlotId) => plan.items.find((i) => i.slot === slot) ?? null;
     const a = item('bottomA');
@@ -1634,7 +1645,7 @@ export function Vids2Builder({
     });
     degenLaidFor.current = buildId;
     if (laid.length) setBooms((prev) => [...prev, ...laid]);
-  }, [buildId, build.degen, build.beats, boomSounds, boomClip, plan]);
+  }, [buildId, build.mode, build.beats, boomSounds, boomClip, plan]);
 
   // End is the one slot nobody chooses: every build finishes on him showing
   // what he made, and which of those it is hardly matters. So it fills itself
@@ -1651,13 +1662,19 @@ export function Vids2Builder({
   }, [libraryLoaded, picks.end, clipsForSlot, onPicksChange]);
 
   /** A song off the shelf, and not the one already on when there is another to
-   *  be had. Reset uses it, and so does the list the first time it arrives. */
+   *  be had — off the degen shelf too only in degen mode (rollableMusic). Each
+   *  new build uses it; the list rolls its own the first time it arrives. */
   const rollMusic = () => {
-    const pool = tracks.filter((t) => t.url !== music.url);
-    const t = pickRandom(pool.length ? pool : tracks);
-    if (!t) return;
+    // Still on its way: the list rolls one when it lands.
+    if (!tracks.length) return;
+    const rollable = rollableMusic(tracks, build.mode === 'degen');
+    const pool = rollable.filter((t) => t.url !== music.url);
+    const t = pickRandom(pool.length ? pool : rollable);
     musicChosenRef.current = true;
-    setMusic((m) => ({ ...m, url: t.url, label: t.label }));
+    // With every song marked degen and this build not in degen mode there is
+    // nothing it may roll, and no music beats a degen song left over from the
+    // build before.
+    setMusic((m) => ({ ...m, url: t?.url ?? null, label: t?.label ?? '' }));
   };
 
   /** A look for the captions off the shelf, and not the one already on when

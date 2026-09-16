@@ -50,6 +50,10 @@ const TradeSection = lazy(() =>
   import('./components/trade/TradeSection').then(m => ({ default: m.TradeSection }))
 );
 
+const NewsSection = lazy(() =>
+  import('./components/news/NewsSection').then(m => ({ default: m.NewsSection }))
+);
+
 const XPhotoSection = lazy(() =>
   import('./components/xphoto/XPhotoSection').then(m => ({ default: m.XPhotoSection }))
 );
@@ -82,6 +86,20 @@ const PricerSection = lazy(() =>
 
 const PhotosSection = lazy(() =>
   import('./components/photos/PhotosSection').then(m => ({ default: m.PhotosSection }))
+);
+
+const AiPersonaSection = lazy(() =>
+  import('./components/aipersona/AiPersonaSection').then(m => ({ default: m.AiPersonaSection }))
+);
+
+// Audio Editor — temporary: an MP3 roughed up to sound less like a studio.
+const AudioEditorSection = lazy(() =>
+  import('./components/audioeditor/AudioEditorSection').then(m => ({ default: m.AudioEditorSection }))
+);
+
+// Music — the song library: listen, rename, upload, send an MP3 to the Phonedeck.
+const MusicSection = lazy(() =>
+  import('./components/music/MusicSection').then(m => ({ default: m.MusicSection }))
 );
 
 function SectionLoader() {
@@ -272,6 +290,10 @@ export function StudioShell() {
   const [tradeEverVisited, setTradeEverVisited] = useState(false);
   useEffect(() => { if (activeSection === 'trade') setTradeEverVisited(true); }, [activeSection]);
 
+  // News too: the search results and the page already drawn survive a tab switch.
+  const [newsEverVisited, setNewsEverVisited] = useState(false);
+  useEffect(() => { if (activeSection === 'news') setNewsEverVisited(true); }, [activeSection]);
+
   // Vids too: keep the builder's slot picks + the open folder alive across
   // tab switches once the section has been opened.
   const [vidsEverVisited, setVidsEverVisited] = useState(false);
@@ -296,6 +318,21 @@ export function StudioShell() {
   // Photos too: a list of names in progress keeps its place while you look elsewhere.
   const [photosEverVisited, setPhotosEverVisited] = useState(false);
   useEffect(() => { if (activeSection === 'photos') setPhotosEverVisited(true); }, [activeSection]);
+
+  // AI Persona too, and most of all: a Kling video is minutes of rendering, so
+  // once opened the section stays mounted and the job it is polling keeps going
+  // while you work somewhere else.
+  const [personaEverVisited, setPersonaEverVisited] = useState(false);
+  useEffect(() => { if (activeSection === 'aipersona') setPersonaEverVisited(true); }, [activeSection]);
+
+  // Audio Editor too: the dropped file and its settings survive a look elsewhere.
+  const [audioEverVisited, setAudioEverVisited] = useState(false);
+  useEffect(() => { if (activeSection === 'audio') setAudioEverVisited(true); }, [activeSection]);
+
+  // Music too, so an upload still converting or a song on its way to the Deck
+  // finishes while you look elsewhere. Playback pauses on the way out.
+  const [musicEverVisited, setMusicEverVisited] = useState(false);
+  useEffect(() => { if (activeSection === 'music') setMusicEverVisited(true); }, [activeSection]);
 
   // Board widget → generator. Replace the current rows with a single fresh entry
   // carrying this row's link/caption/context, then hand its id to CanvasGrid via
@@ -542,6 +579,16 @@ export function StudioShell() {
           </div>
         )}
 
+        {newsEverVisited && (
+          <div style={{ display: activeSection === 'news' ? undefined : 'none' }}>
+            <ErrorBoundary>
+              <Suspense fallback={<SectionLoader />}>
+                <NewsSection />
+              </Suspense>
+            </ErrorBoundary>
+          </div>
+        )}
+
         {pricerEverVisited && (
           <div style={{ display: activeSection === 'pricer' ? undefined : 'none' }}>
             <ErrorBoundary>
@@ -558,6 +605,36 @@ export function StudioShell() {
             <ErrorBoundary>
               <Suspense fallback={<SectionLoader />}>
                 <PhotosSection active={activeSection === 'photos'} />
+              </Suspense>
+            </ErrorBoundary>
+          </div>
+        )}
+
+        {personaEverVisited && (
+          <div style={{ display: activeSection === 'aipersona' ? undefined : 'none' }}>
+            <ErrorBoundary>
+              <Suspense fallback={<SectionLoader />}>
+                <AiPersonaSection />
+              </Suspense>
+            </ErrorBoundary>
+          </div>
+        )}
+
+        {audioEverVisited && (
+          <div style={{ display: activeSection === 'audio' ? undefined : 'none' }}>
+            <ErrorBoundary>
+              <Suspense fallback={<SectionLoader />}>
+                <AudioEditorSection active={activeSection === 'audio'} />
+              </Suspense>
+            </ErrorBoundary>
+          </div>
+        )}
+
+        {musicEverVisited && (
+          <div style={{ display: activeSection === 'music' ? undefined : 'none' }}>
+            <ErrorBoundary>
+              <Suspense fallback={<SectionLoader />}>
+                <MusicSection active={activeSection === 'music'} />
               </Suspense>
             </ErrorBoundary>
           </div>

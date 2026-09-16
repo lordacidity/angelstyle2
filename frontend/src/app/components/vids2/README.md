@@ -4,19 +4,25 @@ A form, then a tuning page. It sits under Simpler in the left sidebar and
 lives at `/vids-2`.
 
 Vids and Simpler both open on the builder: an empty stage and cards to fill it
-from. Vids 2 opens on five questions instead —
+from. Vids 2 opens on six questions instead, asked one at a time —
 
-1. **Persona** — Simpler's own chooser (`components/simpler/VidsPicker`).
-2. **Who** — anybody on Pauv, from the roster itself (`/api/ai/talents`), not
+1. **Who** — anybody on Pauv, from the roster itself (`/api/ai/talents`), not
    from what has been filmed.
+2. **Mode** — 👔 Serious, 😐 Middle or 💀 Degen (`Vids2Mode`). Degen is below;
+   Serious and Middle are still to be defined, and both make the ordinary video
+   until they are.
 3. **Which way** — up or down.
 4. **Look** — light or dark.
-5. **The question** — what gets typed into ChatGPT. Write it, or have it
+5. **Persona** — Simpler's own chooser (`components/simpler/VidsPicker`).
+6. **The question** — what gets typed into ChatGPT. Write it, or have it
    written (Ragebait / Factual, `api/vids/question`).
 
-plus a switch under them rather than a sixth question: **Degen mode**.
+Nothing moves on by itself: pick an answer, then press Next; Back goes back
+one. A strip along the top holds every answer given so far,
+and pressing one goes back to it. The form opens on Who, or on the question
+when Change brought you back from a video.
 
-— and **Generate** makes the whole video from the answers before showing you
+— and **Generate**, on the last question, makes the whole video from the answers before showing you
 anything. Then it lands on the tuning page, which is Simpler's builder with
 the deciding taken out: the sound, the captions, the BOOMs, the post caption
 and Download MP4. **Change** goes back to the form with the answers as they
@@ -42,8 +48,15 @@ an **End** off the shelf. (And Bottom B's folder, for a BOOM filed by hand.)
 
 ## Degen mode
 
-The five questions say what the video *is*. Degen mode says how it talks, and
-it changes two things and nothing else.
+The other questions say what the video *is*. The mode says how it talks, and
+Degen changes three things and nothing else.
+
+**The random song can be a degen one.** Songs are marked degen on the Music
+page (`vids_track_degen`, handed out by `api/charts/list-audio`). The song a
+build rolls — when the list first arrives and for every new build — comes from
+every song in degen mode and from the rest only otherwise (`rollableMusic` in
+`Vids2Builder`). That is the roll and nothing more: a degen song chosen by
+hand from the builder's Music list stays on any build.
 
 **The hook begs instead of bragging.** The ordinary hook is a man making bank
 while something absurd happens to him. The degen hook is a man visibly coming

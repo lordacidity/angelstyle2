@@ -1,6 +1,7 @@
 // /api/vids/personas/:id — rename, re-point a part, say what the bundle is
-// showing, or put it on offer to the clippers (PATCH { name?, startId?,
-// topAId?, topBId?, context?, clipable? }), or delete the bundle (DELETE).
+// showing, put it on offer to the clippers, or make it degen or not (PATCH
+// { name?, startId?, topAId?, topBId?, context?, clipable?, degen? }), or
+// delete the bundle (DELETE).
 // Deleting drops only the persona; its clips stay in the Persona folder as
 // unassigned footage.
 import { NextRequest, NextResponse } from 'next/server';
@@ -26,6 +27,10 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
   if (bad) return NextResponse.json({ error: bad }, { status: 400 });
   readContextPatch(body, patch);
   readClipablePatch(body, patch);
+  if (body.degen !== undefined) {
+    if (typeof body.degen !== 'boolean') return NextResponse.json({ error: 'degen must be true or false' }, { status: 400 });
+    patch.degen = body.degen;
+  }
   if (Object.keys(patch).length === 0) {
     return NextResponse.json({ error: 'nothing to update' }, { status: 400 });
   }

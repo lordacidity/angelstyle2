@@ -28,7 +28,20 @@ import { MAX_MARK_TEXT, type VidMark, type VidRow } from '@/lib/vids-types';
 
 export type { Direction, Theme, TradeTalent };
 
-// ── The five answers ─────────────────────────────────────────────────────────
+// ── The answers ──────────────────────────────────────────────────────────────
+
+/** How the video talks: Serious, Middle or Degen. Only Degen does anything of
+ *  its own so far — three things change, and only in Vids 2: the hook is
+ *  written to DEGEN_HOOK (api/vids/captions) — no money, a self-own and a cry
+ *  for help — three BOOMs lay themselves over the recordings (degenBooms), and
+ *  the song rolled for it may be one marked degen on the Music page, which no
+ *  other build ever rolls (rollableMusic in Vids2Builder). The video
+ *  underneath is exactly the same video. Serious and Middle are still to be
+ *  defined, and until they are, both make the ordinary video. */
+export type Vids2Mode = 'serious' | 'middle' | 'degen';
+export const VIDS2_MODES: readonly Vids2Mode[] = ['serious', 'middle', 'degen'];
+export const isVids2Mode = (v: unknown): v is Vids2Mode =>
+  typeof v === 'string' && (VIDS2_MODES as readonly string[]).includes(v);
 
 /** What the form asks for, and the whole of what Generate needs. */
 export interface Vids2Setup {
@@ -45,15 +58,12 @@ export interface Vids2Setup {
    *  in the box (see `lower`); typing over it is nobody's business but the
    *  person typing. */
   question: string;
-  /** Degen mode. Two things change, and only in Vids 2: the hook is written to
-   *  DEGEN_HOOK (api/vids/captions) — no money, a self-own and a cry for help
-   *  — and three BOOMs lay themselves over the recordings (degenBooms). The
-   *  video underneath is exactly the same video. */
-  degen: boolean;
+  /** Serious, Middle or Degen — see Vids2Mode. */
+  mode: Vids2Mode;
 }
 
 export const EMPTY_SETUP: Vids2Setup = {
-  personaId: null, person: '', direction: 'up', theme: 'light', question: '', degen: false,
+  personaId: null, person: '', direction: 'up', theme: 'light', question: '', mode: 'serious',
 };
 
 const SETUP_KEY = 'vids2-setup-v1';
@@ -70,14 +80,15 @@ export function loadSetup(): Vids2Setup {
   try {
     const raw = localStorage.getItem(SETUP_KEY);
     if (!raw) return EMPTY_SETUP;
-    const j = JSON.parse(raw) as Partial<Record<keyof Vids2Setup, unknown>>;
+    const j = JSON.parse(raw) as Partial<Record<keyof Vids2Setup | 'degen', unknown>>;
     return {
       personaId: typeof j.personaId === 'string' ? j.personaId : null,
       person: typeof j.person === 'string' ? j.person : '',
       direction: j.direction === 'down' ? 'down' : 'up',
       theme: j.theme === 'dark' ? 'dark' : 'light',
       question: typeof j.question === 'string' ? j.question : '',
-      degen: j.degen === true,
+      // Answers saved before there were three modes had a degen switch.
+      mode: isVids2Mode(j.mode) ? j.mode : j.degen === true ? 'degen' : 'serious',
     };
   } catch {
     return EMPTY_SETUP;
@@ -101,8 +112,8 @@ export interface Vids2Build {
   direction: Direction;
   theme: Theme;
   question: string;
-  /** Degen mode was on when this was made — see Vids2Setup.degen. */
-  degen: boolean;
+  /** The mode it was made in — see Vids2Mode. */
+  mode: Vids2Mode;
   /** The moments the two renderers actually put things at, for whatever wants
    *  to land on one. */
   beats: Vids2Beats;

@@ -230,11 +230,11 @@ export function useVidsLibrary(active: boolean) {
 
   const personaSorted = (list: VidPersona[]) => [...list].sort((a, b) => a.name.localeCompare(b.name));
 
-  const createPersona = useCallback(async (name: string, parts: PersonaParts = {}) => {
+  const createPersona = useCallback(async (name: string, degen: boolean, parts: PersonaParts = {}) => {
     const clean = name.trim();
     if (!clean) return null;
     try {
-      const p = await tracked(client.createPersona(clean, parts));
+      const p = await tracked(client.createPersona(clean, degen, parts));
       setPersonas((prev) => personaSorted([...prev, p]));
       return p;
     } catch (e) {

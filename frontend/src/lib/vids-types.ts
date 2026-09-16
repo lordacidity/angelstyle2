@@ -278,6 +278,11 @@ export interface VidPersona {
   context: string;
   /** On offer to the clippers, all three clips with it — see VidClipable. */
   clipable: boolean;
+  /** A degen persona. Said once when it is made (Degen or Not degen, no
+   *  default), and switched after from the 💀 beside the trash on its row in
+   *  Edit & file, where making one degen asks first. Every persona made before
+   *  the flag existed is degen. */
+  degen: boolean;
   createdAt: string;
 }
 

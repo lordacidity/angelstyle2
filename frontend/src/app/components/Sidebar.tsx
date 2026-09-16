@@ -146,6 +146,18 @@ const NAV: { id: AppSection; label: string; icon: React.ReactNode }[] = [
     ),
   },
   {
+    id: 'news',
+    label: 'News',
+    // Newspaper — a real story from an approved outlet, redrawn as that outlet's page.
+    icon: (
+      <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+        <path d="M4 5h13v14a1 1 0 0 0 1 1H6a2 2 0 0 1-2-2z"/>
+        <path d="M17 9h3v10a1 1 0 0 1-2 0"/>
+        <path d="M7 9h7M7 13h7M7 16h4"/>
+      </svg>
+    ),
+  },
+  {
     id: 'pricer',
     label: 'Pricer',
     // Price tag — the AI Pricer: type a name, six steps price them against the master list.
@@ -169,6 +181,19 @@ const NAV: { id: AppSection; label: string; icon: React.ReactNode }[] = [
     ),
   },
   {
+    id: 'aipersona',
+    label: 'AI Persona',
+    // A face inside a play button — a still portrait turned into someone talking:
+    // ElevenLabs reads the script, Kling makes the photo say it.
+    icon: (
+      <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+        <circle cx="12" cy="12" r="10"/>
+        <circle cx="12" cy="10" r="2.6"/>
+        <path d="M7.5 17.5c.9-2.2 2.5-3.3 4.5-3.3s3.6 1.1 4.5 3.3"/>
+      </svg>
+    ),
+  },
+  {
     id: 'prompts',
     label: 'AI Prompts',
     // Lightbulb — saved topics you turn into fresh trending-news overviews.
@@ -177,6 +202,28 @@ const NAV: { id: AppSection; label: string; icon: React.ReactNode }[] = [
         <path d="M9 18h6"/>
         <path d="M10 22h4"/>
         <path d="M15.09 14c.18-.98.65-1.74 1.41-2.5A4.65 4.65 0 0 0 18 8 6 6 0 0 0 6 8c0 1 .23 2.23 1.5 3.5.76.76 1.23 1.52 1.41 2.5"/>
+      </svg>
+    ),
+  },
+  {
+    id: 'audio',
+    label: 'Audio Editor',
+    // Waveform — temporary: drop an MP3 and rough it up until it stops sounding like a studio.
+    icon: (
+      <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+        <path d="M3 10v4M7.5 6v12M12 3v18M16.5 8v8M21 10v4"/>
+      </svg>
+    ),
+  },
+  {
+    id: 'music',
+    label: 'Music',
+    // A pair of notes — the song library: listen, rename, upload, send an MP3 to the Phonedeck.
+    icon: (
+      <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+        <path d="M9 18V5l12-2v13"/>
+        <circle cx="6" cy="18" r="3"/>
+        <circle cx="18" cy="16" r="3"/>
       </svg>
     ),
   },

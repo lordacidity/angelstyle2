@@ -266,7 +266,9 @@ export function VidsPersonas({ lib, folderId, clips, appliedPersonaId, onUse, on
   const commitNew = async () => {
     const name = (newDraft ?? '').trim();
     setNewDraft(null);
-    if (name) await lib.createPersona(name);
+    // Nothing mounts this view any more. The persona list on Edit & file is
+    // where a persona is made, and it asks Degen or Not degen (VidsPrep).
+    if (name) await lib.createPersona(name, false);
   };
 
   // Clips sitting in the Persona folder that no persona points at.

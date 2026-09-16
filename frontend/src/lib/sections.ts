@@ -21,9 +21,13 @@ export const SECTION_PATHS: Record<AppSection, string> = {
   prompts: '/ai-prompts',
   chatgpt: '/chatgpt',
   trade: '/trade',
+  news: '/news',
   pricer: '/pricer',
   photos: '/photos',
   xphoto: '/x-photo',
+  aipersona: '/ai-persona',
+  audio: '/audio-editor',
+  music: '/music',
 };
 
 export function pathForSection(s: AppSection): string {

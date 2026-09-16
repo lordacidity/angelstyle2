@@ -4,12 +4,16 @@ import path from "node:path";
 import * as filesStore from "./filesStore.js";
 
 // Media types that get pushed to phones — videos AND images, since images
-// land in the same Google Photos library after the media rescan.
+// land in the same Google Photos library after the media rescan. And MP3s,
+// sent from the Studio's Music page: the same rescan puts a song in the phone's
+// audio library, where an app's "add a sound from your device" finds it.
 const MEDIA_EXT = new Set([
   // video
   ".mp4", ".mov", ".mkv", ".webm", ".m4v", ".avi", ".3gp",
   // image
   ".jpg", ".jpeg", ".png", ".gif", ".webp", ".heic", ".heif",
+  // audio
+  ".mp3",
 ]);
 
 // Bridges the filesystem to filesStore. No internal state — the store is the

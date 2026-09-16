@@ -61,7 +61,7 @@ import {
 import { VidsClipEditor, type ContextOwner } from './VidsClipEditor';
 import { VidsContextDialog, type VidsContextSave } from './VidsContext';
 import {
-  PERSONA_DROP, VidsIntakeBanner, VidsIntakeStage, hasFiles, hasVid,
+  DegenChoice, PERSONA_DROP, VidsIntakeBanner, VidsIntakeStage, hasFiles, hasVid,
   type FolderChoice, type Intake, type LocalRow,
 } from './VidsIntake';
 import { VidPreview, fmtBytes } from './VidPreview';
@@ -105,7 +105,7 @@ function InboxIcon({ open }: { open: boolean }) {
   );
 }
 
-function ListRow({ label, count, selected, icon, indent, tone, title, expanded, onToggle, onSelect, onDrop, onDelete, onContext }: {
+function ListRow({ label, count, selected, icon, indent, tone, title, expanded, onToggle, onSelect, onDrop, onDelete, onContext, degen, onDegen }: {
   label: string;
   count: number | string;
   selected: boolean;
@@ -122,6 +122,10 @@ function ListRow({ label, count, selected, icon, indent, tone, title, expanded, 
   onDelete?: () => void;
   /** Right-click — used by persona rows to open their context popup. */
   onContext?: () => void;
+  /** Persona rows: whether it is degen, and the 💀 beside the trash that
+   *  switches it. Lit it always shows; unlit it shows on hover, like the trash. */
+  degen?: boolean;
+  onDegen?: () => void;
 }) {
   const [over, setOver] = useState(false);
   return (
@@ -169,6 +173,20 @@ function ListRow({ label, count, selected, icon, indent, tone, title, expanded, 
       )}
       {icon}
       <span className="min-w-0 flex-1 truncate py-1.5">{label}</span>
+      {onDegen && (
+        <button
+          onClick={(e) => { e.stopPropagation(); onDegen(); }}
+          aria-pressed={!!degen}
+          title={degen ? 'Degen — click to make it not degen' : 'Not degen — click to make it degen'}
+          className={`shrink-0 rounded px-0.5 text-[11px] leading-none transition ${
+            degen
+              ? 'bg-amber-500/25 ring-1 ring-amber-400/80'
+              : 'hidden opacity-40 grayscale hover:opacity-100 hover:grayscale-0 group-hover:block'
+          }`}
+        >
+          💀
+        </button>
+      )}
       {onDelete && (
         <button
           onClick={(e) => { e.stopPropagation(); onDelete(); }}
@@ -682,6 +700,7 @@ export function VidsPrep({ lib, active }: { lib: VidsLib; active: boolean }) {
       personaId: null,
       personaName: '',
       personaContext: '',
+      personaDegen: false,
       saving: false,
     });
   }, [lib, personaFolderId, endRun, localRow]);
@@ -695,7 +714,7 @@ export function VidsPrep({ lib, active }: { lib: VidsLib; active: boolean }) {
    *  given, and go straight to trimming. The persona itself is made when the
    *  first trim is saved, alongside that part — so a run cancelled before then
    *  leaves nothing behind, not even an empty persona. */
-  const startPersona = useCallback((name: string, context: VidContext, order: File[]) => {
+  const startPersona = useCallback((name: string, context: VidContext, order: File[], degen: boolean) => {
     if (!intake) return;
     const clean = name.trim();
     const local = order.map((f, i) => ({
@@ -713,6 +732,7 @@ export function VidsPrep({ lib, active }: { lib: VidsLib; active: boolean }) {
       personaId: null,
       personaName: clean,
       personaContext: context.context,
+      personaDegen: degen,
       index: 0,
     });
   }, [intake, personaFolderId, localRow]);
@@ -824,12 +844,21 @@ export function VidsPrep({ lib, active }: { lib: VidsLib; active: boolean }) {
     if (e.dataTransfer.files.length) void attachFiles(persona, part, e.dataTransfer.files);
   };
 
-  const commitNewPersona = async () => {
+  /** A new persona is made by saying whether it is degen: the name typed, then
+   *  one of the two pressed. There is no making one without it. */
+  const commitNewPersona = async (degen: boolean) => {
     const name = (newPersona ?? '').trim();
-    setNewPersona(null);
     if (!name) return;
-    const p = await lib.createPersona(name);
+    setNewPersona(null);
+    const p = await lib.createPersona(name, degen);
     if (p) setList(personaKey(p.id));
+  };
+
+  /** The 💀 on a persona's row, beside the trash. Making one degen asks first,
+   *  so a stray click can't; taking it back off doesn't need to. */
+  const toggleDegen = (p: VidPersona) => {
+    if (!p.degen && !window.confirm(`Make "${p.name}" degen?`)) return;
+    void lib.updatePersona(p.id, { degen: !p.degen });
   };
 
   // Save is what files a clip. For a row the run holds locally, the bytes go up
@@ -881,7 +910,7 @@ export function VidsPrep({ lib, active }: { lib: VidsLib; active: boolean }) {
       if (personaId) {
         await lib.updatePersona(personaId, { [part]: row.id });
       } else {
-        const persona = await lib.createPersona(cur.personaName, { [part]: row.id });
+        const persona = await lib.createPersona(cur.personaName, cur.personaDegen, { [part]: row.id });
         if (!persona) throw new Error('The clip is saved, but the persona could not be made — see the message on the left.');
         if (cur.personaContext) void lib.updatePersona(persona.id, { context: cur.personaContext });
         setIntake((prev) => (prev ? { ...prev, personaId: persona.id } : prev));
@@ -1013,10 +1042,12 @@ export function VidsPrep({ lib, active }: { lib: VidsLib; active: boolean }) {
                         indent
                         selected={list === personaKey(p.id)}
                         icon={<FolderIcon open={list === personaKey(p.id)} />}
-                        title={`${p.name}${p.context ? ` — ${p.context}` : ''} — right-click to give it context`}
+                        title={`${p.name}${p.degen ? ' (degen)' : ''}${p.context ? ` — ${p.context}` : ''} — right-click to give it context`}
                         onSelect={() => setList(personaKey(p.id))}
                         onDrop={dropOnPersona(p)}
                         onContext={() => setCtxTarget({ kind: 'persona', id: p.id })}
+                        degen={p.degen}
+                        onDegen={() => toggleDegen(p)}
                         onDelete={() => {
                           if (!window.confirm(`Delete persona "${p.name}"? Its clips stay in the Persona folder — nothing is deleted from the cloud.`)) return;
                           if (list === personaKey(p.id)) setList(PERSONA_FOLDER);
@@ -1026,18 +1057,23 @@ export function VidsPrep({ lib, active }: { lib: VidsLib; active: boolean }) {
                     );
                   })}
                   {newPersona !== null ? (
-                    <input
-                      autoFocus
-                      value={newPersona}
-                      placeholder="Persona name"
-                      onChange={(e) => setNewPersona(e.target.value)}
-                      onBlur={() => void commitNewPersona()}
-                      onKeyDown={(e) => {
-                        if (e.key === 'Enter') void commitNewPersona();
-                        if (e.key === 'Escape') setNewPersona(null);
-                      }}
-                      className="ml-3 mt-1 w-[calc(100%-0.75rem)] rounded border border-zinc-600 bg-black px-2 py-1 text-[11px] text-white outline-none"
-                    />
+                    <div className="ml-3 mt-1 space-y-1">
+                      <input
+                        autoFocus
+                        value={newPersona}
+                        placeholder="Persona name"
+                        onChange={(e) => setNewPersona(e.target.value)}
+                        onKeyDown={(e) => { if (e.key === 'Escape') setNewPersona(null); }}
+                        className="w-full rounded border border-zinc-600 bg-black px-2 py-1 text-[11px] text-white outline-none"
+                      />
+                      <DegenChoice value={null} disabled={!newPersona.trim()} onChange={(d) => void commitNewPersona(d)} />
+                      <button
+                        onClick={() => setNewPersona(null)}
+                        className="px-1 text-[10px] text-zinc-500 hover:text-white"
+                      >
+                        Cancel
+                      </button>
+                    </div>
                   ) : (
                     <button
                       onClick={() => setNewPersona('')}

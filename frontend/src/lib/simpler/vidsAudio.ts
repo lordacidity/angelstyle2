@@ -78,6 +78,9 @@ export interface MusicTrack {
   url: string;
   label: string;
   durationMs: number;
+  /** Marked degen on the Music page. Vids 2's randomizer only rolls one onto a
+   *  degen-mode build; choosing it by hand is open to every build. */
+  degen: boolean;
 }
 
 export interface Music {
@@ -115,7 +118,7 @@ export async function listMusic(signal?: AbortSignal): Promise<MusicTrack[]> {
   if (!Array.isArray(rows)) return [];
   return rows
     .filter((t): t is MusicTrack => !!t && typeof t.url === 'string' && typeof t.label === 'string')
-    .map((t) => ({ url: t.url, label: t.label, durationMs: Number(t.durationMs) || 0 }));
+    .map((t) => ({ url: t.url, label: t.label, durationMs: Number(t.durationMs) || 0, degen: t.degen === true }));
 }
 
 // ── The BOOM ─────────────────────────────────────────────────────────────────

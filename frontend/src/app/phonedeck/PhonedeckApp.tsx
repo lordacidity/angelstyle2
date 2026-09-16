@@ -75,6 +75,7 @@ export function PhonedeckApp() {
   const MEDIA_EXTS = [
     ".mp4", ".mov", ".mkv", ".webm", ".m4v", ".avi", ".3gp",
     ".jpg", ".jpeg", ".png", ".gif", ".webp", ".heic", ".heif",
+    ".mp3",
   ];
 
   const uploadOne = (file: File) => {
@@ -466,7 +467,7 @@ export function PhonedeckApp() {
                 ref={fileInputRef}
                 type="file"
                 multiple
-                accept="video/*,image/*,.mp4,.mov,.mkv,.webm,.m4v,.avi,.3gp,.jpg,.jpeg,.png,.gif,.webp,.heic,.heif"
+                accept="video/*,image/*,.mp4,.mov,.mkv,.webm,.m4v,.avi,.3gp,.jpg,.jpeg,.png,.gif,.webp,.heic,.heif,.mp3"
                 style={{ display: "none" }}
                 onChange={(e) => {
                   onFilesPicked(e.target.files);

@@ -3,14 +3,15 @@
 // Vids 2 — a form, then a tuning page.
 //
 // Vids and Simpler both start on the builder: a stage with nothing on it, and
-// cards to fill it from. Vids 2 starts on the five questions instead, makes
-// the whole video from the answers, and only then shows it — so the building
-// is one press and everything after it is adjustment.
+// cards to fill it from. Vids 2 starts on six questions instead, makes the
+// whole video from the answers, and only then shows it — so the building is
+// one press and everything after it is adjustment.
 //
-//   Form      persona, who on Pauv, which way, light or dark, the question —
-//             and Degen mode, which is not about the video so much as how it
-//             talks: the hook turns into a cry for help and three BOOMs lay
-//             themselves over the recordings. See Vids2Form.
+//   Form      one question at a time: who on Pauv, the mode (Serious, Middle
+//             or Degen — not about the video so much as how it talks; Degen
+//             turns the hook into a cry for help and lays three BOOMs over the
+//             recordings), which way, light or dark, the persona, the
+//             question. See Vids2Form.
 //   Generate  the two screen recordings, both at once: ChatGPT looking them up
 //             (Bottom A) and the Pauv trade (Bottom B). Neither needs anything
 //             from the other, so neither waits for it. Both are rendered in
@@ -185,7 +186,7 @@ export function Vids2Section({ active }: { active: boolean }) {
     const persona = personas.find((p) => p.id === setup.personaId) ?? null;
     if (!persona) { setJobError('That persona is no longer in the library. Choose another.'); return; }
     const question = setup.question.trim();
-    const { direction, theme, degen } = setup;
+    const { direction, theme, mode } = setup;
 
     jobRef.current?.abort();
     const ctrl = new AbortController();
@@ -288,7 +289,7 @@ export function Vids2Section({ active }: { active: boolean }) {
         direction,
         theme,
         question,
-        degen,
+        mode,
         // The two renderers' own moments, in their own clip seconds. Degen
         // mode hangs its BOOMs on these; the tuning page is what works out
         // where each one falls on the finished timeline.

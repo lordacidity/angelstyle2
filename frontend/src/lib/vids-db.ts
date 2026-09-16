@@ -38,7 +38,7 @@ export const errMessage = (e: unknown) => (e instanceof Error ? e.message : 'une
 // reload in dev, or a long-lived server between deploys. Comparing the version
 // makes such a process re-run the (idempotent) DDL instead of trusting a
 // promise that was resolved against the older schema.
-const SCHEMA_VERSION = 11;
+const SCHEMA_VERSION = 14;
 
 const g = globalThis as unknown as {
   __vidsPool?: pg.Pool;
@@ -226,6 +226,22 @@ function ensureSchema(): Promise<void> {
     for (const table of ['vids_videos', 'vids_personas'] as const) {
       await pool.query(`ALTER TABLE ${table} ADD COLUMN IF NOT EXISTS clipable BOOLEAN NOT NULL DEFAULT false`);
     }
+    // Whether a persona is degen — see VidPersona.degen. Every persona that
+    // existed when the flag arrived is degen, so the column's first appearance
+    // marks them all; from then on it is said when a persona is made. Guarded
+    // on the column not being there yet, so that happens once and never again.
+    await pool.query(`
+      DO $$
+      BEGIN
+        IF NOT EXISTS (
+          SELECT 1 FROM information_schema.columns
+           WHERE table_schema = current_schema() AND table_name = 'vids_personas' AND column_name = 'degen'
+        ) THEN
+          ALTER TABLE vids_personas ADD COLUMN degen BOOLEAN NOT NULL DEFAULT false;
+          UPDATE vids_personas SET degen = true;
+        END IF;
+      END $$;
+    `);
     // The same flag for the things that live in code rather than in a row —
     // songs (public/audio) and caption looks (lib/vidsCaptions). A row here is
     // a yes; turning one off deletes it. Keyed by kind and by what names the
@@ -248,6 +264,14 @@ function ensureSchema(): Promise<void> {
         url        TEXT        PRIMARY KEY,
         label      TEXT        NOT NULL,
         updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+      );
+    `);
+    // Which songs are degen, marked on the Music page. A row here is a yes;
+    // every other song is just a song. Keyed by url like its name.
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS vids_track_degen (
+        url       TEXT        PRIMARY KEY,
+        marked_at TIMESTAMPTZ NOT NULL DEFAULT now()
       );
     `);
     await pool.query('CREATE INDEX IF NOT EXISTS vids_videos_folder_idx ON vids_videos (folder_id)');
@@ -273,7 +297,7 @@ interface VideoDb {
 
 interface PersonaDb {
   id: string; name: string; start_id: string | null; top_a_id: string | null;
-  top_b_id: string | null; context: string; clipable: boolean; created_at: Date;
+  top_b_id: string | null; context: string; clipable: boolean; degen: boolean; created_at: Date;
 }
 
 interface ClipableDb { kind: string; key: string }
@@ -288,7 +312,7 @@ const FOLDER_COLS = 'id, parent_id, name, created_at';
 const LINK_COLS = 'bottom_a_id, bottom_b_id';
 const CLIPABLE_COLS = 'kind, key';
 const RECIPE_COLS = 'code, title, video_id, build, created_at';
-const PERSONA_COLS = 'id, name, start_id, top_a_id, top_b_id, context, clipable, created_at';
+const PERSONA_COLS = 'id, name, start_id, top_a_id, top_b_id, context, clipable, degen, created_at';
 const VIDEO_COLS =
   'id, folder_id, name, storage_path, thumb_path, mime_type, size_bytes, duration_s, width, height, '
   + 'has_sfx, context, marks, source_path, edit, clipable, theme, created_at';
@@ -305,6 +329,7 @@ const toPersona = (r: PersonaDb): VidPersona => ({
   topBId: r.top_b_id,
   context: r.context ?? '',
   clipable: r.clipable === true,
+  degen: r.degen === true,
   createdAt: r.created_at.toISOString(),
 });
 
@@ -393,6 +418,25 @@ export async function setTrackName(url: string, label: string): Promise<void> {
      ON CONFLICT (url) DO UPDATE SET label = EXCLUDED.label, updated_at = now()`,
     [url, label],
   );
+}
+
+// ── Degen songs ───────────────────────────────────────────────────────────────
+
+/** The urls of every song marked degen. Read by list-audio beside the names. */
+export async function listDegenTracks(): Promise<Set<string>> {
+  await ensureSchema();
+  const r = await getPool().query<{ url: string }>('SELECT url FROM vids_track_degen');
+  return new Set(r.rows.map((row) => row.url));
+}
+
+/** Mark a song degen, or back to just a song. Idempotent both ways. */
+export async function setTrackDegen(url: string, degen: boolean): Promise<void> {
+  await ensureSchema();
+  if (degen) {
+    await getPool().query('INSERT INTO vids_track_degen (url) VALUES ($1) ON CONFLICT DO NOTHING', [url]);
+  } else {
+    await getPool().query('DELETE FROM vids_track_degen WHERE url = $1', [url]);
+  }
 }
 
 /** Turn one song or caption look on or off for the clippers. Idempotent both
@@ -515,14 +559,15 @@ export interface PersonaPatch extends VidContextPatch, VidClipablePatch {
   startId?: string | null;
   topAId?: string | null;
   topBId?: string | null;
+  degen?: boolean;
 }
 
 export async function createPersona(name: string, patch: PersonaPatch = {}): Promise<VidPersona> {
   await ensureSchema();
   const r = await getPool().query<PersonaDb>(
-    `INSERT INTO vids_personas (name, start_id, top_a_id, top_b_id)
-     VALUES ($1, $2, $3, $4) RETURNING ${PERSONA_COLS}`,
-    [name, patch.startId ?? null, patch.topAId ?? null, patch.topBId ?? null],
+    `INSERT INTO vids_personas (name, start_id, top_a_id, top_b_id, degen)
+     VALUES ($1, $2, $3, $4, $5) RETURNING ${PERSONA_COLS}`,
+    [name, patch.startId ?? null, patch.topAId ?? null, patch.topBId ?? null, patch.degen === true],
   );
   return toPersona(r.rows[0]);
 }
@@ -538,6 +583,7 @@ export async function updatePersona(id: string, patch: PersonaPatch): Promise<Vi
   if (patch.topBId !== undefined) put('top_b_id', patch.topBId);
   if (patch.context !== undefined) put('context', patch.context);
   if (patch.clipable !== undefined) put('clipable', patch.clipable);
+  if (patch.degen !== undefined) put('degen', patch.degen);
   vals.push(id);
   const r = await getPool().query<PersonaDb>(
     `UPDATE vids_personas SET ${sets.join(', ')} WHERE id = $${vals.length} RETURNING ${PERSONA_COLS}`,

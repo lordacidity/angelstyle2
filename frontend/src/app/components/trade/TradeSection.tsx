@@ -50,6 +50,8 @@ function downloadBlob(blob: Blob, filename: string) {
 }
 
 const fmtT = (s: number) => `${s.toFixed(2)}s`;
+/** How far ahead the preview's sound is scheduled, so it starts on time. */
+const SOUND_LEAD = 0.05;
 const BEAT_LABEL: Record<keyof TradeBeats, string> = {
   searching: 'search', analyzing: 'chart', trading: 'trade', confirming: 'confirmed',
 };
@@ -87,7 +89,6 @@ export function TradeSection({ active }: { active: boolean }) {
   // Bumped whenever playback stops, so a bed that finishes mixing after the
   // user has paused or scrubbed doesn't start anyway.
   const soundTokenRef = useRef(0);
-  const playT0Ref = useRef(0);
 
   useEffect(() => { saveSetup({ name, direction, theme }); }, [name, direction, theme]);
 
@@ -121,27 +122,42 @@ export function TradeSection({ active }: { active: boolean }) {
     setPlaying(true);
     const from = timeRef.current >= clip.seconds - 0.05 ? 0 : timeRef.current;
     const t0 = performance.now() - from * 1000;
-    playT0Ref.current = t0;
+    // The picture runs on the page's clock until the sound is going, then on
+    // the sound's: the clip time of what is coming out of the speakers now,
+    // output latency and all. Starting the sound on a guess of where the
+    // picture is (and before the context had even resumed) left it late.
+    let shown = from;
+    let heard: (() => number) | null = null;
     if (soundRef.current && audioRef.current) {
       const token = soundTokenRef.current;
-      void audioRef.current.then(bed => {
-        // Where the picture actually is now — mixing may have taken a moment.
+      void audioRef.current.then(async bed => {
         if (!bed || token !== soundTokenRef.current || !soundRef.current) return;
         try {
           const actx = audioCtxRef.current ?? (audioCtxRef.current = new AudioContext());
-          void actx.resume();
-          const at = (performance.now() - playT0Ref.current) / 1000;
-          if (at >= bed.duration) return;
+          await actx.resume();
+          if (token !== soundTokenRef.current) return;
+          const offset = shown + SOUND_LEAD;
+          if (offset >= bed.duration) return;
+          const when = actx.currentTime + SOUND_LEAD;
           const src = actx.createBufferSource();
           src.buffer = bed;
           src.connect(actx.destination);
-          src.start(0, Math.max(0, at));
+          src.start(when, offset);
           audioSrcRef.current = src;
+          heard = () => {
+            const ts = actx.getOutputTimestamp();
+            const now = ts.contextTime && ts.performanceTime
+              ? ts.contextTime + (performance.now() - ts.performanceTime) / 1000
+              : actx.currentTime - actx.baseLatency - (actx.outputLatency || 0);
+            return offset + (now - when);
+          };
         } catch { /* the picture plays without it */ }
       });
     }
     const tick = () => {
-      const t = (performance.now() - t0) / 1000;
+      // Never backwards: while the sound gets under way the picture holds.
+      const t = Math.max(shown, heard ? heard() : (performance.now() - t0) / 1000);
+      shown = t;
       if (t >= clip.seconds) {
         // Loop, holding the last frame for a beat first.
         drawAt(clip.seconds - 1 / 30);

@@ -1,44 +1,54 @@
 'use client';
 
-// Vids2Form — the five answers a video is made from, and the Generate button.
-// It is the whole of the first page: nothing is on the stage yet and there is
-// nothing to tune, so there is nothing else to look at.
+// Vids2Form — the answers a video is made from, and the Generate button. It is
+// the whole of the first page: nothing is on the stage yet and there is nothing
+// to tune, so there is nothing else to look at.
 //
-//   1. Persona   the same chooser Simpler's Persona card opens
-//                (components/simpler/VidsPicker) — one row per persona, its
-//                three clips behind it.
-//   2. Who       anybody on Pauv, from the roster itself (/api/ai/talents)
+// One question at a time, in this order:
+//
+//   1. Who       anybody on Pauv, from the roster itself (/api/ai/talents)
 //                rather than from what has been filmed: Vids 2 renders the
 //                trade rather than taking one off a shelf, so there is nothing
 //                to have filmed. Over a thousand of them, so the box searches
 //                rather than scrolls, and says how many as it does.
+//   2. Mode      Serious, Middle or Degen — how the video talks, not what is
+//                in it (Vids2Mode in lib/vids2). Degen writes the hook to beg
+//                instead of brag, lays three BOOMs on the beats worth reacting
+//                to, and may roll a song marked degen on the Music page. See
+//                degenBooms in lib/vids2, DEGEN_HOOK in api/vids/captions, and
+//                rollableMusic in Vids2Builder. Serious and Middle are still to
+//                be defined; until they are, both make the ordinary video.
 //   3. Which way up or down — which way the $10 goes.
 //   4. Look      light or dark. It is the Pauv page's theme, and only that:
 //                the ChatGPT recording is dark whatever this says.
-//   5. Question  what gets typed into ChatGPT, as written — capitals and all.
+//   5. Persona   the same chooser Simpler's Persona card opens
+//                (components/simpler/VidsPicker) — one row per persona, its
+//                three clips behind it.
+//   6. Question  what gets typed into ChatGPT, as written — capitals and all.
 //                Write it, or have it written: Ragebait or Factual, the same
 //                two the Simpler Bottom card offers (api/vids/question). Those
 //                two come back lower case, the way a search bar is typed into;
 //                a question written by hand is left exactly as it is.
 //
-// Under the five, a switch rather than a question: DEGEN MODE. It changes how
-// the video talks, not what is in it — the hook is written to beg instead of
-// brag, and three BOOMs lay themselves on the beats worth reacting to. See
-// degenBooms in lib/vids2, and DEGEN_HOOK in api/vids/captions.
+// Nothing moves on by itself: pick an answer, then press Next. Back goes a step
+// back, and the strip along the top holds every answer given so far — press
+// one to go back to it. The page opens on the first question, or on the last
+// when Change brought you back from a video, since then every answer is
+// already there to be jumped to.
 //
-// Generate hands the five to the section, which renders both recordings — at
-// the same time, neither waiting on the other — and takes over the page
-// (Vids2Section). While that runs this stays up, with a line per recording
-// where the button was, so a question can be re-read and the whole thing
-// cancelled.
+// Generate is on the last question. It hands the answers to the section, which
+// renders both recordings — at the same time, neither waiting on the other —
+// and takes over the page (Vids2Section). While that runs this stays up, with a
+// line per recording where the button was, so a question can be re-read and
+// the whole thing cancelled.
 
 import { useEffect, useMemo, useRef, useState, type KeyboardEvent } from 'react';
 import type { VidPersona, VidRow } from '@/lib/vids-types';
 import { writeQuestion, type QuestionKind } from '@/lib/vids-client';
 import { VidsPersonaPicker } from '@/app/components/simpler/VidsPicker';
 import {
-  loadRoster, lower, setupReady,
-  type Direction, type Theme, type TradeTalent, type Vids2Setup,
+  VIDS2_MODES, loadRoster, lower, setupReady,
+  type Direction, type Theme, type TradeTalent, type Vids2Mode, type Vids2Setup,
 } from '@/lib/vids2/vids2Build';
 import { BTN_TEXT } from '@/lib/ui-constants';
 import { SpinnerIcon, VideoIcon } from '@/lib/icons';
@@ -47,6 +57,12 @@ const DIRECTIONS: readonly Direction[] = ['up', 'down'];
 const DIRECTION_LABEL: Record<Direction, string> = { up: '📈 Up', down: '📉 Down' };
 const THEMES: readonly Theme[] = ['light', 'dark'];
 const THEME_LABEL: Record<Theme, string> = { light: '☀️ Light', dark: '🌙 Dark' };
+const MODE_LABEL: Record<Vids2Mode, string> = { serious: '👔 Serious', middle: '😐 Middle', degen: '💀 Degen' };
+const MODE_ON: Record<Vids2Mode, string> = {
+  serious: 'border-sky-500 bg-sky-500/15 text-sky-200',
+  middle: 'border-zinc-300 bg-zinc-300/10 text-white',
+  degen: 'border-amber-500 bg-amber-500/15 text-amber-200',
+};
 
 /** The two ways the model will write the question — see api/vids/question. */
 const QUESTION_KINDS: readonly QuestionKind[] = ['ragebait', 'factual'];
@@ -60,6 +76,18 @@ const QUESTION_HINT: Record<QuestionKind, string> = {
  *  list and everyone can be found by typing; this is only how many rows exist
  *  on the page before you have narrowed it down. */
 const MAX_ROWS = 60;
+
+/** The questions, in the order they are asked. */
+type StepId = 'who' | 'mode' | 'direction' | 'theme' | 'persona' | 'question';
+const STEPS: readonly { id: StepId; label: string; hint: string }[] = [
+  { id: 'who', label: 'Who', hint: 'anybody on Pauv' },
+  { id: 'mode', label: 'Mode', hint: 'how the video talks' },
+  { id: 'direction', label: 'Which way', hint: '$10 either way' },
+  { id: 'theme', label: 'Look', hint: 'the Pauv page in the trade recording' },
+  { id: 'persona', label: 'Persona', hint: 'fills Start, Top A and Top B' },
+  { id: 'question', label: 'The question', hint: 'typed into ChatGPT' },
+];
+const LAST = STEPS.length - 1;
 
 /** One of the two recordings, while it is being made. */
 export interface Vids2Leg {
@@ -97,25 +125,28 @@ interface Props {
   onBack: () => void;
 }
 
-/** A numbered row: the count, what it asks for, and the control. */
-function Row({ n, label, hint, children }: {
-  n: number;
-  label: string;
-  hint?: string;
-  children: React.ReactNode;
+/** Big answers side by side — the shape of Mode, Which way and Look. */
+function Choice<T extends string | boolean>({ options, value, disabled, onPick }: {
+  options: readonly { value: T; label: string; on: string }[];
+  value: T;
+  disabled: boolean;
+  onPick: (value: T) => void;
 }) {
   return (
-    <div className="flex gap-3">
-      <span className="mt-1 flex h-5 w-5 shrink-0 items-center justify-center rounded-full border border-zinc-700 text-[10px] font-semibold text-zinc-400">
-        {n}
-      </span>
-      <div className="min-w-0 flex-1">
-        <p className="mb-1.5 text-[11px] font-semibold text-zinc-200">
-          {label}
-          {hint && <span className="ml-2 font-normal text-[10px] text-zinc-500">{hint}</span>}
-        </p>
-        {children}
-      </div>
+    <div className="grid gap-2" style={{ gridTemplateColumns: `repeat(${options.length}, minmax(0, 1fr))` }}>
+      {options.map((o) => (
+        <button
+          key={String(o.value)}
+          type="button"
+          disabled={disabled}
+          onClick={() => onPick(o.value)}
+          className={`h-12 rounded-md border text-[13px] font-semibold transition-colors disabled:opacity-50 ${
+            value === o.value ? o.on : 'border-zinc-800 bg-zinc-950 text-zinc-400 hover:border-zinc-600 hover:text-zinc-200'
+          }`}
+        >
+          {o.label}
+        </button>
+      ))}
     </div>
   );
 }
@@ -129,6 +160,39 @@ export function Vids2Form({
 
   const persona = personas.find((p) => p.id === setup.personaId) ?? null;
   const personaThumb = resolveVideo(persona?.topAId ?? '')?.thumbUrl ?? null;
+
+  // ── Which question is up ────────────────────────────────────────────────────
+  // `furthest` is how far the answers go: every step up to it has been reached
+  // and can be jumped back to from the strip; the ones past it are still ahead.
+  const [step, setStep] = useState(hasBuild ? LAST : 0);
+  const [furthest, setFurthest] = useState(hasBuild ? LAST : 0);
+  const go = (i: number) => {
+    const to = Math.max(0, Math.min(LAST, i));
+    setStep(to);
+    setFurthest((f) => Math.max(f, to));
+  };
+  const next = () => go(step + 1);
+  const current = STEPS[step];
+
+  /** Whether a step has what it needs to be left forwards. The two-way ones
+   *  always have an answer — the setup starts with one. */
+  const answered = (id: StepId): boolean =>
+    id === 'who' ? !!setup.person.trim()
+      : id === 'persona' ? !!persona
+      : id === 'question' ? !!setup.question.trim()
+      : true;
+
+  /** What the strip says about an answer. */
+  const summary = (id: StepId): string => {
+    switch (id) {
+      case 'who': return setup.person.trim() || '—';
+      case 'mode': return MODE_LABEL[setup.mode];
+      case 'direction': return DIRECTION_LABEL[setup.direction];
+      case 'theme': return THEME_LABEL[setup.theme];
+      case 'persona': return persona?.name ?? '—';
+      case 'question': return setup.question.trim() || '—';
+    }
+  };
 
   // ── The roster ──────────────────────────────────────────────────────────────
   const [roster, setRoster] = useState<TradeTalent[]>([]);
@@ -165,13 +229,13 @@ export function Vids2Form({
     if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
       e.preventDefault();
       if (!open) { setOpen(true); setActive(0); return; }
-      const step = e.key === 'ArrowDown' ? 1 : -1;
-      setActive((i) => (shown.length ? (i + step + shown.length) % shown.length : 0));
+      const dir = e.key === 'ArrowDown' ? 1 : -1;
+      setActive((i) => (shown.length ? (i + dir + shown.length) % shown.length : 0));
       return;
     }
-    if (e.key === 'Enter' && open) {
+    if (e.key === 'Enter') {
       e.preventDefault();
-      if (shown[active]) choose(shown[active]);
+      if (open && shown[active]) choose(shown[active]);
       return;
     }
     if (e.key === 'Escape' && open) { e.preventDefault(); closeList(); }
@@ -221,6 +285,8 @@ export function Vids2Form({
   };
 
   const ready = setupReady(setup) && !busy;
+  /** The first question still without an answer, for Generate to point at. */
+  const missing = STEPS.find((s) => !answered(s.id)) ?? null;
 
   return (
     <div className="vids-scroll flex min-h-0 flex-1 justify-center overflow-y-auto px-6 py-10">
@@ -241,12 +307,162 @@ export function Vids2Form({
           )}
         </div>
         <p className="mt-1 text-[11px] text-zinc-500">
-          Five answers, then Generate. Both screen recordings are made for this video — ChatGPT looking them up, then
-          the trade on Pauv — and it lands on the tuning page with the words already written.
+          Six questions, one at a time, then Generate. Both screen recordings are made for this video — ChatGPT
+          looking them up, then the trade on Pauv — and it lands on the tuning page with the words already written.
         </p>
 
-        <div className="mt-7 space-y-6">
-          <Row n={1} label="Persona" hint="fills Start, Top A and Top B">
+        {/* Every answer so far. The one being asked is lit; one already reached
+            takes you back to it; one still ahead can't be pressed yet. */}
+        <div className="mt-6 grid grid-cols-6 gap-1">
+          {STEPS.map((s, i) => {
+            const here = i === step;
+            const reached = i <= furthest;
+            return (
+              <button
+                key={s.id}
+                type="button"
+                onClick={() => go(i)}
+                disabled={!reached || busy}
+                title={reached ? `${s.label}: ${summary(s.id)}` : s.label}
+                className={`min-w-0 rounded-md border px-1.5 py-1 text-left transition-colors disabled:cursor-default ${
+                  here ? 'border-zinc-400 bg-zinc-800'
+                    : reached ? 'border-zinc-800 hover:border-zinc-600'
+                    : 'border-zinc-900 opacity-40'
+                }`}
+              >
+                <span className={`block truncate text-[9px] font-semibold uppercase tracking-wider ${here ? 'text-zinc-200' : 'text-zinc-500'}`}>
+                  {i + 1} · {s.label}
+                </span>
+                <span className={`block truncate text-[10px] ${reached ? 'text-zinc-300' : 'text-zinc-700'}`}>
+                  {reached ? summary(s.id) : ' '}
+                </span>
+              </button>
+            );
+          })}
+        </div>
+
+        {/* The question that is up. */}
+        <div key={current.id} className="mt-6 rounded-lg border border-zinc-800 p-4">
+          <p className="text-[10px] font-semibold uppercase tracking-wider text-zinc-500">
+            Step {step + 1} of {STEPS.length}
+          </p>
+          <p className="mb-3 mt-0.5 text-[14px] font-semibold text-zinc-100">
+            {current.label}
+            <span className="ml-2 text-[11px] font-normal text-zinc-500">{current.hint}</span>
+          </p>
+
+          {current.id === 'who' && (
+            <>
+              <div
+                className="relative"
+                onBlur={(e) => { if (!e.currentTarget.contains(e.relatedTarget as Node | null)) closeList(); }}
+              >
+                <input
+                  autoFocus
+                  value={query}
+                  onChange={(e) => { setQuery(e.target.value); setActive(0); setOpen(true); }}
+                  onFocus={() => { setOpen(true); setActive(0); }}
+                  onPointerDown={() => { setOpen(true); setActive(0); }}
+                  onKeyDown={onSearchKey}
+                  disabled={busy}
+                  placeholder={roster.length ? `Search ${roster.length.toLocaleString('en-US')} people…` : 'Loading the roster…'}
+                  spellCheck={false}
+                  autoComplete="off"
+                  className="h-10 w-full rounded-md border border-zinc-700 bg-zinc-900 px-2.5 text-[13px] text-zinc-100 outline-none placeholder:text-zinc-600 focus:border-zinc-500 disabled:opacity-50"
+                />
+                {open && !busy && (
+                  <div
+                    ref={listRef}
+                    className="absolute inset-x-0 top-full z-20 mt-1 max-h-64 overflow-y-auto rounded-md border border-zinc-700 bg-zinc-900 py-0.5 shadow-xl"
+                  >
+                    {shown.length === 0 ? (
+                      <p className="px-2 py-2 text-[11px] text-zinc-500">
+                        {roster.length ? `Nobody on Pauv called “${query.trim()}”` : 'The roster hasn’t arrived yet.'}
+                      </p>
+                    ) : (
+                      <>
+                        {shown.map((t, i) => (
+                          <button
+                            key={t.id}
+                            type="button"
+                            data-active={i === active || undefined}
+                            onMouseDown={(e) => e.preventDefault()}
+                            onMouseEnter={() => setActive(i)}
+                            onClick={() => choose(t)}
+                            className={`flex w-full items-center gap-2 px-2 py-1.5 text-left text-[12px] ${
+                              i === active ? 'bg-zinc-800 text-zinc-100' : 'text-zinc-300'
+                            }`}
+                          >
+                            <span className="min-w-0 flex-1 truncate">{t.name}</span>
+                            <span className="shrink-0 font-mono text-[9px] text-zinc-500">{t.ticker}</span>
+                          </button>
+                        ))}
+                        {matches.length > shown.length && (
+                          <p className="px-2 py-1.5 text-[9px] text-zinc-600">
+                            {(matches.length - shown.length).toLocaleString('en-US')} more — keep typing
+                          </p>
+                        )}
+                      </>
+                    )}
+                  </div>
+                )}
+              </div>
+              {rosterError && <p className="mt-1 text-[9px] text-red-400">Couldn’t read the roster: {rosterError}</p>}
+            </>
+          )}
+
+          {current.id === 'mode' && (
+            <>
+              <Choice
+                options={VIDS2_MODES.map((m) => ({ value: m, label: MODE_LABEL[m], on: MODE_ON[m] }))}
+                value={setup.mode}
+                disabled={busy}
+                onPick={(mode) => onChange({ ...setup, mode })}
+              />
+              {/* Degen says outright what it will do, because what it does is
+                  not subtle and nobody should have to press it to find out. */}
+              {setup.mode === 'degen' ? (
+                <p className="mt-2.5 text-[10px] leading-relaxed text-zinc-500">
+                  Degen: the hook stops bragging and starts begging — &ldquo;homeless man trades on{' '}
+                  {setup.person.trim().toLowerCase() || 'them'} (i need serious help)&rdquo; — and three BOOMs lay
+                  themselves: <span className="text-zinc-400">fahh</span> when ChatGPT names them,{' '}
+                  <span className="text-zinc-400">oh hell nah</span> when their page opens,{' '}
+                  <span className="text-zinc-400">fahh</span> again when the trade goes in. Take any of them off on the
+                  bar afterwards. The random song can be a degen one too. Nothing else about the video changes.
+                </p>
+              ) : (
+                <p className="mt-2.5 text-[10px] leading-relaxed text-zinc-500">
+                  {MODE_LABEL[setup.mode]} makes the ordinary video for now.
+                </p>
+              )}
+            </>
+          )}
+
+          {current.id === 'direction' && (
+            <Choice
+              options={DIRECTIONS.map((d) => ({
+                value: d,
+                label: DIRECTION_LABEL[d],
+                on: d === 'up'
+                  ? 'border-emerald-500 bg-emerald-500/15 text-emerald-300'
+                  : 'border-red-500 bg-red-500/15 text-red-300',
+              }))}
+              value={setup.direction}
+              disabled={busy}
+              onPick={(direction) => onChange({ ...setup, direction })}
+            />
+          )}
+
+          {current.id === 'theme' && (
+            <Choice
+              options={THEMES.map((t) => ({ value: t, label: THEME_LABEL[t], on: 'border-zinc-300 bg-zinc-300/10 text-white' }))}
+              value={setup.theme}
+              disabled={busy}
+              onPick={(theme) => onChange({ ...setup, theme })}
+            />
+          )}
+
+          {current.id === 'persona' && (
             <button
               onClick={() => setPickingPersona(true)}
               disabled={!libraryLoaded || !personas.length || busy}
@@ -255,7 +471,7 @@ export function Vids2Form({
                 persona ? 'border-zinc-700' : 'border-dashed border-zinc-700'
               } hover:border-zinc-500`}
             >
-              <span className="flex h-11 w-11 shrink-0 items-center justify-center overflow-hidden rounded bg-black">
+              <span className="flex h-14 w-14 shrink-0 items-center justify-center overflow-hidden rounded bg-black">
                 {personaThumb ? (
                   // eslint-disable-next-line @next/next/no-img-element
                   <img src={personaThumb} alt="" className="h-full w-full object-cover" draggable={false} />
@@ -263,259 +479,149 @@ export function Vids2Form({
                   <VideoIcon size={15} className="text-zinc-700" />
                 )}
               </span>
-              <span className="min-w-0 flex-1 truncate text-[12px]">
+              <span className="min-w-0 flex-1 truncate text-[13px]">
                 <span className={persona ? 'text-zinc-100' : 'text-zinc-500'}>
                   {persona?.name ?? (libraryLoaded ? 'Choose a persona' : 'Loading the library…')}
                 </span>
               </span>
-              <span className="shrink-0 text-[10px] text-zinc-500">Change</span>
+              <span className="shrink-0 text-[10px] text-zinc-500">{persona ? 'Change' : 'Choose'}</span>
             </button>
-          </Row>
+          )}
 
-          <Row n={2} label="Who" hint="anybody on Pauv">
-            <div
-              className="relative"
-              onBlur={(e) => { if (!e.currentTarget.contains(e.relatedTarget as Node | null)) closeList(); }}
-            >
-              <input
-                value={query}
-                onChange={(e) => { setQuery(e.target.value); setActive(0); setOpen(true); }}
-                onFocus={() => { setOpen(true); setActive(0); }}
-                onPointerDown={() => { setOpen(true); setActive(0); }}
-                onKeyDown={onSearchKey}
+          {current.id === 'question' && (
+            <>
+              <textarea
+                ref={questionRef}
+                autoFocus
+                value={setup.question}
+                onChange={(e) => onChange({ ...setup, question: e.target.value })}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); if (ready) onGenerate(); }
+                }}
                 disabled={busy}
-                placeholder={roster.length ? `Search ${roster.length.toLocaleString('en-US')} people…` : 'Loading the roster…'}
-                spellCheck={false}
-                autoComplete="off"
-                className="h-9 w-full rounded-md border border-zinc-700 bg-zinc-900 px-2 text-[12px] text-zinc-100 outline-none placeholder:text-zinc-600 focus:border-zinc-500 disabled:opacity-50"
+                rows={3}
+                placeholder="e.g. who is the most overrated musician of all time?"
+                className="w-full resize-none rounded-md border border-zinc-700 bg-zinc-900 px-2.5 py-2 text-[13px] text-zinc-100 outline-none focus:border-zinc-500 disabled:opacity-50"
               />
-              {open && !busy && (
-                <div
-                  ref={listRef}
-                  className="absolute inset-x-0 top-full z-20 mt-1 max-h-56 overflow-y-auto rounded-md border border-zinc-700 bg-zinc-900 py-0.5 shadow-xl"
-                >
-                  {shown.length === 0 ? (
-                    <p className="px-2 py-2 text-[11px] text-zinc-500">
-                      {roster.length ? `Nobody on Pauv called “${query.trim()}”` : 'The roster hasn’t arrived yet.'}
-                    </p>
-                  ) : (
-                    <>
-                      {shown.map((t, i) => (
-                        <button
-                          key={t.id}
-                          type="button"
-                          data-active={i === active || undefined}
-                          onMouseDown={(e) => e.preventDefault()}
-                          onMouseEnter={() => setActive(i)}
-                          onClick={() => choose(t)}
-                          className={`flex w-full items-center gap-2 px-2 py-1.5 text-left text-[12px] ${
-                            i === active ? 'bg-zinc-800 text-zinc-100' : 'text-zinc-300'
-                          }`}
-                        >
-                          <span className="min-w-0 flex-1 truncate">{t.name}</span>
-                          <span className="shrink-0 font-mono text-[9px] text-zinc-500">{t.ticker}</span>
-                        </button>
-                      ))}
-                      {matches.length > shown.length && (
-                        <p className="px-2 py-1.5 text-[9px] text-zinc-600">
-                          {(matches.length - shown.length).toLocaleString('en-US')} more — keep typing
-                        </p>
-                      )}
-                    </>
-                  )}
-                </div>
-              )}
-            </div>
-            {rosterError && <p className="mt-1 text-[9px] text-red-400">Couldn’t read the roster: {rosterError}</p>}
-          </Row>
-
-          <Row n={3} label="Which way" hint="$10 either way">
-            <div className="grid grid-cols-2 gap-2">
-              {DIRECTIONS.map((d) => {
-                const on = setup.direction === d;
-                return (
+              <div className="mt-1.5 flex items-center gap-1.5">
+                <span className="min-w-0 flex-1 text-[10px] text-zinc-500">Generate question</span>
+                {QUESTION_KINDS.map((k) => (
                   <button
-                    key={d}
+                    key={k}
                     type="button"
-                    disabled={busy}
-                    onClick={() => onChange({ ...setup, direction: d })}
-                    className={`h-10 rounded-md border text-[12px] font-semibold transition-colors disabled:opacity-50 ${
-                      on
-                        ? d === 'up'
-                          ? 'border-emerald-500 bg-emerald-500/15 text-emerald-300'
-                          : 'border-red-500 bg-red-500/15 text-red-300'
-                        : 'border-zinc-800 bg-zinc-950 text-zinc-400 hover:text-zinc-200'
+                    onClick={() => void suggest(k)}
+                    disabled={!setup.person.trim() || writingKind !== null || busy}
+                    title={setup.person.trim() ? QUESTION_HINT[k] : 'Choose who first'}
+                    className={`shrink-0 rounded border px-1.5 py-0.5 text-[10px] transition-colors disabled:cursor-not-allowed disabled:border-zinc-900 disabled:text-zinc-700 disabled:hover:border-zinc-900 disabled:hover:text-zinc-700 ${
+                      chosenKind === k
+                        ? k === 'ragebait'
+                          ? 'border-amber-500 bg-amber-500/15 text-amber-300'
+                          : 'border-zinc-300 bg-zinc-300/10 text-white'
+                        : 'border-zinc-700 text-zinc-400 hover:border-zinc-500 hover:text-white'
                     }`}
                   >
-                    {DIRECTION_LABEL[d]}
+                    {writingKind === k ? 'Writing…' : QUESTION_LABEL[k]}
                   </button>
-                );
-              })}
-            </div>
-          </Row>
-
-          <Row n={4} label="Look" hint="the Pauv page in the trade recording">
-            <div className="grid grid-cols-2 gap-2">
-              {THEMES.map((t) => {
-                const on = setup.theme === t;
-                return (
-                  <button
-                    key={t}
-                    type="button"
-                    disabled={busy}
-                    onClick={() => onChange({ ...setup, theme: t })}
-                    className={`h-10 rounded-md border text-[12px] font-semibold transition-colors disabled:opacity-50 ${
-                      on
-                        ? 'border-zinc-300 bg-zinc-300/10 text-white'
-                        : 'border-zinc-800 bg-zinc-950 text-zinc-400 hover:text-zinc-200'
-                    }`}
-                  >
-                    {THEME_LABEL[t]}
-                  </button>
-                );
-              })}
-            </div>
-          </Row>
-
-          <Row n={5} label="The question" hint="typed into ChatGPT">
-            <textarea
-              ref={questionRef}
-              value={setup.question}
-              onChange={(e) => onChange({ ...setup, question: e.target.value })}
-              onKeyDown={(e) => {
-                if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); if (ready) onGenerate(); }
-              }}
-              disabled={busy}
-              rows={2}
-              placeholder="e.g. who is the most overrated musician of all time?"
-              className="w-full resize-none rounded-md border border-zinc-700 bg-zinc-900 px-2 py-1.5 text-[12px] text-zinc-100 outline-none focus:border-zinc-500 disabled:opacity-50"
-            />
-            <div className="mt-1.5 flex items-center gap-1.5">
-              <span className="min-w-0 flex-1 text-[10px] text-zinc-500">Generate question</span>
-              {QUESTION_KINDS.map((k) => (
-                <button
-                  key={k}
-                  type="button"
-                  onClick={() => void suggest(k)}
-                  disabled={!setup.person.trim() || writingKind !== null || busy}
-                  title={setup.person.trim() ? QUESTION_HINT[k] : 'Choose who first'}
-                  className={`shrink-0 rounded border px-1.5 py-0.5 text-[10px] transition-colors disabled:cursor-not-allowed disabled:border-zinc-900 disabled:text-zinc-700 disabled:hover:border-zinc-900 disabled:hover:text-zinc-700 ${
-                    chosenKind === k
-                      ? k === 'ragebait'
-                        ? 'border-amber-500 bg-amber-500/15 text-amber-300'
-                        : 'border-zinc-300 bg-zinc-300/10 text-white'
-                      : 'border-zinc-700 text-zinc-400 hover:border-zinc-500 hover:text-white'
-                  }`}
-                >
-                  {writingKind === k ? 'Writing…' : QUESTION_LABEL[k]}
-                </button>
-              ))}
-            </div>
-            {writeError && <p className="mt-1 text-[9px] text-red-400">Couldn’t write one: {writeError}</p>}
-          </Row>
-        </div>
-
-        {/* Degen mode. Not a sixth question: the five above say what the video
-            IS, and this says how it talks. It sits apart from them and says
-            outright what it will do, because what it does is not subtle and
-            nobody should have to press it to find out. */}
-        <div
-          className={`mt-7 rounded-md border p-3 transition-colors ${
-            setup.degen ? 'border-amber-600 bg-amber-950/20' : 'border-zinc-800'
-          }`}
-        >
-          <button
-            type="button"
-            role="switch"
-            aria-checked={setup.degen}
-            disabled={busy}
-            onClick={() => onChange({ ...setup, degen: !setup.degen })}
-            className="flex w-full items-start gap-3 text-left disabled:opacity-50"
-          >
-            <span
-              className={`relative mt-0.5 h-5 w-9 shrink-0 rounded-full transition-colors ${
-                setup.degen ? 'bg-amber-500' : 'bg-zinc-700'
-              }`}
-            >
-              <span
-                className={`absolute top-0.5 h-4 w-4 rounded-full bg-white transition-all ${
-                  setup.degen ? 'left-[18px]' : 'left-0.5'
-                }`}
-              />
-            </span>
-            <span className="min-w-0 flex-1">
-              <span
-                className={`block text-[12px] font-semibold ${setup.degen ? 'text-amber-200' : 'text-zinc-300'}`}
-              >
-                Degen mode{setup.degen ? ' 💀' : ''}
-              </span>
-              <span className="mt-0.5 block text-[10px] leading-relaxed text-zinc-500">
-                The hook stops bragging and starts begging — &ldquo;homeless man trades on{' '}
-                {setup.person.trim().toLowerCase() || 'them'} (i need serious help)&rdquo; — and three BOOMs lay
-                themselves: <span className="text-zinc-400">fahh</span> when ChatGPT names them,{' '}
-                <span className="text-zinc-400">oh hell nah</span> when their page opens,{' '}
-                <span className="text-zinc-400">fahh</span> again when the trade goes in. Take any of them off on the
-                bar afterwards. Nothing else about the video changes.
-              </span>
-            </span>
-          </button>
-        </div>
-
-        {/* Generate, and what it is doing. The button becomes the progress: it
-            is the only thing on the page that is running, and a bar somewhere
-            else would only be somewhere else. */}
-        <div className="mt-8 border-t border-zinc-800 pt-4">
-          {job ? (
-            <div>
-              <div className="flex items-center gap-2 text-[11px] text-zinc-300">
-                <SpinnerIcon size={12} className="animate-spin" />
-                <span className="flex-1 truncate">Making both recordings</span>
-                <span className="font-mono text-zinc-500">{Math.round(jobProgress(job) * 100)}%</span>
-              </div>
-              <div className="mt-2 h-1.5 w-full overflow-hidden rounded-full bg-zinc-800">
-                <div className="h-full bg-white transition-[width]" style={{ width: `${jobProgress(job) * 100}%` }} />
-              </div>
-              {/* A line each: both are running, and this says which of the two
-                  the wait is actually on. */}
-              <div className="mt-2 space-y-1">
-                {([['chat', job.chat], ['trade', job.trade]] as const).map(([key, leg]) => (
-                  <div key={key} className="flex items-center gap-1.5 text-[10px]">
-                    <span className={`w-2 shrink-0 ${leg.done ? 'text-emerald-400' : 'text-zinc-600'}`}>
-                      {leg.done ? '✓' : '·'}
-                    </span>
-                    <span className={`min-w-0 flex-1 truncate ${leg.done ? 'text-zinc-600' : 'text-zinc-400'}`}>
-                      {leg.label}
-                    </span>
-                    {!leg.done && leg.frac != null && (
-                      <span className="shrink-0 font-mono text-zinc-600">{Math.round(leg.frac * 100)}%</span>
-                    )}
-                  </div>
                 ))}
               </div>
-              <button onClick={onCancel} className="mt-2 text-[10px] text-zinc-500 hover:text-red-400">Cancel</button>
-            </div>
-          ) : (
-            <>
-              <button
-                onClick={onGenerate}
-                disabled={!ready}
-                title={ready
-                  ? (hasBuild
-                    ? 'Make both recordings again and replace the video you have'
-                    : 'Make both recordings and open the tuning page')
-                  : 'Answer all five first'}
-                className={`${BTN_TEXT} w-full justify-center border-zinc-600 bg-white py-2 text-black hover:bg-zinc-200`}
-              >
-                Generate
-              </button>
-              <p className="mt-1.5 text-[10px] text-zinc-600">
-                A minute or so: ChatGPT answers while Pauv loads, and both recordings render together.
-                {hasBuild && ' The video you have now goes when this one lands.'}
-              </p>
+              {writeError && <p className="mt-1 text-[9px] text-red-400">Couldn’t write one: {writeError}</p>}
             </>
           )}
-          {jobError && <p className="mt-2 text-[11px] text-red-400">{jobError}</p>}
+
+          {/* Back and Next — the only way on: picking an answer stays put until
+              Next is pressed. The last question has Generate instead, below. */}
+          {!busy && (
+            <div className="mt-5 flex items-center gap-3">
+              {step > 0 && (
+                <button
+                  type="button"
+                  onClick={() => go(step - 1)}
+                  className="h-11 min-w-[110px] rounded-md border border-zinc-700 px-5 text-[14px] font-medium text-zinc-300 transition-colors hover:border-zinc-500 hover:text-white"
+                >
+                  ← Back
+                </button>
+              )}
+              <span className="flex-1" />
+              {step < LAST && (
+                <button
+                  type="button"
+                  onClick={next}
+                  disabled={!answered(current.id)}
+                  title={answered(current.id) ? undefined : current.id === 'who' ? 'Choose who first' : 'Choose a persona first'}
+                  className="h-11 min-w-[140px] rounded-md bg-white px-6 text-[14px] font-semibold text-black transition-colors hover:bg-zinc-200 disabled:opacity-30"
+                >
+                  Next →
+                </button>
+              )}
+            </div>
+          )}
         </div>
+
+        {/* Generate, and what it is doing — on the last question only. The
+            button becomes the progress: it is the only thing on the page that
+            is running, and a bar somewhere else would only be somewhere else. */}
+        {current.id === 'question' && (
+          <div className="mt-6 border-t border-zinc-800 pt-4">
+            {job ? (
+              <div>
+                <div className="flex items-center gap-2 text-[11px] text-zinc-300">
+                  <SpinnerIcon size={12} className="animate-spin" />
+                  <span className="flex-1 truncate">Making both recordings</span>
+                  <span className="font-mono text-zinc-500">{Math.round(jobProgress(job) * 100)}%</span>
+                </div>
+                <div className="mt-2 h-1.5 w-full overflow-hidden rounded-full bg-zinc-800">
+                  <div className="h-full bg-white transition-[width]" style={{ width: `${jobProgress(job) * 100}%` }} />
+                </div>
+                {/* A line each: both are running, and this says which of the two
+                    the wait is actually on. */}
+                <div className="mt-2 space-y-1">
+                  {([['chat', job.chat], ['trade', job.trade]] as const).map(([key, leg]) => (
+                    <div key={key} className="flex items-center gap-1.5 text-[10px]">
+                      <span className={`w-2 shrink-0 ${leg.done ? 'text-emerald-400' : 'text-zinc-600'}`}>
+                        {leg.done ? '✓' : '·'}
+                      </span>
+                      <span className={`min-w-0 flex-1 truncate ${leg.done ? 'text-zinc-600' : 'text-zinc-400'}`}>
+                        {leg.label}
+                      </span>
+                      {!leg.done && leg.frac != null && (
+                        <span className="shrink-0 font-mono text-zinc-600">{Math.round(leg.frac * 100)}%</span>
+                      )}
+                    </div>
+                  ))}
+                </div>
+                <button onClick={onCancel} className="mt-2 text-[10px] text-zinc-500 hover:text-red-400">Cancel</button>
+              </div>
+            ) : (
+              <>
+                <button
+                  onClick={onGenerate}
+                  disabled={!ready}
+                  title={ready
+                    ? (hasBuild
+                      ? 'Make both recordings again and replace the video you have'
+                      : 'Make both recordings and open the tuning page')
+                    : missing ? `${missing.label} still needs an answer` : undefined}
+                  className={`${BTN_TEXT} w-full justify-center border-zinc-600 bg-white py-2 text-black hover:bg-zinc-200`}
+                >
+                  Generate
+                </button>
+                <p className="mt-1.5 text-[10px] text-zinc-600">
+                  {missing && missing.id !== 'question' ? (
+                    <>
+                      <button onClick={() => go(STEPS.indexOf(missing))} className="text-zinc-400 underline decoration-zinc-700 hover:text-white">
+                        {missing.label}
+                      </button>{' '}
+                      still needs an answer.{' '}
+                    </>
+                  ) : null}
+                  A minute or so: ChatGPT answers while Pauv loads, and both recordings render together.
+                  {hasBuild && ' The video you have now goes when this one lands.'}
+                </p>
+              </>
+            )}
+            {jobError && <p className="mt-2 text-[11px] text-red-400">{jobError}</p>}
+          </div>
+        )}
       </div>
 
       {pickingPersona && (

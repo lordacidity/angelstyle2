@@ -47,12 +47,13 @@ export const renameFolder = (id: string, name: string) =>
 export const deleteFolder = (id: string) =>
   api<{ ok: true }>(`/folders/${id}`, { method: 'DELETE' });
 
-export const createPersona = (name: string, parts: PersonaParts = {}) =>
-  api<VidPersona>('/personas', { method: 'POST', body: JSON.stringify({ name, ...parts }) });
+/** `degen` has no default: making a persona means saying whether it is. */
+export const createPersona = (name: string, degen: boolean, parts: PersonaParts = {}) =>
+  api<VidPersona>('/personas', { method: 'POST', body: JSON.stringify({ name, degen, ...parts }) });
 
 /** Anything about a persona that can change on its own: a part, its name, its
- *  context, whether the clippers get it. */
-export type PersonaUpdate = PersonaParts & VidContextPatch & VidClipablePatch & { name?: string };
+ *  context, whether the clippers get it, whether it is degen. */
+export type PersonaUpdate = PersonaParts & VidContextPatch & VidClipablePatch & { name?: string; degen?: boolean };
 
 export const updatePersona = (id: string, patch: PersonaUpdate) =>
   api<VidPersona>(`/personas/${id}`, { method: 'PATCH', body: JSON.stringify(patch) });
