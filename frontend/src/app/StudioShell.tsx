@@ -46,6 +46,10 @@ const ChatGptSection = lazy(() =>
   import('./components/chatgpt/ChatGptSection').then(m => ({ default: m.ChatGptSection }))
 );
 
+const TradeSection = lazy(() =>
+  import('./components/trade/TradeSection').then(m => ({ default: m.TradeSection }))
+);
+
 const XPhotoSection = lazy(() =>
   import('./components/xphoto/XPhotoSection').then(m => ({ default: m.XPhotoSection }))
 );
@@ -245,6 +249,10 @@ export function StudioShell() {
   // chat in progress (or one already answered) survives a tab switch.
   const [chatgptEverVisited, setChatgptEverVisited] = useState(false);
   useEffect(() => { if (activeSection === 'chatgpt') setChatgptEverVisited(true); }, [activeSection]);
+
+  // Trade too: a render in progress, or a preview built, survives a tab switch.
+  const [tradeEverVisited, setTradeEverVisited] = useState(false);
+  useEffect(() => { if (activeSection === 'trade') setTradeEverVisited(true); }, [activeSection]);
 
   // Vids too: keep the builder's slot picks + the open folder alive across
   // tab switches once the section has been opened.
@@ -459,6 +467,16 @@ export function StudioShell() {
                   </Suspense>
                 </div>
               </div>
+            </ErrorBoundary>
+          </div>
+        )}
+
+        {tradeEverVisited && (
+          <div style={{ display: activeSection === 'trade' ? undefined : 'none' }}>
+            <ErrorBoundary>
+              <Suspense fallback={<SectionLoader />}>
+                <TradeSection active={activeSection === 'trade'} />
+              </Suspense>
             </ErrorBoundary>
           </div>
         )}

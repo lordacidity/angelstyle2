@@ -36,7 +36,7 @@ export async function GET() {
   try {
     const sb = getClient();
     // Each query needs a unique ordering, or rows can shift between pages.
-    const [profiles, markets] = await Promise.all([
+    const [profiles, markets, overview] = await Promise.all([
       fetchAll((from, to) => sb.from('profiles')
         .select('id,ticker,name,bio,photo_url,industry,info_subcategory,info_location,claim_status,created_at')
         .is('delisted_at', null)
@@ -47,17 +47,24 @@ export async function GET() {
         .select('profile_id,latest_price_cents,p0,holders_count,total_volume_lifetime_cents,latest_tick_at,frozen')
         .order('profile_id')
         .range(from, to)),
+      // The site's own change figures — the `market_overview()` RPC the
+      // homepage cards and /trade read — keyed by profile. The roster stands
+      // without them if the RPC is missing or slow.
+      fetchAll<OverviewRow>((from, to) => sb.rpc('market_overview').order('profile_id').range(from, to)).catch(() => [] as OverviewRow[]),
     ]);
 
     type ProfileRow = { id: string; ticker: string; name: string; bio: string | null; photo_url: string | null; industry: string | null; info_subcategory: string | null; info_location: string | null; claim_status: string | null; created_at: string | null };
+    type OverviewRow = { profile_id: string; change_1h: number | null; change_1d: number | null; change_1w: number | null; change_1m: number | null; change_lifetime?: number | null };
     type MarketRow = { profile_id: string; latest_price_cents: number | null; p0: number | null; holders_count: number | null; total_volume_lifetime_cents: number | null; latest_tick_at: string | null; frozen: boolean | null };
 
     const byProfile = new Map<string, MarketRow>(
       ((markets ?? []) as MarketRow[]).map((m) => [m.profile_id, m]),
     );
+    const overviewByProfile = new Map<string, OverviewRow>(overview.map((o) => [o.profile_id, o]));
 
     const talents = ((profiles ?? []) as ProfileRow[]).map((p) => {
       const m = byProfile.get(p.id) ?? null;
+      const o = overviewByProfile.get(p.id) ?? null;
       const cents = m?.latest_price_cents ?? null;
       const p0 = m?.p0 ?? null;
       return {
@@ -81,6 +88,13 @@ export async function GET() {
           volumeLifetimeUsd: m?.total_volume_lifetime_cents != null ? m.total_volume_lifetime_cents / 100 : null,
           latestTickAt: m?.latest_tick_at ?? null,
           frozen: m?.frozen ?? false,
+          // The changes as pauv.com shows them (market_overview(), in percent);
+          // null when the RPC gave nothing for this market.
+          change1hPct: o?.change_1h ?? null,
+          change1dPct: o?.change_1d ?? null,
+          change1wPct: o?.change_1w ?? null,
+          change1mPct: o?.change_1m ?? null,
+          changeLifetimePct: o?.change_lifetime ?? null,
         },
       };
     });

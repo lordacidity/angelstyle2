@@ -26,6 +26,7 @@
 
 import type { AudioCodec } from 'mediabunny';
 import { safeExportName } from '@/lib/canvasVideoExport';
+import { mixClicks, type ClickEvent } from '@/lib/clipSfx';
 import { decodeAudio, scheduleLoop, SFX_URL } from '@/lib/vidsAudio';
 import { DEFAULT_SFX_GAIN } from '@/lib/vidsEdit';
 import { askChatGpt, buildBlocks, totalLen, type Block, type Direction, type Reply } from './reply';
@@ -259,7 +260,7 @@ function mulberry32(seed: number) {
 }
 
 // ── The clip: everything precomputed once, then draw(t) per frame ───────────
-interface Clip { draw: (t: number) => void; typing: Stretch; seconds: number; beats: ClipBeats }
+interface Clip { draw: (t: number) => void; typing: Stretch; seconds: number; beats: ClipBeats; clicks: ClickEvent[] }
 function createClip(ctx: Ctx, o: RenderOptions): Clip {
   const W = VIDEO_W;
   const H = VIDEO_H;
@@ -288,6 +289,13 @@ function createClip(ctx: Ctx, o: RenderOptions): Clip {
   const T_NAME_LOOP: [number, number] = [T_PULSED + 0.05, T_PULSED + 0.55];
   // Straight out of the last lap and off the top in a whip: three frames.
   const T_EXIT: [number, number] = [T_NAME_LOOP[1], T_NAME_LOOP[1] + 0.1];
+  // What the mouse does: a click into the composer, then the drag across the
+  // name — pressed as it sets off, let go where it stops.
+  const clicks: ClickEvent[] = [
+    { t: T_CLICK, kind: 'full' },
+    { t: T_DRAG[0], kind: 'press' },
+    { t: T_DRAG[1], kind: 'release' },
+  ];
   // About CLIP_SECONDS: never less, a little more when the script needs it,
   // with a beat on the finished answer at the end. Whole frames.
   const seconds = Math.max(CLIP_SECONDS, Math.ceil((Math.max(T_STREAMED, T_EXIT[1]) + 0.7) * FPS) / FPS);
@@ -715,20 +723,24 @@ function createClip(ctx: Ctx, o: RenderOptions): Clip {
     const c = cursorAt(t);
     drawCursor(ctx, c.x, c.y);
   };
-  return { draw, typing: { start: T_TYPE, end: T_TYPED }, seconds, beats };
+  return { draw, typing: { start: T_TYPE, end: T_TYPED }, seconds, beats, clicks };
 }
 
 // The keyboard under the typing: the app's own sample, laid across the typing
 // stretch the way Vids lays it over a clip (same helpers, same gain), mixed
 // offline into a bed the length of the clip. Which second of the sample it
 // opens on follows the question, so the same inputs still give the same file.
-async function keyboardBed(question: string, typing: { start: number; end: number }, seconds: number): Promise<AudioBuffer> {
+async function soundBed(question: string, typing: { start: number; end: number }, clicks: readonly ClickEvent[], seconds: number): Promise<AudioBuffer> {
   const octx = new OfflineAudioContext(2, Math.ceil(seconds * SAMPLE_RATE), SAMPLE_RATE);
   const sample = await decodeAudio(octx, SFX_URL);
   const span = { start: typing.start, end: typing.end + 0.12 };
   const from = mulberry32(hashStr(question) ^ 0x9e3779b9)() * Math.max(0, sample.duration - (span.end - span.start) - 0.5);
   scheduleLoop(octx, sample, span, DEFAULT_SFX_GAIN, { from });
-  return octx.startRendering();
+  const bed = await octx.startRendering();
+  // The mouse over the keyboard, from the same synth the trade clip uses, so
+  // a Bottom A and a Bottom B sound like one recording (lib/clipSfx).
+  mixClicks(bed, clicks, hashStr(question));
+  return bed;
 }
 
 // ── Render + encode ─────────────────────────────────────────────────────────
@@ -740,7 +752,7 @@ export async function renderChatVideo(o: RenderOptions): Promise<RenderResult> {
   canvas.height = VIDEO_H;
   const ctx = canvas.getContext('2d', { alpha: false });
   if (!ctx) throw new Error('Canvas 2D is unavailable.');
-  const { draw, typing, seconds, beats } = createClip(ctx, o);
+  const { draw, typing, seconds, beats, clicks } = createClip(ctx, o);
   const frames = Math.round(seconds * FPS);
 
   // H.264 in an MP4 wherever the browser can encode it (Chrome and Edge on a
@@ -749,13 +761,13 @@ export async function renderChatVideo(o: RenderOptions): Promise<RenderResult> {
   if (!codec) throw new Error('No video encoder is available in this browser.');
   const mp4 = codec === 'avc';
 
-  // The keyboard track. Skipped, not fatal, if the sound can't be mixed or
-  // encoded here: the clip still goes out, silent.
+  // The keyboard and mouse track. Skipped, not fatal, if the sound can't be
+  // mixed or encoded here: the clip still goes out, silent.
   const wanted: AudioCodec[] = mp4 ? ['aac'] : ['opus'];
   const audioCodec = await mb.getFirstEncodableAudioCodec(wanted, { numberOfChannels: 2, sampleRate: SAMPLE_RATE });
   let bed: AudioBuffer | null = null;
   if (audioCodec) {
-    try { bed = await keyboardBed(o.question, typing, seconds); } catch (err) { console.error('[chatgpt video] keyboard sound skipped:', err); }
+    try { bed = await soundBed(o.question, typing, clicks, seconds); } catch (err) { console.error('[chatgpt video] sound skipped:', err); }
   }
 
   const output = new mb.Output({

@@ -107,6 +107,17 @@ const NAV: { id: AppSection; label: string; icon: React.ReactNode }[] = [
     ),
   },
   {
+    id: 'trade',
+    label: 'Trade',
+    // Rising line — the Pauv trade recording: search them, read the chart, place the trade.
+    icon: (
+      <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+        <path d="M3 17l6-6 4 4 8-8"/>
+        <path d="M15 7h6v6"/>
+      </svg>
+    ),
+  },
+  {
     id: 'pricer',
     label: 'Pricer',
     // Price tag — the AI Pricer: type a name, six steps price them against the master list.
