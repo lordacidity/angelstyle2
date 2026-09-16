@@ -115,6 +115,7 @@ Joe Keery,Film and TV,Actors,22.00,23.03,-1.03
 Michael Cera,Film and TV,Actors,22.00,24.73,-2.73
 Nicholas Hoult,Film and TV,Actors,22.00,22.76,-0.76
 Walton Goggins,Film and TV,Actors,22.00,24.12,-2.12
+Matthew Rhys,Film and TV,Actors,20.43,20.43,+0.00
 Adam Scott,Film and TV,Actors,20.00,26.83,-6.83
 Chiwetel Ejiofor,Film and TV,Actors,16.00,16.11,-0.11
 Harris Dickinson,Film and TV,Actors,16.00,17.43,-1.43
@@ -333,6 +334,7 @@ Shawn Mendes,Music,Pop,30.00,39.87,-9.87
 Tate McRae,Music,Pop,27.00,30.77,-3.77
 Benson Boone,Music,Pop,26.00,10.97,+15.03
 Chris Martin,Music,Pop,26.00,26.75,-0.75
+Macklemore,Music,Pop,24.29,24.29,+0.00
 Teddy Swims,Music,Pop,22.00,11.47,+10.53
 Tyla,Music,Pop,22.00,25.76,-3.76
 Kacey Musgraves,Music,Pop,20.00,7.39,+12.61
@@ -404,6 +406,7 @@ Yeat,Music,Rap,20.00,32.10,-12.10
 Don Toliver,Music,Rap,18.00,18.37,-0.37
 Jaden Smith,Music,Rap,18.00,12.97,+5.03
 Kodak Black,Music,Rap,18.00,8.01,+9.99
+lil durk,Music,Rap,17.23,17.23,+0.00
 JID,Music,Rap,16.00,19.55,-3.55
 Ken Carson,Music,Rap,16.00,27.37,-11.37
 Pusha T,Music,Rap,16.00,16.86,-0.86
@@ -467,10 +470,12 @@ Bill Clinton,Politics,Politicians,34.00,36.17,-2.17
 Kim Jong Un,Politics,Politicians,32.00,26.44,+5.56
 Benjamin Netanyahu,Politics,Politicians,30.00,22.65,+7.35
 Justin Trudeau,Politics,Politicians,30.00,32.16,-2.16
+Pete Hegseth,Politics,Politicians,28.34,28.34,+0.00
 RFK Jr.,Politics,Politicians,28.00,17.65,+10.35
 Javier Milei,Politics,Politicians,24.00,27.27,-3.27
 Keir Starmer,Politics,Politicians,24.00,28.47,-4.47
 Mark Carney,Politics,Politicians,24.00,32.17,-8.17
+Kash Patel,Politics,Politicians,23.89,23.89,+0.00
 Ted Cruz,Politics,Politicians,22.00,15.27,+6.73
 Zohran Mamdani,Politics,Politicians,22.00,14.61,+7.39
 Pete Buttigieg,Politics,Politicians,20.00,16.57,+3.43
@@ -559,6 +564,7 @@ Garrett Wilson,Sports,American Football,14.00,15.75,-1.75
 Jaxson Dart,Sports,American Football,14.00,10.39,+3.61
 Marvin Harrison Jr,Sports,American Football,14.00,11.92,+2.08
 Patrick Surtain II,Sports,American Football,14.00,17.89,-3.89
+Kyle Pitts,Sports,American Football,13.29,13.29,+0.00
 Bryce Underwood,Sports,American Football,12.00,2.98,+9.02
 Jeremiyah Love,Sports,American Football,12.00,10.97,+1.03
 Kenneth Walker III,Sports,American Football,12.00,18.73,-6.73
@@ -577,15 +583,57 @@ Caleb Downs,Sports,American Football,8.00,9.53,-1.53
 Carnell Tate,Sports,American Football,8.00,4.13,+3.87
 Chris Henry Jr.,Sports,American Football,8.00,0.09,+7.91
 Dante Moore,Sports,American Football,8.00,2.50,+5.50
+Nico Iamaleava,Sports,American Football,7.15,7.15,+0.00
+Dylan Raiola,Sports,American Football,6.13,6.13,+0.00
 Darian Mensah,Sports,American Football,6.00,3.22,+2.78
 Jayden Maiava,Sports,American Football,6.00,1.12,+4.88
 Keelon Russell,Sports,American Football,6.00,0.86,+5.14
 Makai Lemon,Sports,American Football,6.00,3.98,+2.02
 Sam Leavitt,Sports,American Football,6.00,0.93,+5.07
+Julian Lewis,Sports,American Football,5.78,5.78,+0.00
+DJ Lagway,Sports,American Football,5.43,5.43,+0.00
+Bo Jackson,Sports,American Football,5.12,5.12,+0.00
 Ahmad Hardy,Sports,American Football,5.00,0.08,+4.92
 Collin Simmons,Sports,American Football,5.00,0.15,+4.85
 Kewan Lacy,Sports,American Football,5.00,1.59,+3.41
 Trinidad Chambliss,Sports,American Football,5.00,0.14,+4.86
+Cam Coleman,Sports,American Football,4.98,4.98,+0.00
+Zachariah Branch,Sports,American Football,4.89,4.89,+0.00
+Bear Bachmeier,Sports,American Football,4.64,4.64,+0.00
+Marcel Reed,Sports,American Football,4.57,4.57,+0.00
+Dakorien Moore,Sports,American Football,4.51,4.51,+0.00
+Gunner Stockton,Sports,American Football,4.32,4.32,+0.00
+Josh Hoover,Sports,American Football,4.18,4.18,+0.00
+Jared Curtis,Sports,American Football,3.98,3.98,+0.00
+Drew Mestemaker,Sports,American Football,3.92,3.92,+0.00
+Trent Mosley,Sports,American Football,3.87,3.87,+0.00
+Ryan Wingo,Sports,American Football,3.78,3.78,+0.00
+Faizon Brandon,Sports,American Football,3.69,3.69,+0.00
+Demond Williams Jr.,Sports,American Football,3.67,3.67,+0.00
+Savion Hiter,Sports,American Football,3.54,3.54,+0.00
+Dylan Stewart,Sports,American Football,3.46,3.46,+0.00
+Nyck Harbor,Sports,American Football,3.43,3.43,+0.00
+Leonard Moore,Sports,American Football,3.39,3.39,+0.00
+Hollywood Smothers,Sports,American Football,3.31,3.31,+0.00
+Jackson Cantwell,Sports,American Football,3.29,3.29,+0.00
+Avery Johnson,Sports,American Football,3.23,3.23,+0.00
+King Miller,Sports,American Football,3.19,3.19,+0.00
+Byrum Brown,Sports,American Football,3.17,3.17,+0.00
+Luke Wafle,Sports,American Football,3.12,3.12,+0.00
+Devon Dampier,Sports,American Football,3.08,3.08,+0.00
+Jadan Baugh,Sports,American Football,2.97,2.97,+0.00
+Kayden Dixon-Wyatt,Sports,American Football,2.92,2.92,+0.00
+Nate Frazier,Sports,American Football,2.89,2.89,+0.00
+Caden Durham,Sports,American Football,2.87,2.87,+0.00
+Jordan Marshall,Sports,American Football,2.85,2.85,+0.00
+Mark Bowman,Sports,American Football,2.83,2.83,+0.00
+Jesse Legree,Sports,American Football,2.81,2.81,+0.00
+Jaron-Keawe Sagapolutele,Sports,American Football,2.78,2.78,+0.00
+Tavien St. Clair,Sports,American Football,2.76,2.76,+0.00
+Andrew Marsh,Sports,American Football,2.63,2.63,+0.00
+Malik Washington,Sports,American Football,2.59,2.59,+0.00
+Zion Elee,Sports,American Football,2.54,2.54,+0.00
+Suntarine Perkins,Sports,American Football,2.42,2.42,+0.00
 Shohei Ohtani,Sports,Baseball,44.00,45.93,-1.93
 Aaron Judge,Sports,Baseball,34.00,34.52,-0.52
 Derek Jeter,Sports,Baseball,34.00,31.98,+2.02
@@ -634,6 +682,7 @@ Cristopher Sánchez,Sports,Baseball,6.00,8.31,-2.31
 Jordan Walker,Sports,Baseball,5.00,6.21,-1.21
 JJ Wetherholt,Sports,Baseball,4.00,6.39,-2.39
 Kevin McGonigle,Sports,Baseball,4.00,6.92,-2.92
+Mitch Voit,Sports,Baseball,3.40,3.40,+0.00
 Otto Lopez,Sports,Baseball,3.00,5.21,-2.21
 LeBron James,Sports,Basketball,58.00,56.07,+1.93
 Michael Jordan,Sports,Basketball,52.00,45.87,+6.13
@@ -914,6 +963,7 @@ Jhon Durán,Sports,Football (Soccer),6.00,4.94,+1.06
 Manuel Akanji,Sports,Football (Soccer),6.00,9.59,-3.59
 Mikel Merino,Sports,Football (Soccer),6.00,10.00,-4.00
 Thomas Partey,Sports,Football (Soccer),6.00,10.17,-4.17
+Shea Lacey,Sports,Football (Soccer),5.21,5.21,+0.00
 Abdukodir Khusanov,Sports,Football (Soccer),5.00,1.79,+3.21
 Chris Wood,Sports,Football (Soccer),5.00,8.15,-3.15
 Kendry Páez,Sports,Football (Soccer),5.00,3.58,+1.42
@@ -935,8 +985,27 @@ Mat Ryan,Sports,Football (Soccer),3.00,7.15,-4.15
 Musa Al-Taamari,Sports,Football (Soccer),3.00,2.54,+0.46
 Percy Tau,Sports,Football (Soccer),3.00,6.17,-3.17
 Tiger Woods,Sports,Golf,45.00,46.17,-1.17
+Rory McIlroy,Sports,Golf,33.89,33.89,+0.00
+Scottie Scheffler,Sports,Golf,32.67,32.67,+0.00
+Phil Mickelson,Sports,Golf,30.89,30.89,+0.00
 Bryson DeChambeau,Sports,Golf,22.00,9.18,+12.82
+John Daly,Sports,Golf,20.32,20.32,+0.00
+Jordan Spieth,Sports,Golf,19.21,19.21,+0.00
+Jon Rahm,Sports,Golf,18.97,18.97,+0.00
+Nelly Korda,Sports,Golf,18.12,18.12,+0.00
+Xander Schauffele,Sports,Golf,16.98,16.98,+0.00
+Sergio García,Sports,Golf,16.42,16.42,+0.00
+Dustin Johnson,Sports,Golf,16.13,16.13,+0.00
+Justin Thomas,Sports,Golf,15.63,15.63,+0.00
+Brooks Koepka,Sports,Golf,15.45,15.45,+0.00
+Collin Morikawa,Sports,Golf,15.43,15.43,+0.00
+Rickie Fowler,Sports,Golf,14.79,14.79,+0.00
+Viktor Hovland,Sports,Golf,14.78,14.78,+0.00
+Ludvig Åberg,Sports,Golf,12.73,12.73,+0.00
+Charley Hull,Sports,Golf,11.82,11.82,+0.00
+Cameron Young,Sports,Golf,9.34,9.34,+0.00
 Grant Horvat,Sports,Golf,8.00,0.95,+7.05
+Jackson Koivun,Sports,Golf,5.98,5.98,+0.00
 Simone Biles,Sports,Gymnastics,38.00,30.77,+7.23
 Sidney Crosby,Sports,Hockey,28.00,27.37,+0.63
 Connor McDavid,Sports,Hockey,26.00,27.57,-1.57
@@ -995,6 +1064,7 @@ Petr Yan,Sports,Martial Arts,8.00,12.98,-4.98
 Umar Nurmagomedov,Sports,Martial Arts,8.00,9.12,-1.12
 Joshua Van,Sports,Martial Arts,6.00,11.78,-5.78
 Song Yadong,Sports,Martial Arts,6.00,9.89,-3.89
+Tommy Mcmillen,Sports,Martial Arts,5.60,5.60,+0.00
 Movsar Evloev,Sports,Martial Arts,5.00,8.21,-3.21
 Lewis Hamilton,Sports,Racing,44.00,43.97,+0.03
 Max Verstappen,Sports,Racing,40.00,21.37,+18.63
