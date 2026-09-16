@@ -142,3 +142,37 @@ input[type='range']::-moz-range-progress {
 .vids-scroll::-webkit-scrollbar-corner {
   background: transparent;
 }
+
+/* Simpler — the stripped-down Vids builder (components/simpler) — and Vids 2,
+   which is the same builder with the deciding taken out (components/vids2).
+   Their transport scrub bar is a band wide enough to hit without aiming,
+   rather than the hairline every other slider is. Scoped to these two roots
+   rather than left loose on the attribute, because Vids marks its own scrub
+   bar the same way and is meant to look exactly as it did. */
+.simpler-root input[type='range'][data-vids-scrub],
+.vids2-root input[type='range'][data-vids-scrub] {
+  height: 14px;
+  border-radius: 7px;
+}
+.simpler-root input[type='range'][data-vids-scrub]::-webkit-slider-thumb,
+.vids2-root input[type='range'][data-vids-scrub]::-webkit-slider-thumb {
+  width: 14px;
+  height: 14px;
+}
+.simpler-root input[type='range'][data-vids-scrub]::-moz-range-thumb,
+.vids2-root input[type='range'][data-vids-scrub]::-moz-range-thumb {
+  width: 14px;
+  height: 14px;
+}
+
+/* Scrolls, but draws no bar. The left sidebar uses it: there are more tools
+   than fit a short window now, and a 72px rail has no room for a scrollbar —
+   on Windows the browser's own is a wide white slab against an all-black
+   page. Wheel, trackpad, touch and keyboard all still scroll it. */
+.no-scrollbar {
+  scrollbar-width: none;        /* Firefox */
+  -ms-overflow-style: none;     /* old Edge */
+}
+.no-scrollbar::-webkit-scrollbar {
+  display: none;                /* Chrome, Safari */
+}

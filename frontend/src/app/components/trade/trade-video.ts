@@ -3,6 +3,18 @@
 // fixed timeline, then WebCodecs (via mediabunny) into an H.264 MP4. Same
 // inputs, same file, every time.
 //
+// ── This file is the source of truth for the trade recording ────────────────
+// Studio > Trade renders one today, and it is the only caller. When the Vids
+// and Simpler builders come to lay one in as a Bottom B, they render it from
+// here too rather than taking a copy — the way all three already share
+// chatgpt-video.ts. A change here is then a change to every one of them, which
+// is the point.
+//
+// So the same rule holds as for chatgpt-video.ts: this file may NOT import
+// from a caller's namespace — nothing from components/vids, components/simpler
+// or lib/simpler — and what each caller does with the finished file (download
+// it, file it, keep it in the tab) belongs to that caller, not in here.
+//
 // What is real, from Pauv (the MAIN Supabase project): the person's name,
 // bio, photo, current price, holders, lifetime volume and the changes the
 // site shows (1H/1D/1W/1M, /api/ai/talents), which way their price has gone

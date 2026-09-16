@@ -18,3 +18,11 @@ export function fmtTime(s: number): string {
 export function bestVideoUrl(data: { play?: string; hdplay?: string; wmplay?: string }): string {
   return proxyStreamUrl(data.play || data.hdplay || data.wmplay || '');
 }
+
+/** Strip characters Windows can't put in a filename, for a download name.
+ *  Used by Simpler (components/simpler). The Charts/Vids export path has its
+ *  own copy in lib/canvasVideoExport with a different fallback name; they are
+ *  kept apart so a change to one export's naming can't rename the other's. */
+export function safeExportName(raw: string) {
+  return raw.replace(/[<>:"/\\|?*]/g, '').replace(/\s+/g, ' ').trim().slice(0, 70).replace(/[. ]+$/g, '').trim() || 'vid';
+}

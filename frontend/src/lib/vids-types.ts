@@ -411,6 +411,11 @@ export interface RecipePick {
   transform: { zoom: number; dx: number; dy: number };
   trim: { start: number; end: number | null };
   speed: number;
+  /** Bottom B sitting dead centre rather than nudged left — see SlotPick.centred
+   *  in lib/simpler/vidsPlan. Only a Vids 2 build writes it, and only Simpler's
+   *  side of the restore reads it; a record without it is nudged, which is what
+   *  every build before it was. */
+  centred?: boolean;
 }
 
 export interface RecipeCaptionLine {
@@ -440,8 +445,25 @@ export interface VidBuildSpec {
    *  they were exported with. */
   music?: { url: string | null; label: string; level: number };
   clipLevel: number;
+  /** How loud the BOOMs landed. Simpler lays them; Vids has none, so its
+   *  records leave this out. */
+  boomLevel?: number;
   /** Output preset id — '9:16', '1:1', '4:5', '16:9'. */
   preset: string;
+  /** Every BOOM laid over the top of the whole frame, and the timeline second
+   *  each landed on, in the order they were laid. Absent on a build that had
+   *  none — and on everything written down before there was one to lay. */
+  booms?: {
+    videoId: string; videoName: string; at: number;
+    /** The bang it was laid with, absent on a silent one. */
+    sound?: { url: string; label: string };
+    /** False when it was laid for its noise alone and nothing was drawn — see
+     *  BoomInsert.picture in lib/simpler/vidsPlan. Absent is the ordinary kind. */
+    picture?: boolean;
+  }[];
+  /** What a record written while only one BOOM was allowed called it. Still
+   *  read, so those records still say what they said. */
+  boom?: { videoId: string; videoName: string; at: number };
   captions: {
     lines: {
       start: RecipeCaptionLine;
@@ -451,6 +473,11 @@ export interface VidBuildSpec {
       end: RecipeCaptionLine;
     };
     styleId: string;
+    /** How big they were drawn, as a multiple of the look's own size (see
+     *  scaleCaptionStyle in lib/simpler/vidsCaptions). Absent on records
+     *  written before the size could be moved, and on every Vids record —
+     *  those were all drawn at the look's own size, which is 1. */
+    size?: number;
     notes: string;
     emojis: boolean;
   };

@@ -139,6 +139,12 @@ export interface CaptionRequest {
    *  (lib/vidsCaptions seamNeedsMerge), so the writer puts one line across
    *  both: A's last entry carries it, B's first is left ''. */
   mergeSeam: boolean;
+  /** Degen mode — Vids 2's form, and nothing else asks for it. ONE line moves:
+   *  the hook, written to DEGEN_HOOK instead of HOOK (api/vids/captions) — no
+   *  money in it, a name he calls himself, and a cry for help in brackets. The
+   *  step-by-step lines and the closing word are written exactly as ever.
+   *  Left out means off. */
+  degen?: boolean;
 }
 
 /** The written lines. A marked clip's array lines up with its marks by index;
@@ -155,6 +161,24 @@ export interface CaptionDraft {
 
 export const writeCaptions = (input: CaptionRequest) =>
   api<CaptionDraft>('/captions', { method: 'POST', body: JSON.stringify(input) });
+
+// ── The question ──────────────────────────────────────────────────────────────
+
+/** Which of the two the Bottom card asked for: a question ChatGPT naming them
+ *  makes a provocation, or one they would plainly come up in. */
+export type QuestionKind = 'ragebait' | 'factual';
+
+/** A question to ask the ChatGPT lookalike about this person, written by the
+ *  model — one line, lower case, and never naming them. What the Bottom card's
+ *  two buttons fill the box with. Which way the video trades is no part of it:
+ *  the question is about the person, the direction is what the lookalike
+ *  argues afterwards.
+ *
+ *  Only Simpler's Bottom card asks for one today; Vids writes its own. */
+export const writeQuestion = (
+  input: { person: string; kind: QuestionKind },
+  signal?: AbortSignal,
+) => api<{ question: string }>('/question', { method: 'POST', body: JSON.stringify(input), signal });
 
 // ── Post caption ──────────────────────────────────────────────────────────────
 

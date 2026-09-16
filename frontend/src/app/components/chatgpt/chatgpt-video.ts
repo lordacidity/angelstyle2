@@ -1,9 +1,33 @@
 // The ChatGPT lookalike's "screen recording", rendered here in the browser
 // instead of captured off the screen. Every frame is drawn on a 1000×750
-// canvas from the same numbers as ChatGpt.module.css, a pointer is drawn on
-// top, and the frames go through WebCodecs (via mediabunny) into an H.264 MP4.
-// Nothing depends on how fast the machine draws: the same inputs give the same
-// file every time.
+// screen from the same numbers as ChatGpt.module.css — laid down at twice that
+// size (RENDER_SCALE), the way a retina display would, so the text is still
+// crisp once the build shrinks it into the bottom half — a pointer is drawn
+// on top, and the frames go through WebCodecs (via mediabunny) into an H.264
+// MP4. Nothing depends on how fast the machine draws: the same inputs give the
+// same file every time.
+//
+// ── This file is the source of truth for the recording ──────────────────────
+// Three places render one, and all three render it from here:
+//   Studio > ChatGPT      ChatGptSection, which downloads the file
+//   Studio > Vids         the Bottom card, which files it under Bottom A
+//   Studio > Simpler      the Bottom card, which keeps it in the tab instead
+//                         (lib/simpler/vidsLocal) and lets it go afterwards
+// So a change here is a change to all three, which is the point: there is no
+// second copy to keep in step. What each one does with the finished file is
+// its own business and lives in that caller, not in here.
+//
+// Which means this file may NOT import from a caller's namespace — nothing
+// from components/vids, components/simpler or lib/simpler. Pointing a fourth
+// thing at it must never drag one caller's fork into another's video.
+//
+// One seam is left, and it is worth knowing about: the six helpers below come
+// from lib/vidsAudio, lib/vidsEdit and lib/vidsPlan (decodeAudio, scheduleLoop,
+// SFX_URL, DEFAULT_SFX_GAIN, videoBitrate, smoothScaling). Those files are
+// Vids' side of the Vids/Simpler split, so editing one of those six there does
+// reach this renderer, and through it all three callers. They are identical in
+// lib/simpler today and generic enough that this has never bitten; if it ever
+// does, lift just those six into a neutral module and point this at that.
 //
 // The script, on a clock of about 8s (never less; a long question stretches
 // it a little):
@@ -25,20 +49,60 @@
 // the way a hand-cut recording is, and captions land on the moment.
 
 import type { AudioCodec } from 'mediabunny';
-import { safeExportName } from '@/lib/canvasVideoExport';
-import { mixClicks, type ClickEvent } from '@/lib/clipSfx';
+import { safeExportName } from '@/lib/utils';
 import { decodeAudio, scheduleLoop, SFX_URL } from '@/lib/vidsAudio';
 import { DEFAULT_SFX_GAIN } from '@/lib/vidsEdit';
+import { smoothScaling, videoBitrate } from '@/lib/vidsPlan';
 import { askChatGpt, buildBlocks, totalLen, type Block, type Direction, type Reply } from './reply';
 
+/** The screen, in CSS px: every number in `m` below is on this grid. */
 export const VIDEO_W = 1000;
 export const VIDEO_H = 750;
+/** Device pixels per CSS px in the file — the file is VIDEO_W × RENDER_SCALE
+ *  wide. The build draws the recording into a region about the screen's own
+ *  size, so at 1 the 19px text went out at 19px and then through two H.264
+ *  passes, which is what read as pixelated. At 2 it is drawn at the resolution
+ *  of a good laptop screen and shrunk on the way into the build — the
+ *  compression sits at half the size, and the letters keep their edges. */
+export const RENDER_SCALE = 2;
+/** The size of the file that actually comes out — what to show anyone who is
+ *  told what they are about to get. VIDEO_W/VIDEO_H are the CSS grid the
+ *  drawing is laid out on, which is not the same number any more. */
+export const FILE_W = VIDEO_W * RENDER_SCALE;
+export const FILE_H = VIDEO_H * RENDER_SCALE;
 /** What a clip runs to, at least: the script is timed to land about here, and
  *  only a long question pushes past it. */
 export const CLIP_SECONDS = 8;
 const FPS = 30;
 const MAX_ZOOM = 1.9;
 const SAMPLE_RATE = 44100;
+/** The poster's width — the card it is on is a few dozen px tall. */
+const POSTER_W = 480;
+
+/** The typing rhythm, in shares of the typing stretch rather than seconds:
+ *  they are normalised to typeDur, so only their ratios to each other matter.
+ *  A run is a few characters typed at one rate; between runs sits a pause. The
+ *  distance between a fast character and a long pause is the whole effect —
+ *  set them close together and the question appears all at once however the
+ *  delays are shuffled. */
+const TYPE_RHYTHM = {
+  /** Characters in one run, from this many to this many. */
+  run: [2, 7],
+  /** Per character, ripping through — several land on the same frame. */
+  fast: [0.15, 0.30],
+  /** Per character, labouring — about one frame each. */
+  slow: [0.90, 1.60],
+  /** How much of the time a run is a fast one. */
+  fastShare: 0.55,
+  /** The stop between two runs: usually a catch of breath… */
+  catch: [1.8, 3.2],
+  /** …and now and then a proper think, which is the one you really see. */
+  think: [5, 9],
+  /** How often that stop is a think rather than a catch. */
+  thinkShare: 0.3,
+  /** On top of whatever else, after a comma or a full stop. */
+  punctuation: 4,
+} as const;
 
 export interface RenderOptions {
   name: string;
@@ -56,7 +120,19 @@ export interface Stretch { start: number; end: number }
  *  and the pick — the name dragged, the zoom, the laps — to the end. They
  *  abut, and together cover the whole clip. */
 export interface ClipBeats { typing: Stretch; loading: Stretch; choosing: Stretch }
-export interface RenderResult { blob: Blob; filename: string; beats: ClipBeats }
+export interface RenderResult {
+  blob: Blob;
+  filename: string;
+  beats: ClipBeats;
+  /** How long the file runs, in seconds — whole frames. */
+  seconds: number;
+  /** The file's size in pixels (the screen times RENDER_SCALE). */
+  width: number;
+  height: number;
+  /** A frame out of the middle of the clip as a JPEG, for wherever the clip
+   *  is shown as a card. Null if the browser wouldn't give one. */
+  poster: Blob | null;
+}
 
 // ── Stylesheet numbers (ChatGpt.module.css, base rules: the stage is wider
 // than its narrow-stage breakpoint) ──────────────────────────────────────────
@@ -260,14 +336,18 @@ function mulberry32(seed: number) {
 }
 
 // ── The clip: everything precomputed once, then draw(t) per frame ───────────
-interface Clip { draw: (t: number) => void; typing: Stretch; seconds: number; beats: ClipBeats; clicks: ClickEvent[] }
+interface Clip { draw: (t: number) => void; typing: Stretch; seconds: number; beats: ClipBeats }
 function createClip(ctx: Ctx, o: RenderOptions): Clip {
   const W = VIDEO_W;
   const H = VIDEO_H;
   const question = o.question.trim();
 
   // ── Timeline ──────────────────────────────────────────────────────────────
-  const typeDur = clamp(question.length * 0.029, 0.65, 3.0);
+  // Long enough for the rhythm to show. At 30fps a question typed in much
+  // under two seconds is a character or more on every single frame from start
+  // to finish, and no shuffling of the delays can read as anything but all at
+  // once — there are no frames spare to put a pause in. See TYPE_RHYTHM.
+  const typeDur = clamp(question.length * 0.045, 1.1, 3.4);
   const T_CLICK = 0.3;
   // A beat after the click before the first key lands.
   const T_TYPE = T_CLICK + 0.5;
@@ -289,13 +369,6 @@ function createClip(ctx: Ctx, o: RenderOptions): Clip {
   const T_NAME_LOOP: [number, number] = [T_PULSED + 0.05, T_PULSED + 0.55];
   // Straight out of the last lap and off the top in a whip: three frames.
   const T_EXIT: [number, number] = [T_NAME_LOOP[1], T_NAME_LOOP[1] + 0.1];
-  // What the mouse does: a click into the composer, then the drag across the
-  // name — pressed as it sets off, let go where it stops.
-  const clicks: ClickEvent[] = [
-    { t: T_CLICK, kind: 'full' },
-    { t: T_DRAG[0], kind: 'press' },
-    { t: T_DRAG[1], kind: 'release' },
-  ];
   // About CLIP_SECONDS: never less, a little more when the script needs it,
   // with a beat on the finished answer at the end. Whole frames.
   const seconds = Math.max(CLIP_SECONDS, Math.ceil((Math.max(T_STREAMED, T_EXIT[1]) + 0.7) * FPS) / FPS);
@@ -306,13 +379,40 @@ function createClip(ctx: Ctx, o: RenderOptions): Clip {
     choosing: { start: T_HALF, end: seconds },
   };
 
-  // When each typed character lands: a human rhythm (slower after a space,
-  // a real pause after punctuation), scaled to fit typeDur.
+  // When each typed character lands. Typing is runs and stops, not a rate:
+  // three or four characters go down together, then nothing for a beat, then a
+  // slower stretch, then nothing again. Jitter per key cannot produce that, and
+  // neither can a tempo that drifts — both average out to a steady stream over
+  // the handful of frames this takes. So the rhythm is built out of the two
+  // things you can actually see: RUNS, a few characters at one rate, and the
+  // PAUSES between them.
+  //
+  // Everything is drawn off the question's own seed, so the same question
+  // always types the same way, and the shares are normalised to typeDur below
+  // — which means the more the pauses take, the faster the runs have to be.
+  // That is what makes a burst look like a burst.
   const rnd = mulberry32(hashStr(question));
-  const weights = Array.from(question, (_, i) => {
+  const pick = ([lo, hi]: readonly [number, number]) => lo + rnd() * (hi - lo);
+  const weights: number[] = [];
+  let left = 0;       // characters still to go in the run being typed
+  let perChar = 0;    // what each of them costs
+  for (let i = 0; i < question.length; i++) {
     const prev = question[i - 1];
-    return 1 + rnd() * 1.2 + (prev === ' ' ? 0.6 : 0) + (prev && /[,.?!]/.test(prev) ? 2.5 : 0);
-  });
+    let w: number;
+    if (left <= 0) {
+      left = Math.round(pick(TYPE_RHYTHM.run));
+      perChar = rnd() < TYPE_RHYTHM.fastShare ? pick(TYPE_RHYTHM.fast) : pick(TYPE_RHYTHM.slow);
+      // The stop in front of the run. Nothing is stopped in front of the first
+      // key — the hands are already there.
+      w = perChar + (i === 0 ? 0 : pick(rnd() < TYPE_RHYTHM.thinkShare ? TYPE_RHYTHM.think : TYPE_RHYTHM.catch));
+    } else {
+      w = perChar;
+    }
+    // A comma or a full stop is a real stop wherever it falls, run or no run.
+    if (prev && /[,.?!]/.test(prev)) w += TYPE_RHYTHM.punctuation;
+    weights.push(w);
+    left--;
+  }
   const weightSum = weights.reduce((a, b) => a + b, 0) || 1;
   const charAt: number[] = [];
   let acc = 0;
@@ -705,8 +805,11 @@ function createClip(ctx: Ctx, o: RenderOptions): Clip {
     }
   }
 
+  // Everything is drawn in CSS px on a canvas RENDER_SCALE times the screen:
+  // the base transform is the scale, and the zoom and the pointer ride on it.
+  const S = RENDER_SCALE;
   const draw = (t: number) => {
-    ctx.setTransform(1, 0, 0, 1, 0, 0);
+    ctx.setTransform(S, 0, 0, S, 0, 0);
     ctx.fillStyle = C.bg;
     ctx.fillRect(0, 0, W, H);
     // The zoom scales the page around the selection, which stays put on
@@ -715,32 +818,28 @@ function createClip(ctx: Ctx, o: RenderOptions): Clip {
     if (z > 1) {
       const tx = clamp(selCX * (1 - z), W * (1 - z), 0);
       const ty = clamp(nameCY * (1 - z), H * (1 - z), 0);
-      ctx.setTransform(z, 0, 0, z, tx, ty);
+      ctx.setTransform(z * S, 0, 0, z * S, tx * S, ty * S);
     }
     if (t < T_SEND) drawLanding(t);
     else drawChat(t);
-    ctx.setTransform(1, 0, 0, 1, 0, 0);
+    ctx.setTransform(S, 0, 0, S, 0, 0);
     const c = cursorAt(t);
     drawCursor(ctx, c.x, c.y);
   };
-  return { draw, typing: { start: T_TYPE, end: T_TYPED }, seconds, beats, clicks };
+  return { draw, typing: { start: T_TYPE, end: T_TYPED }, seconds, beats };
 }
 
 // The keyboard under the typing: the app's own sample, laid across the typing
 // stretch the way Vids lays it over a clip (same helpers, same gain), mixed
 // offline into a bed the length of the clip. Which second of the sample it
 // opens on follows the question, so the same inputs still give the same file.
-async function soundBed(question: string, typing: { start: number; end: number }, clicks: readonly ClickEvent[], seconds: number): Promise<AudioBuffer> {
+async function keyboardBed(question: string, typing: { start: number; end: number }, seconds: number): Promise<AudioBuffer> {
   const octx = new OfflineAudioContext(2, Math.ceil(seconds * SAMPLE_RATE), SAMPLE_RATE);
   const sample = await decodeAudio(octx, SFX_URL);
   const span = { start: typing.start, end: typing.end + 0.12 };
   const from = mulberry32(hashStr(question) ^ 0x9e3779b9)() * Math.max(0, sample.duration - (span.end - span.start) - 0.5);
   scheduleLoop(octx, sample, span, DEFAULT_SFX_GAIN, { from });
-  const bed = await octx.startRendering();
-  // The mouse over the keyboard, from the same synth the trade clip uses, so
-  // a Bottom A and a Bottom B sound like one recording (lib/clipSfx).
-  mixClicks(bed, clicks, hashStr(question));
-  return bed;
+  return octx.startRendering();
 }
 
 // ── Render + encode ─────────────────────────────────────────────────────────
@@ -748,11 +847,11 @@ export async function renderChatVideo(o: RenderOptions): Promise<RenderResult> {
   if (typeof VideoEncoder === 'undefined') throw new Error('This browser cannot encode video. Use Chrome or Edge.');
   const mb = await import('mediabunny');
   const canvas = document.createElement('canvas');
-  canvas.width = VIDEO_W;
-  canvas.height = VIDEO_H;
+  canvas.width = VIDEO_W * RENDER_SCALE;
+  canvas.height = VIDEO_H * RENDER_SCALE;
   const ctx = canvas.getContext('2d', { alpha: false });
   if (!ctx) throw new Error('Canvas 2D is unavailable.');
-  const { draw, typing, seconds, beats, clicks } = createClip(ctx, o);
+  const { draw, typing, seconds, beats } = createClip(ctx, o);
   const frames = Math.round(seconds * FPS);
 
   // H.264 in an MP4 wherever the browser can encode it (Chrome and Edge on a
@@ -761,20 +860,28 @@ export async function renderChatVideo(o: RenderOptions): Promise<RenderResult> {
   if (!codec) throw new Error('No video encoder is available in this browser.');
   const mp4 = codec === 'avc';
 
-  // The keyboard and mouse track. Skipped, not fatal, if the sound can't be
-  // mixed or encoded here: the clip still goes out, silent.
+  // The keyboard track. Skipped, not fatal, if the sound can't be mixed or
+  // encoded here: the clip still goes out, silent.
   const wanted: AudioCodec[] = mp4 ? ['aac'] : ['opus'];
   const audioCodec = await mb.getFirstEncodableAudioCodec(wanted, { numberOfChannels: 2, sampleRate: SAMPLE_RATE });
   let bed: AudioBuffer | null = null;
   if (audioCodec) {
-    try { bed = await soundBed(o.question, typing, clicks, seconds); } catch (err) { console.error('[chatgpt video] sound skipped:', err); }
+    try { bed = await keyboardBed(o.question, typing, seconds); } catch (err) { console.error('[chatgpt video] keyboard sound skipped:', err); }
   }
 
   const output = new mb.Output({
     format: mp4 ? new mb.Mp4OutputFormat({ fastStart: 'in-memory' }) : new mb.WebMOutputFormat(),
     target: new mb.BufferTarget(),
   });
-  const source = new mb.CanvasSource(canvas, { codec, bitrate: 8_000_000, keyFrameInterval: 2, latencyMode: 'quality' });
+  // Written as generously as the build writes its own file (lib/vidsPlan
+  // videoBitrate): this is the first of two H.264 passes the picture goes
+  // through, and it is the one with the small text in it.
+  const source = new mb.CanvasSource(canvas, {
+    codec,
+    bitrate: videoBitrate(canvas.width, canvas.height, FPS),
+    keyFrameInterval: 2,
+    latencyMode: 'quality',
+  });
   output.addVideoTrack(source, { frameRate: FPS });
   const audio = bed && audioCodec ? new mb.AudioBufferSource({ codec: audioCodec, bitrate: 128_000 }) : null;
   if (audio) output.addAudioTrack(audio);
@@ -801,7 +908,32 @@ export async function renderChatVideo(o: RenderOptions): Promise<RenderResult> {
     blob: new Blob([buf], { type: mp4 ? 'video/mp4' : 'video/webm' }),
     filename: `chatgpt-${slug}-${o.direction}.${mp4 ? 'mp4' : 'webm'}`,
     beats,
+    seconds,
+    width: canvas.width,
+    height: canvas.height,
+    poster: await poster(canvas, () => draw(seconds / 2)),
   };
+}
+
+/** A frame out of the middle of the clip, the size the library's own posters
+ *  are (lib/vids-client probeVideoFile), so the card shows the answer rather
+ *  than an empty search bar. Never throws: no poster is not no clip. */
+function poster(canvas: HTMLCanvasElement, drawMiddle: () => void): Promise<Blob | null> {
+  return new Promise((resolve) => {
+    try {
+      drawMiddle();
+      const k = Math.min(1, POSTER_W / canvas.width);
+      const small = document.createElement('canvas');
+      small.width = Math.max(1, Math.round(canvas.width * k));
+      small.height = Math.max(1, Math.round(canvas.height * k));
+      const sctx = small.getContext('2d');
+      if (!sctx) { resolve(null); return; }
+      smoothScaling(sctx).drawImage(canvas, 0, 0, small.width, small.height);
+      small.toBlob((b) => resolve(b), 'image/jpeg', 0.82);
+    } catch {
+      resolve(null);
+    }
+  });
 }
 
 // ── The whole errand: ask, then render ──────────────────────────────────────

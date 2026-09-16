@@ -17,7 +17,7 @@
 // Go stays off until you have.
 
 import { useEffect, useRef, useState, type KeyboardEvent } from 'react';
-import { CLIP_SECONDS, VIDEO_H, VIDEO_W } from '@/app/components/chatgpt/chatgpt-video';
+import { CLIP_SECONDS, FILE_H, FILE_W } from '@/app/components/chatgpt/chatgpt-video';
 import type { BottomPerson, Direction } from '@/lib/vidsBottom';
 import { BTN_TEXT } from '@/lib/ui-constants';
 import { Empty, Shell } from './VidsPicker';
@@ -233,7 +233,7 @@ export function VidsBottomPopup({ people, current, onGo, onClose }: {
 
           <div className="flex items-center justify-between gap-3">
             <p className="min-w-0 flex-1 text-[9px] text-zinc-600">
-              About {CLIP_SECONDS}s at {VIDEO_W}×{VIDEO_H} with the keyboard on it, filed under Bottom A and paired with
+              About {CLIP_SECONDS}s at {FILE_W}×{FILE_H} with the keyboard on it, filed under Bottom A and paired with
               their Bottom B, marked up search · wait · pick so its three captions land on the beat. It renders behind
               this popup — keep building meanwhile.
             </p>

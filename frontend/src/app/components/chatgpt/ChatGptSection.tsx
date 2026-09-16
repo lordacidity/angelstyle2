@@ -38,7 +38,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import s from './ChatGpt.module.css';
 import { askChatGpt, buildBlocks, replyToText, totalLen, type Block, type Direction, type Reply, type Run } from './reply';
-import { CLIP_SECONDS, renderChatVideo, VIDEO_H, VIDEO_W } from './chatgpt-video';
+import { CLIP_SECONDS, FILE_H, FILE_W, renderChatVideo } from './chatgpt-video';
 
 type AssistantStatus = 'loading' | 'streaming' | 'done' | 'error';
 interface UserMsg { id: string; role: 'user'; text: string }
@@ -769,7 +769,7 @@ export function ChatGptSection({ active }: { active: boolean }) {
               )}
             </div>
             <p className="text-sm text-zinc-600 leading-relaxed">
-              Start renders the recording, about {CLIP_SECONDS} seconds at {VIDEO_W}×{VIDEO_H}, right here and
+              Start renders the recording, about {CLIP_SECONDS} seconds at {FILE_W}×{FILE_H}, right here and
               downloads it: the question typed out with the keyboard sound, the answer loading, then the pointer
               selecting the name to zoom in on it before leaving.
               Open the chat plays the same thing live (the first click in the search bar types the question;

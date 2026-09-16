@@ -63,6 +63,34 @@ const NAV: { id: AppSection; label: string; icon: React.ReactNode }[] = [
     ),
   },
   {
+    id: 'simpler',
+    label: 'Simpler',
+    // The same film strip, cut down to a single frame — Vids stripped to the
+    // bare minimum of making one: the same builder with the controls and
+    // configs taken out. Sits directly under Vids because that is what it is a
+    // version of.
+    icon: (
+      <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+        <rect x="5" y="3" width="14" height="18" rx="2"/>
+        <path d="M5 8h3M5 16h3M16 8h3M16 16h3"/>
+      </svg>
+    ),
+  },
+  {
+    id: 'vids2',
+    label: 'Vids 2',
+    // The single frame again, with a play button in it: Simpler's builder, but
+    // nothing to build — five answers and one press make the whole video, and
+    // the page it lands on is only for tuning it. Sits under Simpler because
+    // that is what it is made of.
+    icon: (
+      <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+        <rect x="5" y="3" width="14" height="18" rx="2"/>
+        <path d="M10 9.5v5l4-2.5z"/>
+      </svg>
+    ),
+  },
+  {
     id: 'carousel',
     label: 'Carousel',
     // Stacked cards — a multi-page swipe post.
@@ -167,14 +195,14 @@ export function Sidebar({
     <>
     <aside className="fixed top-0 left-0 h-screen w-[72px] bg-[#0f0f0f] border-r border-zinc-800 flex flex-col z-30">
       {/* Nav — real links so each section has its own URL (prefetch + open in new tab) */}
-      <nav className="flex-1 px-2 py-4 flex flex-col gap-1">
+      <nav className="flex-1 min-h-0 overflow-y-auto no-scrollbar px-2 py-4 flex flex-col gap-1">
         {NAV.map(({ id, label, icon }) => {
           const isActive = active === id;
           return (
             <Link
               key={id}
               href={pathForSection(id)}
-              className={`w-full flex flex-col items-center gap-2 py-2.5 px-1 rounded-lg transition-colors ${
+              className={`w-full shrink-0 flex flex-col items-center gap-2 py-2.5 px-1 rounded-lg transition-colors ${
                 isActive
                   ? 'text-white'
                   : 'text-zinc-700 hover:text-zinc-200'
@@ -191,7 +219,7 @@ export function Sidebar({
         <button
           onClick={() => setEmojiOpen((o) => !o)}
           title="Emojis — pin & set @ shortcuts"
-          className={`w-full flex flex-col items-center gap-2 py-2.5 px-1 rounded-lg transition-colors ${
+          className={`w-full shrink-0 flex flex-col items-center gap-2 py-2.5 px-1 rounded-lg transition-colors ${
             emojiOpen ? 'text-white' : 'text-zinc-700 hover:text-zinc-200'
           }`}
         >
@@ -210,7 +238,7 @@ export function Sidebar({
         <Link
           href={pathForSection('xphoto')}
           title="X Photo — price strip and newly listed cards"
-          className={`w-full flex flex-col items-center gap-2 py-2.5 px-1 rounded-lg transition-colors ${
+          className={`w-full shrink-0 flex flex-col items-center gap-2 py-2.5 px-1 rounded-lg transition-colors ${
             active === 'xphoto' ? 'text-white' : 'text-zinc-700 hover:text-zinc-200'
           }`}
         >

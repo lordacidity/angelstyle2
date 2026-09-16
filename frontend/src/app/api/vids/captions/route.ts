@@ -49,6 +49,13 @@
 // answers with no thinking unless asked; this asks for a little, since each
 // line has to be right about the whole video and not only the clip it sits on.
 //
+// Degen mode (Vids 2's form) changes ONE thing: the hook is written to
+// DEGEN_HOOK instead of HOOK — no money, a name he calls himself, and a cry for
+// help in brackets ("homeless man trades on ronaldo (i need serious help)").
+// The step-by-step lines and the closing word are untouched, because they are
+// what the video is actually for. Every other caller leaves `degen` out and
+// gets the ordinary hook.
+//
 // The hook is written to one guide (HOOK): a money phrase from a fixed list,
 // the weird thing or the place from the persona context, and usually who he is
 // trading on and which way — "shorting" for down, plain "on" for up. He is
@@ -95,14 +102,16 @@ const MODEL = 'gemini-3.1-flash-lite';
 const LAUGHING = new Set(['😂', '🤣', '😹', '😆', '😅']);
 const isLaughing = (char: string) => LAUGHING.has(char.replace(/\uFE0F/g, ''));
 
-const style = (emojis: boolean, palette: string[]) => `Every caption:
+const style = (emojis: boolean, palette: string[], degen: boolean) => `Every caption:
 - SHORT. A screen line is 3 to 7 words and never more than 8 — it is read in a second while the screen moves on. Not a sentence. No full stop at the end. The hook may run a little longer; it wraps.
 - mostly lower case, the way ppl type — that is still the default for every line. Capitals are allowed: a word or a short line in caps for emphasis ("making BANK shorting trump", "he is DONE"), or a name or acronym capitalised where it reads better. Do not start every line with a capital, do not capitalise every word, and keep it consistent across the set — if one line writes Ronaldo, they all do.
 - plain spoken, the way someone talks to a camera. No hashtags, no quote marks.
 - text-speak, the way ppl actually type: "bc" for because, "rn" for right now, "ppl", "tbh", "ngl", "fr", "w/", "ur". Shorten with these before cutting meaning — "trade down on him bc ppl hate him rn". A few across the set, where they land naturally — never one in every line, never forced, never at the cost of being clear.
 ${emojis
   ? `- EMOJI: put two or three across the set, always — one on the START hook and at least one on a BOTTOM A or BOTTOM B line, each at the end of its line. Never two in one caption, never a row of them, never one standing in for a word. The comment line at the END is fixed and never gets one, and neither do the fixed screen lines under THE FIXED LINES — so the one you put on a screen line goes on a line you actually wrote.
-  The START hook NEVER takes a laughing face — not ${[...LAUGHING].join(', ')}, nor any other face laughing or crying with laughter. The hook is said straight; a face laughing at it does the joke for the viewer and kills it. Give the hook one that points at what he is doing — the money, the thing he is doing on camera — or leave it without one.
+  ${degen
+    ? `The START hook ALWAYS takes one, and it is half the joke — either 🔥 or 💯 played dead straight over a line about his life falling apart, or one that laughs at him. It is ONE OF THESE SEVEN and nothing else: 🔥 💯 💀 🤡 😭 🥀 😂. Never an emoji of the thing he is doing or the place he is in — no trees for the woods, no toilet, no football. The picture is already showing that; the emoji is the tone. On the end of the line. The hook is the ONE caption that may go outside the saved set below; every other line stays inside it.`
+    : `The START hook NEVER takes a laughing face — not ${[...LAUGHING].join(', ')}, nor any other face laughing or crying with laughter. The hook is said straight; a face laughing at it does the joke for the viewer and kills it. Give the hook one that points at what he is doing — the money, the thing he is doing on camera — or leave it without one.`}
 ${palette.length
     ? `  Pick from THESE, the app's own saved emoji, and only these: ${palette.join(' ')} — whichever fits what that caption is saying. If none of them fits a line, leave that line without one.`
     : `  Pick whatever emoji actually fits what that caption is saying — a plain standard one. No skin tones, no flags, no joined sequences.`}`
@@ -118,6 +127,49 @@ ${palette.length
  *  line is a "how to", addressed to the viewer, or ends on how fast it was —
  *  "in 67 secs", "in 69 secs", the house numbers. Every build is written this
  *  way; there is no choice of voice. */
+/** The hook with degen mode on — HOOK turned inside out. Instead of a man
+ *  making bank while something absurd happens to him, it is a man visibly
+ *  coming apart who is trading anyway, saying so himself, in the third person,
+ *  with the cry for help in brackets on the end. Nothing is sold and nobody is
+ *  impressed: the line stops the scroll by being worse than whatever was above
+ *  it in the feed. Only the hook changes — the step-by-step lines still teach
+ *  someone how Pauv works, and the closing word is the same fixed line, because
+ *  that is what the video is for. Asked for on Vids 2's form and nowhere else;
+ *  every other build gets HOOK. */
+const DEGEN_HOOK = `START — the hook, in DEGEN MODE. One caption over the persona on camera.
+Degen mode turns the hook inside out. The ordinary hook brags — the money, and the weird thing he is doing to get it. This one NEVER brags and NEVER mentions making money. He is a mess, he is trading anyway, and the caption is him saying it out loud. It is meant to be awful. That is the whole job: somebody scrolling stops because they cannot believe it was posted.
+
+THE SHAPE, and it is usually this:
+  <what he calls himself> trades on <person> (<the aside>)
+- WHAT HE CALLS HIMSELF — a self-own in the third person, two or three words. Where the persona context gives you ANYTHING, build it out of that first: day drinking -> "day drinking man", in the woods -> "man living in the woods", a phone in his mouth -> "man with a phone in his mouth", in the car -> "man who lives in his car". Only when the context gives you nothing at all, fall back on plain self-loathing: "homeless man", "little goy boy", "depressed man", "unemployed man", "grown man", "man in debt", "man with no job".
+- <person> — whoever the screen recording shows, the same name the other captions use. Which way he trades hardly matters here and is usually left out.
+- THE ASIDE, in round brackets on the end. This is where the video actually gets written, and it MUST come out different every time. It is a cry for help, an admission, or something unhinged that follows from THIS video — who he is trading on, which way he is going, what the context has him doing. Off the video: going down on someone — "(i hate this man)", "(he ruined my life)"; going up on someone — "(she doesn't know i exist)", "(he is my only hope)"; off what he is doing — "(my mum is watching this)", "(im in the woods rn)". Off nothing in particular: "(i need serious help)", "(i hate my life)", "(this is my last penny)", "(send help)", "(i am not ok)", "(rent is due friday)", "(3 years no job)", "(me, i'm the depressed man)", "(i need serious therapy)".
+  Every one of those has been used already. WRITE A NEW ONE for this video wherever you can, and where you do take one from the list, take one this video has earned. Never reach for "(i need serious therapy)" as a default — it is one of a dozen, not the answer.
+
+Now and then drop the shape and write a straight plea, one breath, no brackets:
+  "someone please help me dear god this is my last penny"
+  "day drinking doing dis shi (i need serious therapy"
+A bracket left open like that one is fine. Sloppy is in character. Do not tidy it every time.
+
+THESE ARE EXAMPLES OF THE SPIRIT, and they are spent. Write new ones; do not hand any of these back:
+  homeless man trades on ronaldo (i need serious help)
+  little goy boy trades on trump (i hate my life)
+  someone please help me dear god this is my last penny
+  day drinking doing dis shi (i need serious therapy
+  depressed man trades on mbappe (me, i'm the depressed man)
+What they have in common is the only thing to copy: he says what he is, he says who he is trading on, then he says the quiet part out loud.
+
+RULES:
+- NEVER a money phrase. Not "making bank", not "getting paid", not "making bands", not "securing the bag". He is not winning. Where money comes into it at all it is the last of it: "my last penny", "rent money", "my mum's card".
+- Lower case throughout, the way it is typed at 3am — the person's name included: "trades on ronaldo", "trades on trump", never "Ronaldo". No full stop. A capital only where a word is being shouted.
+- Text-speak, misspellings and swallowed words are welcome: "dis shi", "im", "bc", "fr", "ngl", "istg". This is the one caption in the set where being badly written is right.
+- It may run long and wrap. A hook that reads like it was typed in one go beats a tidy one.
+- No hashtags, no quote marks.
+WRONG:
+  "making bank on ronaldo (i need help)" — it brags, and degen never brags
+  "Homeless Man Trades On Ronaldo" — title case, and it reads like a headline
+  "depressed man trades" — no person, no aside, nothing to stop on`;
+
 const HOOK = `START — the hook. One caption over the persona on camera.
 The persona context says what he is doing or where he is: "typing in the middle of the road", "putting a phone in my mouth", "in the park today", "in the woods on my computer". He is ALWAYS typing or on a computer, so never say that part — not "typing", not "on my laptop", not "on my phone". The hook is the WEIRD thing — the place he is, or the thing he is doing — and it is in the caption every single time, named from the context.
 TWO things in every hook:
@@ -248,6 +300,10 @@ const Schema = z.object({
   /** The emoji the writer may use, as characters — the ones pinned in the
    *  app's Emojis drawer. Empty means any plain standard emoji. */
   emojiPalette: z.array(z.string().max(16)).max(40).default([]),
+  /** Degen mode — Vids 2's form. The hook is written to DEGEN_HOOK instead of
+   *  HOOK: no money, a self-own and a cry for help. Nothing else about the set
+   *  changes. Off unless asked for, so every other caller is untouched. */
+  degen: z.boolean().default(false),
   /** Bottom A's last moment and Bottom B's first are too brief for a line each,
    *  so the writer puts one line across both — as A's last entry, with B's
    *  first left "". Decided by the caller from the real timeline. */
@@ -379,6 +435,7 @@ function ensureSite(d: Drafted, mergeSeam: boolean): Drafted {
 function buildPrompt(input: z.infer<typeof Schema>): string {
   const {
     personaContext, personaName, wantStart, bottomA, bottomB, wantEnd, endContext, notes, emojis, emojiPalette,
+    degen,
   } = input;
   // A placed Bottom A ends on the pick, not on the way into Pauv, so no seam
   // is merged across it whatever the caller sent.
@@ -413,7 +470,12 @@ function buildPrompt(input: z.infer<typeof Schema>): string {
   /** The same for the hook's line of the example, past any laughing face in the
    *  palette — an example that laughs on the hook teaches the opposite of the
    *  rule above it. */
-  const hookEx = () => (emojis ? ` ${emojiPalette.find((e) => !isLaughing(e)) ?? '💰'}` : '');
+  const hookEx = () => {
+    if (!emojis) return '';
+    // Degen wants the opposite of the rule above: the hook laughs at him.
+    if (degen) return ` ${emojiPalette.find(isLaughing) ?? '💀'}`;
+    return ` ${emojiPalette.find((e) => !isLaughing(e)) ?? '💰'}`;
+  };
 
   /** The worked example's screen part, shaped the way this build's Bottom A is
    *  asked for: one line per moment, or on Fast two lines with their times. */
@@ -482,7 +544,7 @@ Part 2 — the screen recording: the same guy's screen while he does something o
 Part 3 — END: the pay-off. He is back on camera showing off the money the trade made him, and over the whole of it ONE caption: the line that sends the viewer to the comments for the link. Nothing is written about the money — the clip already shows it.
 
 WHAT EACH CAPTION DOES
-${HOOK}
+${degen ? DEGEN_HOOK : HOOK}
 BOTTOM A and BOTTOM B — tell the viewer what to do, step by step, so someone learns how Pauv works by following along. Assume they CANNOT see the screen: the recording is small and quick, and most people read the caption and never make out what is on it. So every line has to stand on its own — name the site or app and the exact thing being done there, in the words the viewer would need to go and do it themselves. Not "type in most hated person in the world" but "search on chatgpt most hated ppl rn". Not "click the button" but "hit trade up on pauv.com". Not "look him up" but "search ronaldo on pauv". Each caption still describes ITS OWN clip: a Bottom A caption is what the viewer does in the Bottom A recording, a Bottom B caption in Bottom B — which is on pauv.com every time, whatever its context happens to mention. Do not describe a step that is not on that clip's screen.
 When a clip is given as a numbered list of moments, a caption goes on screen at exactly its moment and stays up until the next one — so caption 1 describes moment 1 and nothing else, caption 2 moment 2, and so on. Every moment gets its own caption: keep them in order, never skip one, never merge two into one line${mergeSeam ? ' — except at the seam, below' : ''}. Each line says what is on screen RIGHT THEN, not what came before or what comes next.
 A moment that is really two things — go to the site, then do the thing there — or that will not fit in one short line, gets TWO captions: put both in that moment's one entry with " / " between them, like "go to chatgpt / see who the most hated person is rn". The first goes up where the moment starts, the second halfway through it. Two at most for a moment, and the entry still counts as one, so the array stays one entry per moment. Split rather than write one long line. The same " / " works inside any line of an unmarked clip.
@@ -501,7 +563,7 @@ ${FIXED}
 
 ${SEND(hasScreen, !!bottomB?.count)}
 
-${style(emojis, emojiPalette)}
+${style(emojis, emojiPalette, degen)}
 
 ${IMPERATIVE}
 
@@ -512,10 +574,12 @@ bottom b — 2 moments (the clip overall: finding ronaldo on pauv and trading up
   1. searched ronaldo
   2. traded up on him
 ->
-start: velo in my mouth making bands on ronaldo${hookEx()}
+start: ${degen ? `little goy boy trades on ronaldo (i need serious help)` : `velo in my mouth making bands on ronaldo`}${hookEx()}
 ${exLines}
 end: ronaldo
-(${exShape}"end" closes it on its own: over the whole of the money he shows off, the one fixed line, which reads comment "ronaldo" for the link — and nothing is written about the money, since the clip is already showing it. Every screen line says where he is and what he does there — chatgpt, pauv.com, ronaldo — so it reads without seeing the screen; "him" in the last bottom b line is the ronaldo from the hook and bottom a, one story across all of it. The hook says he is making bands, names ronaldo and the velo in his mouth — the weird thing from the persona context — and never mentions the typing; ${exSite}; "rn" and "bc" are the text-speak)
+(${exShape}"end" closes it on its own: over the whole of the money he shows off, the one fixed line, which reads comment "ronaldo" for the link — and nothing is written about the money, since the clip is already showing it. Every screen line says where he is and what he does there — chatgpt, pauv.com, ronaldo — so it reads without seeing the screen; "him" in the last bottom b line is the ronaldo from the hook and bottom a, one story across all of it. ${degen
+  ? 'The hook is degen: what he calls himself, who he is trading on, and the aside in brackets — no money anywhere near it'
+  : 'The hook says he is making bands, names ronaldo and the velo in his mouth — the weird thing from the persona context — and never mentions the typing'}; ${exSite}; "rn" and "bc" are the text-speak)
 ${emojis ? `(the three emoji there are just where they happened to land for that video — choose your own${emojiPalette.length ? ', from the saved set above,' : ''} for this one)` : ''}
 THIS VIDEO
 persona${personaName ? ` (${personaName})` : ''} context: ${personaContext || '(not given — no weird thing to name, so the hook is just the money and who he is trading on)'}
@@ -560,7 +624,12 @@ export async function POST(req: NextRequest) {
     // Bottom A on Fast comes back as lines with the second each goes up.
     const placedA = bottomA?.placed ? asPlaced(parsed.bottomA, bottomA.count, bottomA.placed.length) : null;
     const drafted: Drafted = {
-      start: wantStart ? dropLaughing(cleanLine(parsed.start)) : '',
+      // Degen's hook is allowed to laugh at him — it is the one voice where a
+      // face crying with laughter is the line landing rather than the line
+      // being explained away.
+      start: wantStart
+        ? (input.degen ? cleanLine(parsed.start) : dropLaughing(cleanLine(parsed.start)))
+        : '',
       bottomA: placedA
         ? placedA.map((l) => l.text)
         : asLines(parsed.bottomA, bottomA?.count ?? 0, !!bottomA?.marks.length),

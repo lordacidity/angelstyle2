@@ -58,6 +58,24 @@ const VidsSection = lazy(() =>
   import('./components/vids/VidsSection').then(m => ({ default: m.VidsSection }))
 );
 
+// Simpler — Vids cut down to the bare minimum of making one. It is a second
+// copy rather than a mode of the first: its own components under
+// components/simpler and its own build logic under lib/simpler, sharing only
+// the /api/vids routes and the library they read (the same folders, the same
+// clips). A change to the logic of one is meant to be made to the other by
+// hand; nothing propagates on its own.
+const SimplerSection = lazy(() =>
+  import('./components/simpler/SimplerSection').then(m => ({ default: m.SimplerSection }))
+);
+
+// Vids 2 — a form, then Simpler's builder with the deciding taken out. Unlike
+// Simpler it is not a third copy: it shares lib/simpler outright and forks
+// only the pages (components/vids2). Both screen recordings are rendered for
+// the one video rather than picked off a shelf.
+const Vids2Section = lazy(() =>
+  import('./components/vids2/Vids2Section').then(m => ({ default: m.Vids2Section }))
+);
+
 const PricerSection = lazy(() =>
   import('./components/pricer/PricerSection').then(m => ({ default: m.PricerSection }))
 );
@@ -258,6 +276,17 @@ export function StudioShell() {
   // tab switches once the section has been opened.
   const [vidsEverVisited, setVidsEverVisited] = useState(false);
   useEffect(() => { if (activeSection === 'vids') setVidsEverVisited(true); }, [activeSection]);
+
+  // Simpler the same way, and separately from Vids: the two hold their own
+  // picks, so leaving one to look at the other doesn't disturb either build.
+  const [simplerEverVisited, setSimplerEverVisited] = useState(false);
+  useEffect(() => { if (activeSection === 'simpler') setSimplerEverVisited(true); }, [activeSection]);
+
+  // Vids 2 the same way, and for a stronger reason than either: a Generate is
+  // two screen recordings rendering in this tab, and switching away from the
+  // page while one runs must not throw it away.
+  const [vids2EverVisited, setVids2EverVisited] = useState(false);
+  useEffect(() => { if (activeSection === 'vids2') setVids2EverVisited(true); }, [activeSection]);
 
   // Pricer too: a pricing takes 30s to 5 minutes, so once opened the section
   // stays mounted (hidden) and a run in progress keeps going off-tab.
@@ -471,6 +500,38 @@ export function StudioShell() {
           </div>
         )}
 
+        {simplerEverVisited && (
+          <div style={{ display: activeSection === 'simpler' ? undefined : 'none' }}>
+            <ErrorBoundary>
+              {/* Laid out exactly like Vids above — plain black, the builder
+                  filling the window, kept mounted after the first visit. */}
+              <div className="flex flex-col h-screen">
+                <div className="flex-1 min-h-0">
+                  <Suspense fallback={<SectionLoader />}>
+                    <SimplerSection active={activeSection === 'simpler'} />
+                  </Suspense>
+                </div>
+              </div>
+            </ErrorBoundary>
+          </div>
+        )}
+
+        {vids2EverVisited && (
+          <div style={{ display: activeSection === 'vids2' ? undefined : 'none' }}>
+            <ErrorBoundary>
+              {/* Laid out exactly like Simpler above: plain black, the page
+                  filling the window, kept mounted after the first visit. */}
+              <div className="flex flex-col h-screen">
+                <div className="flex-1 min-h-0">
+                  <Suspense fallback={<SectionLoader />}>
+                    <Vids2Section active={activeSection === 'vids2'} />
+                  </Suspense>
+                </div>
+              </div>
+            </ErrorBoundary>
+          </div>
+        )}
+
         {tradeEverVisited && (
           <div style={{ display: activeSection === 'trade' ? undefined : 'none' }}>
             <ErrorBoundary>
@@ -568,8 +629,10 @@ export function StudioShell() {
 
       {/* Launch-server split button + first-time setup dropdown (see component).
           Off on Vids: the transport bar runs along that edge, and the Phonedeck
-          list under that page's export buttons shows whether the server is up. */}
-      <LaunchServerButton hidden={activeSection === 'vids'} />
+          list under that page's export buttons shows whether the server is up.
+          Off on Simpler and Vids 2 too — same builder, same bar along the same
+          edge. */}
+      <LaunchServerButton hidden={activeSection === 'vids' || activeSection === 'simpler' || activeSection === 'vids2'} />
     </div>
   );
 }
