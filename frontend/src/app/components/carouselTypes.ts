@@ -1,6 +1,6 @@
 // ── Shared types, interfaces and constants for the Carousel feature ──────────
 
-export const MAX_FONT = 88;
+export const MAX_FONT = 150;
 export const SUB_MAX  = 52;
 
 // Target platform for a carousel. IG cards are 4:5; X posts are a 2-card pair
