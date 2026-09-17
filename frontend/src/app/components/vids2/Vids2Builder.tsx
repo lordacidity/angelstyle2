@@ -60,12 +60,14 @@ import {
 // Bottom logic. Nothing that reads a person off a filed clip is wanted here:
 // Vids 2 knows who it is, because the form said so.
 import { HOUSE_BOOM, boomFromBottomB, personKey } from '@/lib/simpler/vidsBottom';
-import { degenBoomSound, degenBooms, NEWS_BOTTOM_A_LINES, type Vids2Build } from '@/lib/vids2/vids2Build';
+import {
+  bottomBFixed, bottomBTrade, degenBoomSound, degenBooms, NEWS_BOTTOM_A_LINES, type Vids2Build,
+} from '@/lib/vids2/vids2Build';
 import { composeSequence } from '@/lib/simpler/vidsCompose';
 import {
   CAPTION_STYLES, DEFAULT_CAPTION_SCALE, DEFAULT_CAPTION_STYLE, EMPTY_LINES, FAST_BOTTOM_A_CAPTIONS,
   MIN_SHARE, ONE_LINE_DEFAULT,
-  bottomBOpen, buildCaptions, capLine, captionAt,
+  bareFixedLine, bottomBOpen, buildCaptions, capLine, captionAt,
   captionStyle, captionWindows, drawCaption, fixedLine, layoutCaption, preloadCaptionEmoji,
   scaleCaptionStyle, seamNeedsMerge, wantedCount,
   type CaptionLines, type CaptionPos, type CaptionRef, type CaptionWindow,
@@ -74,7 +76,7 @@ import { VidsCaptionsRail } from '@/app/components/simpler/VidsCaptionsRail';
 import { emojiByUnified } from '@/lib/emoji';
 import { pinnedUnifieds, useEmojiPrefs } from '@/lib/emoji-prefs-store';
 import { VidsPostCaption } from '@/app/components/simpler/VidsPostCaption';
-import { createRecipe, deleteRecipe, writeCaptions } from '@/lib/vids-client';
+import { createRecipe, deleteRecipe, writeCaptions, writeHook } from '@/lib/vids-client';
 import { specFromBuild } from '@/lib/simpler/vidsRecipe';
 import {
   DEFAULT_BOOM_LEVEL, DEFAULT_CLIP_LEVEL, DEFAULT_MUSIC, DEFAULT_ROOM_TONE,
@@ -649,18 +651,30 @@ export function Vids2Builder({
       && (aSped || !aWin.marks.length)
       && aWin.end - aWin.start >= FAST_BOTTOM_A_CAPTIONS * MIN_SHARE;
     const briefA = clipBrief(aWin, picks.bottomA?.video.context);
+    const personaContext = persona?.context || picks.start?.video.context || '';
+    // A hook somebody wrote themselves is not the model's to write. The rest
+    // of the words still follow on from it, but nothing is asked for another.
+    // Somebody who starts typing after this has gone out is covered too:
+    // whatever comes back for the hook is dropped on arrival if the box has
+    // words in it by then.
+    const wantHook = !!windows.start && !hookIsTheirs(startTouched.current, lines);
+    // The hook is written to the mode's own guide (api/vids/hook), off who,
+    // which way and what the persona is doing — nothing on the screen
+    // recordings — so it goes out beside the rest of the words rather than
+    // inside them, and each lands as it comes back.
     setWriting(true);
     setCaptionError(null);
-    try {
+    const hook = wantHook
+      ? writeHook({ mode: build.mode, person: build.person, direction: build.direction, personaContext })
+        .then(({ start }) => setLines((prev) => (hookIsTheirs(startTouched.current, prev)
+          ? prev
+          : { ...prev, start: { ...capLine(start, prev.start.oneLine), pos: prev.start.pos } })))
+      : null;
+    const rest = (async () => {
       const draft = await writeCaptions({
         personaName: persona?.name ?? '',
-        personaContext: persona?.context || picks.start?.video.context || '',
-        // A hook somebody wrote themselves is not the model's to write. It
-        // still knows there is one — the rest of the words follow on from it —
-        // but it is not asked for another. Somebody who starts typing after
-        // this has gone out is covered too: whatever comes back for the hook
-        // is dropped on arrival if the box has words in it by then.
-        wantStart: !!windows.start && !hookIsTheirs(startTouched.current, lines),
+        personaContext,
+        wantStart: false,
         notes: notes.trim(),
         bottomA: placeA && briefA && aWin
           ? {
@@ -681,38 +695,43 @@ export function Vids2Builder({
         // says neither side has room for its own. Never across a placed
         // Bottom A: its two lines are the search and the pick.
         mergeSeam: !placeA && seamNeedsMerge(windows),
-        // Degen mode moves exactly one line — the hook, written to DEGEN_HOOK
-        // instead of HOOK (api/vids/captions). The step-by-step lines and the
-        // closing word come back the same either way.
-        degen: build.mode === 'degen',
+        // Bottom B is always the rendered trade here, so the writer is told its
+        // chart and confirmation lines are fixed and its trade line carries $.
+        renderedTrade: true,
       });
       const atA = placeA ? draft.bottomAAt : undefined;
       const toClip = (at: number) => (aItem ? Math.round((aItem.trimStart + at * aItem.speed) * 100) / 100 : at);
-      // Three of the lines are not the model's to write — Bottom A's wait and
-      // pick, and Bottom B's opener — so whatever came back in those slots is
-      // dropped for one of the fixed lines (lib/simpler/vidsCaptions). Bottom A's are
-      // taken by mark, so they only stand in on a clip marked the way the
-      // rendered ChatGPT recording is: three beats, one line each, never the
-      // two placed lines Fast asks for.
+      // Two of Bottom A's lines are not the model's to write — the wait and the
+      // pick — so whatever came back in those slots is dropped for one of the
+      // fixed lines (lib/simpler/vidsCaptions). They are taken by mark, so they
+      // only stand in on a clip marked the way the rendered ChatGPT recording
+      // is: three beats, one line each, never the two placed lines Fast asks for.
       const fixedA = !placeA && draft.bottomA.length >= 3;
       /** What stands in for the writer's line at Bottom A's index, if
        *  anything: on a news intro the first two lines outright, then the
        *  rolled pick; on a ChatGPT one the rolled wait and pick. */
       const standInA = (i: number): string | null =>
         (newsA && NEWS_BOTTOM_A_LINES[i]) || (fixedA ? fixedLine('bottomA', i, capName) : null);
+      const textA = draft.bottomA.map((t, i) => (fixedA && fixedLine('bottomA', i, capName)) || t);
+      // Bottom B is the rendered trade, and three of its four lines are not the
+      // model's either: the opener, the chart and the confirmation. The trade
+      // between them is, held to having its amount in $ (lib/vids2
+      // bottomBFixed, bottomBTrade). The chart and confirmation steer clear of
+      // whatever Bottom A just said.
+      const fixedB = draft.bottomB.length >= 4;
+      const saidA = textA.map(bareFixedLine);
+      const textB = draft.bottomB.map((t, i) => (i === 0 ? bottomBOpen(capName)
+        : !fixedB ? t
+        : bottomBFixed(i, saidA) ?? (i === 2 ? bottomBTrade(t, capName, build.direction) : t)));
       // A rewrite keeps whatever was set to one line, and wherever a line was
       // dragged to, matched up by position — both are about the shape and place
       // of the caption slot rather than its wording. A line that wasn't there
       // before starts on its section's default.
       setLines((prev) => ({
-        // Left exactly as typed when it is somebody's own — and asked of the
-        // box as it stands NOW, so a hook typed while this call was out is
-        // kept rather than written over by an answer that set off before it
-        // existed. Everything else is filled in around it either way.
-        start: hookIsTheirs(startTouched.current, prev)
-          ? prev.start
-          : { ...capLine(draft.start, prev.start.oneLine), pos: prev.start.pos },
-        bottomA: draft.bottomA.map((t, i) => {
+        // The hook is its own call's to write, whichever of the two lands
+        // first; everything else is filled in around it.
+        start: prev.start,
+        bottomA: textA.map((t, i) => {
           const at = atA?.[i];
           return {
             ...capLine(standInA(i) || t,
@@ -721,18 +740,18 @@ export function Vids2Builder({
             ...(at != null && Number.isFinite(at) ? { at: toClip(at) } : {}),
           };
         }),
-        bottomB: draft.bottomB.map((t, i) => ({
-          ...capLine(i === 0 ? bottomBOpen(capName) : t,
-            prev.bottomB[i]?.oneLine ?? ONE_LINE_DEFAULT.bottomB),
+        bottomB: textB.map((t, i) => ({
+          ...capLine(t, prev.bottomB[i]?.oneLine ?? ONE_LINE_DEFAULT.bottomB),
           pos: prev.bottomB[i]?.pos,
         })),
         end: { ...capLine(draft.end, prev.end.oneLine), pos: prev.end.pos },
       }));
-    } catch (e) {
-      setCaptionError(e instanceof Error ? e.message : String(e));
-    } finally {
-      setWriting(false);
-    }
+    })();
+    // One failing leaves whatever the other wrote standing.
+    const failed = (await Promise.allSettled([rest, hook]))
+      .flatMap((r) => (r.status === 'rejected' ? [r.reason] : []));
+    if (failed.length) setCaptionError(failed.map((e) => (e instanceof Error ? e.message : String(e))).join(' · '));
+    setWriting(false);
   };
   const broken = plan.items.filter((i) => errors[i.video.id]);
 
