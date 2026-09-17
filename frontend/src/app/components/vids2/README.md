@@ -8,9 +8,7 @@ from. Vids 2 opens on six questions instead, asked one at a time —
 
 1. **Who** — anybody on Pauv, from the roster itself (`/api/ai/talents`), not
    from what has been filmed.
-2. **Mode** — 👔 Serious, 😐 Middle or 💀 Degen (`Vids2Mode`). Degen is below;
-   Serious and Middle are still to be defined, and both make the ordinary video
-   until they are.
+2. **Mode** — 👔 Serious, 😐 Middle or 💀 Degen (`Vids2Mode`). Each is below.
 3. **Which way** — up or down.
 4. **Look** — light or dark.
 5. **Persona** — Simpler's own chooser (`components/simpler/VidsPicker`).
@@ -46,9 +44,53 @@ behind the other. The first real failure aborts the pair.
 The library is still read for two things: the **persona**'s three clips, and
 an **End** off the shelf. (And Bottom B's folder, for a BOOM filed by hand.)
 
-## Degen mode
+## The modes
 
-The other questions say what the video *is*. The mode says how it talks, and
+The other questions say what the video *is*. The mode says how it talks.
+Serious and Middle each change one line — the hook — and nothing else. Degen
+changes the hook and two more things.
+
+Every hook is written in `api/vids/hook`, by Claude Opus 5, on its own call
+beside the one that writes the rest of the words (`api/vids/captions`, which
+Vids 2 never asks for a hook). None is written off the screen recordings, so
+none waits on them: the hook lands as it comes back. The trading verb is drawn
+by the route, not the model — down is always "shorting" / "shorts", up is
+"going long on" or "trading on" / "goes long on" or "trades on" — and a line
+that says the trade on another verb has it swapped.
+
+**Serious** is flat and in a fixed order: the trading verb, the person, now and
+then a real-world moment that gives the trade a reason, and what the money
+does. Nothing about what the persona is doing, no "man", no emoji, lower case.
+
+> going long on taylor swift before the tour announcement to cover a year of rent
+> shorting drake before the album drops to pay off the car
+
+**Middle** uses exactly two of three parts — a money analogy, what the persona
+is doing (off the persona's context), the trade — and the route draws which
+two. A build with no persona context has no activity to name, so it is always
+analogy + trade.
+
+> making a surgeon's salary from the hot tub
+> shorting drake mid haircut
+> how to make a lawyer's salary shorting kanye
+
+**One hook in five is a twist**, whatever the mode, one of three at even odds:
+a **mystery** — the trade on someone described but never named — **hype** —
+the name and how high it is going — or **me if** — the trade somewhere it
+would be out of line, "was legal". Hype only goes up, so a down trade's twist
+is a mystery or a me if. Degen's hype and me if say the nickname; everything
+else about the three is the same in every mode. A mystery that names them, or
+a me if that breaks its frame, is written again.
+
+> shorting the greatest musician of our generation
+> going long on the most unhinged billionaire
+> messi to the stratosphere
+> swifty to outer space (Degen)
+> me if shorting drake at a funeral was legal
+> me if going long on swifty at church was legal (Degen)
+
+### Degen
+
 Degen changes three things and nothing else.
 
 **The random song can be a degen one.** Songs are marked degen on the Music
@@ -58,20 +100,19 @@ every song in degen mode and from the rest only otherwise (`rollableMusic` in
 `Vids2Builder`). That is the roll and nothing more: a degen song chosen by
 hand from the builder's Music list stays on any build.
 
-**The hook begs instead of bragging.** The ordinary hook is a man making bank
-while something absurd happens to him. The degen hook is a man visibly coming
-apart who is trading anyway, saying so himself, third person, with the quiet
-part in brackets on the end:
+**The hook is a self-own with a nickname**: descriptor + trade + nickname +
+(bracket) + emoji.
 
-> man with a phone in his mouth trades on trump (i have no dignity left) 🤡
-> man living in the woods trades on ronaldo (the squirrels are watching me) 💀
+> chopped kid shorts musky (i need serious help) 🔥
+> down bad guy goes long on swifty (i love you swifty)
 
-It is written to `DEGEN_HOOK` in `api/vids/captions` instead of `HOOK` — no
-money phrase anywhere, lower case including the person's name, the self-own
-built off the persona context where there is one, and the aside written fresh
-for each video. The hook always takes one emoji, from a fixed ironic seven
-(🔥 💯 💀 🤡 😭 🥀 😂), and it is the one caption allowed outside the app's
-saved emoji set. **Only the hook moves.** The step-by-step lines still teach
+Every part but the nickname comes off a fixed list, so the route draws those
+itself and asks Claude for the nickname alone — a funny shorthand when one
+lands, the plain name when not — plus its one-word short form. The descriptor
+is one of chopped kid, homeless man, tweaker, down bad guy, dude, kid. The
+bracket is one of nine self-owns followed by 💯 🔥 😎 or 🥀; or, a third of the
+time when the nickname has a short form of eight letters or fewer,
+"(i love you <short>)" with no emoji. The step-by-step lines still teach
 someone how Pauv works and the closing word is the same fixed comment line,
 because that is what the video is for.
 
@@ -124,7 +165,7 @@ Simpler's logic outright:
 | The Pauv trade recording | `components/trade/trade-video.ts` | shared with everybody |
 | The form, the tuning page, the section | `components/vids2/*` | Vids 2's own |
 | The five answers, degen mode, the roster, the trade-as-a-Bottom-B | `lib/vids2/vids2Build.ts` | Vids 2's own |
-| The degen hook (`DEGEN_HOOK`, behind an optional `degen` flag) | `api/vids/captions` | shared route, Vids 2 the only caller |
+| The hook for each mode | `api/vids/hook` | Vids 2's own |
 
 **So a change to how Simpler builds a video is a change to how Vids 2 builds
 one** — the opposite of the Vids/Simpler rule, and chosen deliberately: a third
@@ -151,6 +192,26 @@ nothing Simpler or Vids does moved.
   `BOTTOM_B_LEFT` (5%) to the left, because one filmed off a screen wants it.
   Vids 2's is the page itself, drawn square on to fill the frame, so it sits
   dead centre. Left unset everywhere else, which is the nudge.
+
+## The trade's captions
+
+Bottom B is the rendered trade, four beats, one caption each — and only one
+of the four is written:
+
+| Beat | Caption |
+| --- | --- |
+| Searching them | fixed: go to pauv.com / search {name} (`bottomBOpen`) |
+| Reading their chart | one at random: check their chart, look at the price, analyze... |
+| Putting the money on | written by Gemini (`api/vids/captions`), always with the amount in $ |
+| The trade goes through | one at random: locked in, trade confirmed, confirmed, order placed |
+
+The two sets and the trade line's fallback are `bottomBFixed` and
+`bottomBTrade` in `lib/vids2/vids2Build.ts`. The captions call goes out with
+`renderedTrade`, which tells the writer those slots are fixed and the trade
+line carries "$10", never "10 dollars"; a trade line that still comes back
+without a $ amount is replaced with "put $10 up on {name}". The confirmation
+never repeats a line Bottom A's pick already landed on ("locked in" is in
+both sets).
 
 ## Things worth knowing
 

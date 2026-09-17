@@ -140,12 +140,10 @@ export interface CaptionRequest {
    *  (lib/vidsCaptions seamNeedsMerge), so the writer puts one line across
    *  both: A's last entry carries it, B's first is left ''. */
   mergeSeam: boolean;
-  /** Degen mode — Vids 2's form, and nothing else asks for it. ONE line moves:
-   *  the hook, written to DEGEN_HOOK instead of HOOK (api/vids/captions) — no
-   *  money in it, a name he calls himself, and a cry for help in brackets. The
-   *  step-by-step lines and the closing word are written exactly as ever.
-   *  Left out means off. */
-  degen?: boolean;
+  /** Bottom B is Vids 2's rendered trade: its chart and confirmation lines are
+   *  fixed by the caller as well as its opener, so the writer is told to leave
+   *  them and write the trade line with the amount in $. Left out means off. */
+  renderedTrade?: boolean;
 }
 
 /** The written lines. A marked clip's array lines up with its marks by index;
@@ -162,6 +160,24 @@ export interface CaptionDraft {
 
 export const writeCaptions = (input: CaptionRequest) =>
   api<CaptionDraft>('/captions', { method: 'POST', body: JSON.stringify(input) });
+
+// ── The hook ──────────────────────────────────────────────────────────────────
+
+/** Vids 2's modes, each with its own guide for the hook (api/vids/hook). */
+export type HookMode = 'serious' | 'middle' | 'degen';
+
+export interface HookRequest {
+  mode: HookMode;
+  /** Who the video trades on, as the Pauv roster spells them. */
+  person: string;
+  direction: TradePosition;
+  /** What the persona is doing on camera — Middle's activity. */
+  personaContext: string;
+}
+
+/** The Start caption alone, written to the mode's guide. */
+export const writeHook = (input: HookRequest) =>
+  api<{ start: string }>('/hook', { method: 'POST', body: JSON.stringify(input) });
 
 // ── The question ──────────────────────────────────────────────────────────────
 

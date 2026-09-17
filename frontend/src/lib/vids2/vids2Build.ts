@@ -19,7 +19,7 @@
 // to the library, and neither survives the page being left.
 
 import {
-  createTradeClip, loadTradeAssets, renderTradeVideo, VIDEO_H, VIDEO_W,
+  AMOUNT_USD, createTradeClip, loadTradeAssets, renderTradeVideo, VIDEO_H, VIDEO_W,
   type Direction, type Theme, type TradeBeats, type TradeTalent,
 } from '@/app/components/trade/trade-video';
 import type { BoomSound } from '@/lib/simpler/vidsAudio';
@@ -30,14 +30,14 @@ export type { Direction, Theme, TradeTalent };
 
 // ── The answers ──────────────────────────────────────────────────────────────
 
-/** How the video talks: Serious, Middle or Degen. Only Degen does anything of
- *  its own so far — three things change, and only in Vids 2: the hook is
- *  written to DEGEN_HOOK (api/vids/captions) — no money, a self-own and a cry
- *  for help — three BOOMs lay themselves over the recordings (degenBooms), and
- *  the song rolled for it may be one marked degen on the Music page, which no
- *  other build ever rolls (rollableMusic in Vids2Builder). The video
- *  underneath is exactly the same video. Serious and Middle are still to be
- *  defined, and until they are, both make the ordinary video. */
+/** How the video talks: Serious, Middle or Degen. Each writes the hook to its
+ *  own guide in api/vids/hook: Serious a flat trade, reason and what the money
+ *  is for; Middle two of a money analogy, what the persona is doing and the
+ *  trade; Degen a descriptor, the trade, a nickname and a bracket. Degen also
+ *  lays three BOOMs over the recordings (degenBooms), and the song rolled for
+ *  it may be one marked degen on the Music page, which no other build ever
+ *  rolls (rollableMusic in Vids2Builder). The video underneath is exactly the
+ *  same video in all three. */
 export type Vids2Mode = 'serious' | 'middle' | 'degen';
 export const VIDS2_MODES: readonly Vids2Mode[] = ['serious', 'middle', 'degen'];
 export const isVids2Mode = (v: unknown): v is Vids2Mode =>
@@ -229,26 +229,58 @@ export const bottomBName = (person: string, direction: Direction, theme: Theme) 
 /** Its context, in the words a hand-filed Bottom B uses, so the caption writer
  *  and the post-caption writer read it the same way. */
 export const bottomBContext = (person: string, direction: Direction) =>
-  `pauv.com, searching ${person}, reading their chart, then trading $10 ${direction} on them`;
+  `pauv.com, searching ${person}, reading their chart, then trading $${AMOUNT_USD} ${direction} on them`;
 
 const r2 = (n: number) => Math.round(n * 100) / 100;
 
 /** Its marks: the recording's four beats, written the way a hand-marked clip is
  *  — the caption writer turns each into a line and the layout lands that line
  *  where its beat starts (lib/simpler/vidsCaptions onMarks). Times are the
- *  renderer's own, in clip seconds. The first line is replaced by the fixed
- *  opener ("go to pauv.com / search them") whatever comes back for it, so this
- *  one is what steers the three after it. */
+ *  renderer's own, in clip seconds. Only the third line is the writer's: the
+ *  other three are fixed whatever comes back for them (bottomBOpen,
+ *  bottomBFixed), so the marks around it are there to steer that one. */
 export function bottomBMarks(beats: TradeBeats, person: string, direction: Direction): VidMark[] {
   const at = (s: { start: number; end: number }) => ({ start: r2(s.start), end: r2(s.end) });
   const say = (text: string) => text.slice(0, MAX_MARK_TEXT);
   return [
     { ...at(beats.searching), text: say(`searching ${person} on pauv`) },
     { ...at(beats.analyzing), text: say(`reading ${person}'s price chart`) },
-    { ...at(beats.trading), text: say(`putting $10 ${direction} on them`) },
+    { ...at(beats.trading), text: say(`putting $${AMOUNT_USD} ${direction} on them`) },
     { ...at(beats.confirming), text: say('the trade goes through') },
   ];
 }
+
+// ── The trade's captions ─────────────────────────────────────────────────────
+// The trade says the same four things every build, and three of them never
+// change: the opener is the address and the search (lib/simpler/vidsCaptions
+// bottomBOpen), the chart and the confirmation come off the sets below, one at
+// random. The third — the trade itself — is the caption writer's, and it always
+// carries the amount in $.
+
+/** Bottom B's second caption — reading their chart. */
+export const BOTTOM_B_CHART: readonly string[] = ['check their chart', 'look at the price', 'analyze...'];
+
+/** Bottom B's fourth caption — the trade gone through. */
+export const BOTTOM_B_CONFIRM: readonly string[] = ['locked in', 'trade confirmed', 'confirmed', 'order placed'];
+
+/** One of a Bottom B slot's fixed lines at random — null for the opener, which
+ *  is bottomBOpen's, and for the trade, which is written. `avoid` is lines
+ *  already on the video: Bottom A's pick can land on "locked in" too, and the
+ *  same words twice in one video read like a mistake. Nothing is avoided when
+ *  that would leave nothing. */
+export function bottomBFixed(index: number, avoid: readonly string[] = []): string | null {
+  const bank = index === 1 ? BOTTOM_B_CHART : index === 3 ? BOTTOM_B_CONFIRM : null;
+  if (!bank) return null;
+  const fresh = bank.filter((l) => !avoid.includes(l));
+  const from = fresh.length ? fresh : bank;
+  return from[Math.floor(Math.random() * from.length)];
+}
+
+/** The written trade line, held to its money: kept as written when it has a $
+ *  amount in it, and otherwise the plain trade, amount and all — "put $10 up
+ *  on ronaldo". */
+export const bottomBTrade = (line: string, name: string, direction: Direction): string =>
+  (/\$\d/.test(line) ? line : `put $${AMOUNT_USD} ${direction} on ${name || 'them'}`);
 
 export interface TradeClipProgress { stage: 'load' | 'render'; frac: number | null }
 

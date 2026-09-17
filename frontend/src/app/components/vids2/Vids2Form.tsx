@@ -12,12 +12,11 @@
 //                to have filmed. Over a thousand of them, so the box searches
 //                rather than scrolls, and says how many as it does.
 //   2. Mode      Serious, Middle or Degen — how the video talks, not what is
-//                in it (Vids2Mode in lib/vids2). Degen writes the hook to beg
-//                instead of brag, lays three BOOMs on the beats worth reacting
-//                to, and may roll a song marked degen on the Music page. See
-//                degenBooms in lib/vids2, DEGEN_HOOK in api/vids/captions, and
-//                rollableMusic in Vids2Builder. Serious and Middle are still to
-//                be defined; until they are, both make the ordinary video.
+//                in it (Vids2Mode in lib/vids2). Each writes the hook to its
+//                own guide (api/vids/hook). Degen also lays three BOOMs on the
+//                beats worth reacting to, and may roll a song marked degen on
+//                the Music page. See degenBooms in lib/vids2 and rollableMusic
+//                in Vids2Builder.
 //   3. Which way up or down — which way the $10 goes.
 //   4. Look      light or dark. It is the Pauv page's theme, and only that:
 //                the ChatGPT recording is dark whatever this says.
@@ -423,18 +422,31 @@ export function Vids2Form({
                   not subtle and nobody should have to press it to find out. */}
               {setup.mode === 'degen' ? (
                 <p className="mt-2.5 text-[10px] leading-relaxed text-zinc-500">
-                  Degen: the hook stops bragging and starts begging — &ldquo;homeless man trades on{' '}
-                  {setup.person.trim().toLowerCase() || 'them'} (i need serious help)&rdquo; — and three BOOMs lay
+                  Degen: the hook is a self-own with a nickname — &ldquo;tweaker trades on zuckey (dear god please
+                  help me) 💯&rdquo; — and three BOOMs lay
                   themselves: <span className="text-zinc-400">fahh</span> when ChatGPT names them,{' '}
                   <span className="text-zinc-400">oh hell nah</span> when their page opens,{' '}
                   <span className="text-zinc-400">fahh</span> again when the trade goes in. Take any of them off on the
                   bar afterwards. The random song can be a degen one too. Nothing else about the video changes.
                 </p>
+              ) : setup.mode === 'serious' ? (
+                <p className="mt-2.5 text-[10px] leading-relaxed text-zinc-500">
+                  Serious: the hook says it dead straight — &ldquo;trading on{' '}
+                  {setup.person.trim().toLowerCase() || 'them'} all season to quit the 9 to 5&rdquo; — the trade, now
+                  and then a reason for it, and what the money is for. Nothing else about the video changes.
+                </p>
               ) : (
                 <p className="mt-2.5 text-[10px] leading-relaxed text-zinc-500">
-                  {MODE_LABEL[setup.mode]} makes the ordinary video for now.
+                  Middle: the hook uses two of three — a money analogy, what the persona is doing, the trade —
+                  &ldquo;making a surgeon&rsquo;s salary from the hot tub&rdquo;, &ldquo;shorting{' '}
+                  {setup.person.trim().toLowerCase() || 'them'} mid haircut&rdquo;. Nothing else about the video changes.
                 </p>
               )}
+              <p className="mt-1.5 text-[10px] leading-relaxed text-zinc-500">
+                In every mode, one hook in five is a twist instead: a mystery — &ldquo;shorting the goat&rdquo; — a
+                me if — &ldquo;me if shorting drake at a funeral was legal&rdquo; — or, going up, hype:
+                &ldquo;{setup.person.trim().toLowerCase() || 'messi'} to the stratosphere&rdquo;.
+              </p>
             </>
           )}
 
