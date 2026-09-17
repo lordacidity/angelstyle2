@@ -5,13 +5,14 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { z } from 'zod';
 import { latestFromOutlet, resolveGoogleNewsLink } from '@/lib/news/google-news';
+import { imdbIdOf, imdbRail } from '@/lib/news/imdb';
 import { ArticleError, readNewsArticle } from '@/lib/news/read-article';
 import type { OutletId, RailItem } from '@/lib/news/types';
 
 export const runtime = 'nodejs';
 
 /** Outlets whose page layout has a column of other stories. */
-const HAS_RAIL: OutletId[] = ['espn', 'cnn', 'fox', 'tmz'];
+const HAS_RAIL: OutletId[] = ['espn', 'cnn', 'fox', 'tmz', 'people'];
 
 export async function POST(req: NextRequest) {
   const parsed = z.object({ link: z.string().url() }).safeParse(await req.json().catch(() => ({})));
@@ -27,9 +28,15 @@ export async function POST(req: NextRequest) {
   try {
     const article = await readNewsArticle(url);
     let rail: RailItem[] = [];
-    if (HAS_RAIL.includes(article.outlet)) {
+    // IMDb's lists come from IMDb itself, under the names its pages give them;
+    // everyone else's latest headlines come from Google News.
+    if (article.outlet === 'imdb') {
+      rail = await imdbRail(imdbIdOf(new URL(article.url)) ?? '').catch(() => []);
+    } else if (HAS_RAIL.includes(article.outlet)) {
       rail = await latestFromOutlet(article.outlet, article.headline).catch(() => []);
-      if (rail.length === 0) article.notes.push("Couldn't load the outlet's other headlines, so the side column is empty.");
+    }
+    if (rail.length === 0 && (article.outlet === 'imdb' || HAS_RAIL.includes(article.outlet))) {
+      article.notes.push("Couldn't load the outlet's other headlines, so the side column is empty.");
     }
     return NextResponse.json({ article, rail });
   } catch (err) {

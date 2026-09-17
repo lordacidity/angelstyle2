@@ -9,20 +9,22 @@
 //
 //   Form      one question at a time: who on Pauv, the mode (Serious, Middle
 //             or Degen — not about the video so much as how it talks; Degen
-//             turns the hook into a cry for help and lays three BOOMs over the
-//             recordings), which way, light or dark, the persona, the
-//             question. See Vids2Form.
-//   Generate  the two screen recordings, both at once: ChatGPT looking them up
-//             (Bottom A) and the Pauv trade (Bottom B). Neither needs anything
-//             from the other, so neither waits for it. Both are rendered in
-//             this tab, by the files that own them, and neither goes to the
-//             library. Then the persona's three clips and an End off the
-//             shelf, and the stage is a whole video.
+//             turns the hook into a cry for help and lays BOOMs over the
+//             recordings), which way, light or dark, the persona, and the
+//             intro — nothing, ChatGPT and a question, or a news story about
+//             them. See Vids2Form.
+//   Generate  the screen recordings, all at once: the intro (Bottom A) —
+//             ChatGPT looking them up, or the news story opened and read, or
+//             nothing at all — and the Pauv trade (Bottom B). Neither needs
+//             anything from the other, so neither waits for it. Both are
+//             rendered in this tab, by the files that own them, and neither
+//             goes to the library. Then the persona's three clips and an End
+//             off the shelf, and the stage is a whole video.
 //   Tune      Vids2Builder: the sound, the words, the BOOMs, the post caption
 //             and Download. Change goes back to the form with the answers as
 //             they were left.
 //
-// This section owns the two recordings' bytes: it made them, it lets them go
+// This section owns the recordings' bytes: it made them, it lets them go
 // when a second Generate replaces them, and again when the page is left.
 // Nothing downstream releases a clip.
 //
@@ -31,8 +33,8 @@
 // caption on the tuning page are Simpler's own components. That is the deal
 // this section is built on: a change to how Simpler builds a video is a change
 // to how Vids 2 builds one. What is Vids 2's alone is the form, the tuning
-// page's shape, and lib/vids2 (the answers, the roster, and the trade
-// recording as a Bottom B). See components/vids2/README.md.
+// page's shape, and lib/vids2 (the answers, the roster, the news story as a
+// Bottom A and the trade recording as a Bottom B). See components/vids2/README.md.
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useVidsLibrary } from '@/app/hooks/useVidsLibrary';
@@ -46,13 +48,18 @@ import { PERSONA_PARTS, type VidPersona, type VidRow } from '@/lib/vids-types';
 import { isLocalClip, makeLocalClip, releaseLocalClip } from '@/lib/simpler/vidsLocal';
 import { makeChatGptClip } from '@/app/components/chatgpt/chatgpt-video';
 import { bottomAContext, bottomAMarks, bottomAName } from '@/lib/simpler/vidsBottom';
+import { outletById } from '@/lib/news/outlets';
 import {
-  loadSetup, makeTradeClip, saveSetup, setupReady,
+  loadSetup, makeNewsClip, makeTradeClip, saveSetup, setupReady, storyFor,
   type Vids2Build, type Vids2Setup,
 } from '@/lib/vids2/vids2Build';
 
 const pickRandom = <T,>(xs: readonly T[]): T | undefined =>
   (xs.length ? xs[Math.floor(Math.random() * xs.length)] : undefined);
+
+/** The intro, made: its clip for the stage, the moment it gets to them (clip
+ *  seconds, for degen mode's BOOM), and anything its renderer wanted said. */
+interface IntroClip { row: VidRow; pick: number; notes: string[] }
 
 export function Vids2Section({ active }: { active: boolean }) {
   const lib = useVidsLibrary(active);
@@ -82,7 +89,7 @@ export function Vids2Section({ active }: { active: boolean }) {
     void ensureFolders([...LIBRARY_FOLDERS]);
   }, [loaded, ensureFolders]);
 
-  // ── The two recordings' bytes ───────────────────────────────────────────────
+  // ── The recordings' bytes ───────────────────────────────────────────────────
   // They live in this tab and nowhere else (lib/simpler/vidsLocal). Whoever
   // made them lets them go, which is here: when a second Generate replaces
   // them, and when the page is left.
@@ -103,7 +110,7 @@ export function Vids2Section({ active }: { active: boolean }) {
   // new URL — so every slot is resolved against the library each render rather
   // than trusting that snapshot. A clip whose row has gone empties its slot;
   // new footage resets that slot's in / out points, since they pointed into
-  // footage that no longer exists. The two recordings have no row to resolve
+  // footage that no longer exists. The recordings have no row to resolve
   // against and pass through as they are.
   const livePicks = useMemo(() => {
     let changed = false;
@@ -166,57 +173,103 @@ export function Vids2Section({ active }: { active: boolean }) {
     setJob(null);
   };
 
-  /** Generate: both recordings, then the whole stage, then the tuning page.
+  /** Generate: the recordings, then the whole stage, then the tuning page.
    *
-   *  The two are made at the same time. Neither needs anything from the other
-   *  — the question goes to ChatGPT, the name goes to Pauv — and each spends a
-   *  good part of its time waiting on something that is not the CPU (the model
-   *  answering, the roster and the photos arriving), which is exactly the time
-   *  the other one can be drawing frames in. They share the one thread, so the
-   *  drawing itself still takes the drawing's time; what disappears is one
-   *  wait sitting behind the other.
+   *  The intro and the trade are made at the same time. Neither needs
+   *  anything from the other — the question goes to ChatGPT, the story goes
+   *  to Google and the outlet, the name goes to Pauv — and each spends a good
+   *  part of its time waiting on something that is not the CPU (the model
+   *  answering, the photos, the roster arriving), which is exactly the time
+   *  the other one can be drawing frames in. They share the one thread, so
+   *  the drawing itself still takes the drawing's time; what disappears is
+   *  one wait sitting behind the other. With no intro there is only the
+   *  trade, and nothing to wait beside.
    *
-   *  Nothing is put on the stage until both have come back, so a failure on
-   *  either side leaves the form exactly as it was, with a reason on it,
-   *  rather than half a video behind it. The first real failure aborts the
-   *  pair, so the survivor stops rather than rendering for a build that will
-   *  never be shown. */
+   *  Nothing is put on the stage until every recording has come back, so a
+   *  failure on either side leaves the form exactly as it was, with a reason
+   *  on it, rather than half a video behind it. The first real failure aborts
+   *  the pair, so the survivor stops rather than rendering for a build that
+   *  will never be shown. */
   const generate = async () => {
     if (!setupReady(setup) || job) return;
     const persona = personas.find((p) => p.id === setup.personaId) ?? null;
     if (!persona) { setJobError('That persona is no longer in the library. Choose another.'); return; }
-    const question = setup.question.trim();
-    const { direction, theme, mode } = setup;
+    const { direction, theme, mode, intro } = setup;
+    const question = intro === 'chatgpt' ? setup.question.trim() : '';
+    const story = intro === 'news' ? storyFor(setup) : null;
+    if (intro === 'news' && !story) { setJobError('Choose a story first.'); return; }
 
     jobRef.current?.abort();
     const ctrl = new AbortController();
     jobRef.current = ctrl;
     setJobError(null);
     setJob({
-      chat: { label: 'Asking ChatGPT…', frac: null, done: false },
+      intro: intro === 'none' ? null : {
+        label: intro === 'chatgpt' ? 'Asking ChatGPT…' : 'Finding photos for the story…', frac: null, done: false,
+      },
       trade: { label: 'Reading them off Pauv…', frac: null, done: false },
     });
-    /** One of the two lines on the form, moved on its own. */
-    const leg = (which: 'chat' | 'trade', next: Partial<Vids2Leg>) =>
-      setJob((j) => (j ? { ...j, [which]: { ...j[which], ...next } } : j));
+    /** One of the lines on the form, moved on its own. */
+    const leg = (which: 'intro' | 'trade', next: Partial<Vids2Leg>) =>
+      setJob((j) => (j && j[which] ? { ...j, [which]: { ...j[which], ...next } } : j));
     /** A leg giving up because the other one already has. Not a failure, and
      *  not what the form should be told about. */
     const cancelled = (e: unknown) => e instanceof DOMException && e.name === 'AbortError';
     /** The first real failure takes the other one down with it. */
     const stopBoth = (e: unknown) => { if (!cancelled(e)) ctrl.abort(); throw e; };
 
-    const chatP = makeChatGptClip({
-      name: setup.person,
-      direction,
-      question,
-      signal: ctrl.signal,
-      onProgress: (p) => leg('chat', p.stage === 'ask'
-        ? { label: 'Asking ChatGPT…', frac: null }
-        : { label: 'Rendering the ChatGPT search', frac: p.frac }),
-    }).then(
-      (r) => { leg('chat', { label: 'ChatGPT search — done', frac: 1, done: true }); return r; },
-      stopBoth,
-    );
+    // The intro, whichever it is, as a clip for the stage — made by the file
+    // that owns the recording and filed here the way a hand-filed Bottom A
+    // is: a name to read, a context and marks for the caption writer.
+    const introP: Promise<IntroClip | null> = intro === 'chatgpt'
+      ? makeChatGptClip({
+        name: setup.person,
+        direction,
+        question,
+        signal: ctrl.signal,
+        onProgress: (p) => leg('intro', p.stage === 'ask'
+          ? { label: 'Asking ChatGPT…', frac: null }
+          : { label: 'Rendering the ChatGPT search', frac: p.frac }),
+      }).then(
+        (chat) => {
+          leg('intro', { label: 'ChatGPT search — done', frac: 1, done: true });
+          // The name the answer led with ("Donald Trump" for "Trump") is what
+          // the context says the answer was.
+          const answer = chat.reply.picks[0]?.name.trim() || setup.person;
+          const row = makeLocalClip(chat.blob, {
+            name: bottomAName(setup.person, direction),
+            context: bottomAContext(question, answer),
+            marks: bottomAMarks(chat.beats, question, answer),
+            duration: chat.seconds,
+            width: chat.width,
+            height: chat.height,
+            // Its audio track is the keyboard under the typing and nothing else.
+            hasSfx: true,
+            poster: chat.poster,
+          });
+          return { row, pick: chat.beats.choosing.start, notes: [] };
+        },
+        stopBoth,
+      )
+      : story
+        ? makeNewsClip({
+          name: setup.person,
+          direction,
+          story,
+          signal: ctrl.signal,
+          onProgress: (p) => leg('intro', p.stage === 'photos'
+            ? { label: 'Finding photos for the story…', frac: null }
+            : p.stage === 'layout'
+              ? { label: 'Laying the pages out…', frac: null }
+              : { label: 'Rendering the news story', frac: p.frac }),
+        }).then(
+          (r) => {
+            leg('intro', { label: 'News story — done', frac: 1, done: true });
+            return { row: r.row, pick: r.nameAt, notes: r.notes };
+          },
+          stopBoth,
+        )
+        : Promise.resolve(null);
     const tradeP = makeTradeClip({
       name: setup.person,
       direction,
@@ -231,38 +284,24 @@ export function Vids2Section({ active }: { active: boolean }) {
     );
 
     try {
-      const [chatR, tradeR] = await Promise.allSettled([chatP, tradeP]);
-      if (chatR.status !== 'fulfilled' || tradeR.status !== 'fulfilled') {
-        // The trade makes its clip as it finishes, so a trade that landed
-        // beside a ChatGPT that didn't is holding bytes nothing will show.
+      const [introR, tradeR] = await Promise.allSettled([introP, tradeP]);
+      if (introR.status !== 'fulfilled' || tradeR.status !== 'fulfilled') {
+        // Each makes its clip as it finishes, so one that landed beside one
+        // that didn't is holding bytes nothing will show.
         if (tradeR.status === 'fulfilled') releaseLocalClip(tradeR.value.row);
-        const failed = [chatR, tradeR].find(
+        if (introR.status === 'fulfilled' && introR.value) releaseLocalClip(introR.value.row);
+        const failed = [introR, tradeR].find(
           (r): r is PromiseRejectedResult => r.status === 'rejected' && !cancelled(r.reason),
         );
         // Nothing failed, so both were cancelled: the form says nothing.
         if (failed) throw failed.reason;
         return;
       }
-      const chat = chatR.value;
+      const introClip = introR.value;
       const trade = tradeR.value;
 
-      // The name the answer led with ("Donald Trump" for "Trump") is what the
-      // context says the answer was.
-      const answer = chat.reply.picks[0]?.name.trim() || setup.person;
-      const aRow = makeLocalClip(chat.blob, {
-        name: bottomAName(setup.person, direction),
-        context: bottomAContext(question, answer),
-        marks: bottomAMarks(chat.beats, question, answer),
-        duration: chat.seconds,
-        width: chat.width,
-        height: chat.height,
-        // Its audio track is the keyboard under the typing and nothing else.
-        hasSfx: true,
-        poster: chat.poster,
-      });
-
       const next: Picks = personaPicks(persona);
-      next.bottomA = freshPick('bottomA', aRow);
+      if (introClip) next.bottomA = freshPick('bottomA', introClip.row);
       next.bottomB = {
         ...freshPick('bottomB', trade.row),
         // At the speed every filed Bottom B is rendered at (INTAKE_SPEED): a
@@ -288,13 +327,16 @@ export function Vids2Section({ active }: { active: boolean }) {
         person: trade.person.name,
         direction,
         theme,
+        intro,
         question,
+        story: story ? { outlet: outletById(story.article.outlet).name, headline: story.article.headline } : null,
+        notes: introClip?.notes ?? [],
         mode,
-        // The two renderers' own moments, in their own clip seconds. Degen
-        // mode hangs its BOOMs on these; the tuning page is what works out
-        // where each one falls on the finished timeline.
+        // The renderers' own moments, in their own clip seconds. Degen mode
+        // hangs its BOOMs on these; the tuning page is what works out where
+        // each one falls on the finished timeline.
         beats: {
-          chatPick: chat.beats.choosing.start,
+          introPick: introClip?.pick ?? null,
           tradeOpen: trade.beats.analyzing.start,
           tradePlaced: trade.beats.confirming.start,
         },

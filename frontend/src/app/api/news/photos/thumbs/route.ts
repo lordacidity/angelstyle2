@@ -12,7 +12,7 @@ export const maxDuration = 60;
 
 const Body = z.object({
   outlet: z.string().refine(isOutletId),
-  headlines: z.array(z.string().max(300)).max(8),
+  headlines: z.array(z.string().max(300)).max(16),
   /** The page's own subject, kept out of the random people. */
   name: z.string().max(80).optional(),
 });

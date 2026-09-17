@@ -6,13 +6,16 @@ import { renderBbc } from './bbc';
 import { renderCnn } from './cnn';
 import { renderEspn } from './espn';
 import { renderFox } from './fox';
+import { renderImdb } from './imdb';
 import { renderNyt } from './nyt';
+import { renderPeople } from './people';
 import { renderTmz } from './tmz';
 
 export { NO_PHOTOS, PAGE_WIDTH, PHOTO_SLOTS, type PagePhotos, type PhotoSize, type RenderedPage } from './shared';
 
 const TEMPLATES: Record<OutletId, (a: NewsArticle, rail: RailItem[], now: Date, photos: PagePhotos) => RenderedPage> = {
   espn: renderEspn, cnn: renderCnn, fox: renderFox, nyt: renderNyt, tmz: renderTmz, bbc: renderBbc,
+  people: renderPeople, imdb: renderImdb,
 };
 
 /** Templates write plain selectors; every one is scoped under `.np` so a page

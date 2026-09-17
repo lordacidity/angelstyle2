@@ -1,0 +1,80 @@
+<!doctype html>
+<!-- Temporary harness: draws a rendered News page the way lib/news/rasterize.ts
+     does (hidden iframe, fonts inlined, SVG foreignObject, canvas) so the new
+     templates can be checked through the real path. Delete when done. -->
+<html><head><meta charset="utf-8"><title>news raster test</title></head>
+<body style="margin:0;background:#888">
+<script type="module">
+const PAGE_WIDTH = 1440;
+const qs = new URLSearchParams(location.search);
+const which = qs.get('page') || 'people';
+const scale = Number(qs.get('scale') || 1.5);
+
+const blobToDataUrl = blob => new Promise((res, rej) => {
+  const r = new FileReader();
+  r.onload = () => res(String(r.result));
+  r.onerror = () => rej(r.error);
+  r.readAsDataURL(blob);
+});
+const toDataUrl = async url => blobToDataUrl(await (await fetch(url)).blob());
+
+async function inlineFontCss(href) {
+  const css = await (await fetch(href)).text();
+  const blocks = css.split(/(?=\/\*\s*[\w-]+\s*\*\/)/).filter(b => /^\/\*\s*latin\s*\*\//.test(b.trim()));
+  const kept = blocks.length ? blocks : [css];
+  const out = [];
+  for (const block of kept) {
+    const urls = [...block.matchAll(/url\((['"]?)(https:[^)'"]+)\1\)/g)].map(m => m[2]);
+    let b = block;
+    for (const u of urls) b = b.split(u).join(await toDataUrl(u));
+    out.push(b);
+  }
+  return out.join('\n');
+}
+const xmlEscapeText = s => s.replace(/&/g, '&amp;').replace(/</g, '&lt;');
+
+(async () => {
+  const page = await (await fetch(`/__newstest-${which}.json`)).json();
+  const frame = document.createElement('iframe');
+  frame.style.cssText = `position:fixed;left:-100000px;top:0;width:${PAGE_WIDTH}px;height:900px;border:0;visibility:hidden;`;
+  const loaded = new Promise(r => frame.addEventListener('load', () => r(), { once: true }));
+  frame.srcdoc = `<!doctype html><html><head><meta charset="utf-8"><link rel="stylesheet" href="${page.fontsHref}"><style>html,body{margin:0;padding:0;}${page.css}</style></head><body>${page.html}</body></html>`;
+  document.body.appendChild(frame);
+  await loaded;
+  const doc = frame.contentDocument;
+  await doc.fonts.ready;
+  await Promise.all([...doc.images].map(i => (i.complete ? Promise.resolve() : i.decode().catch(() => {}))));
+  const root = doc.querySelector('.np');
+  const height = Math.ceil(root.getBoundingClientRect().height);
+
+  for (const img of [...root.querySelectorAll('img')]) {
+    const src = img.getAttribute('src');
+    if (src && !src.startsWith('data:')) img.setAttribute('src', await toDataUrl(new URL(src, location.href).href));
+  }
+  const fontCss = await inlineFontCss(page.fontsHref);
+  const markup = new XMLSerializer().serializeToString(root);
+  const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="${PAGE_WIDTH}" height="${height}">`
+    + `<foreignObject x="0" y="0" width="${PAGE_WIDTH}" height="${height}">`
+    + `<div xmlns="http://www.w3.org/1999/xhtml" style="width:${PAGE_WIDTH}px;height:${height}px;margin:0;">`
+    + `<style>${xmlEscapeText(fontCss)}\n${xmlEscapeText(page.css)}</style>` + markup + `</div></foreignObject></svg>`;
+
+  const image = new Image();
+  image.decoding = 'sync';
+  await new Promise((res, rej) => {
+    image.onload = () => res();
+    image.onerror = () => rej(new Error('the page could not be drawn as an image'));
+    image.src = `data:image/svg+xml;charset=utf-8,${encodeURIComponent(svg)}`;
+  });
+  await image.decode().catch(() => {});
+  await new Promise(r => setTimeout(r, 200));
+  const canvas = document.createElement('canvas');
+  canvas.width = Math.round(PAGE_WIDTH * scale);
+  canvas.height = Math.round(height * scale);
+  const ctx = canvas.getContext('2d');
+  ctx.drawImage(image, 0, 0, canvas.width, canvas.height);
+  window.__png = canvas.toDataURL('image/png');
+  window.__size = { width: canvas.width, height: canvas.height, pageHeight: height };
+  document.title = 'done';
+})().catch(err => { window.__error = String(err && err.message || err); document.title = 'failed'; });
+</script>
+</body></html>

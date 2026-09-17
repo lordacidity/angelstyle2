@@ -8,6 +8,11 @@
 //      and inlined (Latin subsets only), so nothing outside the image is needed.
 //   3. The page is serialised as XHTML inside an SVG <foreignObject> and drawn
 //      onto a canvas at `scale` device pixels per CSS pixel.
+//
+// Two ways in: rasterizeNewsPage gives the PNG the section shows and downloads;
+// paintNewsPage gives the news recording (components/news/news-video.ts) a
+// canvas instead, and lets it read the laid-out page first — where the name
+// is, where the photos are — since the page is only ever a DOM in step 1.
 
 import { PAGE_WIDTH, type RenderedPage } from './templates';
 
@@ -17,6 +22,10 @@ export interface NewsImage {
   width: number;
   height: number;
 }
+
+/** Browsers refuse canvases taller than 32,767px; a very long article is
+ *  drawn at a slightly lower scale instead of failing. */
+const MAX_CANVAS = 32_000;
 
 function blobToDataUrl(blob: Blob): Promise<string> {
   return new Promise((resolve, reject) => {
@@ -86,41 +95,45 @@ async function layOut(page: RenderedPage): Promise<{ frame: HTMLIFrameElement; r
   return { frame, root };
 }
 
+/** Steps 2 and 3: the laid-out page as one self-contained image, `height`
+ *  CSS px tall. Swaps the page's images for data URLs in place. */
+async function svgImageOf(root: HTMLElement, page: RenderedPage, height: number): Promise<HTMLImageElement> {
+  // Logos and any other images become data URLs so the SVG is self-contained.
+  for (const img of [...root.querySelectorAll('img')]) {
+    const src = img.getAttribute('src');
+    if (src && !src.startsWith('data:')) img.setAttribute('src', await toDataUrl(new URL(src, window.location.href).href));
+  }
+  const fontCss = await inlineFontCss(page.fontsHref);
+  const markup = new XMLSerializer().serializeToString(root);
+  const svg =
+    `<svg xmlns="http://www.w3.org/2000/svg" width="${PAGE_WIDTH}" height="${height}">`
+    + `<foreignObject x="0" y="0" width="${PAGE_WIDTH}" height="${height}">`
+    + `<div xmlns="http://www.w3.org/1999/xhtml" style="width:${PAGE_WIDTH}px;height:${height}px;margin:0;">`
+    + `<style>${xmlEscapeText(fontCss)}\n${xmlEscapeText(page.css)}</style>`
+    + markup
+    + `</div></foreignObject></svg>`;
+
+  // A data: URL, not a blob: one: Chrome lets a canvas export an SVG
+  // <foreignObject> drawing only when the SVG came from a data URL.
+  const image = new Image();
+  image.decoding = 'sync';
+  await new Promise<void>((resolve, reject) => {
+    image.onload = () => resolve();
+    image.onerror = () => reject(new Error('The page could not be drawn as an image.'));
+    image.src = `data:image/svg+xml;charset=utf-8,${encodeURIComponent(svg)}`;
+  });
+  // Give the SVG's embedded fonts a moment to apply before it is drawn.
+  await image.decode().catch(() => undefined);
+  await new Promise(r => setTimeout(r, 150));
+  return image;
+}
+
 export async function rasterizeNewsPage(page: RenderedPage, scale = 1.5): Promise<NewsImage> {
   const { frame, root } = await layOut(page);
   try {
     const height = Math.ceil(root.getBoundingClientRect().height);
-    // Logos and any other images become data URLs so the SVG is self-contained.
-    for (const img of [...root.querySelectorAll('img')]) {
-      const src = img.getAttribute('src');
-      if (src && !src.startsWith('data:')) img.setAttribute('src', await toDataUrl(new URL(src, window.location.href).href));
-    }
-    const fontCss = await inlineFontCss(page.fontsHref);
-    const markup = new XMLSerializer().serializeToString(root);
-    const svg =
-      `<svg xmlns="http://www.w3.org/2000/svg" width="${PAGE_WIDTH}" height="${height}">`
-      + `<foreignObject x="0" y="0" width="${PAGE_WIDTH}" height="${height}">`
-      + `<div xmlns="http://www.w3.org/1999/xhtml" style="width:${PAGE_WIDTH}px;height:${height}px;margin:0;">`
-      + `<style>${xmlEscapeText(fontCss)}\n${xmlEscapeText(page.css)}</style>`
-      + markup
-      + `</div></foreignObject></svg>`;
-
-    // A data: URL, not a blob: one: Chrome lets a canvas export an SVG
-    // <foreignObject> drawing only when the SVG came from a data URL.
-    const image = new Image();
-    image.decoding = 'sync';
-    await new Promise<void>((resolve, reject) => {
-      image.onload = () => resolve();
-      image.onerror = () => reject(new Error('The page could not be drawn as an image.'));
-      image.src = `data:image/svg+xml;charset=utf-8,${encodeURIComponent(svg)}`;
-    });
-    // Give the SVG's embedded fonts a moment to apply before it is drawn.
-    await image.decode().catch(() => undefined);
-    await new Promise(r => setTimeout(r, 150));
-
-    // Browsers refuse canvases taller than 32,767px; a very long article is
-    // drawn at a slightly lower scale instead of failing.
-    const drawScale = Math.min(scale, 32_000 / height);
+    const image = await svgImageOf(root, page, height);
+    const drawScale = Math.min(scale, MAX_CANVAS / height);
     const canvas = document.createElement('canvas');
     canvas.width = Math.round(PAGE_WIDTH * drawScale);
     canvas.height = Math.round(height * drawScale);
@@ -131,6 +144,50 @@ export async function rasterizeNewsPage(page: RenderedPage, scale = 1.5): Promis
     const blob = await new Promise<Blob | null>(resolve => canvas.toBlob(resolve, 'image/png'));
     if (!blob) throw new Error('The image could not be saved.');
     return { blob, width: canvas.width, height: canvas.height };
+  } finally {
+    frame.remove();
+  }
+}
+
+export interface PaintOptions<M> {
+  /** Device pixels per CSS pixel. */
+  scale: number;
+  /** Runs against the laid-out page before it is drawn; the DOM is real here
+   *  (fonts loaded, images decoded), so boxes measure true. */
+  measure: (root: HTMLElement) => M;
+  /** How much of the page, from the top, to actually paint (CSS px) — a
+   *  recording that never scrolls past a point has no use for the rest.
+   *  Left out, the whole page. */
+  heightFor?: (measured: M, pageHeight: number) => number;
+}
+export interface PaintedPage<M> {
+  canvas: HTMLCanvasElement;
+  /** Device pixels per CSS pixel the canvas was drawn at. */
+  scale: number;
+  /** CSS px of the page the canvas holds, from the top. */
+  height: number;
+  /** The whole page's height in CSS px. */
+  pageHeight: number;
+  measured: M;
+}
+
+/** The page on a canvas, plus whatever `measure` read off its layout. */
+export async function paintNewsPage<M>(page: RenderedPage, o: PaintOptions<M>): Promise<PaintedPage<M>> {
+  const { frame, root } = await layOut(page);
+  try {
+    const pageHeight = Math.ceil(root.getBoundingClientRect().height);
+    const measured = o.measure(root);
+    const height = Math.max(1, Math.min(pageHeight, Math.ceil(o.heightFor?.(measured, pageHeight) ?? pageHeight)));
+    const image = await svgImageOf(root, page, pageHeight);
+    const drawScale = Math.min(o.scale, MAX_CANVAS / height);
+    const canvas = document.createElement('canvas');
+    canvas.width = Math.round(PAGE_WIDTH * drawScale);
+    canvas.height = Math.round(height * drawScale);
+    const ctx = canvas.getContext('2d');
+    if (!ctx) throw new Error('No canvas to draw on.');
+    ctx.scale(drawScale, drawScale);
+    ctx.drawImage(image, 0, 0, PAGE_WIDTH, pageHeight);
+    return { canvas, scale: drawScale, height, pageHeight, measured };
   } finally {
     frame.remove();
   }

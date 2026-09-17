@@ -2,8 +2,8 @@
 // byline, the publish (and update) time and the article text, word for
 // word. Each outlet is read from the most reliable public source it offers:
 //
-//   CNN, Fox, TMZ, BBC  the article page itself (its JSON-LD plus the page's
-//                       own headline and paragraph markup)
+//   CNN, Fox, TMZ,      the article page itself (its JSON-LD plus the page's
+//   BBC, People         own headline and paragraph markup)
 //   ESPN                ESPN's public content API (the page blocks scripted
 //                       visitors; the API serves the same story)
 //   NYT                 the Times' public oEmbed feed (the page blocks scripted
@@ -11,13 +11,16 @@
 //                       date, but no article text)
 //   The Athletic        the Athletic's public API, rendered as a Times page
 //                       (headline, summary, authors and time; no article text)
+//   IMDb                the endpoint imdb.com's own pages read (the page blocks
+//                       scripted visitors); see lib/news/imdb.ts
 //
 // A story without a headline, a byline or a date is refused: the page would
 // otherwise need something made up to fill the gap.
 
 import {
-  articleLd, BROWSER_HEADERS, elementText, fetchText, firstH1, isShouting, ldAuthors, ldString, textOf, decodeEntities,
+  articleLd, BROWSER_HEADERS, elementText, fetchPage, fetchText, firstH1, isShouting, ldAuthors, ldString, textOf, decodeEntities,
 } from './html';
+import { imdbIdOf, imdbItem, imdbUrl } from './imdb';
 import { articleUrlProblem, athleticId, outletForHost, outletById } from './outlets';
 import type { NewsArticle, OutletId } from './types';
 
@@ -69,7 +72,7 @@ function articleText(paragraphs: string[]): string[] {
 async function pageHtml(url: string, outlet: OutletId): Promise<string> {
   let res;
   try {
-    res = await fetchText(url);
+    res = await fetchPage(url);
   } catch (err) {
     throw new ArticleError(`Couldn't reach ${outletById(outlet).name}: ${String(err instanceof Error ? err.message : err)}`);
   }
@@ -115,6 +118,7 @@ async function readEspn(u: URL): Promise<NewsArticle> {
     url: cleanUrl(u),
     headline: decodeEntities(ldString(h.headline) ?? ''),
     headlineParts: null,
+    sourceName: null,
     dek: null,
     authors,
     byline: byline || joinNames(authors),
@@ -123,6 +127,7 @@ async function readEspn(u: URL): Promise<NewsArticle> {
     updatedAt: isoOrNull(h.lastModified),
     section: league ?? null,
     paragraphs: articleText(paragraphs),
+    keyPoints: [],
     live: h.isLiveBlog === true,
     notes: team ? [`Team: ${team}`] : [],
   };
@@ -159,6 +164,7 @@ async function readNyt(u: URL): Promise<NewsArticle> {
     url,
     headline: decodeEntities(ldString(j.title) ?? ''),
     headlineParts: null,
+    sourceName: null,
     dek: ldString(j.summary) ? decodeEntities(ldString(j.summary)!) : null,
     authors,
     byline,
@@ -167,6 +173,7 @@ async function readNyt(u: URL): Promise<NewsArticle> {
     updatedAt: null,
     section: afterDate === 'live' ? null : sectionName(afterDate),
     paragraphs: [],
+    keyPoints: [],
     live: u.pathname.includes('/live/'),
     notes: ["The Times doesn't let its article text be read, so the page shows the headline, summary and byline only."],
   };
@@ -205,6 +212,7 @@ async function readAthletic(u: URL, id: string): Promise<NewsArticle> {
     url: ldString(a.permalink) ?? cleanUrl(u),
     headline: decodeEntities(ldString(a.title) ?? ''),
     headlineParts: null,
+    sourceName: null,
     dek: ldString(a.excerpt_plaintext) ? decodeEntities(ldString(a.excerpt_plaintext)!) : null,
     authors,
     byline: joinNames(authors),
@@ -213,6 +221,7 @@ async function readAthletic(u: URL, id: string): Promise<NewsArticle> {
     updatedAt: null,
     section: 'The Athletic',
     paragraphs: [],
+    keyPoints: [],
     live: false,
     notes: [
       `A story from The Athletic${league ? ` (${league})` : ''}, shown on The Times' page.`,
@@ -234,6 +243,7 @@ async function readCnn(u: URL): Promise<NewsArticle> {
     url: cleanUrl(u),
     headline: elementText(html, 'h1', 'headline__text') ?? firstH1(html) ?? decodeEntities(ldString(ld.headline) ?? ''),
     headlineParts: null,
+    sourceName: null,
     dek: null,
     authors,
     byline: joinNames(authors),
@@ -242,6 +252,7 @@ async function readCnn(u: URL): Promise<NewsArticle> {
     updatedAt: isoOrNull(ld.dateModified),
     section: sectionName(section),
     paragraphs: articleText(paragraphs),
+    keyPoints: [],
     live: u.pathname.includes('/live-news/'),
     notes: [],
   };
@@ -265,6 +276,7 @@ async function readFox(u: URL): Promise<NewsArticle> {
     url: cleanUrl(u),
     headline: elementText(html, 'h1', 'headline') ?? firstH1(html) ?? decodeEntities(ldString(ld.headline) ?? ''),
     headlineParts: null,
+    sourceName: null,
     dek: elementText(html, 'h2', 'sub-headline'),
     authors,
     byline: joinNames(authors),
@@ -273,6 +285,7 @@ async function readFox(u: URL): Promise<NewsArticle> {
     updatedAt: isoOrNull(ld.dateModified),
     section: sectionName(u.pathname.split('/').filter(Boolean)[0]),
     paragraphs: articleText(paragraphs),
+    keyPoints: [],
     live: false,
     notes: [],
   };
@@ -300,6 +313,7 @@ async function readTmz(u: URL): Promise<NewsArticle> {
     url: cleanUrl(u),
     headline,
     headlineParts: main ? { kicker, main, sub } : null,
+    sourceName: null,
     dek: null,
     authors,
     byline: joinNames(authors),
@@ -308,6 +322,7 @@ async function readTmz(u: URL): Promise<NewsArticle> {
     updatedAt: isoOrNull(ld.dateModified),
     section: null,
     paragraphs: articleText(bodyText.split(/\n\s*\n/)),
+    keyPoints: [],
     live: false,
     notes: [],
   };
@@ -326,6 +341,7 @@ async function readBbc(u: URL): Promise<NewsArticle> {
     // The page's own headline; BBC's JSON-LD often carries a different, search-engine one.
     headline: firstH1(html) ?? decodeEntities(ldString(ld.headline) ?? ''),
     headlineParts: null,
+    sourceName: null,
     dek: null,
     authors,
     byline: joinNames(authors),
@@ -334,6 +350,78 @@ async function readBbc(u: URL): Promise<NewsArticle> {
     updatedAt: isoOrNull(ld.dateModified),
     section: null,
     paragraphs: articleText(paragraphs),
+    keyPoints: [],
+    live: false,
+    notes: [],
+  };
+}
+
+
+// ── People ─────────────────────────────────────────────────────────────────
+
+/** The bullets People puts in the NEED TO KNOW box above some stories, as
+ *  People writes them. Empty when the article has no box. */
+function peopleKeyPoints(html: string): string[] {
+  const block = html.match(/<div[^>]*class="[^"]*theme-needtoknow[^"]*"[^>]*>([\s\S]*?)<\/div>\s*<\/div>/i);
+  if (!block) return [];
+  return [...block[1].matchAll(/<li[^>]*>([\s\S]*?)<\/li>/gi)].map(m => textOf(m[1])).filter(Boolean).slice(0, 6);
+}
+
+async function readPeople(u: URL): Promise<NewsArticle> {
+  const html = await pageHtml(u.toString(), 'people');
+  const ld = articleLd(html) ?? {};
+  const authors = ldAuthors(ld.author);
+  // The story's own blocks; People's related-story cards and promos sit in
+  // other block types.
+  const paragraphs = [...html.matchAll(/<p[^>]*class="[^"]*mntl-sc-block-html[^"]*"[^>]*>([\s\S]*?)<\/p>/gi)].map(m => textOf(m[1]));
+  const first = u.pathname.split('/').filter(Boolean);
+  return {
+    outlet: 'people',
+    url: cleanUrl(u),
+    headline: elementText(html, 'h1', 'article-heading') ?? firstH1(html) ?? decodeEntities(ldString(ld.headline) ?? ''),
+    headlineParts: null,
+    sourceName: null,
+    dek: elementText(html, 'p', 'article-subheading'),
+    authors,
+    byline: joinNames(authors),
+    publishedAt: isoOrNull(ld.datePublished),
+    publishedDate: null,
+    updatedAt: isoOrNull(ld.dateModified),
+    section: first.length > 1 ? sectionName(first[0]) : null,
+    paragraphs: articleText(paragraphs),
+    keyPoints: peopleKeyPoints(html),
+    live: false,
+    notes: [],
+  };
+}
+
+// ── IMDb ───────────────────────────────────────────────────────────────────
+
+async function readImdb(u: URL): Promise<NewsArticle> {
+  const id = imdbIdOf(u);
+  if (!id) throw new ArticleError('That IMDb link has no news id.');
+  let item;
+  try {
+    item = await imdbItem(id);
+  } catch (err) {
+    throw new ArticleError(`IMDb wouldn't serve that story (${err instanceof Error ? err.message : String(err)}).`);
+  }
+  if (!item) throw new ArticleError('IMDb is no longer listing that story, so it can\'t be read.');
+  return {
+    outlet: 'imdb',
+    url: imdbUrl(id),
+    headline: item.headline,
+    headlineParts: null,
+    sourceName: item.source,
+    dek: null,
+    authors: [item.byline],
+    byline: item.byline,
+    publishedAt: item.publishedAt,
+    publishedDate: null,
+    updatedAt: null,
+    section: null,
+    paragraphs: articleText(item.paragraphs),
+    keyPoints: [],
     live: false,
     notes: [],
   };
@@ -351,6 +439,7 @@ export async function readNewsArticle(rawUrl: string): Promise<NewsArticle> {
 
   const readers: Record<OutletId, (u: URL) => Promise<NewsArticle>> = {
     espn: readEspn, nyt: readNyt, cnn: readCnn, fox: readFox, tmz: readTmz, bbc: readBbc,
+    people: readPeople, imdb: readImdb,
   };
   const article = await readers[outlet](u);
   if (article.outlet !== 'nyt' && article.paragraphs.length === 0) {

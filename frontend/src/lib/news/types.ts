@@ -5,7 +5,7 @@
 // from the outlet itself (its page, or its own public feed for that article),
 // and anything the outlet didn't give us is left null/empty, never guessed.
 
-export type OutletId = 'espn' | 'cnn' | 'fox' | 'nyt' | 'tmz' | 'bbc';
+export type OutletId = 'espn' | 'cnn' | 'fox' | 'nyt' | 'tmz' | 'bbc' | 'people' | 'imdb';
 
 /** One search result: a real story Google News lists for an approved outlet. */
 export interface NewsHit {
@@ -30,6 +30,10 @@ export interface NewsArticle {
   headline: string;
   /** TMZ splits its display headline into three lines; null everywhere else. */
   headlineParts: { kicker: string | null; main: string; sub: string | null } | null;
+  /** IMDb doesn't write its news: every item is an excerpt of someone else's
+   *  story, and the page credits them. The publisher IMDb credits; null for
+   *  every outlet that writes its own. */
+  sourceName: string | null;
   /** The summary line under the headline, when the outlet shows one. */
   dek: string | null;
   /** Author names as the outlet credits them. */
@@ -46,6 +50,9 @@ export interface NewsArticle {
   section: string | null;
   /** The article text, paragraph by paragraph, word for word (up to 60). */
   paragraphs: string[];
+  /** People puts a NEED TO KNOW box above the story on some articles; these
+   *  are its bullets, as People writes them. Empty everywhere else. */
+  keyPoints: string[];
   live: boolean;
   /** Anything the reader should know about what could and couldn't be read. */
   notes: string[];
@@ -93,4 +100,9 @@ export interface ThumbPhotosResponse {
 export interface RailItem {
   title: string;
   publishedAt: string | null;
+  /** Who wrote it, when the outlet's list credits one (IMDb does). */
+  byline?: string | null;
+  /** The list it came from, when the outlet's page shows its lists under
+   *  their own headings (IMDb: "Top news", "Celebrity news"). */
+  group?: string | null;
 }

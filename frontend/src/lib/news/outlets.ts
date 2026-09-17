@@ -19,6 +19,8 @@ export const OUTLETS: Outlet[] = [
   { id: 'nyt', name: 'The New York Times', hosts: ['nytimes.com'], color: '#121212' },
   { id: 'tmz', name: 'TMZ', hosts: ['tmz.com'], color: '#d8000f' },
   { id: 'bbc', name: 'BBC', hosts: ['bbc.com', 'bbc.co.uk'], color: '#141414' },
+  { id: 'people', name: 'People', hosts: ['people.com'], color: '#29abe2' },
+  { id: 'imdb', name: 'IMDb', hosts: ['imdb.com'], color: '#f5c518' },
 ];
 
 export const OUTLET_IDS = OUTLETS.map(o => o.id);
@@ -72,5 +74,11 @@ export function articleUrlProblem(outlet: OutletId, url: URL): string | null {
     case 'bbc':
       if (/\/(audio|videos?|sounds|iplayer|live)\//.test(path)) return 'That BBC link is audio, video or a live page, not an article.';
       return /\/articles\/|\/news\/[a-z-]+-\d{6,}/.test(path) ? null : 'That BBC link is not an article page.';
+    case 'people':
+      // Stories are <slug>-<id>, at the root or under a section.
+      if (/^\/(tag|author|about|video|videos|gallery|photos|sweepstakes|newsletter)\b/.test(path)) return 'That People link is not an article page.';
+      return /-\d{6,}\/?$/.test(path) ? null : 'That People link is not an article page.';
+    case 'imdb':
+      return /^\/news\/ni\d+\/?$/.test(path) ? null : 'That IMDb link is not a news page.';
   }
 }

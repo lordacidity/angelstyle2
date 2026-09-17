@@ -14,12 +14,24 @@ from. Vids 2 opens on six questions instead, asked one at a time —
 3. **Which way** — up or down.
 4. **Look** — light or dark.
 5. **Persona** — Simpler's own chooser (`components/simpler/VidsPicker`).
-6. **The question** — what gets typed into ChatGPT. Write it, or have it
-   written (Ragebait / Factual, `api/vids/question`).
+6. **Intro** — what opens the video, Bottom A (`Vids2Intro`). Three ways:
+   - **No intro** — nothing before the trade; the video goes straight to
+     trading on them on Pauv. Bottom A stays empty.
+   - **ChatGPT** — the question typed into ChatGPT. Write it, or have it
+     written (Ragebait / Factual, `api/vids/question`).
+   - **News article** — a real story about them, found the way Studio > News
+     finds one (`lib/news/client`): choose how far back to look (a week, to
+     start), Search for articles — the list opens on headlines with the name
+     in them — and pick one. It is read off the outlet and
+     checked, and its page is drawn on the form — grey where the photos will
+     go — to scroll through. Generate finds the photos and records it
+     (`makeNewsClip` in `lib/vids2`). A story is kept with the answers, and
+     is only an answer for the person it was found for: change Who and it
+     has to be searched again.
 
 Nothing moves on by itself: pick an answer, then press Next; Back goes back
 one. A strip along the top holds every answer given so far,
-and pressing one goes back to it. The form opens on Who, or on the question
+and pressing one goes back to it. The form opens on Who, or on the intro
 when Change brought you back from a video.
 
 — and **Generate**, on the last question, makes the whole video from the answers before showing you
@@ -28,20 +40,36 @@ the deciding taken out: the sound, the captions, the BOOMs, the post caption
 and Download MP4. **Change** goes back to the form with the answers as they
 were left; Generate again replaces the video.
 
-## One video, both recordings, rendered here
+## One video, every recording rendered here
 
-Bottom A is the ChatGPT search and Bottom B is the Pauv trade — and Vids 2
-renders **both** for this one video rather than picking either off a shelf.
-That is the difference from Simpler, which renders Bottom A and takes Bottom B
-from the clips filed under that folder. Nothing Vids 2 makes goes to the
-library, and nothing survives the page being left.
+Bottom A is the intro — the ChatGPT search, or the news story, or nothing —
+and Bottom B is the Pauv trade, and Vids 2 renders **every one of them** for
+this one video rather than picking any off a shelf. That is the difference
+from Simpler, which renders Bottom A and takes Bottom B from the clips filed
+under that folder. Nothing Vids 2 makes goes to the library, and nothing
+survives the page being left.
 
-The two are made **at the same time**. Neither needs anything from the other,
-and each spends a good part of its time waiting on something that is not the
-CPU — the model answering, the roster and the photos arriving — which is
-exactly the time the other can be drawing frames in. They share one thread, so
-the drawing still takes the drawing's time; what goes is one wait sitting
-behind the other. The first real failure aborts the pair.
+The news intro is the recording Studio > News makes
+(`components/news/news-video.ts`): Google with the story as the third result,
+the click, the outlet's page loading with its pictures arriving late, their
+name dragged over and zoomed in on. Its photos are found the way that page
+finds them — free ones of the person and the side column's thumbnails,
+`lib/news/client` — and it is filed on the stage the way the ChatGPT one is:
+a name, a context that says Google and the outlet, and three abutting marks
+— Google up to the click, the story from the click to the pointer pressing on
+their name (`nameAt`), the name from there to the end. Its captions are three,
+one per mark, and the first two are fixed outright (`NEWS_BOTTOM_A_LINES`):
+"find a news article on google", then "look for someone trending"; the third
+is the pick, rolled from `BOTTOM_A_PICK` the way a ChatGPT clip's is ("lock
+in trump"). A news intro is never captioned on Fast's two placed lines.
+
+The intro and the trade are made **at the same time**. Neither needs anything
+from the other, and each spends a good part of its time waiting on something
+that is not the CPU — the model answering, the photos, the roster arriving —
+which is exactly the time the other can be drawing frames in. They share one
+thread, so the drawing still takes the drawing's time; what goes is one wait
+sitting behind the other. The first real failure aborts the pair. With no
+intro there is only the trade.
 
 The library is still read for two things: the **persona**'s three clips, and
 an **End** off the shelf. (And Bottom B's folder, for a BOOM filed by hand.)
@@ -76,11 +104,11 @@ someone how Pauv works and the closing word is the same fixed comment line,
 because that is what the video is for.
 
 **Three BOOMs lay themselves** (`degenBooms` in `lib/vids2/vids2Build.ts`), on
-the beats somebody watching would react on:
+the beats somebody watching would react on — two, with no intro:
 
 | When | Sound | Picture |
 | --- | --- | --- |
-| ChatGPT gets to the name (Bottom A, the `choosing` beat) | fahh (2.2s) | the BOOM |
+| The intro gets to them — ChatGPT reaching the name (the `choosing` beat), or the pointer pressing on their name in the story (`nameAt`) | fahh (2.2s) | the BOOM |
 | Their page opens, the click after the search (Bottom B, `analyzing`) | oh hell nah (7.4s) | **none** |
 | Place trade goes in (Bottom B, `confirming`) | fahh (2.2s) | the BOOM |
 
@@ -121,9 +149,11 @@ Simpler's logic outright:
 | The plan, compose, audio, captions, edit, recipe, local clips | `lib/simpler/*` | **shared with Simpler** |
 | The captions rail, the post caption, the persona chooser | `components/simpler/*` | **shared with Simpler** |
 | The ChatGPT recording | `components/chatgpt/chatgpt-video.ts` | shared with everybody |
+| The news recording | `components/news/news-video.ts` | shared with Studio > News |
+| Searching, reading and photographing a story | `lib/news/client.ts` | shared with Studio > News |
 | The Pauv trade recording | `components/trade/trade-video.ts` | shared with everybody |
 | The form, the tuning page, the section | `components/vids2/*` | Vids 2's own |
-| The five answers, degen mode, the roster, the trade-as-a-Bottom-B | `lib/vids2/vids2Build.ts` | Vids 2's own |
+| The answers, degen mode, the roster, the news-story-as-a-Bottom-A, the trade-as-a-Bottom-B | `lib/vids2/vids2Build.ts` | Vids 2's own |
 | The degen hook (`DEGEN_HOOK`, behind an optional `degen` flag) | `api/vids/captions` | shared route, Vids 2 the only caller |
 
 **So a change to how Simpler builds a video is a change to how Vids 2 builds

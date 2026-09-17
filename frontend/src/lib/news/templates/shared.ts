@@ -20,6 +20,10 @@ export const PHOTO_SLOTS: Record<OutletId, { hero: PhotoSize; thumbs: PhotoSize[
   nyt: { hero: { width: 705, height: 470 }, thumbs: [] },
   tmz: { hero: { width: 870, height: 490 }, thumbs: Array.from({ length: 6 }, () => ({ width: 133, height: 95 })) },
   bbc: { hero: { width: 1084, height: 609 }, thumbs: [] },
+  // Four across the Top Stories strip, then the right column: one big, four small.
+  people: { hero: { width: 600, height: 338 }, thumbs: [...Array.from({ length: 4 }, () => ({ width: 110, height: 78 })), { width: 300, height: 169 }, ...Array.from({ length: 4 }, () => ({ width: 110, height: 78 }))] },
+  // Three under Similar News, then the rail's three lists of four.
+  imdb: { hero: { width: 724, height: 407 }, thumbs: [...Array.from({ length: 3 }, () => ({ width: 88, height: 112 })), ...Array.from({ length: 12 }, () => ({ width: 84, height: 104 }))] },
 };
 
 /** The photos a page is drawn with, already cut to their boxes (data URLs).

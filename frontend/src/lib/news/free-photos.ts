@@ -332,6 +332,8 @@ const NICHE: Record<OutletId, string[]> = {
   tmz: ['Hollywood Sign', 'Los Angeles skyline', 'concert stage', 'Sunset Boulevard'],
   nyt: ['New York City skyline'],
   bbc: ['London skyline'],
+  people: ['red carpet event', 'Hollywood Sign', 'New York City skyline'],
+  imdb: ['movie theater', 'film set', 'Hollywood Sign'],
 };
 
 const SENSITIVE = /\b(arrest\w*|charg(ed|es)|indict\w*|kill\w*|dead|dies|died|death|murder\w*|shoot\w*|shot|stabb\w*|assault\w*|abus\w*|rape\w*|sexual\w*|accus\w*|alleg\w*|lawsuits?|sues|sued|scandal\w*|fraud\w*|prison|jail\w*|convict\w*|guilty|sentenc\w*|crash\w*|overdos\w*|drugs?|dui|suspects?|victims?|investigat\w*|probe|fired|banned|suspen\w*|racis\w*|antisemit\w*|terror\w*|war|missiles?|attack\w*|hostages?|kidnap\w*|missing|funeral|obituar\w*|cancer|hospitali[sz]ed|injur\w*|affair|divorc\w*|cheat\w*|robbe\w*|stolen|theft|police|court|trial|judge|verdict|feud\w*|slam\w*|blast\w*|rips?|backlash|controvers\w*|outrage\w*|apolog\w*|harass\w*|misconduct|split|breakup|palestin\w*|israel\w*|gaza|drilled|hit by|scary|hurt|carted|collaps\w*|surger\w*|torn|acl|concussion)\b/i;

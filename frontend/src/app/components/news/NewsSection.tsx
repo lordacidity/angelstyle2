@@ -22,33 +22,51 @@
 // and face-centred by the AI (lib/news/free-photos.ts, lib/news/frame-photo.ts);
 // side-column thumbnails are about half Pauv profile photos, half stock scenes.
 // Credits print under the main photo and are all listed beside the page.
+//
+// With the photos in, the page can be made into the "screen recording" the
+// ChatGPT and Trade sections make (news-video.ts): Google with the story as
+// the third result, the click, the page loading with its pictures arriving
+// late, the name dragged and zoomed in on. Preview plays it here with its
+// sound; Save renders the MP4 and downloads it.
 
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { OUTLETS, outletById } from '@/lib/news/outlets';
-import { framePersonPhoto, frameThumb, photoCredit } from '@/lib/news/frame-photo';
-import { rasterizeNewsPage } from '@/lib/news/rasterize';
-import { PHOTO_SLOTS, renderNewsPage, type PagePhotos } from '@/lib/news/templates';
-import type {
-  NewsArticle, NewsHit, NewsPhoto, OutletId, PersonPhoto, PersonPhotosResponse, RailItem, ThumbPhotosResponse,
-} from '@/lib/news/types';
+// Searching, reading a story, finding its photos and drawing its page are
+// lib/news/client — shared with the Vids 2 form, which does the same from
+// its news intro.
+import {
+  ago, drawNewsPage, errorText, findPagePhotos, NEWS_RANGE_LABEL, readNewsStory, searchNews, type NewsRange,
+} from '@/lib/news/client';
+import { NO_PHOTOS, type PagePhotos } from '@/lib/news/templates';
+import type { NewsArticle, NewsHit, NewsPhoto, OutletId, PersonPhoto, RailItem } from '@/lib/news/types';
+import { ClipPlayer, type ClipPlayerHandle } from '../ClipPlayer';
+import {
+  buildNewsAudio, CLIP_SECONDS, createNewsClip, FILE_H, FILE_W, loadNewsAssets, renderNewsVideo,
+  type NewsAssets, type NewsBeats, type NewsClip, type NewsClipSource,
+} from './news-video';
 
-type Range = '1d' | '7d' | '30d' | 'any';
-const RANGE_LABEL: Record<Range, string> = { '1d': 'Past day', '7d': 'Past week', '30d': 'Past month', any: 'Any time' };
+type Range = NewsRange;
+const RANGE_LABEL = NEWS_RANGE_LABEL;
 
-const SETUP_KEY = 'studio-news-setup-v1';
+// v2 moved the defaults to the past week with the name in the title (the
+// Vids 2 form's too). A v1 setup keeps its name and outlets and takes the new
+// defaults once; it is written back under v2 on the first change.
+const SETUP_KEY = 'studio-news-setup-v2';
+const OLD_SETUP_KEY = 'studio-news-setup-v1';
 interface Setup { query: string; outlets: OutletId[]; range: Range; nameInTitle: boolean }
 function loadSetup(): Setup {
-  const fallback: Setup = { query: '', outlets: OUTLETS.map(o => o.id), range: '30d', nameInTitle: false };
+  const fallback: Setup = { query: '', outlets: OUTLETS.map(o => o.id), range: '7d', nameInTitle: true };
   if (typeof window === 'undefined') return fallback;
   try {
-    const j = JSON.parse(localStorage.getItem(SETUP_KEY) ?? 'null') as Partial<Setup> | null;
+    const saved = localStorage.getItem(SETUP_KEY);
+    const j = JSON.parse(saved ?? localStorage.getItem(OLD_SETUP_KEY) ?? 'null') as Partial<Setup> | null;
     if (!j) return fallback;
     const outlets = Array.isArray(j.outlets) ? j.outlets.filter(id => OUTLETS.some(o => o.id === id)) : [];
     return {
       query: typeof j.query === 'string' ? j.query : '',
       outlets: outlets.length ? outlets : fallback.outlets,
-      range: j.range && j.range in RANGE_LABEL ? j.range : '30d',
-      nameInTitle: j.nameInTitle === true,
+      range: saved && j.range && j.range in RANGE_LABEL ? j.range : fallback.range,
+      nameInTitle: saved ? j.nameInTitle === true : fallback.nameInTitle,
     };
   } catch {
     return fallback;
@@ -56,15 +74,6 @@ function loadSetup(): Setup {
 }
 function saveSetup(s: Setup) {
   try { localStorage.setItem(SETUP_KEY, JSON.stringify(s)); } catch { /* ignore */ }
-}
-
-function ago(iso: string | null): string {
-  if (!iso) return '';
-  const mins = Math.max(0, Math.round((Date.now() - Date.parse(iso)) / 60_000));
-  if (mins < 60) return `${Math.max(1, mins)}m ago`;
-  const hrs = Math.round(mins / 60);
-  if (hrs < 48) return `${hrs}h ago`;
-  return new Date(iso).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
 }
 
 function fullTime(iso: string): string {
@@ -75,14 +84,19 @@ function slug(s: string): string {
   return s.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '').slice(0, 60) || 'article';
 }
 
-async function postJson<T>(url: string, body: unknown, signal?: AbortSignal): Promise<T> {
-  const res = await fetch(url, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body), signal });
-  const j = await res.json().catch(() => ({}));
-  if (!res.ok) throw new Error((j as { error?: string }).error ?? `${url} answered ${res.status}`);
-  return j as T;
+// Hand a rendered recording to the browser's downloads.
+function downloadBlob(blob: Blob, filename: string) {
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = filename;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 30_000);
 }
 
-const errorText = (err: unknown) => (err instanceof Error ? err.message : String(err));
+const BEAT_LABEL: Record<keyof NewsBeats, string> = { searching: 'google', loading: 'loading', choosing: 'name' };
 
 interface Loaded {
   hit: NewsHit;
@@ -100,26 +114,17 @@ interface Loaded {
   thumbs: (NewsPhoto | null)[];
   thumbSrcs: (string | null)[];
   photoNotes: string[];
+  /** The photos the page on screen was drawn with — what the recording gets. */
+  pagePhotos: PagePhotos;
 }
 
 /** Draws the page with people[from] (or the next one that loads) as its main
- *  photo. Returns the PNG and which photo it used. */
-async function drawPage(l: Loaded, from: number): Promise<{ png: Awaited<ReturnType<typeof rasterizeNewsPage>>; photoIndex: number }> {
-  const slots = PHOTO_SLOTS[l.article.outlet];
-  let hero: PagePhotos['hero'] = null;
-  let photoIndex = -1;
-  for (let k = 0; k < l.people.length && !hero; k++) {
-    const i = (from + k) % l.people.length;
-    try {
-      hero = { src: await framePersonPhoto(l.people[i], slots.hero), credit: photoCredit(l.people[i]) };
-      photoIndex = i;
-    } catch { /* that file wouldn't load; try the next */ }
-  }
-  const png = await rasterizeNewsPage(renderNewsPage(l.article, l.rail, { hero, thumbs: l.thumbSrcs }));
-  return { png, photoIndex };
-}
+ *  photo. Returns the PNG, which photo it used, and the photos it was drawn
+ *  with. */
+const drawPage = (l: Loaded, from: number) =>
+  drawNewsPage({ article: l.article, rail: l.rail, people: l.people, thumbSrcs: l.thumbSrcs }, from);
 
-export function NewsSection() {
+export function NewsSection({ active = true }: { active?: boolean }) {
   const [query, setQuery] = useState(() => loadSetup().query);
   const [outlets, setOutlets] = useState<OutletId[]>(() => loadSetup().outlets);
   const [range, setRange] = useState<Range>(() => loadSetup().range);
@@ -138,8 +143,6 @@ export function NewsSection() {
   const [loaded, setLoaded] = useState<Loaded | null>(null);
   const [image, setImage] = useState<{ url: string; width: number; height: number; blob: Blob } | null>(null);
   const pickCtrl = useRef<AbortController | null>(null);
-  // Photos of a name are the same whichever story is picked; ask once.
-  const peopleCache = useRef(new Map<string, Promise<PersonPhotosResponse>>());
 
   // Let go of the old PNG when a new one replaces it.
   useEffect(() => () => { if (image) URL.revokeObjectURL(image.url); }, [image]);
@@ -153,29 +156,14 @@ export function NewsSection() {
     setSearching(true);
     setSearchError(null);
     try {
-      const params = new URLSearchParams({ q, outlets: outlets.join(','), range });
-      const res = await fetch(`/api/news/search?${params}`, { signal: ctrl.signal });
-      const j = await res.json();
-      if (!res.ok) throw new Error(j.error ?? `Search failed (${res.status})`);
-      setHits(j.hits as NewsHit[]);
+      setHits(await searchNews(q, outlets, range, ctrl.signal));
       setSearched(q);
     } catch (err) {
-      if (!ctrl.signal.aborted) setSearchError(err instanceof Error ? err.message : String(err));
+      if (!ctrl.signal.aborted) setSearchError(errorText(err));
     } finally {
       if (searchCtrl.current === ctrl) setSearching(false);
     }
   }, [query, outlets, range]);
-
-  const peopleFor = useCallback((name: string) => {
-    const key = name.trim().toLowerCase();
-    let p = peopleCache.current.get(key);
-    if (!p) {
-      p = postJson<PersonPhotosResponse>('/api/news/photos/person', { name });
-      peopleCache.current.set(key, p);
-      p.then(r => { if (!r.ai || r.photos.length === 0) peopleCache.current.delete(key); }, () => peopleCache.current.delete(key));
-    }
-    return p;
-  }, []);
 
   /** Show a story's page with placeholders; no photo searching yet. */
   const pick = useCallback(async (hit: NewsHit) => {
@@ -186,10 +174,10 @@ export function NewsSection() {
     setPickError(null);
     setStatus(`Reading the story from ${outletById(hit.outlet).name}…`);
     try {
-      const { article, rail } = await postJson<{ article: NewsArticle; rail: RailItem[] }>('/api/news/article', { link: hit.url }, ctrl.signal);
+      const { article, rail } = await readNewsStory(hit.url, ctrl.signal);
       if (ctrl.signal.aborted) return;
       setStatus('Drawing the page…');
-      const next: Loaded = { hit, name: searched, article, rail, withPhotos: false, people: [], photoIndex: -1, thumbs: [], thumbSrcs: [], photoNotes: [] };
+      const next: Loaded = { hit, name: searched, article, rail, withPhotos: false, people: [], photoIndex: -1, thumbs: [], thumbSrcs: [], photoNotes: [], pagePhotos: NO_PHOTOS };
       const { png } = await drawPage(next, 0);
       if (ctrl.signal.aborted) return;
       setLoaded(next);
@@ -214,30 +202,15 @@ export function NewsSection() {
     setPickError(null);
     setStatus(`Finding photos${base.name ? ` of ${base.name}` : ''}…`);
     try {
-      const slots = PHOTO_SLOTS[base.article.outlet];
-      const headlines = base.rail.slice(0, slots.thumbs.length).map(r => r.title);
-      const photoNotes: string[] = [];
-      const [people, thumbs] = await Promise.all([
-        base.name
-          ? peopleFor(base.name).then(r => { if (r.note) photoNotes.push(r.note); return r.photos; },
-            err => { photoNotes.push(`Couldn't find a photo: ${errorText(err)}`); return [] as PersonPhoto[]; })
-          : Promise.resolve([] as PersonPhoto[]),
-        headlines.length
-          ? postJson<ThumbPhotosResponse>('/api/news/photos/thumbs', { outlet: base.article.outlet, headlines, name: base.name }, ctrl.signal)
-            .then(r => { if (!r.ai) photoNotes.push("The AI couldn't check the thumbnails, so a stranger's face could be in one; look before using the page."); return r.photos; },
-              err => { photoNotes.push(`Couldn't find thumbnails: ${errorText(err)}`); return [] as (NewsPhoto | null)[]; })
-          : Promise.resolve([] as (NewsPhoto | null)[]),
-      ]);
-      if (ctrl.signal.aborted) return;
-      const thumbSrcs = await Promise.all(slots.thumbs.map((size, i) => (thumbs[i] ? frameThumb(thumbs[i]!, size).catch(() => null) : null)));
+      const { people, thumbs, thumbSrcs, notes: photoNotes } = await findPagePhotos(base.article, base.rail, base.name, ctrl.signal);
       if (ctrl.signal.aborted) return;
 
       setStatus('Drawing the page…');
       const next: Loaded = { ...base, withPhotos: true, people, photoIndex: -1, thumbs, thumbSrcs, photoNotes };
-      const { png, photoIndex } = await drawPage(next, 0);
+      const { png, photoIndex, photos } = await drawPage(next, 0);
       if (ctrl.signal.aborted) return;
       if (people.length > 0 && photoIndex < 0) photoNotes.push("None of the photos found would load, so the page keeps a placeholder.");
-      setLoaded({ ...next, photoIndex, thumbs: thumbs.map((t, i) => (thumbSrcs[i] ? t : null)) });
+      setLoaded({ ...next, photoIndex, pagePhotos: photos });
       setImage({ url: URL.createObjectURL(png.blob), width: png.width, height: png.height, blob: png.blob });
       setStatus(null);
     } catch (err) {
@@ -245,7 +218,7 @@ export function NewsSection() {
       setStatus(null);
       setPickError(errorText(err));
     }
-  }, [loaded, peopleFor]);
+  }, [loaded]);
 
   /** Redraw the page with the next photo of the person. */
   const nextPhoto = useCallback(async () => {
@@ -256,9 +229,9 @@ export function NewsSection() {
     setPickError(null);
     setStatus('Drawing the page with another photo…');
     try {
-      const { png, photoIndex } = await drawPage(loaded, (loaded.photoIndex + 1) % loaded.people.length);
+      const { png, photoIndex, photos } = await drawPage(loaded, (loaded.photoIndex + 1) % loaded.people.length);
       if (ctrl.signal.aborted) return;
-      setLoaded({ ...loaded, photoIndex });
+      setLoaded({ ...loaded, photoIndex, pagePhotos: photos });
       setImage({ url: URL.createObjectURL(png.blob), width: png.width, height: png.height, blob: png.blob });
       setStatus(null);
     } catch (err) {
@@ -281,6 +254,97 @@ export function NewsSection() {
     a.click();
     a.remove();
   }
+
+  // ── The video ─────────────────────────────────────────────────────────────
+  // Once the page has its photos: Preview builds the recording and plays it
+  // here; Save renders the MP4 and downloads it. What both are made from (the
+  // Google page with the story in it, the outlet's page painted and measured)
+  // is made once per page and kept for the next preview or save.
+  const playerRef = useRef<ClipPlayerHandle>(null);
+  const clipCanvasRef = useRef<HTMLCanvasElement>(null);
+  const videoAssets = useRef<{ key: string; assets: NewsAssets } | null>(null);
+  const [clip, setClip] = useState<NewsClip | null>(null);
+  const [clipAudio, setClipAudio] = useState<Promise<AudioBuffer | null> | null>(null);
+  const [playToken, setPlayToken] = useState(0);
+  const [videoBusy, setVideoBusy] = useState<{ label: string; pct: number | null } | null>(null);
+  const [videoNote, setVideoNote] = useState<{ ok: boolean; text: string } | null>(null);
+  const [assetNote, setAssetNote] = useState<string | null>(null);
+  const videoCtrl = useRef<AbortController | null>(null);
+
+  // A different page — another story, another photo — is a different clip.
+  useEffect(() => { setClip(null); setClipAudio(null); setVideoNote(null); setAssetNote(null); }, [loaded]);
+
+  const clipSource = (l: Loaded): NewsClipSource => ({ name: l.name, article: l.article, rail: l.rail, photos: l.pagePhotos });
+  const clipKey = (l: Loaded) => `${l.article.url}|${l.name}|${l.pagePhotos.hero?.src.length ?? 0}|${l.pagePhotos.thumbs.map(t => t?.length ?? 0).join(',')}`;
+
+  async function assetsFor(l: Loaded, signal: AbortSignal): Promise<NewsAssets> {
+    const key = clipKey(l);
+    const have = videoAssets.current;
+    if (have && have.key === key) return have.assets;
+    setVideoBusy({ label: 'Laying out the pages…', pct: null });
+    const a = await loadNewsAssets(clipSource(l), signal);
+    videoAssets.current = { key, assets: a };
+    setAssetNote(a.note);
+    return a;
+  }
+
+  function cancelVideo() {
+    videoCtrl.current?.abort();
+    videoCtrl.current = null;
+    setVideoBusy(null);
+  }
+
+  async function previewVideo() {
+    if (!loaded?.withPhotos) return;
+    cancelVideo();
+    playerRef.current?.stop();
+    const ctrl = new AbortController();
+    videoCtrl.current = ctrl;
+    setVideoNote(null);
+    try {
+      const a = await assetsFor(loaded, ctrl.signal);
+      if (ctrl.signal.aborted) return;
+      const ctx = clipCanvasRef.current?.getContext('2d', { alpha: false });
+      if (!ctx) throw new Error('The preview canvas is not on screen.');
+      const c = createNewsClip(ctx, a);
+      setClip(c);
+      setClipAudio(Promise.resolve().then(() => buildNewsAudio(c, a.source.article.url)).catch(err => {
+        console.error('[news] preview sound skipped:', err);
+        return null;
+      }));
+      setPlayToken(n => n + 1);
+    } catch (err) {
+      if (!ctrl.signal.aborted) setVideoNote({ ok: false, text: errorText(err) });
+    } finally {
+      if (videoCtrl.current === ctrl) { videoCtrl.current = null; setVideoBusy(null); }
+    }
+  }
+
+  async function saveVideo() {
+    if (!loaded?.withPhotos) return;
+    cancelVideo();
+    playerRef.current?.stop();
+    const ctrl = new AbortController();
+    videoCtrl.current = ctrl;
+    setVideoNote(null);
+    try {
+      const a = await assetsFor(loaded, ctrl.signal);
+      if (ctrl.signal.aborted) return;
+      setVideoBusy({ label: 'Rendering…', pct: 0 });
+      const { blob, filename, seconds } = await renderNewsVideo(a, {
+        signal: ctrl.signal,
+        onProgress: (done, total) => setVideoBusy({ label: `Rendering ${Math.round((done / total) * 100)}%`, pct: done / total }),
+      });
+      downloadBlob(blob, filename);
+      setVideoNote({ ok: true, text: `Saved ${filename} (${seconds.toFixed(1)}s)` });
+    } catch (err) {
+      if (!ctrl.signal.aborted) setVideoNote({ ok: false, text: errorText(err) });
+    } finally {
+      if (videoCtrl.current === ctrl) { videoCtrl.current = null; setVideoBusy(null); }
+    }
+  }
+
+  useEffect(() => () => { videoCtrl.current?.abort(); }, []);
 
   const article = loaded?.article ?? null;
   const photo = loaded && loaded.photoIndex >= 0 ? loaded.people[loaded.photoIndex] : null;
@@ -484,6 +548,60 @@ export function NewsSection() {
                   </ul>
                 )}
               </div>
+
+              {/* ── Video ───────────────────────────────────────────────────── */}
+              {loaded?.withPhotos && (
+                <div className="max-w-[1000px] rounded-xl border border-zinc-800 bg-[#111] p-4 text-sm flex flex-col gap-3">
+                  <div className="flex flex-wrap items-center gap-3">
+                    <span className="text-xs uppercase tracking-wide text-zinc-500">Video</span>
+                    <span className="text-zinc-500">
+                      Google, this story clicked, the page loading, {loaded.name ? `“${loaded.name}”` : 'the name'} highlighted.
+                      About {CLIP_SECONDS}s at {FILE_W}×{FILE_H}.
+                    </span>
+                    <div className="ml-auto flex items-center gap-2">
+                      {videoBusy && (
+                        <button type="button" onClick={cancelVideo} className="px-2 text-xs text-zinc-400 hover:text-white">Cancel</button>
+                      )}
+                      <button
+                        type="button"
+                        onClick={videoBusy ? undefined : () => void previewVideo()}
+                        disabled={!!videoBusy || !!status}
+                        className="rounded-md border border-zinc-700 px-3 py-1.5 text-xs font-semibold text-zinc-200 hover:border-zinc-500 disabled:opacity-40"
+                      >
+                        Preview
+                      </button>
+                      <button
+                        type="button"
+                        onClick={videoBusy ? undefined : () => void saveVideo()}
+                        disabled={!!videoBusy || !!status}
+                        className="relative overflow-hidden rounded-md bg-white px-3 py-1.5 text-xs font-semibold text-black hover:bg-zinc-200 disabled:opacity-40 disabled:hover:bg-white"
+                      >
+                        {videoBusy?.pct != null && (
+                          <span className="absolute inset-y-0 left-0 bg-zinc-400/70" style={{ width: `${Math.round(videoBusy.pct * 100)}%` }} />
+                        )}
+                        <span className="relative">{videoBusy ? videoBusy.label : 'Save video'}</span>
+                      </button>
+                    </div>
+                  </div>
+                  <ClipPlayer
+                    ref={playerRef}
+                    canvasRef={clipCanvasRef}
+                    width={FILE_W}
+                    height={FILE_H}
+                    clip={clip}
+                    audio={clipAudio}
+                    beatLabels={BEAT_LABEL}
+                    active={active}
+                    placeholder={videoBusy ? videoBusy.label : 'Preview builds the recording here.'}
+                    autoplay={playToken}
+                  />
+                  {assetNote && <p className="text-amber-300/90">{assetNote}</p>}
+                  {videoNote && (
+                    <p className={`leading-relaxed ${videoNote.ok ? 'text-emerald-300' : 'text-red-300'}`}>{videoNote.text}</p>
+                  )}
+                </div>
+              )}
+
               <div className="max-w-[1000px] overflow-y-auto rounded-xl border border-zinc-800 bg-zinc-900" style={{ maxHeight: 'calc(100vh - 120px)' }}>
                 {/* eslint-disable-next-line @next/next/no-img-element */}
                 <img src={image.url} alt={article.headline} className="block w-full" width={image.width} height={image.height} />

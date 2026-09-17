@@ -1,32 +1,41 @@
 'use client';
 
-// Vids 2's own bit of logic: the form's five answers, and the two recordings
-// they turn into.
+// Vids 2's own bit of logic: the form's answers, and the recordings they turn
+// into.
 //
 // Everything about laying those recordings into a video — the plan, the
 // captions, the sound, the export, the record — is Simpler's (lib/simpler/*),
 // which Vids 2 shares rather than copies. What lives here is only what Vids 2
 // has and Simpler hasn't:
 //
-//   - the five answers, and remembering them between visits;
-//   - the Pauv roster the second answer is chosen from;
+//   - the answers, and remembering them between visits;
+//   - the Pauv roster the first answer is chosen from;
+//   - the intro as a Bottom A: nothing, the ChatGPT search, or a real news
+//     story about them — the news recording is rendered here for this one
+//     video the way the ChatGPT search already is;
 //   - the Pauv trade recording as a Bottom B — Simpler picks that slot off a
-//     shelf of filed clips, Vids 2 renders it for this one video the way it
-//     already renders the ChatGPT search for Bottom A.
+//     shelf of filed clips, Vids 2 renders it for this one video.
 //
-// Both recordings are rendered by their one home — components/chatgpt and
-// components/trade — and kept in this tab (lib/simpler/vidsLocal). Neither goes
-// to the library, and neither survives the page being left.
+// Every recording is rendered by its one home — components/chatgpt,
+// components/news and components/trade — and kept in this tab
+// (lib/simpler/vidsLocal). None goes to the library, and none survives the
+// page being left.
 
+import {
+  loadNewsAssets, renderNewsVideo, type NewsBeats,
+} from '@/app/components/news/news-video';
 import {
   createTradeClip, loadTradeAssets, renderTradeVideo, VIDEO_H, VIDEO_W,
   type Direction, type Theme, type TradeBeats, type TradeTalent,
 } from '@/app/components/trade/trade-video';
+import { findPagePhotos, isNewsRange, pagePhotosFrom, type NewsRange } from '@/lib/news/client';
+import { isOutletId, outletById } from '@/lib/news/outlets';
+import type { NewsArticle, NewsHit, RailItem } from '@/lib/news/types';
 import type { BoomSound } from '@/lib/simpler/vidsAudio';
 import { makeLocalClip } from '@/lib/simpler/vidsLocal';
 import { MAX_MARK_TEXT, type VidMark, type VidRow } from '@/lib/vids-types';
 
-export type { Direction, Theme, TradeTalent };
+export type { Direction, NewsRange, Theme, TradeTalent };
 
 // ── The answers ──────────────────────────────────────────────────────────────
 
@@ -43,6 +52,28 @@ export const VIDS2_MODES: readonly Vids2Mode[] = ['serious', 'middle', 'degen'];
 export const isVids2Mode = (v: unknown): v is Vids2Mode =>
   typeof v === 'string' && (VIDS2_MODES as readonly string[]).includes(v);
 
+/** What opens the video — the first screen recording, Bottom A. None: there
+ *  isn't one, and the video goes straight to trading on them on Pauv.
+ *  ChatGPT: the question typed in and them picked off the answer. News: a
+ *  real story about them found on Google News, opened and read, with their
+ *  name dragged over — the recording Studio > News makes. */
+export type Vids2Intro = 'none' | 'chatgpt' | 'news';
+export const VIDS2_INTROS: readonly Vids2Intro[] = ['none', 'chatgpt', 'news'];
+export const isVids2Intro = (v: unknown): v is Vids2Intro =>
+  typeof v === 'string' && (VIDS2_INTROS as readonly string[]).includes(v);
+
+/** The story a news intro is made from: the search result it was, and the
+ *  article as read off the outlet — already checked, so the form can show its
+ *  page — with the outlet's other headlines for the side column. `name` is
+ *  who it was searched for: a story found for somebody else is no answer for
+ *  this one (see storyFor). */
+export interface Vids2Story {
+  name: string;
+  hit: NewsHit;
+  article: NewsArticle;
+  rail: RailItem[];
+}
+
 /** What the form asks for, and the whole of what Generate needs. */
 export interface Vids2Setup {
   /** The persona's id in the library. Its three clips are looked up from it. */
@@ -53,17 +84,24 @@ export interface Vids2Setup {
   /** Which way Pauv is in the trade recording. The ChatGPT one is dark
    *  whatever this says — that page has no light mode in the renderer. */
   theme: Theme;
+  /** What opens the video — see Vids2Intro. */
+  intro: Vids2Intro;
   /** What gets typed into ChatGPT, exactly as it is written here — capitals
    *  and all. Only the two Generate question buttons lower-case what they put
    *  in the box (see `lower`); typing over it is nobody's business but the
-   *  person typing. */
+   *  person typing. Only read for a ChatGPT intro. */
   question: string;
+  /** How far back the article search looks, for a news intro. */
+  newsRange: NewsRange;
+  /** The story chosen for a news intro, or null. Only read for one. */
+  story: Vids2Story | null;
   /** Serious, Middle or Degen — see Vids2Mode. */
   mode: Vids2Mode;
 }
 
 export const EMPTY_SETUP: Vids2Setup = {
-  personaId: null, person: '', direction: 'up', theme: 'light', question: '', mode: 'serious',
+  personaId: null, person: '', direction: 'up', theme: 'light',
+  intro: 'chatgpt', question: '', newsRange: '7d', story: null, mode: 'serious',
 };
 
 const SETUP_KEY = 'vids2-setup-v1';
@@ -72,6 +110,26 @@ const SETUP_KEY = 'vids2-setup-v1';
  *  bar is typed into. Only the model's two drafts go through this — a question
  *  typed by hand keeps whatever case it was given. */
 export const lower = (s: string) => s.toLowerCase();
+
+const sameName = (a: string, b: string) => a.trim().toLowerCase() === b.trim().toLowerCase();
+
+/** The story chosen for THIS person, or null: one chosen and then Who changed
+ *  is a story about somebody else, and the search has to be run again. */
+export const storyFor = (s: Pick<Vids2Setup, 'person' | 'story'>): Vids2Story | null =>
+  (s.story && sameName(s.story.name, s.person) ? s.story : null);
+
+/** A saved story, loosely checked: enough that the form can show it and
+ *  Generate can render it. Anything else is no story. */
+function isStory(v: unknown): v is Vids2Story {
+  const s = v as Partial<Vids2Story> | null;
+  if (!s || typeof s !== 'object' || typeof s.name !== 'string') return false;
+  const h = s.hit as Partial<NewsHit> | undefined;
+  const a = s.article as Partial<NewsArticle> | undefined;
+  return !!h && typeof h.url === 'string' && typeof h.title === 'string' && isOutletId(h.outlet)
+    && !!a && typeof a.url === 'string' && typeof a.headline === 'string' && isOutletId(a.outlet)
+    && Array.isArray(a.paragraphs) && Array.isArray(a.notes)
+    && Array.isArray(s.rail);
+}
 
 /** The answers from last time, so a second video is a few words' work rather
  *  than five. Anything missing or wrong falls back to the empty answer. */
@@ -86,7 +144,11 @@ export function loadSetup(): Vids2Setup {
       person: typeof j.person === 'string' ? j.person : '',
       direction: j.direction === 'down' ? 'down' : 'up',
       theme: j.theme === 'dark' ? 'dark' : 'light',
+      // Answers saved before there was a choice of intro were ChatGPT ones.
+      intro: isVids2Intro(j.intro) ? j.intro : 'chatgpt',
       question: typeof j.question === 'string' ? j.question : '',
+      newsRange: isNewsRange(j.newsRange) ? j.newsRange : EMPTY_SETUP.newsRange,
+      story: isStory(j.story) ? j.story : null,
       // Answers saved before there were three modes had a degen switch.
       mode: isVids2Mode(j.mode) ? j.mode : j.degen === true ? 'degen' : 'serious',
     };
@@ -111,10 +173,19 @@ export interface Vids2Build {
   person: string;
   direction: Direction;
   theme: Theme;
+  /** What opened it — see Vids2Intro. */
+  intro: Vids2Intro;
+  /** The question, for a ChatGPT intro; empty otherwise. */
   question: string;
+  /** The story, for a news intro — the outlet's name and the headline, for
+   *  the tuning page to say; null otherwise. */
+  story: { outlet: string; headline: string } | null;
+  /** Anything the renderers wanted known — a name that wasn't on the page, a
+   *  photo that couldn't be found — for the tuning page to show. */
+  notes: string[];
   /** The mode it was made in — see Vids2Mode. */
   mode: Vids2Mode;
-  /** The moments the two renderers actually put things at, for whatever wants
+  /** The moments the renderers actually put things at, for whatever wants
    *  to land on one. */
   beats: Vids2Beats;
 }
@@ -123,18 +194,27 @@ export interface Vids2Build {
  *  seconds — straight off the renderers' beats, not off the timeline, since
  *  neither recording knows where it will end up sitting. */
 export interface Vids2Beats {
-  /** Bottom A: ChatGPT has got to the name and the pointer goes for it. */
-  chatPick: number;
+  /** Bottom A: the intro getting to them — ChatGPT has got to the name and
+   *  the pointer goes for it, or the pointer presses on their name in the
+   *  story to drag over it. Null when there is no intro. */
+  introPick: number | null;
   /** Bottom B: their page opening — the click after the search. */
   tradeOpen: number;
   /** Bottom B: Place trade pressed. */
   tradePlaced: number;
 }
 
+/** Whether the intro has what it needs: nothing, for none; the question, for
+ *  ChatGPT; a story found for this person, for news. */
+export const introReady = (s: Vids2Setup): boolean =>
+  s.intro === 'none' ? true
+    : s.intro === 'chatgpt' ? !!s.question.trim()
+    : !!storyFor(s);
+
 /** Whether the form has been answered enough to press Generate. A persona with
  *  no clips is caught later, by the stage having nothing on it. */
 export const setupReady = (s: Vids2Setup): boolean =>
-  !!s.personaId && !!s.person.trim() && !!s.question.trim();
+  !!s.personaId && !!s.person.trim() && introReady(s);
 
 // ── Degen mode's BOOMs ───────────────────────────────────────────────────────
 
@@ -169,11 +249,13 @@ export interface DegenBoom {
   on: string;
 }
 
-/** The three BOOMs every degen build gets, in play order. They are the beats
- *  somebody watching would react on: the answer naming them, their page coming
- *  up, and the money going in. Nothing places them by hand — degen mode is a
- *  switch, not a job — and every one of them can still be taken off on the bar
- *  like any other, because they are ordinary BOOMs once they are down.
+/** The BOOMs every degen build gets, in play order — three with an intro, two
+ *  without. They are the beats somebody watching would react on: the intro
+ *  getting to them (ChatGPT naming them, or their name dragged over in the
+ *  story), their page coming up, and the money going in. Nothing places them
+ *  by hand — degen mode is a switch, not a job — and every one of them can
+ *  still be taken off on the bar like any other, because they are ordinary
+ *  BOOMs once they are down.
  *
  *  The middle one is its noise and nothing else (`picture: false`). The oh hell
  *  nah runs for several seconds, far longer than a BOOM is ever on screen, and
@@ -182,7 +264,9 @@ export interface DegenBoom {
  *  the whole thing, hit and all. Every bang plays its own length wherever it
  *  is laid, and two that run into each other simply both play. */
 export const degenBooms = (b: Vids2Beats): DegenBoom[] => [
-  { slot: 'bottomA', at: b.chatPick, sound: 'fahh', picture: true, on: 'chatgpt naming them' },
+  ...(b.introPick == null ? [] : [
+    { slot: 'bottomA', at: b.introPick, sound: 'fahh', picture: true, on: 'the intro getting to them' } as const,
+  ]),
   { slot: 'bottomB', at: b.tradeOpen, sound: 'ohHellNah', picture: false, on: 'their page opening' },
   { slot: 'bottomB', at: b.tradePlaced, sound: 'fahh', picture: true, on: 'the trade going in' },
 ];
@@ -218,6 +302,109 @@ export function loadRoster(signal?: AbortSignal): Promise<TradeTalent[]> {
   });
 }
 
+const r2 = (n: number) => Math.round(n * 100) / 100;
+const cancelled = () => new DOMException('Cancelled', 'AbortError');
+
+// ── The news story, as a Bottom A ────────────────────────────────────────────
+// The recording Studio > News makes (components/news/news-video), rendered
+// here for this one video: Google with the story as the third result, the
+// click, the outlet's page loading, their name dragged over and zoomed in on.
+// Its photos are found the way that page finds them (lib/news/client) — free
+// ones of the person, the side column's thumbnails — and it is filed on the
+// stage the way the ChatGPT recording is (lib/simpler/vidsBottom bottomA*):
+// a name to read, a context and three marks for the caption writer.
+
+/** What the clip is called on the stage and in the record an export writes
+ *  down. Written to be read; nothing parses it. */
+export const bottomANewsName = (person: string, direction: Direction, outlet: string) =>
+  `${person} ${direction} A · News ${outlet}`;
+
+/** Its context, in the words a hand-filed Bottom A uses, so the caption writer
+ *  and the post-caption writer read it the same way — and read that it is
+ *  Google and the outlet, not ChatGPT (api/vids/captions takes Bottom A's
+ *  site from here). */
+export const bottomANewsContext = (person: string, outlet: string, headline: string) =>
+  `google news, searching ${person}, opening the ${outlet} story "${headline}" about them, reading it and highlighting their name`;
+
+/** The captions a news intro carries, and where. Three, one per mark, the way
+ *  the ChatGPT recording's are: the first two are these, fixed outright —
+ *  Google, then the story being opened and looked through — and the third is
+ *  the pick, rolled from BOTTOM_A_PICK (lib/simpler/vidsCaptions) the way it
+ *  is on a ChatGPT clip ("lock in trump"). The tuning page puts them in
+ *  (Vids2Builder writeLines); the marks below are what put each on its
+ *  moment. */
+export const NEWS_BOTTOM_A_LINES: readonly string[] = [
+  'find a news article on google',
+  'look for someone trending',
+];
+
+/** Its marks: three, abutting, so each caption goes up on its moment and
+ *  holds to the next (lib/simpler/vidsCaptions onMarks) — Google, from the
+ *  top to the click on the story; the story, from the click through the wait,
+ *  the paint and the wheel, to the pointer pressing on their name; and the
+ *  name, from that press to the end. `nameAt` is the renderer's own (see
+ *  NewsClip.nameAt), like the beats, in clip seconds. */
+export function bottomANewsMarks(beats: NewsBeats, nameAt: number, person: string, outlet: string): VidMark[] {
+  const at = (start: number, end: number) => ({ start: r2(start), end: r2(end) });
+  const say = (text: string) => text.slice(0, MAX_MARK_TEXT);
+  const press = Math.min(Math.max(nameAt, beats.loading.start), beats.choosing.end);
+  return [
+    { ...at(beats.searching.start, beats.searching.end), text: say('finding a news article on google') },
+    { ...at(beats.loading.start, press), text: say(`looking for someone trending — opening the ${outlet} story, scrolling it`) },
+    { ...at(press, beats.choosing.end), text: say(`highlighting ${person}'s name in the story`) },
+  ];
+}
+
+export interface NewsClipProgress { stage: 'photos' | 'layout' | 'render'; frac: number | null }
+
+export interface MakeNewsClipOptions {
+  /** Who — the name the story was found for, and what gets highlighted. */
+  name: string;
+  direction: Direction;
+  story: Vids2Story;
+  signal?: AbortSignal;
+  onProgress?: (p: NewsClipProgress) => void;
+}
+
+/** The news recording for this one video, as a clip the stage, the plan, the
+ *  captions and the exporter take like any other. Photos first — the page is
+ *  drawn with them, the way "Use this one" does it on the News page — then
+ *  the recording, rendered by components/news/news-video, the one home for
+ *  it, and held in this tab. `nameAt` is the pointer pressing on their name,
+ *  in clip seconds; `notes` is anything worth telling whoever asked. */
+export async function makeNewsClip(
+  o: MakeNewsClipOptions,
+): Promise<{ row: VidRow; beats: NewsBeats; nameAt: number; notes: string[] }> {
+  const { article, rail } = o.story;
+  const outlet = outletById(article.outlet).name;
+  o.onProgress?.({ stage: 'photos', frac: null });
+  const found = await findPagePhotos(article, rail, o.name, o.signal);
+  const { photoIndex, photos } = await pagePhotosFrom({ article, rail, people: found.people, thumbSrcs: found.thumbSrcs }, 0);
+  if (o.signal?.aborted) throw cancelled();
+  const notes = [...found.notes];
+  if (found.people.length > 0 && photoIndex < 0) notes.push('None of the photos found would load, so the page keeps a placeholder.');
+
+  o.onProgress?.({ stage: 'layout', frac: null });
+  const assets = await loadNewsAssets({ name: o.name, article, rail, photos }, o.signal);
+  if (assets.note) notes.push(assets.note);
+  const { blob, beats, nameAt, seconds, width, height, poster } = await renderNewsVideo(assets, {
+    signal: o.signal,
+    onProgress: (done, total) => o.onProgress?.({ stage: 'render', frac: done / total }),
+  });
+  const row = makeLocalClip(blob, {
+    name: bottomANewsName(o.name, o.direction, outlet),
+    context: bottomANewsContext(o.name, outlet, article.headline),
+    marks: bottomANewsMarks(beats, nameAt, o.name, outlet),
+    duration: seconds,
+    width,
+    height,
+    // Its audio track is the mouse — the click on the story, the drag.
+    hasSfx: true,
+    poster,
+  });
+  return { row, beats, nameAt, notes };
+}
+
 // ── The trade recording, as a Bottom B ───────────────────────────────────────
 
 /** What the clip is called on the stage and in the record an export writes
@@ -230,8 +417,6 @@ export const bottomBName = (person: string, direction: Direction, theme: Theme) 
  *  and the post-caption writer read it the same way. */
 export const bottomBContext = (person: string, direction: Direction) =>
   `pauv.com, searching ${person}, reading their chart, then trading $10 ${direction} on them`;
-
-const r2 = (n: number) => Math.round(n * 100) / 100;
 
 /** Its marks: the recording's four beats, written the way a hand-marked clip is
  *  — the caption writer turns each into a line and the layout lands that line

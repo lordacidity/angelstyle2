@@ -583,7 +583,7 @@ export function StudioShell() {
           <div style={{ display: activeSection === 'news' ? undefined : 'none' }}>
             <ErrorBoundary>
               <Suspense fallback={<SectionLoader />}>
-                <NewsSection />
+                <NewsSection active={activeSection === 'news'} />
               </Suspense>
             </ErrorBoundary>
           </div>

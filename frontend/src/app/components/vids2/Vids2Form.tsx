@@ -24,11 +24,28 @@
 //   5. Persona   the same chooser Simpler's Persona card opens
 //                (components/simpler/VidsPicker) — one row per persona, its
 //                three clips behind it.
-//   6. Question  what gets typed into ChatGPT, as written — capitals and all.
-//                Write it, or have it written: Ragebait or Factual, the same
-//                two the Simpler Bottom card offers (api/vids/question). Those
-//                two come back lower case, the way a search bar is typed into;
-//                a question written by hand is left exactly as it is.
+//   6. Intro     what opens the video — the first screen recording, Bottom A
+//                (Vids2Intro in lib/vids2). Three ways:
+//                  No intro      nothing before the trade: the video goes
+//                                straight to trading on them on Pauv.
+//                  ChatGPT       the question typed into ChatGPT, as written —
+//                                capitals and all. Write it, or have it
+//                                written: Ragebait or Factual, the same two
+//                                the Simpler Bottom card offers
+//                                (api/vids/question). Those two come back
+//                                lower case, the way a search bar is typed
+//                                into; a question written by hand is left
+//                                exactly as it is.
+//                  News article  a real story about them, the way Studio >
+//                                News finds one (lib/news/client): choose how
+//                                far back to look — a week, to start — and
+//                                Search for articles; the list opens on the
+//                                headlines with the name in them, the rest a
+//                                press away; pick one and it is read
+//                                off the outlet and checked, and its page is
+//                                drawn here, grey where the photos will go, to
+//                                scroll through. Generate finds the photos and
+//                                records it (makeNewsClip in lib/vids2).
 //
 // Nothing moves on by itself: pick an answer, then press Next. Back goes a step
 // back, and the strip along the top holds every answer given so far — press
@@ -37,7 +54,7 @@
 // already there to be jumped to.
 //
 // Generate is on the last question. It hands the answers to the section, which
-// renders both recordings — at the same time, neither waiting on the other —
+// renders the recordings — at the same time, neither waiting on the other —
 // and takes over the page (Vids2Section). While that runs this stays up, with a
 // line per recording where the button was, so a question can be re-read and
 // the whole thing cancelled.
@@ -47,9 +64,12 @@ import type { VidPersona, VidRow } from '@/lib/vids-types';
 import { writeQuestion, type QuestionKind } from '@/lib/vids-client';
 import { VidsPersonaPicker } from '@/app/components/simpler/VidsPicker';
 import {
-  VIDS2_MODES, loadRoster, lower, setupReady,
-  type Direction, type Theme, type TradeTalent, type Vids2Mode, type Vids2Setup,
+  VIDS2_INTROS, VIDS2_MODES, introReady, loadRoster, lower, setupReady, storyFor,
+  type Direction, type NewsRange, type Theme, type TradeTalent, type Vids2Intro, type Vids2Mode, type Vids2Setup,
 } from '@/lib/vids2/vids2Build';
+import { ago, drawNewsPage, errorText, NEWS_RANGE_LABEL, NEWS_RANGES, readNewsStory, searchNews } from '@/lib/news/client';
+import { OUTLET_IDS, outletById } from '@/lib/news/outlets';
+import type { NewsHit } from '@/lib/news/types';
 import { BTN_TEXT } from '@/lib/ui-constants';
 import { SpinnerIcon, VideoIcon } from '@/lib/icons';
 
@@ -62,6 +82,12 @@ const MODE_ON: Record<Vids2Mode, string> = {
   serious: 'border-sky-500 bg-sky-500/15 text-sky-200',
   middle: 'border-zinc-300 bg-zinc-300/10 text-white',
   degen: 'border-amber-500 bg-amber-500/15 text-amber-200',
+};
+const INTRO_LABEL: Record<Vids2Intro, string> = { none: '⏭️ No intro', chatgpt: '💬 ChatGPT', news: '📰 News article' };
+const INTRO_ON: Record<Vids2Intro, string> = {
+  none: 'border-zinc-300 bg-zinc-300/10 text-white',
+  chatgpt: 'border-emerald-500 bg-emerald-500/15 text-emerald-200',
+  news: 'border-sky-500 bg-sky-500/15 text-sky-200',
 };
 
 /** The two ways the model will write the question — see api/vids/question. */
@@ -78,35 +104,40 @@ const QUESTION_HINT: Record<QuestionKind, string> = {
 const MAX_ROWS = 60;
 
 /** The questions, in the order they are asked. */
-type StepId = 'who' | 'mode' | 'direction' | 'theme' | 'persona' | 'question';
+type StepId = 'who' | 'mode' | 'direction' | 'theme' | 'persona' | 'intro';
 const STEPS: readonly { id: StepId; label: string; hint: string }[] = [
   { id: 'who', label: 'Who', hint: 'anybody on Pauv' },
   { id: 'mode', label: 'Mode', hint: 'how the video talks' },
   { id: 'direction', label: 'Which way', hint: '$10 either way' },
   { id: 'theme', label: 'Look', hint: 'the Pauv page in the trade recording' },
   { id: 'persona', label: 'Persona', hint: 'fills Start, Top A and Top B' },
-  { id: 'question', label: 'The question', hint: 'typed into ChatGPT' },
+  { id: 'intro', label: 'Intro', hint: 'what opens the video, before the trade' },
 ];
 const LAST = STEPS.length - 1;
 
-/** One of the two recordings, while it is being made. */
+/** One of the recordings, while it is being made. */
 export interface Vids2Leg {
   label: string;
   /** 0..1 where there is a share to count, null while there is not — the model
-   *  thinking and the roster loading have no frames. */
+   *  thinking, the roster loading and the photos arriving have no frames. */
   frac: number | null;
   done: boolean;
 }
 
-/** How the build is getting on. The two recordings are made at once — neither
+/** How the build is getting on. The recordings are made at once — neither
  *  needs anything from the other — so there is no step 1 and step 2, only two
- *  things running. Null when nothing is being made. */
-export interface Vids2Job { chat: Vids2Leg; trade: Vids2Leg }
+ *  things running; one, with no intro. Null when nothing is being made. */
+export interface Vids2Job { intro: Vids2Leg | null; trade: Vids2Leg }
 
-/** The pair as one share, for the bar: a finished leg counts whole, and one
+/** The legs there are, in play order. */
+export const jobLegs = (j: Vids2Job): Vids2Leg[] => [j.intro, j.trade].filter((l): l is Vids2Leg => !!l);
+
+/** The legs as one share, for the bar: a finished leg counts whole, and one
  *  with nothing to count yet counts as nothing. */
-export const jobProgress = (j: Vids2Job): number =>
-  [j.chat, j.trade].reduce((sum, leg) => sum + (leg.done ? 1 : leg.frac ?? 0), 0) / 2;
+export const jobProgress = (j: Vids2Job): number => {
+  const legs = jobLegs(j);
+  return legs.reduce((sum, leg) => sum + (leg.done ? 1 : leg.frac ?? 0), 0) / legs.length;
+};
 
 interface Props {
   setup: Vids2Setup;
@@ -125,7 +156,7 @@ interface Props {
   onBack: () => void;
 }
 
-/** Big answers side by side — the shape of Mode, Which way and Look. */
+/** Big answers side by side — the shape of Mode, Which way, Look and Intro. */
 function Choice<T extends string | boolean>({ options, value, disabled, onPick }: {
   options: readonly { value: T; label: string; on: string }[];
   value: T;
@@ -157,9 +188,20 @@ export function Vids2Form({
 }: Props) {
   const [pickingPersona, setPickingPersona] = useState(false);
   const busy = !!job;
+  const who = setup.person.trim();
 
   const persona = personas.find((p) => p.id === setup.personaId) ?? null;
   const personaThumb = resolveVideo(persona?.topAId ?? '')?.thumbUrl ?? null;
+  /** The story chosen for THIS person — one chosen and then Who changed is
+   *  about somebody else, and doesn't count (storyFor). */
+  const story = storyFor(setup);
+
+  // The answers as they stand now, for whatever lands after an await — a
+  // story read off the outlet arrives seconds after it was asked for, and
+  // must not put back an answer changed in between.
+  const setupRef = useRef(setup);
+  useEffect(() => { setupRef.current = setup; });
+  const patch = (next: Partial<Vids2Setup>) => onChange({ ...setupRef.current, ...next });
 
   // ── Which question is up ────────────────────────────────────────────────────
   // `furthest` is how far the answers go: every step up to it has been reached
@@ -177,20 +219,23 @@ export function Vids2Form({
   /** Whether a step has what it needs to be left forwards. The two-way ones
    *  always have an answer — the setup starts with one. */
   const answered = (id: StepId): boolean =>
-    id === 'who' ? !!setup.person.trim()
+    id === 'who' ? !!who
       : id === 'persona' ? !!persona
-      : id === 'question' ? !!setup.question.trim()
+      : id === 'intro' ? introReady(setup)
       : true;
 
   /** What the strip says about an answer. */
   const summary = (id: StepId): string => {
     switch (id) {
-      case 'who': return setup.person.trim() || '—';
+      case 'who': return who || '—';
       case 'mode': return MODE_LABEL[setup.mode];
       case 'direction': return DIRECTION_LABEL[setup.direction];
       case 'theme': return THEME_LABEL[setup.theme];
       case 'persona': return persona?.name ?? '—';
-      case 'question': return setup.question.trim() || '—';
+      case 'intro':
+        return setup.intro === 'none' ? 'No intro'
+          : setup.intro === 'chatgpt' ? `ChatGPT · ${setup.question.trim() || '—'}`
+          : `News · ${story?.article.headline ?? '—'}`;
     }
   };
 
@@ -260,7 +305,6 @@ export function Vids2Form({
   useEffect(() => () => writeRef.current?.abort(), []);
 
   const suggest = async (kind: QuestionKind) => {
-    const who = setup.person.trim();
     if (!who || writingKind) return;
     writeRef.current?.abort();
     const ctrl = new AbortController();
@@ -273,7 +317,7 @@ export function Vids2Form({
       const { question } = await writeQuestion({ person: who, kind }, ctrl.signal);
       if (ctrl.signal.aborted) return;
       const text = lower(question);
-      onChange({ ...setup, question: text });
+      patch({ question: text });
       setWritten({ kind, text });
       questionRef.current?.focus();
     } catch (e) {
@@ -283,6 +327,83 @@ export function Vids2Form({
       if (writeRef.current === ctrl) { writeRef.current = null; setWritingKind(null); }
     }
   };
+
+  // ── The news story ──────────────────────────────────────────────────────────
+  // The News page's own errand, from lib/news/client: Google News for the
+  // name, every approved outlet, as far back as the time frame says; pick a
+  // result and the story is read off the outlet and checked — a story with
+  // no headline, byline, date or paragraphs is refused with the reason — and
+  // goes into the answers, so it is still there after Change. What was found
+  // is this page's alone: Who changing empties the list, since it was about
+  // somebody else.
+  const [found, setFound] = useState<{ name: string; range: NewsRange; hits: NewsHit[] } | null>(null);
+  const [searching, setSearching] = useState(false);
+  const [searchError, setSearchError] = useState<string | null>(null);
+  // Headlines with the name in them, to start — the rest are a press away.
+  const [nameInTitle, setNameInTitle] = useState(true);
+  const searchRef = useRef<AbortController | null>(null);
+  /** The result being read, by its url. */
+  const [reading, setReading] = useState<string | null>(null);
+  const [readError, setReadError] = useState<string | null>(null);
+  const readRef = useRef<AbortController | null>(null);
+  useEffect(() => () => { searchRef.current?.abort(); readRef.current?.abort(); }, []);
+  useEffect(() => { setFound(null); setSearchError(null); }, [setup.person]);
+
+  const searchStories = async () => {
+    if (!who || searching) return;
+    searchRef.current?.abort();
+    const ctrl = new AbortController();
+    searchRef.current = ctrl;
+    setSearching(true);
+    setSearchError(null);
+    try {
+      const hits = await searchNews(who, OUTLET_IDS, setup.newsRange, ctrl.signal);
+      if (ctrl.signal.aborted) return;
+      setFound({ name: who, range: setup.newsRange, hits });
+    } catch (e) {
+      if (!ctrl.signal.aborted) setSearchError(errorText(e));
+    } finally {
+      if (searchRef.current === ctrl) { searchRef.current = null; setSearching(false); }
+    }
+  };
+
+  const pickStory = async (hit: NewsHit) => {
+    readRef.current?.abort();
+    const ctrl = new AbortController();
+    readRef.current = ctrl;
+    setReading(hit.url);
+    setReadError(null);
+    try {
+      const { article, rail } = await readNewsStory(hit.url, ctrl.signal);
+      if (ctrl.signal.aborted) return;
+      patch({ story: { name: who, hit, article, rail } });
+    } catch (e) {
+      if (!ctrl.signal.aborted) setReadError(errorText(e));
+    } finally {
+      if (readRef.current === ctrl) { readRef.current = null; setReading(null); }
+    }
+  };
+
+  // The story's page, drawn the way the News page draws it — grey where the
+  // photos will go, since those are found by Generate — in a box to scroll.
+  // Drawn again whenever the story changes, and let go when it does.
+  const [page, setPage] = useState<{ url: string; width: number; height: number } | null>(null);
+  const [drawing, setDrawing] = useState(false);
+  const [drawError, setDrawError] = useState<string | null>(null);
+  useEffect(() => {
+    if (!story) { setPage(null); return; }
+    let alive = true;
+    setDrawing(true);
+    setDrawError(null);
+    drawNewsPage({ article: story.article, rail: story.rail, people: [], thumbSrcs: [] }, 0)
+      .then(({ png }) => { if (alive) setPage({ url: URL.createObjectURL(png.blob), width: png.width, height: png.height }); })
+      .catch((e: unknown) => { if (alive) setDrawError(errorText(e)); })
+      .finally(() => { if (alive) setDrawing(false); });
+    return () => { alive = false; };
+  }, [story]);
+  useEffect(() => () => { if (page) URL.revokeObjectURL(page.url); }, [page]);
+
+  const hitsShown = found ? (nameInTitle ? found.hits.filter((h) => h.named) : found.hits) : [];
 
   const ready = setupReady(setup) && !busy;
   /** The first question still without an answer, for Generate to point at. */
@@ -307,8 +428,9 @@ export function Vids2Form({
           )}
         </div>
         <p className="mt-1 text-[11px] text-zinc-500">
-          Six questions, one at a time, then Generate. Both screen recordings are made for this video — ChatGPT
-          looking them up, then the trade on Pauv — and it lands on the tuning page with the words already written.
+          Six questions, one at a time, then Generate. The intro you choose — ChatGPT looking them up, a news story
+          about them, or nothing — and the trade on Pauv are both recorded for this video, and it lands on the tuning
+          page with the words already written.
         </p>
 
         {/* Every answer so far. The one being asked is lit; one already reached
@@ -424,8 +546,8 @@ export function Vids2Form({
               {setup.mode === 'degen' ? (
                 <p className="mt-2.5 text-[10px] leading-relaxed text-zinc-500">
                   Degen: the hook stops bragging and starts begging — &ldquo;homeless man trades on{' '}
-                  {setup.person.trim().toLowerCase() || 'them'} (i need serious help)&rdquo; — and three BOOMs lay
-                  themselves: <span className="text-zinc-400">fahh</span> when ChatGPT names them,{' '}
+                  {who.toLowerCase() || 'them'} (i need serious help)&rdquo; — and BOOMs lay
+                  themselves: <span className="text-zinc-400">fahh</span> when the intro gets to them,{' '}
                   <span className="text-zinc-400">oh hell nah</span> when their page opens,{' '}
                   <span className="text-zinc-400">fahh</span> again when the trade goes in. Take any of them off on the
                   bar afterwards. The random song can be a degen one too. Nothing else about the video changes.
@@ -488,43 +610,201 @@ export function Vids2Form({
             </button>
           )}
 
-          {current.id === 'question' && (
+          {current.id === 'intro' && (
             <>
-              <textarea
-                ref={questionRef}
-                autoFocus
-                value={setup.question}
-                onChange={(e) => onChange({ ...setup, question: e.target.value })}
-                onKeyDown={(e) => {
-                  if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); if (ready) onGenerate(); }
-                }}
+              <Choice
+                options={VIDS2_INTROS.map((i) => ({ value: i, label: INTRO_LABEL[i], on: INTRO_ON[i] }))}
+                value={setup.intro}
                 disabled={busy}
-                rows={3}
-                placeholder="e.g. who is the most overrated musician of all time?"
-                className="w-full resize-none rounded-md border border-zinc-700 bg-zinc-900 px-2.5 py-2 text-[13px] text-zinc-100 outline-none focus:border-zinc-500 disabled:opacity-50"
+                onPick={(intro) => onChange({ ...setup, intro })}
               />
-              <div className="mt-1.5 flex items-center gap-1.5">
-                <span className="min-w-0 flex-1 text-[10px] text-zinc-500">Generate question</span>
-                {QUESTION_KINDS.map((k) => (
-                  <button
-                    key={k}
-                    type="button"
-                    onClick={() => void suggest(k)}
-                    disabled={!setup.person.trim() || writingKind !== null || busy}
-                    title={setup.person.trim() ? QUESTION_HINT[k] : 'Choose who first'}
-                    className={`shrink-0 rounded border px-1.5 py-0.5 text-[10px] transition-colors disabled:cursor-not-allowed disabled:border-zinc-900 disabled:text-zinc-700 disabled:hover:border-zinc-900 disabled:hover:text-zinc-700 ${
-                      chosenKind === k
-                        ? k === 'ragebait'
-                          ? 'border-amber-500 bg-amber-500/15 text-amber-300'
-                          : 'border-zinc-300 bg-zinc-300/10 text-white'
-                        : 'border-zinc-700 text-zinc-400 hover:border-zinc-500 hover:text-white'
-                    }`}
-                  >
-                    {writingKind === k ? 'Writing…' : QUESTION_LABEL[k]}
-                  </button>
-                ))}
-              </div>
-              {writeError && <p className="mt-1 text-[9px] text-red-400">Couldn’t write one: {writeError}</p>}
+
+              {setup.intro === 'none' && (
+                <p className="mt-2.5 text-[10px] leading-relaxed text-zinc-500">
+                  No intro: nothing before the trade. The video opens straight onto Pauv — searching{' '}
+                  {who || 'them'}, their chart, the $10 going {setup.direction} — with the persona over it, then the
+                  ending.
+                </p>
+              )}
+
+              {setup.intro === 'chatgpt' && (
+                <div className="mt-3">
+                  <textarea
+                    ref={questionRef}
+                    autoFocus
+                    value={setup.question}
+                    onChange={(e) => onChange({ ...setup, question: e.target.value })}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); if (ready) onGenerate(); }
+                    }}
+                    disabled={busy}
+                    rows={3}
+                    placeholder="e.g. who is the most overrated musician of all time?"
+                    className="w-full resize-none rounded-md border border-zinc-700 bg-zinc-900 px-2.5 py-2 text-[13px] text-zinc-100 outline-none focus:border-zinc-500 disabled:opacity-50"
+                  />
+                  <div className="mt-1.5 flex items-center gap-1.5">
+                    <span className="min-w-0 flex-1 text-[10px] text-zinc-500">Typed into ChatGPT, as written. Generate question:</span>
+                    {QUESTION_KINDS.map((k) => (
+                      <button
+                        key={k}
+                        type="button"
+                        onClick={() => void suggest(k)}
+                        disabled={!who || writingKind !== null || busy}
+                        title={who ? QUESTION_HINT[k] : 'Choose who first'}
+                        className={`shrink-0 rounded border px-1.5 py-0.5 text-[10px] transition-colors disabled:cursor-not-allowed disabled:border-zinc-900 disabled:text-zinc-700 disabled:hover:border-zinc-900 disabled:hover:text-zinc-700 ${
+                          chosenKind === k
+                            ? k === 'ragebait'
+                              ? 'border-amber-500 bg-amber-500/15 text-amber-300'
+                              : 'border-zinc-300 bg-zinc-300/10 text-white'
+                            : 'border-zinc-700 text-zinc-400 hover:border-zinc-500 hover:text-white'
+                        }`}
+                      >
+                        {writingKind === k ? 'Writing…' : QUESTION_LABEL[k]}
+                      </button>
+                    ))}
+                  </div>
+                  {writeError && <p className="mt-1 text-[9px] text-red-400">Couldn’t write one: {writeError}</p>}
+                </div>
+              )}
+
+              {setup.intro === 'news' && (
+                <div className="mt-3">
+                  <p className="mb-2 text-[10px] leading-relaxed text-zinc-500">
+                    A real story about {who || 'them'} from an approved outlet, off Google News. Pick one: it is read
+                    from the outlet and checked, and its page is drawn below to look over. Generate finds its photos and
+                    records it — Google, the click, the page loading, their name dragged over.
+                  </p>
+                  <div className="flex items-center gap-2">
+                    <select
+                      value={setup.newsRange}
+                      onChange={(e) => onChange({ ...setup, newsRange: e.target.value as NewsRange })}
+                      disabled={busy}
+                      title="How far back to look"
+                      className="h-10 rounded-md border border-zinc-700 bg-zinc-900 px-2 text-[12px] text-zinc-100 outline-none focus:border-zinc-500 disabled:opacity-50"
+                    >
+                      {NEWS_RANGES.map((r) => <option key={r} value={r}>{NEWS_RANGE_LABEL[r]}</option>)}
+                    </select>
+                    <button
+                      type="button"
+                      onClick={() => void searchStories()}
+                      disabled={!who || searching || busy}
+                      title={who ? undefined : 'Choose who first'}
+                      className="h-10 min-w-0 flex-1 truncate rounded-md border border-zinc-600 bg-zinc-100 px-4 text-[12px] font-semibold text-black transition-colors hover:bg-white disabled:opacity-40"
+                    >
+                      {searching ? 'Searching…' : `Search for articles${who ? ` about ${who}` : ''}`}
+                    </button>
+                  </div>
+                  {searchError && <p className="mt-1 text-[9px] text-red-400">Couldn’t search: {searchError}</p>}
+
+                  {found && (
+                    <div className="mt-2">
+                      <div className="flex items-center gap-2 text-[10px] text-zinc-500">
+                        <span className="min-w-0 flex-1 truncate">
+                          {found.hits.length === 0
+                            ? 'No stories from the approved outlets. Try a wider time frame.'
+                            : hitsShown.length === 0
+                              ? `None of the ${found.hits.length} headlines have “${found.name}” in them.`
+                              : `${hitsShown.length} ${hitsShown.length === 1 ? 'story' : 'stories'} about ${found.name} · ${NEWS_RANGE_LABEL[found.range].toLowerCase()}`}
+                        </span>
+                        {found.hits.length > 0 && (
+                          <button
+                            type="button"
+                            onClick={() => setNameInTitle((v) => !v)}
+                            className={`shrink-0 rounded border px-1.5 py-0.5 text-[9px] transition-colors ${
+                              nameInTitle ? 'border-zinc-300 bg-zinc-300/10 text-white' : 'border-zinc-700 text-zinc-400 hover:border-zinc-500 hover:text-white'
+                            }`}
+                          >
+                            Name in title only
+                          </button>
+                        )}
+                      </div>
+                      {hitsShown.length > 0 && (
+                        <div className="mt-1.5 max-h-56 space-y-1 overflow-y-auto pr-0.5">
+                          {hitsShown.map((h) => {
+                            const o = outletById(h.outlet);
+                            const chosen = story?.hit.url === h.url;
+                            return (
+                              <button
+                                key={h.url}
+                                type="button"
+                                onClick={() => void pickStory(h)}
+                                disabled={busy || reading !== null}
+                                className={`flex w-full items-start gap-2 rounded-md border px-2 py-1.5 text-left transition-colors disabled:cursor-default ${
+                                  chosen ? 'border-zinc-400 bg-zinc-800' : 'border-zinc-800 bg-zinc-950 hover:border-zinc-600'
+                                }`}
+                              >
+                                <span className="mt-px shrink-0 rounded px-1 py-px text-[8px] font-bold text-white" style={{ background: o.color }}>
+                                  {o.name}
+                                </span>
+                                <span className="min-w-0 flex-1">
+                                  <span className="block text-[11px] leading-snug text-zinc-100">{h.title}</span>
+                                  <span className="block text-[9px] text-zinc-500">
+                                    {ago(h.publishedAt)}
+                                    {h.url.includes('nytimes.com/athletic/') && ' · The Athletic'}
+                                    {h.named && ' · name in the title'}
+                                  </span>
+                                </span>
+                                {reading === h.url ? (
+                                  <SpinnerIcon size={10} className="mt-0.5 shrink-0 animate-spin text-zinc-400" />
+                                ) : chosen ? (
+                                  <span className="shrink-0 text-[10px] text-emerald-400">✓</span>
+                                ) : null}
+                              </button>
+                            );
+                          })}
+                        </div>
+                      )}
+                    </div>
+                  )}
+                  {readError && <p className="mt-1.5 text-[9px] text-red-400">That one can’t be used: {readError}</p>}
+
+                  {/* The story, chosen: what it is, and its page to scroll. */}
+                  {story ? (
+                    <div className="mt-3 overflow-hidden rounded-md border border-zinc-700">
+                      <div className="flex items-start gap-2 px-2.5 py-2">
+                        <span
+                          className="mt-px shrink-0 rounded px-1 py-px text-[8px] font-bold text-white"
+                          style={{ background: outletById(story.article.outlet).color }}
+                        >
+                          {outletById(story.article.outlet).name}
+                        </span>
+                        <div className="min-w-0 flex-1">
+                          <p className="text-[12px] leading-snug text-zinc-100">{story.article.headline}</p>
+                          <p className="mt-0.5 text-[9px] text-zinc-500">
+                            {story.article.byline}
+                            {story.article.publishedAt ? ` · ${ago(story.article.publishedAt)}` : story.article.publishedDate ? ` · ${story.article.publishedDate}` : ''}
+                            {' · '}{story.article.paragraphs.length} paragraphs
+                            {' · '}{story.hit.named ? 'name in the headline' : 'name not in the headline — the clip finds it in the story'}
+                          </p>
+                        </div>
+                      </div>
+                      {story.article.notes.length > 0 && (
+                        <ul className="space-y-0.5 px-2.5 pb-2 text-[9px] text-amber-300/90">
+                          {story.article.notes.map((n) => <li key={n}>{n}</li>)}
+                        </ul>
+                      )}
+                      <div className="max-h-[360px] overflow-y-auto border-t border-zinc-800 bg-zinc-900">
+                        {page ? (
+                          // eslint-disable-next-line @next/next/no-img-element
+                          <img src={page.url} alt={story.article.headline} className="block w-full" width={page.width} height={page.height} />
+                        ) : (
+                          <p className="flex h-24 items-center justify-center text-[10px] text-zinc-500">
+                            {drawing ? 'Drawing the page…' : drawError ? `Couldn’t draw the page: ${drawError}` : ''}
+                          </p>
+                        )}
+                      </div>
+                      <p className="px-2.5 py-1.5 text-[9px] text-zinc-600">
+                        Grey where the photos go — free ones of {who || 'them'} and the side column&apos;s are found when you
+                        press Generate.
+                      </p>
+                    </div>
+                  ) : setup.story && !found ? (
+                    <p className="mt-2 text-[10px] text-zinc-500">
+                      The story chosen before was about {setup.story.name}. Search again for {who || 'them'}.
+                    </p>
+                  ) : null}
+                </div>
+              )}
             </>
           )}
 
@@ -560,13 +840,13 @@ export function Vids2Form({
         {/* Generate, and what it is doing — on the last question only. The
             button becomes the progress: it is the only thing on the page that
             is running, and a bar somewhere else would only be somewhere else. */}
-        {current.id === 'question' && (
+        {current.id === 'intro' && (
           <div className="mt-6 border-t border-zinc-800 pt-4">
             {job ? (
               <div>
                 <div className="flex items-center gap-2 text-[11px] text-zinc-300">
                   <SpinnerIcon size={12} className="animate-spin" />
-                  <span className="flex-1 truncate">Making both recordings</span>
+                  <span className="flex-1 truncate">{job.intro ? 'Making both recordings' : 'Making the trade recording'}</span>
                   <span className="font-mono text-zinc-500">{Math.round(jobProgress(job) * 100)}%</span>
                 </div>
                 <div className="mt-2 h-1.5 w-full overflow-hidden rounded-full bg-zinc-800">
@@ -575,8 +855,8 @@ export function Vids2Form({
                 {/* A line each: both are running, and this says which of the two
                     the wait is actually on. */}
                 <div className="mt-2 space-y-1">
-                  {([['chat', job.chat], ['trade', job.trade]] as const).map(([key, leg]) => (
-                    <div key={key} className="flex items-center gap-1.5 text-[10px]">
+                  {jobLegs(job).map((leg, i) => (
+                    <div key={i} className="flex items-center gap-1.5 text-[10px]">
                       <span className={`w-2 shrink-0 ${leg.done ? 'text-emerald-400' : 'text-zinc-600'}`}>
                         {leg.done ? '✓' : '·'}
                       </span>
@@ -598,23 +878,29 @@ export function Vids2Form({
                   disabled={!ready}
                   title={ready
                     ? (hasBuild
-                      ? 'Make both recordings again and replace the video you have'
-                      : 'Make both recordings and open the tuning page')
+                      ? 'Make the recordings again and replace the video you have'
+                      : 'Make the recordings and open the tuning page')
                     : missing ? `${missing.label} still needs an answer` : undefined}
                   className={`${BTN_TEXT} w-full justify-center border-zinc-600 bg-white py-2 text-black hover:bg-zinc-200`}
                 >
                   Generate
                 </button>
                 <p className="mt-1.5 text-[10px] text-zinc-600">
-                  {missing && missing.id !== 'question' ? (
+                  {missing && missing.id !== 'intro' ? (
                     <>
                       <button onClick={() => go(STEPS.indexOf(missing))} className="text-zinc-400 underline decoration-zinc-700 hover:text-white">
                         {missing.label}
                       </button>{' '}
                       still needs an answer.{' '}
                     </>
+                  ) : missing ? (
+                    <>{setup.intro === 'chatgpt' ? 'Write the question first.' : 'Choose a story first.'}{' '}</>
                   ) : null}
-                  A minute or so: ChatGPT answers while Pauv loads, and both recordings render together.
+                  {setup.intro === 'none'
+                    ? 'Half a minute or so: Pauv loads, then the trade renders.'
+                    : setup.intro === 'chatgpt'
+                      ? 'A minute or so: ChatGPT answers while Pauv loads, and both recordings render together.'
+                      : 'A minute or so: the story’s photos are found while Pauv loads, and both recordings render together.'}
                   {hasBuild && ' The video you have now goes when this one lands.'}
                 </p>
               </>

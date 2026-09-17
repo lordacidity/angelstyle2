@@ -4,9 +4,10 @@
 // the handful of things left to change about it.
 //
 // It is Simpler's builder with the deciding taken out. The form decided —
-// persona, who, which way, light or dark, the question — and Generate made
-// both screen recordings before this page was ever on screen, so there are no
-// choices here, only adjustments:
+// persona, who, which way, light or dark, the intro (nothing, ChatGPT and a
+// question, or a news story) — and Generate made the screen recordings before
+// this page was ever on screen, so there are no choices here, only
+// adjustments:
 //
 //   Sound     the song under the video, how loud the clips sit, how loud the
 //             BOOMs land.
@@ -59,7 +60,7 @@ import {
 // Bottom logic. Nothing that reads a person off a filed clip is wanted here:
 // Vids 2 knows who it is, because the form said so.
 import { HOUSE_BOOM, boomFromBottomB, personKey } from '@/lib/simpler/vidsBottom';
-import { degenBoomSound, degenBooms, type Vids2Build } from '@/lib/vids2/vids2Build';
+import { degenBoomSound, degenBooms, NEWS_BOTTOM_A_LINES, type Vids2Build } from '@/lib/vids2/vids2Build';
 import { composeSequence } from '@/lib/simpler/vidsCompose';
 import {
   CAPTION_STYLES, DEFAULT_CAPTION_SCALE, DEFAULT_CAPTION_STYLE, EMPTY_LINES, FAST_BOTTOM_A_CAPTIONS,
@@ -640,7 +641,11 @@ export function Vids2Builder({
     const aItem = plan.items.find((i) => i.slot === 'bottomA') ?? null;
     const aSped = !!aItem && !!picks.bottomA
       && aItem.speed > slotSpeed('bottomA', picks.bottomA.speed, aItem.sourceLength, 'normal') + 1e-6;
-    const placeA = bottomAPace === 'fast' && !!aWin && !!aItem
+    // A news intro is always captioned on its marks: three lines, the first
+    // two fixed outright (NEWS_BOTTOM_A_LINES), the pick rolled — never the
+    // two placed lines Fast asks the writer for.
+    const newsA = build.intro === 'news';
+    const placeA = bottomAPace === 'fast' && !newsA && !!aWin && !!aItem
       && (aSped || !aWin.marks.length)
       && aWin.end - aWin.start >= FAST_BOTTOM_A_CAPTIONS * MIN_SHARE;
     const briefA = clipBrief(aWin, picks.bottomA?.video.context);
@@ -690,6 +695,11 @@ export function Vids2Builder({
       // rendered ChatGPT recording is: three beats, one line each, never the
       // two placed lines Fast asks for.
       const fixedA = !placeA && draft.bottomA.length >= 3;
+      /** What stands in for the writer's line at Bottom A's index, if
+       *  anything: on a news intro the first two lines outright, then the
+       *  rolled pick; on a ChatGPT one the rolled wait and pick. */
+      const standInA = (i: number): string | null =>
+        (newsA && NEWS_BOTTOM_A_LINES[i]) || (fixedA ? fixedLine('bottomA', i, capName) : null);
       // A rewrite keeps whatever was set to one line, and wherever a line was
       // dragged to, matched up by position — both are about the shape and place
       // of the caption slot rather than its wording. A line that wasn't there
@@ -705,7 +715,7 @@ export function Vids2Builder({
         bottomA: draft.bottomA.map((t, i) => {
           const at = atA?.[i];
           return {
-            ...capLine((fixedA && fixedLine('bottomA', i, capName)) || t,
+            ...capLine(standInA(i) || t,
               prev.bottomA[i]?.oneLine ?? ONE_LINE_DEFAULT.bottomA),
             pos: prev.bottomA[i]?.pos,
             ...(at != null && Number.isFinite(at) ? { at: toClip(at) } : {}),
@@ -1424,7 +1434,8 @@ export function Vids2Builder({
   // — so the caption is drafted again exactly when it would be about someone
   // else. Empty until there is a vid, since the vid is where the person is.
   const postBrief = useMemo(() => {
-    if (!picks.bottomA) return '';
+    // A build with no intro has the one recording, and it is still the vid.
+    if (!picks.bottomA && !picks.bottomB) return '';
     const say = (label: string, context: string | undefined, marks: readonly { text: string }[] = []) => {
       const said = (context ?? '').trim();
       const beats = marks.map((m) => m.text.trim()).filter(Boolean);
@@ -1432,8 +1443,9 @@ export function Vids2Builder({
       return `${label}: ${said || '(no context given)'}${beats.length ? `. Moments, in order: ${beats.join('; ')}` : ''}`;
     };
     return [
-      say('Screen recording 1', picks.bottomA.video.context, picks.bottomA.video.marks),
-      say('Screen recording 2, on pauv.com', picks.bottomB?.video.context, picks.bottomB?.video.marks),
+      picks.bottomA ? say('Screen recording 1', picks.bottomA.video.context, picks.bottomA.video.marks) : '',
+      say(picks.bottomA ? 'Screen recording 2, on pauv.com' : 'Screen recording, on pauv.com',
+        picks.bottomB?.video.context, picks.bottomB?.video.marks),
       say('Ending, him showing what the trade made', picks.end?.video.context),
     ].filter(Boolean).join('\n');
   }, [picks]);
@@ -1601,20 +1613,20 @@ export function Vids2Builder({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [buildId]);
 
-  /** Degen mode's three BOOMs, laid on for you — see degenBooms in lib/vids2:
-   *  the answer naming them, their page coming up, the money going in. Each
-   *  moment is a second into its own recording, so it is put on the timeline
-   *  through that slot's item — where the slot starts, where it was trimmed
-   *  from, and how fast it plays — rather than guessed at.
+  /** Degen mode's BOOMs, laid on for you — see degenBooms in lib/vids2: the
+   *  intro getting to them, their page coming up, the money going in (two
+   *  without an intro). Each moment is a second into its own recording, so it
+   *  is put on the timeline through that slot's item — where the slot starts,
+   *  where it was trimmed from, and how fast it plays — rather than guessed at.
    *
    *  Once they are down they are ordinary BOOMs: the bar marks them, pressing
    *  a mark takes that one off, and Insert adds a fourth. Which is why this is
    *  held by the build's number rather than by whether there are any BOOMs —
    *  taking all three off must not bring them straight back.
    *
-   *  It waits for two things that arrive a beat after the clips do: both
-   *  bottoms on the plan, and the list of sounds. A sound the folder hasn't
-   *  got leaves its BOOM silent rather than not laid. */
+   *  It waits for two things that arrive a beat after the clips do: the
+   *  bottoms the build has on the plan, and the list of sounds. A sound the
+   *  folder hasn't got leaves its BOOM silent rather than not laid. */
   const degenLaidFor = useRef(0);
   useEffect(() => {
     if (build.mode !== 'degen' || degenLaidFor.current === buildId) return;
@@ -1622,12 +1634,12 @@ export function Vids2Builder({
     const item = (slot: SlotId) => plan.items.find((i) => i.slot === slot) ?? null;
     const a = item('bottomA');
     const b = item('bottomB');
-    if (!a || !b) return;
+    if (!b || (build.beats.introPick != null && !a)) return;
     /** A clip second in one of the two recordings, as a second of the finished
      *  video. Outside that slot's window it is nowhere, and lays nothing. */
     const onTimeline = (slot: SlotId, clipSecond: number): number | null => {
       const it = slot === 'bottomA' ? a : b;
-      if (!(it.speed > 0)) return null;
+      if (!it || !(it.speed > 0)) return null;
       const t = it.start + (clipSecond - it.trimStart) / it.speed;
       return t >= it.start && t < it.end ? t : null;
     };
@@ -1705,8 +1717,9 @@ export function Vids2Builder({
   // button — is gone, so it says the lot.
   const working = busy || writing;
   /** There is always a build by the time this page is up — the form is what
-   *  stands where an empty stage would. */
-  const started = !!picks.bottomA;
+   *  stands where an empty stage would. The trade is the one recording every
+   *  build has; the intro is there or not, as the form said. */
+  const started = !!picks.bottomA || !!picks.bottomB;
   /** The still beside the summary: the trade, which is the one of the two
    *  recordings with a face in it. */
   const buildThumb = picks.bottomB?.video.thumbUrl ?? picks.bottomA?.video.thumbUrl ?? null;
@@ -2063,9 +2076,26 @@ export function Vids2Builder({
               <p className="truncate text-[10px] text-zinc-500">
                 {appliedPersona?.name ?? 'no persona'} · {build.theme}
               </p>
-              <p className="truncate text-[9px] text-zinc-600" title={build.question}>&ldquo;{build.question}&rdquo;</p>
+              {/* The intro: the question ChatGPT was asked, the story that
+                  was opened, or that there wasn't one. */}
+              {build.intro === 'chatgpt' ? (
+                <p className="truncate text-[9px] text-zinc-600" title={build.question}>&ldquo;{build.question}&rdquo;</p>
+              ) : build.intro === 'news' && build.story ? (
+                <p className="truncate text-[9px] text-zinc-600" title={`${build.story.outlet}: ${build.story.headline}`}>
+                  {build.story.outlet}: {build.story.headline}
+                </p>
+              ) : (
+                <p className="truncate text-[9px] text-zinc-600">no intro — straight to the trade</p>
+              )}
             </div>
           </div>
+          {/* What the renderers wanted known — a name that wasn't on the
+              page, a photo that couldn't be found. */}
+          {build.notes.length > 0 && (
+            <ul className="mt-1.5 space-y-0.5 text-[9px] leading-snug text-amber-300/90">
+              {build.notes.map((n) => <li key={n}>{n}</li>)}
+            </ul>
+          )}
 
           {/* One line for how it is getting on. Stands down when there is
               nothing to say. */}
