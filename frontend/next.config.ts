@@ -46,6 +46,22 @@ const nextConfig: NextConfig = {
   // Leave AIER_RAILWAY_URL UNSET on Railway and in local dev so the routes resolve in-process
   // (a value there would make the backend proxy to itself). rewrites() is evaluated at BUILD
   // time, so the var must be present when Vercel builds — change it → redeploy.
+  // The clipper build has no home page of its own: its root is the clipper
+  // page, and nothing else it serves is reachable from there.
+  //
+  // This is a redirect in the config rather than a rewrite in middleware, and
+  // that is the whole point. The site root resolves to a statically
+  // prerendered page, and Vercel serves those from the CDN without running
+  // middleware — so a middleware gate on "/" can be answered out of cache and
+  // never fire. It is how the Studio shell came to be served, unauthenticated,
+  // at pauv.io/clipping. redirects() is evaluated by the routing layer ahead of
+  // both the filesystem and middleware, so "/" can never resolve to a page at
+  // all: it answers 307 to /clippers, which the password gate then guards like
+  // any other path.
+  async redirects() {
+    if (!CLIPPERS) return [];
+    return [{ source: "/", destination: "/clippers", permanent: false }];
+  },
   async rewrites() {
     const backend = (process.env.AIER_RAILWAY_URL || '').replace(/\/+$/, '');
     if (!backend) return [];
