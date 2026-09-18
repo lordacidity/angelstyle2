@@ -44,14 +44,31 @@ export function makeLocalClip(blob: Blob, meta: LocalClipMeta): VidRow {
   const url = URL.createObjectURL(blob);
   const thumbUrl = meta.poster ? URL.createObjectURL(meta.poster) : null;
   clips.set(id, { blob, urls: thumbUrl ? [url, thumbUrl] : [url] });
+  return rowFor(id, meta, { url, thumbUrl, mimeType: blob.type || 'video/mp4', sizeBytes: blob.size });
+}
+
+/** The row a clip still being drawn will have, without its bytes: what a plan
+ *  is laid out from, so whatever is written against the plan (the captions)
+ *  can go out while the frames render. Nothing plays it — there is no URL —
+ *  and nothing in this tab holds anything for it, so it is never released. */
+export function plannedClip(meta: LocalClipMeta): VidRow {
+  return rowFor(`planned-${crypto.randomUUID()}`, meta, { url: '', thumbUrl: null, mimeType: 'video/mp4', sizeBytes: 0 });
+}
+
+function rowFor(
+  id: string,
+  meta: LocalClipMeta,
+  file: { url: string; thumbUrl: string | null; mimeType: string; sizeBytes: number },
+): VidRow {
+  const { url, thumbUrl } = file;
   return {
     id,
     folderId: null,
     name: meta.name,
     storagePath: '',
     thumbPath: null,
-    mimeType: blob.type || 'video/mp4',
-    sizeBytes: blob.size,
+    mimeType: file.mimeType,
+    sizeBytes: file.sizeBytes,
     duration: meta.duration,
     width: meta.width,
     height: meta.height,

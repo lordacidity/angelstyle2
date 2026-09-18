@@ -17,9 +17,10 @@
 
 import { NextRequest, NextResponse } from 'next/server';
 import { z } from 'zod';
-import { extractGeminiJson, geminiGenerate } from '@/lib/gemini';
+import { geminiGenerate } from '@/lib/gemini';
 import { BANNED_WORDS, PAUV_BRIEF } from '@/lib/vids-brief';
 import { LONG_CAPTION_MAX, LONG_CAPTION_MIN, LONG_CAPTION_PARAGRAPHS, writeInBand } from '@/lib/long-caption';
+import { readTrade } from '@/lib/vids-read-trade';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -40,30 +41,6 @@ const Schema = z.object({
   person: z.string().max(120).default(''),
   position: z.enum(['up', 'down']).nullable().default(null),
 });
-
-/** Who the recordings trade on and which way, or null where they don't say. */
-async function readTrade(brief: string): Promise<{ person: string | null; position: Position | null }> {
-  const prompt = `Below is what the screen recordings in a short video show, as written by the person who cut them. In the video he looks a person up online and then trades on that person on pauv.com: UP if he thinks they are getting more popular, DOWN if he thinks they are falling off. The second recording is always the pauv.com one, whether or not its notes say so.
-
-Say WHO is being traded on and WHICH WAY.
-- person: the person's name as they are commonly known ("Cristiano Ronaldo", "Drake"). A real, named person: the one looked up and traded on. Never the site, the app, or the person filming. If more than one is named, the one traded on wins. null if no one is named.
-- position: "up" if the notes say he trades up, backs, buys or bets on them rising; "down" if he trades down, fades them, or bets on them falling; null if they don't say.
-
-${brief}
-
-Reply with ONLY a JSON object: {"person": "<name or null>", "position": "up" | "down" | null}. No prose, no code fence.`;
-  const raw = await geminiGenerate([{ text: prompt }], {
-    model: MODEL,
-    thinkingLevel: 'minimal',
-    temperature: 0.1,
-    maxOutputTokens: 300,
-    timeoutMs: 20_000,
-  });
-  const parsed = JSON.parse(extractGeminiJson(raw)) as { person?: unknown; position?: unknown };
-  const person = typeof parsed.person === 'string' ? parsed.person.trim().slice(0, 120) : '';
-  const position = parsed.position === 'up' || parsed.position === 'down' ? parsed.position : null;
-  return { person: person && person.toLowerCase() !== 'null' ? person : null, position };
-}
 
 /** A banned word in a draft, as an issue to nudge on. Whole words, any of the
  *  single-word forms on the list ("stock market" is caught by "stock"). The

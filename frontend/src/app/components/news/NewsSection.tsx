@@ -13,6 +13,10 @@
 // and drawn to a PNG right here in the browser (lib/news/rasterize.ts), shown
 // in a box you can scroll.
 //
+// A link can be pasted instead of a story searched for — any article page on
+// an approved outlet, read and checked the same way. Its page is for the name
+// in the box, or, with the box empty, whoever on Pauv the story names first.
+//
 // Clicking a story shows its page straight away with grey placeholders, so
 // stories can be flicked through quickly. "Use this one" (bottom right) is what
 // fetches the photos and redraws that page with them.
@@ -35,7 +39,8 @@ import { OUTLETS, outletById } from '@/lib/news/outlets';
 // lib/news/client — shared with the Vids 2 form, which does the same from
 // its news intro.
 import {
-  ago, drawNewsPage, errorText, findPagePhotos, NEWS_RANGE_LABEL, readNewsStory, searchNews, type NewsRange,
+  ago, drawNewsPage, errorText, findPagePhotos, hitFromStory, NEWS_RANGE_LABEL, pastedLinkProblem, readNewsStory,
+  searchedForms, searchNews, type NewsRange,
 } from '@/lib/news/client';
 import { NO_PHOTOS, type PagePhotos } from '@/lib/news/templates';
 import type { NewsArticle, NewsHit, NewsPhoto, OutletId, PersonPhoto, RailItem } from '@/lib/news/types';
@@ -135,6 +140,9 @@ export function NewsSection({ active = true }: { active?: boolean }) {
   const [searchError, setSearchError] = useState<string | null>(null);
   const [hits, setHits] = useState<NewsHit[] | null>(null);
   const [searched, setSearched] = useState('');
+  /** The name and the short forms it was searched by — "Vladimir Putin,
+   *  Putin" — or empty when there were none beyond the name. */
+  const [searchedAs, setSearchedAs] = useState('');
   const searchCtrl = useRef<AbortController | null>(null);
 
   const [picked, setPicked] = useState<string | null>(null);
@@ -156,8 +164,10 @@ export function NewsSection({ active = true }: { active?: boolean }) {
     setSearching(true);
     setSearchError(null);
     try {
-      setHits(await searchNews(q, outlets, range, ctrl.signal));
+      const found = await searchNews(q, outlets, range, ctrl.signal);
+      setHits(found.hits);
       setSearched(q);
+      setSearchedAs(searchedForms(q, found.forms));
     } catch (err) {
       if (!ctrl.signal.aborted) setSearchError(errorText(err));
     } finally {
@@ -191,6 +201,49 @@ export function NewsSection({ active = true }: { active?: boolean }) {
       setPickError(errorText(err));
     }
   }, [searched]);
+
+  // A link pasted in instead of a story searched for: any article page on an
+  // approved outlet, read and checked the way a result is. The page is for
+  // the name in the box; with the box empty it is for whoever on Pauv the
+  // story names first, and the box is filled in with them.
+  const [link, setLink] = useState('');
+  const linkUrl = link.trim();
+  const linkProblem = linkUrl ? pastedLinkProblem(linkUrl) : null;
+
+  const readLink = useCallback(async () => {
+    const url = link.trim();
+    if (!url || pastedLinkProblem(url)) return;
+    pickCtrl.current?.abort();
+    const ctrl = new AbortController();
+    pickCtrl.current = ctrl;
+    setPicked(url);
+    setPickError(null);
+    setStatus('Reading the story from the outlet…');
+    try {
+      const { article, rail, people = [] } = await readNewsStory(url, ctrl.signal);
+      if (ctrl.signal.aborted) return;
+      const typed = query.trim();
+      const name = typed || people[0]?.name || '';
+      if (!typed && name) setQuery(name);
+      setStatus('Drawing the page…');
+      const next: Loaded = {
+        hit: hitFromStory(article, people, name), name, article, rail,
+        withPhotos: false, people: [], photoIndex: -1, thumbs: [], thumbSrcs: [], photoNotes: [], pagePhotos: NO_PHOTOS,
+      };
+      const { png } = await drawPage(next, 0);
+      if (ctrl.signal.aborted) return;
+      setPicked(article.url);
+      setLoaded(next);
+      setImage({ url: URL.createObjectURL(png.blob), width: png.width, height: png.height, blob: png.blob });
+      setStatus(null);
+    } catch (err) {
+      if (ctrl.signal.aborted) return;
+      setStatus(null);
+      setLoaded(null);
+      setImage(null);
+      setPickError(errorText(err));
+    }
+  }, [link, query]);
 
   /** "Use this one": find photos for the story on screen and redraw it with them. */
   const addPhotos = useCallback(async () => {
@@ -274,7 +327,9 @@ export function NewsSection({ active = true }: { active?: boolean }) {
   // A different page — another story, another photo — is a different clip.
   useEffect(() => { setClip(null); setClipAudio(null); setVideoNote(null); setAssetNote(null); }, [loaded]);
 
-  const clipSource = (l: Loaded): NewsClipSource => ({ name: l.name, article: l.article, rail: l.rail, photos: l.pagePhotos });
+  const clipSource = (l: Loaded): NewsClipSource => ({
+    name: l.name, namedAs: l.hit.namedAs, article: l.article, rail: l.rail, photos: l.pagePhotos,
+  });
   const clipKey = (l: Loaded) => `${l.article.url}|${l.name}|${l.pagePhotos.hero?.src.length ?? 0}|${l.pagePhotos.thumbs.map(t => t?.length ?? 0).join(',')}`;
 
   async function assetsFor(l: Loaded, signal: AbortSignal): Promise<NewsAssets> {
@@ -423,15 +478,42 @@ export function NewsSection({ active = true }: { active?: boolean }) {
           </div>
           {searchError && <p className="text-sm text-red-300">{searchError}</p>}
 
+          <div className="flex flex-col gap-2">
+            <span className="text-sm uppercase tracking-wide text-zinc-500">Or paste an article link</span>
+            <div className="flex gap-3">
+              <input
+                value={link}
+                onChange={e => setLink(e.target.value)}
+                onKeyDown={e => { if (e.key === 'Enter' && linkUrl && !linkProblem) void readLink(); }}
+                placeholder="https://… from an approved outlet"
+                spellCheck={false}
+                autoComplete="off"
+                className="h-12 min-w-0 flex-1 rounded-xl bg-black border border-zinc-800 px-4 text-white outline-none focus:border-zinc-500"
+              />
+              <button
+                type="button"
+                onClick={() => void readLink()}
+                disabled={!linkUrl || !!linkProblem || !!status}
+                className="h-12 shrink-0 rounded-xl border border-zinc-600 px-4 font-semibold text-zinc-100 hover:border-zinc-400 disabled:opacity-40 disabled:cursor-not-allowed"
+              >
+                Use link
+              </button>
+            </div>
+            {linkProblem
+              ? <p className="text-sm text-amber-300/90">{linkProblem}</p>
+              : <p className="text-xs text-zinc-600">The page is made for the name above; leave it empty and it is whoever on Pauv the story names.</p>}
+          </div>
+
           {hits && shown && (
             <div className="flex flex-col gap-2">
               <span className="text-sm text-zinc-500">
                 {hits.length === 0
                   ? 'No stories from these outlets. Try a wider time range.'
                   : shown.length === 0
-                    ? `None of the ${hits.length} headlines have “${searched}” in them. Turn off “Name has to be in title” to see them.`
+                    ? `None of the ${hits.length} headlines have “${searched}”${searchedAs ? ' or a short form of it' : ''} in them. Turn off “Name has to be in title” to see them.`
                     : `${shown.length} ${shown.length === 1 ? 'story' : 'stories'}${shown.length < hits.length ? ` · ${hits.length - shown.length} more without the name in the title` : ''}`}
               </span>
+              {searchedAs && <span className="-mt-1 text-xs text-zinc-600">Searched as {searchedAs}</span>}
               <div className="flex max-h-[60vh] flex-col gap-2 overflow-y-auto pr-1">
                 {shown.map(h => {
                   const o = outletById(h.outlet);

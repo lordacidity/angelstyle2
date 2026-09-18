@@ -22,20 +22,24 @@
 // page being left.
 
 import {
-  loadNewsAssets, renderNewsVideo, type NewsBeats,
+  loadNewsAssets, renderNewsVideo, type NewsBeats, type NewsPlan,
 } from '@/app/components/news/news-video';
 import {
   AMOUNT_USD, createTradeClip, loadTradeAssets, renderTradeVideo, VIDEO_H, VIDEO_W,
   type Direction, type Theme, type TradeBeats, type TradeTalent,
 } from '@/app/components/trade/trade-video';
-import { findPagePhotos, isNewsRange, pagePhotosFrom, type NewsRange } from '@/lib/news/client';
+import {
+  findPagePhotos, isNewsRange, isTrendSort, isTrendWindow, pagePhotosFrom,
+  type NewsRange, type TrendSort, type TrendWindow,
+} from '@/lib/news/client';
 import { isOutletId, outletById } from '@/lib/news/outlets';
 import type { NewsArticle, NewsHit, RailItem } from '@/lib/news/types';
 import type { BoomSound } from '@/lib/simpler/vidsAudio';
-import { makeLocalClip } from '@/lib/simpler/vidsLocal';
+import { makeLocalClip, type LocalClipMeta } from '@/lib/simpler/vidsLocal';
 import { MAX_MARK_TEXT, type VidMark, type VidRow } from '@/lib/vids-types';
+import type { Vids2Early } from './vids2Words';
 
-export type { Direction, NewsRange, Theme, TradeTalent };
+export type { Direction, NewsRange, Theme, TradeTalent, TrendSort, TrendWindow };
 
 // ── The answers ──────────────────────────────────────────────────────────────
 
@@ -62,6 +66,14 @@ export const VIDS2_INTROS: readonly Vids2Intro[] = ['none', 'chatgpt', 'news'];
 export const isVids2Intro = (v: unknown): v is Vids2Intro =>
   typeof v === 'string' && (VIDS2_INTROS as readonly string[]).includes(v);
 
+/** Which end the form starts from. Who: the person first, the intro last —
+ *  five questions. News: the other way round — it opens on the stories going
+ *  out right now that name somebody on Pauv (lib/news/trending), and picking
+ *  one answers Who and the intro both, so what is left is which way, the mode
+ *  and the persona. A news-flow setup always has a news intro. */
+export type Vids2Flow = 'who' | 'news';
+export const isVids2Flow = (v: unknown): v is Vids2Flow => v === 'who' || v === 'news';
+
 /** The story a news intro is made from: the search result it was, and the
  *  article as read off the outlet — already checked, so the form can show its
  *  page — with the outlet's other headlines for the side column. `name` is
@@ -81,9 +93,6 @@ export interface Vids2Setup {
   /** Who on Pauv the video trades on — their name as the roster spells it. */
   person: string;
   direction: Direction;
-  /** Which way Pauv is in the trade recording. The ChatGPT one is dark
-   *  whatever this says — that page has no light mode in the renderer. */
-  theme: Theme;
   /** What opens the video — see Vids2Intro. */
   intro: Vids2Intro;
   /** What gets typed into ChatGPT, exactly as it is written here — capitals
@@ -97,12 +106,28 @@ export interface Vids2Setup {
   story: Vids2Story | null;
   /** Serious, Middle or Degen — see Vids2Mode. */
   mode: Vids2Mode;
+  /** Which end the form starts from — see Vids2Flow. */
+  flow: Vids2Flow;
+  /** How far back the news flow's trending list looks. */
+  trendWindow: TrendWindow;
+  /** Whether that list leaves politics out. */
+  hidePolitics: boolean;
+  /** Its order: the biggest stories first — the AI's read of what would stop
+   *  somebody scrolling — or the newest. */
+  trendSort: TrendSort;
 }
 
 export const EMPTY_SETUP: Vids2Setup = {
-  personaId: null, person: '', direction: 'up', theme: 'light',
+  personaId: null, person: '', direction: 'up',
   intro: 'chatgpt', question: '', newsRange: '7d', story: null, mode: 'serious',
+  flow: 'who', trendWindow: '24h', hidePolitics: false, trendSort: 'hot',
 };
+
+/** Which way Pauv is in the trade recording: not asked, rolled at even odds on
+ *  every Generate, so builds spread across the two the way they spread across
+ *  songs and caption looks. The ChatGPT recording is dark whatever comes up —
+ *  that page has no light mode in the renderer. */
+export const rollTheme = (): Theme => (Math.random() < 0.5 ? 'light' : 'dark');
 
 const SETUP_KEY = 'vids2-setup-v1';
 
@@ -138,19 +163,25 @@ export function loadSetup(): Vids2Setup {
   try {
     const raw = localStorage.getItem(SETUP_KEY);
     if (!raw) return EMPTY_SETUP;
+    // A saved `theme` is from when Look was a question; it is simply not read.
     const j = JSON.parse(raw) as Partial<Record<keyof Vids2Setup | 'degen', unknown>>;
+    const flow = isVids2Flow(j.flow) ? j.flow : 'who';
     return {
       personaId: typeof j.personaId === 'string' ? j.personaId : null,
       person: typeof j.person === 'string' ? j.person : '',
       direction: j.direction === 'down' ? 'down' : 'up',
-      theme: j.theme === 'dark' ? 'dark' : 'light',
       // Answers saved before there was a choice of intro were ChatGPT ones.
-      intro: isVids2Intro(j.intro) ? j.intro : 'chatgpt',
+      // The news flow has no intro question: its intro is the story.
+      intro: flow === 'news' ? 'news' : isVids2Intro(j.intro) ? j.intro : 'chatgpt',
       question: typeof j.question === 'string' ? j.question : '',
       newsRange: isNewsRange(j.newsRange) ? j.newsRange : EMPTY_SETUP.newsRange,
       story: isStory(j.story) ? j.story : null,
       // Answers saved before there were three modes had a degen switch.
       mode: isVids2Mode(j.mode) ? j.mode : j.degen === true ? 'degen' : 'serious',
+      flow,
+      trendWindow: isTrendWindow(j.trendWindow) ? j.trendWindow : EMPTY_SETUP.trendWindow,
+      hidePolitics: j.hidePolitics === true,
+      trendSort: isTrendSort(j.trendSort) ? j.trendSort : EMPTY_SETUP.trendSort,
     };
   } catch {
     return EMPTY_SETUP;
@@ -172,6 +203,7 @@ export interface Vids2Build {
   /** Who, as Pauv spells them — the roster's name rather than what was typed. */
   person: string;
   direction: Direction;
+  /** Which way Pauv came up for this one — rolled, see rollTheme. */
   theme: Theme;
   /** What opened it — see Vids2Intro. */
   intro: Vids2Intro;
@@ -188,15 +220,20 @@ export interface Vids2Build {
   /** The moments the renderers actually put things at, for whatever wants
    *  to land on one. */
   beats: Vids2Beats;
+  /** The words Generate set off while the recordings were still being drawn,
+   *  for the tuning page to take rather than ask for again — see Vids2Early. */
+  early: Vids2Early;
 }
 
 /** The moments degen mode hangs a BOOM on, in each recording's OWN clip
  *  seconds — straight off the renderers' beats, not off the timeline, since
  *  neither recording knows where it will end up sitting. */
 export interface Vids2Beats {
-  /** Bottom A: the intro getting to them — ChatGPT has got to the name and
-   *  the pointer goes for it, or the pointer presses on their name in the
-   *  story to drag over it. Null when there is no intro. */
+  /** Bottom A: the intro landing on them — the first of the quick in-out zoom
+   *  pulses on their highlighted name, once it has been dragged over, in the
+   *  ChatGPT answer or the news story alike (each renderer's `pulseAt`). Not
+   *  the pointer going for the name, nor the drag: the BOOM waits for the
+   *  zoom. Null when there is no intro. */
   introPick: number | null;
   /** Bottom B: their page opening — the click after the search. */
   tradeOpen: number;
@@ -251,7 +288,7 @@ export interface DegenBoom {
 
 /** The BOOMs every degen build gets, in play order — three with an intro, two
  *  without. They are the beats somebody watching would react on: the intro
- *  getting to them (ChatGPT naming them, or their name dragged over in the
+ *  zooming in and out on their highlighted name (in the ChatGPT answer or the
  *  story), their page coming up, and the money going in. Nothing places them
  *  by hand — degen mode is a switch, not a job — and every one of them can
  *  still be taken off on the bar like any other, because they are ordinary
@@ -265,7 +302,7 @@ export interface DegenBoom {
  *  is laid, and two that run into each other simply both play. */
 export const degenBooms = (b: Vids2Beats): DegenBoom[] => [
   ...(b.introPick == null ? [] : [
-    { slot: 'bottomA', at: b.introPick, sound: 'fahh', picture: true, on: 'the intro getting to them' } as const,
+    { slot: 'bottomA', at: b.introPick, sound: 'fahh', picture: true, on: 'the zoom on their name' } as const,
   ]),
   { slot: 'bottomB', at: b.tradeOpen, sound: 'ohHellNah', picture: false, on: 'their page opening' },
   { slot: 'bottomB', at: b.tradePlaced, sound: 'fahh', picture: true, on: 'the trade going in' },
@@ -331,26 +368,32 @@ export const bottomANewsContext = (person: string, outlet: string, headline: str
  *  Google, then the story being opened and looked through — and the third is
  *  the pick, rolled from BOTTOM_A_PICK (lib/simpler/vidsCaptions) the way it
  *  is on a ChatGPT clip ("lock in trump"). The tuning page puts them in
- *  (Vids2Builder writeLines); the marks below are what put each on its
+ *  (vids2Words draftLines); the marks below are what put each on its
  *  moment. */
 export const NEWS_BOTTOM_A_LINES: readonly string[] = [
-  'find a news article on google',
-  'look for someone trending',
+  'look for trending news on google',
+  'find someone trending',
 ];
 
 /** Its marks: three, abutting, so each caption goes up on its moment and
  *  holds to the next (lib/simpler/vidsCaptions onMarks) — Google, from the
- *  top to the click on the story; the story, from the click through the wait,
- *  the paint and the wheel, to the pointer pressing on their name; and the
- *  name, from that press to the end. `nameAt` is the renderer's own (see
- *  NewsClip.nameAt), like the beats, in clip seconds. */
-export function bottomANewsMarks(beats: NewsBeats, nameAt: number, person: string, outlet: string): VidMark[] {
+ *  top until Google goes off the screen; the story, from there through the
+ *  paint and the wheel to the pointer pressing on their name; and the name,
+ *  from that press to the end. The first two meet where Google LEAVES, not at
+ *  the click: Google stays up for most of a second after the click, and "find
+ *  someone trending" is the story's line, not Google's. `leftGoogleAt` and
+ *  `nameAt` are the renderer's own (NewsClip), like the beats, in clip
+ *  seconds. */
+export function bottomANewsMarks(
+  beats: NewsBeats, leftGoogleAt: number, nameAt: number, person: string, outlet: string,
+): VidMark[] {
   const at = (start: number, end: number) => ({ start: r2(start), end: r2(end) });
   const say = (text: string) => text.slice(0, MAX_MARK_TEXT);
-  const press = Math.min(Math.max(nameAt, beats.loading.start), beats.choosing.end);
+  const left = Math.min(Math.max(leftGoogleAt, beats.loading.start), beats.loading.end);
+  const press = Math.min(Math.max(nameAt, left), beats.choosing.end);
   return [
-    { ...at(beats.searching.start, beats.searching.end), text: say('finding a news article on google') },
-    { ...at(beats.loading.start, press), text: say(`looking for someone trending — opening the ${outlet} story, scrolling it`) },
+    { ...at(beats.searching.start, left), text: say('looking for trending news on google') },
+    { ...at(left, press), text: say(`finding someone trending — opening the ${outlet} story, scrolling it`) },
     { ...at(press, beats.choosing.end), text: say(`highlighting ${person}'s name in the story`) },
   ];
 }
@@ -364,17 +407,22 @@ export interface MakeNewsClipOptions {
   story: Vids2Story;
   signal?: AbortSignal;
   onProgress?: (p: NewsClipProgress) => void;
+  /** The clip as it will be filed, bar its bytes and poster, as soon as the
+   *  renderer has laid it out — before the first frame (renderNewsVideo
+   *  onPlanned). */
+  onPlanned?: (meta: LocalClipMeta) => void;
 }
 
 /** The news recording for this one video, as a clip the stage, the plan, the
  *  captions and the exporter take like any other. Photos first — the page is
  *  drawn with them, the way "Use this one" does it on the News page — then
  *  the recording, rendered by components/news/news-video, the one home for
- *  it, and held in this tab. `nameAt` is the pointer pressing on their name,
- *  in clip seconds; `notes` is anything worth telling whoever asked. */
+ *  it, and held in this tab. `nameAt` is the pointer pressing on their name
+ *  and `pulseAt` the first zoom pulse on it once dragged over, both in clip
+ *  seconds; `notes` is anything worth telling whoever asked. */
 export async function makeNewsClip(
   o: MakeNewsClipOptions,
-): Promise<{ row: VidRow; beats: NewsBeats; nameAt: number; notes: string[] }> {
+): Promise<{ row: VidRow; beats: NewsBeats; nameAt: number; pulseAt: number; notes: string[] }> {
   const { article, rail } = o.story;
   const outlet = outletById(article.outlet).name;
   o.onProgress?.({ stage: 'photos', frac: null });
@@ -385,24 +433,25 @@ export async function makeNewsClip(
   if (found.people.length > 0 && photoIndex < 0) notes.push('None of the photos found would load, so the page keeps a placeholder.');
 
   o.onProgress?.({ stage: 'layout', frac: null });
-  const assets = await loadNewsAssets({ name: o.name, article, rail, photos }, o.signal);
+  const assets = await loadNewsAssets({ name: o.name, namedAs: o.story.hit.namedAs, article, rail, photos }, o.signal);
   if (assets.note) notes.push(assets.note);
-  const { blob, beats, nameAt, seconds, width, height, poster } = await renderNewsVideo(assets, {
-    signal: o.signal,
-    onProgress: (done, total) => o.onProgress?.({ stage: 'render', frac: done / total }),
-  });
-  const row = makeLocalClip(blob, {
+  const meta = (p: NewsPlan): LocalClipMeta => ({
     name: bottomANewsName(o.name, o.direction, outlet),
     context: bottomANewsContext(o.name, outlet, article.headline),
-    marks: bottomANewsMarks(beats, nameAt, o.name, outlet),
-    duration: seconds,
-    width,
-    height,
+    marks: bottomANewsMarks(p.beats, p.leftGoogleAt, p.nameAt, o.name, outlet),
+    duration: p.seconds,
+    width: p.width,
+    height: p.height,
     // Its audio track is the mouse — the click on the story, the drag.
     hasSfx: true,
-    poster,
   });
-  return { row, beats, nameAt, notes };
+  const r = await renderNewsVideo(assets, {
+    signal: o.signal,
+    onProgress: (done, total) => o.onProgress?.({ stage: 'render', frac: done / total }),
+    onPlanned: (p) => o.onPlanned?.(meta(p)),
+  });
+  const row = makeLocalClip(r.blob, { ...meta(r), poster: r.poster });
+  return { row, beats: r.beats, nameAt: r.nameAt, pulseAt: r.pulseAt, notes };
 }
 
 // ── The trade recording, as a Bottom B ───────────────────────────────────────
@@ -476,6 +525,10 @@ export interface MakeTradeClipOptions {
   theme: Theme;
   signal?: AbortSignal;
   onProgress?: (p: TradeClipProgress) => void;
+  /** The clip as it will be filed, bar its bytes and poster, and who Pauv
+   *  turned out to have, as soon as the renderer has laid it out — before the
+   *  first frame (renderTradeVideo onPlanned). */
+  onPlanned?: (meta: LocalClipMeta, person: TradeTalent) => void;
 }
 
 /** The Pauv trade recording for this one video, as a clip the stage, the plan,
@@ -486,17 +539,12 @@ export async function makeTradeClip(
 ): Promise<{ row: VidRow; person: TradeTalent; beats: TradeBeats }> {
   o.onProgress?.({ stage: 'load', frac: null });
   const assets = await loadTradeAssets(o.name, o.theme, o.signal);
-  const { blob, beats, seconds } = await renderTradeVideo(assets, {
-    direction: o.direction,
-    signal: o.signal,
-    onProgress: (done, total) => o.onProgress?.({ stage: 'render', frac: done / total }),
-  });
   const person = assets.person.name;
-  const row = makeLocalClip(blob, {
+  const meta = (p: { beats: TradeBeats; seconds: number }): LocalClipMeta => ({
     name: bottomBName(person, o.direction, o.theme),
     context: bottomBContext(person, o.direction),
-    marks: bottomBMarks(beats, person, o.direction),
-    duration: seconds,
+    marks: bottomBMarks(p.beats, person, o.direction),
+    duration: p.seconds,
     width: VIDEO_W,
     height: VIDEO_H,
     // Its audio track is the keyboard and the mouse (buildTradeAudio).
@@ -504,9 +552,15 @@ export async function makeTradeClip(
     // Which way Pauv was: what the frame puts either side of the recording
     // where it doesn't fill the bottom half (vidsPlan itemBacking).
     theme: o.theme,
-    poster: await tradePoster(assets, o.direction, beats),
   });
-  return { row, person: assets.person, beats };
+  const r = await renderTradeVideo(assets, {
+    direction: o.direction,
+    signal: o.signal,
+    onProgress: (done, total) => o.onProgress?.({ stage: 'render', frac: done / total }),
+    onPlanned: (p) => o.onPlanned?.(meta(p), assets.person),
+  });
+  const row = makeLocalClip(r.blob, { ...meta(r), poster: await tradePoster(assets, o.direction, r.beats) });
+  return { row, person: assets.person, beats: r.beats };
 }
 
 /** A frame off the end of the recording — the card green, Trade confirmed —

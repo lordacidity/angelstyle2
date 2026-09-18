@@ -111,8 +111,14 @@ export interface RenderOptions {
   question: string;
   reply: Reply;
   onProgress?: (done: number, total: number) => void;
+  /** The clip as it will come out — its beats, its length, its size — the
+   *  moment it is worked out, before the first frame is drawn. For whoever has
+   *  something to start on those while the frames go. */
+  onPlanned?: (p: ClipPlan) => void;
   signal?: AbortSignal;
 }
+/** Everything a render hands back that is known before it starts drawing. */
+export type ClipPlan = Pick<RenderResult, 'beats' | 'pulseAt' | 'seconds' | 'width' | 'height'>;
 /** A stretch of the clip, in clip seconds. */
 export interface Stretch { start: number; end: number }
 /** The three things the recording shows, in order, each with its stretch:
@@ -125,6 +131,9 @@ export interface RenderResult {
   blob: Blob;
   filename: string;
   beats: ClipBeats;
+  /** The first of the hard in-out zoom pulses on the name, once it has been
+   *  dragged over — clip seconds, inside `choosing`. */
+  pulseAt: number;
   /** How long the file runs, in seconds — whole frames. */
   seconds: number;
   /** The file's size in pixels (the screen times RENDER_SCALE). */
@@ -319,7 +328,7 @@ function mulberry32(seed: number) {
 }
 
 // ── The clip: everything precomputed once, then draw(t) per frame ───────────
-interface Clip { draw: (t: number) => void; typing: Stretch; seconds: number; beats: ClipBeats }
+interface Clip { draw: (t: number) => void; typing: Stretch; seconds: number; beats: ClipBeats; pulseAt: number }
 function createClip(ctx: Ctx, o: RenderOptions): Clip {
   const W = VIDEO_W;
   const H = VIDEO_H;
@@ -843,7 +852,7 @@ function createClip(ctx: Ctx, o: RenderOptions): Clip {
     const c = cursorAt(t);
     drawPointer(ctx, pointerAt(t, c), c.x, c.y);
   };
-  return { draw, typing: { start: T_TYPE, end: T_TYPED }, seconds, beats };
+  return { draw, typing: { start: T_TYPE, end: T_TYPED }, seconds, beats, pulseAt: T_PULSE };
 }
 
 // The keyboard under the typing: the app's own sample, laid across the typing
@@ -869,8 +878,9 @@ export async function renderChatVideo(o: RenderOptions): Promise<RenderResult> {
   const ctx = canvas.getContext('2d', { alpha: false });
   if (!ctx) throw new Error('Canvas 2D is unavailable.');
   await loadPointers();
-  const { draw, typing, seconds, beats } = createClip(ctx, o);
+  const { draw, typing, seconds, beats, pulseAt } = createClip(ctx, o);
   const frames = Math.round(seconds * FPS);
+  o.onPlanned?.({ beats, pulseAt, seconds, width: canvas.width, height: canvas.height });
 
   // H.264 in an MP4 wherever the browser can encode it (Chrome and Edge on a
   // normal machine); VP9/VP8 in a WebM otherwise.
@@ -926,6 +936,7 @@ export async function renderChatVideo(o: RenderOptions): Promise<RenderResult> {
     blob: new Blob([buf], { type: mp4 ? 'video/mp4' : 'video/webm' }),
     filename: `chatgpt-${slug}-${o.direction}.${mp4 ? 'mp4' : 'webm'}`,
     beats,
+    pulseAt,
     seconds,
     width: canvas.width,
     height: canvas.height,
@@ -962,6 +973,9 @@ export interface MakeClipOptions {
   question: string;
   signal?: AbortSignal;
   onProgress?: (p: ClipProgress) => void;
+  /** The answer and the clip's layout, once both are known and before the
+   *  frames are drawn — see RenderOptions.onPlanned. */
+  onPlanned?: (p: ClipPlan & { reply: Reply }) => void;
 }
 /** One answer from the model for the question, then the recording of it. */
 export async function makeChatGptClip(o: MakeClipOptions): Promise<RenderResult & { reply: Reply }> {
@@ -974,6 +988,7 @@ export async function makeChatGptClip(o: MakeClipOptions): Promise<RenderResult 
     reply,
     signal: o.signal,
     onProgress: (done, total) => o.onProgress?.({ stage: 'render', frac: done / total }),
+    onPlanned: (p) => o.onPlanned?.({ ...p, reply }),
   });
   return { ...out, reply };
 }

@@ -5,7 +5,11 @@
 // copy of any of it:
 //
 //   searchNews       Google News for a name, approved outlets only
+//   loadTrending     the other way round: fresh headlines that name anybody on
+//                    Pauv, newest first (api/news/trending)
 //   readNewsStory    the story off the outlet itself, checked (api/news/article)
+//                    — a search result's link, or one pasted in by hand
+//                    (pastedLinkProblem, hitFromStory)
 //   findPagePhotos   free photos for the page — the person, the side column
 //   pagePhotosFrom   those photos cut to the page's boxes, a hero that loads
 //   drawNewsPage     the page drawn to a PNG with them
@@ -16,13 +20,16 @@
 
 import { framePersonPhoto, frameThumb, photoCredit } from './frame-photo';
 import type { NewsRange } from './google-news';
+import type { NameForms } from './name-forms';
+import { OUTLETS, articleUrlProblem, outletForHost } from './outlets';
 import { rasterizeNewsPage, type NewsImage } from './rasterize';
 import { PHOTO_SLOTS, renderNewsPage, type PagePhotos } from './templates';
 import type {
-  NewsArticle, NewsHit, NewsPhoto, OutletId, PersonPhoto, PersonPhotosResponse, RailItem, ThumbPhotosResponse,
+  NewsArticle, NewsHit, NewsPhoto, OutletId, PersonPhoto, PersonPhotosResponse, RailItem, StoryPerson,
+  ThumbPhotosResponse, TrendingHit, TrendingResponse, TrendSort, TrendWindow,
 } from './types';
 
-export type { NewsRange };
+export type { NewsRange, TrendSort, TrendWindow };
 
 /** How far back a search looks — the same four api/news/search takes. */
 export const NEWS_RANGES: readonly NewsRange[] = ['1d', '7d', '30d', 'any'];
@@ -51,21 +58,103 @@ export function ago(iso: string | null): string {
   return new Date(iso).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
 }
 
+/** What a search found, and the short forms of the name it went by as well as
+ *  the whole of it (lib/news/name-forms). */
+export interface NewsSearch { hits: NewsHit[]; forms: NameForms }
+
 /** Stories about `q` from the approved outlets, article pages only, as Google
- *  News lists them. Throws with the route's reason. */
-export async function searchNews(q: string, outlets: readonly OutletId[], range: NewsRange, signal?: AbortSignal): Promise<NewsHit[]> {
+ *  News lists them — found by the whole name and by the short forms the press
+ *  uses for it ("Putin"), which count as the name in a headline too. Throws
+ *  with the route's reason. */
+export async function searchNews(q: string, outlets: readonly OutletId[], range: NewsRange, signal?: AbortSignal): Promise<NewsSearch> {
   const params = new URLSearchParams({ q, outlets: outlets.join(','), range });
   const res = await fetch(`/api/news/search?${params}`, { signal });
-  const j = await res.json().catch(() => ({})) as { hits?: NewsHit[]; error?: string };
+  const j = await res.json().catch(() => ({})) as { hits?: NewsHit[]; forms?: NameForms; error?: string };
   if (!res.ok) throw new Error(j.error ?? `Search failed (${res.status})`);
-  return j.hits ?? [];
+  return { hits: j.hits ?? [], forms: j.forms ?? { search: [], headline: [], ai: false } };
 }
+
+/** What a search went by, to say under it: the name, then its short forms —
+ *  "Vladimir Putin, Putin". Empty when there were none beyond the name. */
+export const searchedForms = (q: string, forms: NameForms): string =>
+  (forms.search.length || forms.headline.length ? [q.trim(), ...forms.search, ...forms.headline].join(', ') : '');
 
 /** The story read from the outlet itself — headline, byline, date and every
  *  paragraph, word for word — with the outlet's other headlines for the side
- *  column. Refused, with the reason, when any of that is missing. */
+ *  column, and whoever on Pauv it names (the headline's first, then by how
+ *  often). Refused, with the reason, when any of the story is missing. The
+ *  link is a search result's or one pasted in by hand. */
 export const readNewsStory = (link: string, signal?: AbortSignal) =>
-  postJson<{ article: NewsArticle; rail: RailItem[] }>('/api/news/article', { link }, signal);
+  postJson<{ article: NewsArticle; rail: RailItem[]; people?: StoryPerson[] }>('/api/news/article', { link }, signal);
+
+// ── A link pasted in by hand ─────────────────────────────────────────────────
+
+/** Why a pasted link can't be read, or null when it looks like an article
+ *  page on an approved outlet — the check the route makes, made before asking
+ *  so the reason is there as soon as the link is. */
+export function pastedLinkProblem(raw: string): string | null {
+  let url: URL;
+  try { url = new URL(raw.trim()); } catch { return 'That is not a link.'; }
+  if (url.protocol !== 'https:' && url.protocol !== 'http:') return 'That is not a link.';
+  const outlet = outletForHost(url.hostname);
+  if (!outlet) return `${url.hostname.replace(/^www\./, '')} is not an approved outlet — ${OUTLETS.map(o => o.name).join(', ')}.`;
+  return articleUrlProblem(outlet, url);
+}
+
+/** A story read off a pasted link, as the search result it never was — what
+ *  everything downstream of a pick takes. `person` is whoever it is being used
+ *  for; the headline names them when the route found them in it. */
+export function hitFromStory(article: NewsArticle, people: readonly StoryPerson[], person: string): NewsHit {
+  const p = people.find(x => x.name.trim().toLowerCase() === person.trim().toLowerCase());
+  const named = !!p?.inHeadline;
+  return {
+    outlet: article.outlet, title: article.headline, publishedAt: article.publishedAt,
+    link: article.url, url: article.url, named, ...(named && p ? { namedAs: p.name } : {}),
+  };
+}
+
+// ── Trending ─────────────────────────────────────────────────────────────────
+
+/** How far back the trending list looks — the three api/news/trending takes. */
+export const TREND_WINDOWS: readonly TrendWindow[] = ['24h', '6h', '1h'];
+export const TREND_WINDOW_LABEL: Record<TrendWindow, string> = { '24h': 'Past 24 hours', '6h': 'Past 6 hours', '1h': 'Past hour' };
+export const isTrendWindow = (v: unknown): v is TrendWindow =>
+  typeof v === 'string' && (TREND_WINDOWS as readonly string[]).includes(v);
+
+/** Fresh stories whose headlines name somebody on Pauv, each with its heat
+ *  (lib/news/trending). Throws with the route's reason. */
+export async function loadTrending(window: TrendWindow, signal?: AbortSignal): Promise<TrendingResponse> {
+  const res = await fetch(`/api/news/trending?window=${window}`, { signal, cache: 'no-store' });
+  const j = await res.json().catch(() => ({})) as Partial<TrendingResponse> & { error?: string };
+  if (!res.ok) throw new Error(j.error ?? `Trending failed (${res.status})`);
+  return { hits: j.hits ?? [], scanned: j.scanned ?? 0, matched: j.matched ?? 0, ai: j.ai ?? false };
+}
+
+/** The two orders the trending list comes in. Biggest: the AI's heat — how
+ *  hard the headline would stop somebody scrolling — then how many headlines
+ *  are about them, then the clock, which is also what is left of it when the
+ *  AI read nothing. Newest: the clock. */
+export const TREND_SORTS: readonly TrendSort[] = ['hot', 'new'];
+export const TREND_SORT_LABEL: Record<TrendSort, string> = { hot: '🔥 Biggest', new: '🕒 Newest' };
+export const isTrendSort = (v: unknown): v is TrendSort => v === 'hot' || v === 'new';
+
+export function sortTrending(hits: readonly TrendingHit[], sort: TrendSort): TrendingHit[] {
+  const at = (h: TrendingHit) => (h.publishedAt ? Date.parse(h.publishedAt) : 0);
+  return [...hits].sort(sort === 'new'
+    ? (a, b) => at(b) - at(a)
+    : (a, b) => (b.heat ?? -1) - (a.heat ?? -1) || b.buzz - a.buzz || at(b) - at(a));
+}
+
+/** When a story went out, to the minute: "11:42 AM", or "Yesterday 9:10 PM" —
+ *  shown beside `ago` on the trending list, where the order is the point. */
+export function clock(iso: string | null): string {
+  if (!iso) return '';
+  const d = new Date(iso);
+  const time = d.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' });
+  const day = (x: Date) => new Date(x.getFullYear(), x.getMonth(), x.getDate()).getTime();
+  const days = Math.round((day(new Date()) - day(d)) / 86_400_000);
+  return days === 0 ? time : days === 1 ? `Yesterday ${time}` : `${d.toLocaleDateString('en-US', { month: 'short', day: 'numeric' })} ${time}`;
+}
 
 // Photos of a name are the same whichever story is picked; ask once per page.
 // An answer with nothing in it, or one the AI didn't check, is asked again

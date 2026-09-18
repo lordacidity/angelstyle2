@@ -10,16 +10,20 @@
 
 import { request as httpsRequest } from 'node:https';
 import { decodeEntities, BROWSER_HEADERS } from './html';
+import type { NameForms } from './name-forms';
 import { OUTLETS, articleUrlProblem, outletForHost } from './outlets';
 import type { NewsHit, OutletId, RailItem } from './types';
+
+/** No short forms: the whole name and nothing else, the way search always was. */
+export const NO_FORMS: NameForms = { search: [], headline: [], ai: false };
 
 const FEED = 'https://news.google.com/rss/search';
 
 export type NewsRange = '1d' | '7d' | '30d' | 'any';
 
-interface FeedItem { title: string; link: string; publishedAt: string | null; sourceUrl: string | null; sourceName: string | null }
+export interface FeedItem { title: string; link: string; publishedAt: string | null; sourceUrl: string | null; sourceName: string | null }
 
-async function fetchFeed(q: string): Promise<FeedItem[]> {
+export async function fetchFeed(q: string): Promise<FeedItem[]> {
   const url = new URL(FEED);
   url.searchParams.set('q', q);
   url.searchParams.set('hl', 'en-US');
@@ -54,19 +58,19 @@ async function fetchFeed(q: string): Promise<FeedItem[]> {
 
 /** Google News appends " - Outlet Name" to every title; the page doesn't have it.
  *  Athletic stories carry " - The Athletic" as well. */
-function stripSourceSuffix(title: string, sourceName: string | null): string {
+export function stripSourceSuffix(title: string, sourceName: string | null): string {
   const t = sourceName && title.endsWith(` - ${sourceName}`)
     ? title.slice(0, -(sourceName.length + 3))
     : title.replace(/\s+-\s+[^-]{2,40}$/, '');
   return t.replace(/\s+-\s+The Athletic$/, '').trim();
 }
 
-function siteClause(ids: OutletId[]): string {
+export function siteClause(ids: OutletId[]): string {
   const hosts = OUTLETS.filter(o => ids.includes(o.id)).flatMap(o => o.hosts);
   return hosts.length === 1 ? `site:${hosts[0]}` : `(${hosts.map(h => `site:${h}`).join(' OR ')})`;
 }
 
-function outletOf(item: FeedItem): OutletId | null {
+export function outletOf(item: FeedItem): OutletId | null {
   if (!item.sourceUrl) return null;
   try { return outletForHost(new URL(item.sourceUrl).hostname); } catch { return null; }
 }
@@ -86,27 +90,58 @@ export function headlineNames(title: string, query: string): boolean {
 
 /** The same story can be listed under two hosts (bbc.com and bbc.co.uk,
  *  www.cnn.com and edition.cnn.com); the path is what identifies it. */
-function storyKey(outlet: OutletId, url: URL): string {
+export function storyKey(outlet: OutletId, url: URL): string {
   return `${outlet}|${url.pathname.toLowerCase().replace(/\/$/, '')}`;
+}
+
+/** Short forms as one Google clause: "(Putin OR "King Charles")". */
+function anyOf(forms: string[]): string {
+  const q = forms.map(f => (/\s/.test(f) ? `"${f}"` : f));
+  return q.length === 1 ? q[0] : `(${q.join(' OR ')})`;
+}
+
+/** The form a headline names them by — the whole name first, then a short
+ *  form that is safe anywhere, then (only for a story found for the whole
+ *  name) one that is only safe there. Null when it names none of them. */
+export function namedAs(title: string, query: string, forms: NameForms, foundForWhole: boolean): string | null {
+  const all = [query, ...forms.search, ...(foundForWhole ? forms.headline : [])];
+  return all.find(f => headlineNames(title, f)) ?? null;
 }
 
 /** Stories about `query` from the approved outlets only. Every result is
  *  resolved to the outlet's own URL, and anything that isn't an article page
  *  (video, audio, live pages, section fronts) is left out. Headlines that name
- *  what was searched come first, then newest first. */
-export async function searchApprovedNews(query: string, ids: OutletId[], range: NewsRange): Promise<NewsHit[]> {
+ *  them come first, then newest first.
+ *
+ *  Two feeds: the whole name, and — once lib/news/name-forms has said which
+ *  of their short forms are safe to search alone — those, so a story that only
+ *  ever says "Putin" is found too. The whole-name feed goes out at once rather
+ *  than waiting on that answer. A headline names them when it has the whole
+ *  name or any of their short forms in it (see namedAs). */
+export async function searchApprovedNews(
+  query: string, ids: OutletId[], range: NewsRange, formsP: Promise<NameForms> | NameForms = NO_FORMS,
+): Promise<NewsHit[]> {
   const when = range === 'any' ? '' : ` when:${range}`;
-  const items = await fetchFeed(`${query} ${siteClause(ids)}${when}`);
+  const sites = siteClause(ids);
+  const [whole, short, forms] = await Promise.all([
+    fetchFeed(`${query} ${sites}${when}`),
+    // A second feed that fails costs its extra stories, not the search.
+    Promise.resolve(formsP).then(f => (f.search.length ? fetchFeed(`${anyOf(f.search)} ${sites}${when}`).catch(() => []) : [])),
+    Promise.resolve(formsP),
+  ]);
   const seenTitles = new Set<string>();
-  const candidates: { outlet: OutletId; title: string; item: FeedItem }[] = [];
-  for (const it of items) {
-    const outlet = outletOf(it);
-    if (!outlet || !ids.includes(outlet)) continue;
-    const title = stripSourceSuffix(it.title, it.sourceName);
-    const key = `${outlet}|${title.toLowerCase()}`;
-    if (seenTitles.has(key)) continue;
-    seenTitles.add(key);
-    candidates.push({ outlet, title, item: it });
+  const candidates: { outlet: OutletId; title: string; item: FeedItem; foundForWhole: boolean }[] = [];
+  // The whole name's first, so a story in both feeds counts as found for it.
+  for (const [items, foundForWhole] of [[whole, true], [short, false]] as const) {
+    for (const it of items) {
+      const outlet = outletOf(it);
+      if (!outlet || !ids.includes(outlet)) continue;
+      const title = stripSourceSuffix(it.title, it.sourceName);
+      const key = `${outlet}|${title.toLowerCase()}`;
+      if (seenTitles.has(key)) continue;
+      seenTitles.add(key);
+      candidates.push({ outlet, title, item: it, foundForWhole });
+    }
   }
 
   const urls = await resolveGoogleNewsLinks(candidates.map(c => c.item.link));
@@ -125,7 +160,11 @@ export async function searchApprovedNews(query: string, ids: OutletId[], range: 
     const key = storyKey(c.outlet, parsed);
     if (seenStories.has(key)) return;
     seenStories.add(key);
-    hits.push({ outlet: c.outlet, title: c.title, publishedAt: c.item.publishedAt, link: c.item.link, url, named: headlineNames(c.title, query) });
+    const form = namedAs(c.title, query, forms, c.foundForWhole);
+    hits.push({
+      outlet: c.outlet, title: c.title, publishedAt: c.item.publishedAt, link: c.item.link, url,
+      named: form !== null, ...(form ? { namedAs: form } : {}),
+    });
   });
   const ts = (h: NewsHit) => (h.publishedAt ? Date.parse(h.publishedAt) : 0);
   hits.sort((a, b) => Number(b.named) - Number(a.named) || ts(b) - ts(a));

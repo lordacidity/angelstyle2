@@ -1,18 +1,43 @@
 // News article: read and verify a story from the outlet's own page (a Google
 // News link is resolved first; search results already carry the outlet URL),
 // and collect the outlet's latest real headlines for the page's side column.
-//   POST /api/news/article  { link }  →  { article, rail }
+//   POST /api/news/article  { link }  →  { article, rail, people }
+//
+// The link can be a search result's or one pasted in by hand — any article
+// page on an approved outlet. Nobody searched for a pasted one, so the story
+// is read for whoever on Pauv it names (lib/news/roster-match): `people`, the
+// ones in the headline first, then by how often the story says them.
 import { NextRequest, NextResponse } from 'next/server';
 import { z } from 'zod';
 import { latestFromOutlet, resolveGoogleNewsLink } from '@/lib/news/google-news';
 import { imdbIdOf, imdbRail } from '@/lib/news/imdb';
 import { ArticleError, readNewsArticle } from '@/lib/news/read-article';
-import type { OutletId, RailItem } from '@/lib/news/types';
+import { isOrdinaryName } from '@/lib/news/roster-match';
+import { asNamed, rosterReader } from '@/lib/news/trending';
+import type { NewsArticle, OutletId, RailItem, StoryPerson } from '@/lib/news/types';
 
 export const runtime = 'nodejs';
 
 /** Outlets whose page layout has a column of other stories. */
 const HAS_RAIL: OutletId[] = ['espn', 'cnn', 'fox', 'tmz', 'people'];
+
+/** Everyone on Pauv the story names. One-word names that are also ordinary
+ *  words are left out — "Rose" five times in a story is not Rosé, and nothing
+ *  here can tell (the trending list has the AI for that). A roster that won't
+ *  load costs the names, not the story. */
+async function peopleIn(article: NewsArticle): Promise<StoryPerson[]> {
+  try {
+    const read = await rosterReader();
+    const inHeadline = new Set(read(article.headline).map(f => f.person.ticker));
+    const body = [article.headline, article.dek ?? '', ...article.keyPoints, ...article.paragraphs].join('\n');
+    return read(body)
+      .filter(f => !isOrdinaryName(f.person.name))
+      .map(f => ({ ...asNamed(f.person), inHeadline: inHeadline.has(f.person.ticker), mentions: f.count }))
+      .sort((a, b) => Number(b.inHeadline) - Number(a.inHeadline) || b.mentions - a.mentions);
+  } catch {
+    return [];
+  }
+}
 
 export async function POST(req: NextRequest) {
   const parsed = z.object({ link: z.string().url() }).safeParse(await req.json().catch(() => ({})));
@@ -38,7 +63,7 @@ export async function POST(req: NextRequest) {
     if (rail.length === 0 && (article.outlet === 'imdb' || HAS_RAIL.includes(article.outlet))) {
       article.notes.push("Couldn't load the outlet's other headlines, so the side column is empty.");
     }
-    return NextResponse.json({ article, rail });
+    return NextResponse.json({ article, rail, people: await peopleIn(article) });
   } catch (err) {
     const status = err instanceof ArticleError ? 422 : 500;
     return NextResponse.json({ error: err instanceof Error ? err.message : String(err), url }, { status });

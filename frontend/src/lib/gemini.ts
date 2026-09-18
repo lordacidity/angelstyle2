@@ -162,7 +162,14 @@ export async function geminiGenerate(parts: GeminiPart[], opts: {
 // is unreliable alongside the search tool, so callers ask for JSON in the prompt
 // and parse it out with extractGeminiJson.
 
-export async function geminiWithSearch(prompt: string, opts: { temperature?: number; maxOutputTokens?: number; timeoutMs?: number } = {}): Promise<string> {
+export async function geminiWithSearch(prompt: string, opts: {
+  temperature?: number;
+  maxOutputTokens?: number;
+  timeoutMs?: number;
+  // 2.5 models only, and counted inside maxOutputTokens. 0 (the default) is the
+  // one-pass answer; a small budget lets it search again and cross-check facts.
+  thinkingBudget?: number;
+} = {}): Promise<string> {
   const apiKey = process.env.GEMINI_API_KEY ?? '';
   if (!apiKey) throw new Error('GEMINI_API_KEY is not set');
   const model = process.env.GEMINI_MODEL || 'gemini-2.5-flash';
@@ -173,7 +180,7 @@ export async function geminiWithSearch(prompt: string, opts: { temperature?: num
     generationConfig: {
       temperature: opts.temperature ?? 0.7,
       maxOutputTokens: opts.maxOutputTokens ?? 2048,
-      thinkingConfig: { thinkingBudget: 0 },
+      thinkingConfig: { thinkingBudget: opts.thinkingBudget ?? 0 },
     },
   });
 

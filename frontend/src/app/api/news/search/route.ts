@@ -4,9 +4,15 @@
 // Google News lists every outlet but IMDb, which it barely carries; IMDb's own
 // lists are searched alongside it (lib/news/imdb.ts) and the two are merged the
 // same way: headlines that name what was searched first, then newest first.
+//
+// Both go by the short forms the press uses for the name as well as the whole
+// of it — "Putin" for Vladimir Putin — worked out once per name by
+// lib/news/name-forms, and handed back as `forms` so the page can say what was
+// searched. Google's whole-name feed doesn't wait for them.
 import { NextRequest, NextResponse } from 'next/server';
 import { searchApprovedNews, type NewsRange } from '@/lib/news/google-news';
 import { searchImdbNews } from '@/lib/news/imdb';
+import { nameForms } from '@/lib/news/name-forms';
 import { OUTLET_IDS, isOutletId } from '@/lib/news/outlets';
 import type { NewsHit } from '@/lib/news/types';
 
@@ -22,15 +28,19 @@ export async function GET(req: NextRequest) {
   const range = rangeParam && RANGES.includes(rangeParam) ? rangeParam : '30d';
   const wanted = outlets.length ? outlets : OUTLET_IDS;
   const fromGoogle = wanted.filter(id => id !== 'imdb');
+  const formsP = nameForms(q);
   try {
-    const [google, imdb] = await Promise.all([
-      fromGoogle.length ? searchApprovedNews(q, fromGoogle, range) : Promise.resolve([] as NewsHit[]),
-      wanted.includes('imdb') ? searchImdbNews(q, range).catch(() => [] as NewsHit[]) : Promise.resolve([] as NewsHit[]),
+    const [google, imdb, forms] = await Promise.all([
+      fromGoogle.length ? searchApprovedNews(q, fromGoogle, range, formsP) : Promise.resolve([] as NewsHit[]),
+      wanted.includes('imdb')
+        ? formsP.then(f => searchImdbNews(q, range, f)).catch(() => [] as NewsHit[])
+        : Promise.resolve([] as NewsHit[]),
+      formsP,
     ]);
     const hits = [...google, ...imdb];
     const ts = (h: NewsHit) => (h.publishedAt ? Date.parse(h.publishedAt) : 0);
     hits.sort((a, b) => Number(b.named) - Number(a.named) || ts(b) - ts(a));
-    return NextResponse.json({ hits });
+    return NextResponse.json({ hits, forms });
   } catch (err) {
     return NextResponse.json({ error: `Search failed: ${err instanceof Error ? err.message : String(err)}` }, { status: 502 });
   }

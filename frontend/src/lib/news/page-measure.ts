@@ -97,18 +97,20 @@ function charBoxes(m: Mapped, i: number, len: number, base: DOMRect): Rect[] | n
   return out.length ? out : null;
 }
 
-/** The name as the page might print it: whole, then the surname, then the
- *  first name — a headline says "Trump", the story says "Donald Trump". */
-function candidates(name: string): string[] {
+/** The name as the page might print it: whole, then the short form the search
+ *  found in the headline when there is one ("AOC"), then the surname, then
+ *  the first name — a headline says "Trump", the story says "Donald Trump". */
+function candidates(name: string, namedAs?: string): string[] {
   const words = name.trim().split(/\s+/).filter(Boolean);
   const out = [words.join(' ')];
+  if (namedAs?.trim()) out.push(namedAs.trim());
   if (words.length > 1) {
     const last = words[words.length - 1];
     const first = words[0];
     if (last.length >= 3) out.push(last);
     if (first.length >= 3) out.push(first);
   }
-  return out.filter(Boolean);
+  return [...new Set(out.filter(Boolean))];
 }
 
 function findIn(scopes: Element[], needles: string[], base: DOMRect): { chars: Rect[]; text: string } | null {
@@ -125,7 +127,7 @@ function findIn(scopes: Element[], needles: string[], base: DOMRect): { chars: R
   return null;
 }
 
-export function measureNewsPage(root: HTMLElement, name: string): PageMeasure {
+export function measureNewsPage(root: HTMLElement, name: string, namedAs?: string): PageMeasure {
   const base = root.getBoundingClientRect();
   const win = root.ownerDocument.defaultView ?? window;
   const background = win.getComputedStyle(root).backgroundColor;
@@ -146,7 +148,7 @@ export function measureNewsPage(root: HTMLElement, name: string): PageMeasure {
   // The headline first (TMZ's is three pieces), then the story, then anywhere.
   const headline = [...root.querySelectorAll<HTMLElement>('h1, .kicker, .subhead')];
   const story = [...root.querySelectorAll<HTMLElement>('.dek, .body')];
-  const needles = candidates(name);
+  const needles = candidates(name, namedAs);
   let mark: NameMark | null = null;
   if (needles.length) {
     const inHead = findIn(headline, needles, base);

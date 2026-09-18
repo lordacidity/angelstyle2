@@ -13,7 +13,8 @@
 // person picked, and no IMDb data is stored.
 
 import type { NewsHit, RailItem } from './types';
-import { headlineNames } from './google-news';
+import { NO_FORMS, headlineNames, namedAs } from './google-news';
+import type { NameForms } from './name-forms';
 
 const ENDPOINT = 'https://api.graphql.imdb.com/';
 
@@ -134,27 +135,34 @@ export async function imdbItem(id: string): Promise<ImdbItem | null> {
 }
 
 /** IMDb items about `query`, newest first, headlines that name it first —
- *  the order searchApprovedNews puts Google's results in. */
-export async function searchImdbNews(query: string, range: '1d' | '7d' | '30d' | 'any'): Promise<NewsHit[]> {
+ *  the order searchApprovedNews puts Google's results in. `forms` are the
+ *  short forms the press uses for them (lib/news/name-forms), read the way
+ *  Google's results are: one that is safe alone counts anywhere, one that
+ *  isn't only in the headline of an item whose excerpt says the whole name. */
+export async function searchImdbNews(
+  query: string, range: '1d' | '7d' | '30d' | 'any', forms: NameForms = NO_FORMS,
+): Promise<NewsHit[]> {
   const days = range === '1d' ? 1 : range === '7d' ? 7 : range === '30d' ? 30 : null;
   const since = days === null ? 0 : Date.now() - days * 86_400_000;
-  const words = query.trim().split(/\s+/).filter(Boolean);
+  if (!query.trim()) return [];
+  const says = (it: ImdbItem, form: string) => it.paragraphs.some(p => headlineNames(p, form));
   const items = await imdbNews();
   const hits: NewsHit[] = [];
   for (const it of items) {
     if (Date.parse(it.publishedAt) < since) continue;
-    const named = headlineNames(it.headline, query);
-    // A story counts when it names what was searched in the headline, or says
-    // the whole name in the excerpt IMDb runs.
-    const inText = words.length > 0 && it.paragraphs.some(p => headlineNames(p, query));
-    if (!named && !inText) continue;
+    // A story counts when it names them in the headline, or says the whole
+    // name — or a short form that can only be them — in the excerpt IMDb runs.
+    const whole = says(it, query);
+    const form = namedAs(it.headline, query, forms, whole);
+    if (!form && !whole && !forms.search.some(f => says(it, f))) continue;
     hits.push({
       outlet: 'imdb',
       title: it.headline,
       publishedAt: it.publishedAt,
       link: imdbUrl(it.id),
       url: imdbUrl(it.id),
-      named,
+      named: form !== null,
+      ...(form ? { namedAs: form } : {}),
     });
   }
   return hits;

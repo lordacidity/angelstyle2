@@ -3,23 +3,30 @@
 // Vids 2 — a form, then a tuning page.
 //
 // Vids and Simpler both start on the builder: a stage with nothing on it, and
-// cards to fill it from. Vids 2 starts on six questions instead, makes the
+// cards to fill it from. Vids 2 starts on five questions instead, makes the
 // whole video from the answers, and only then shows it — so the building is
 // one press and everything after it is adjustment.
 //
 //   Form      one question at a time: who on Pauv, the mode (Serious, Middle
 //             or Degen — not about the video so much as how it talks; Degen
 //             turns the hook into a cry for help and lays BOOMs over the
-//             recordings), which way, light or dark, the persona, and the
-//             intro — nothing, ChatGPT and a question, or a news story about
-//             them. See Vids2Form.
+//             recordings), which way, the persona, and the intro — nothing,
+//             ChatGPT and a question, or a news story about them. Or from
+//             the other end, "Choose by news": a story going out right now
+//             that names somebody on Pauv, which answers who and the intro
+//             both, then which way, the mode and the persona. Either way it
+//             is the same answers that arrive here. See Vids2Form.
 //   Generate  the screen recordings, all at once: the intro (Bottom A) —
 //             ChatGPT looking them up, or the news story opened and read, or
-//             nothing at all — and the Pauv trade (Bottom B). Neither needs
+//             nothing at all — and the Pauv trade (Bottom B), light or dark at
+//             random (rollTheme). Neither needs
 //             anything from the other, so neither waits for it. Both are
 //             rendered in this tab, by the files that own them, and neither
 //             goes to the library. Then the persona's three clips and an End
-//             off the shelf, and the stage is a whole video.
+//             off the shelf, and the stage is a whole video. The captions and
+//             the post captions are asked for while the frames are drawn — the
+//             post captions and the hook the moment Generate is pressed — not
+//             after (lib/vids2/vids2Words).
 //   Tune      Vids2Builder: the sound, the words, the BOOMs, the post caption
 //             and Download. Change goes back to the form with the answers as
 //             they were left.
@@ -42,23 +49,60 @@ import { Vids2Builder } from './Vids2Builder';
 import { Vids2Form, type Vids2Job, type Vids2Leg } from './Vids2Form';
 import {
   DEFAULT_TRIM, INTAKE_SPEED, LIBRARY_FOLDERS, PERSONA_PART_SLOT, SLOT_META,
-  folderGroupIds, freshPick, type Picks, type SlotId,
+  buildPlan, folderGroupIds, freshPick, type Picks, type SlotId,
 } from '@/lib/simpler/vidsPlan';
-import { PERSONA_PARTS, type VidPersona, type VidRow } from '@/lib/vids-types';
-import { isLocalClip, makeLocalClip, releaseLocalClip } from '@/lib/simpler/vidsLocal';
-import { makeChatGptClip } from '@/app/components/chatgpt/chatgpt-video';
+import { PERSONA_PARTS, isPhoto, type VidPersona, type VidRow } from '@/lib/vids-types';
+import {
+  isLocalClip, makeLocalClip, plannedClip, releaseLocalClip, type LocalClipMeta,
+} from '@/lib/simpler/vidsLocal';
+import { makeChatGptClip, type ClipPlan } from '@/app/components/chatgpt/chatgpt-video';
+import type { Reply } from '@/app/components/chatgpt/reply';
 import { bottomAContext, bottomAMarks, bottomAName } from '@/lib/simpler/vidsBottom';
 import { outletById } from '@/lib/news/outlets';
+import { writeHook, writePostCaptions } from '@/lib/vids-client';
 import {
-  loadSetup, makeNewsClip, makeTradeClip, saveSetup, setupReady, storyFor,
+  EMPTY_SETUP, loadSetup, makeNewsClip, makeTradeClip, rollTheme, saveSetup, setupReady, storyFor,
   type Vids2Build, type Vids2Setup,
 } from '@/lib/vids2/vids2Build';
+import {
+  VIDS2_BARS, VIDS2_PACE, draftLines, personaContextOf, useEmojiPalette, type Vids2Early,
+} from '@/lib/vids2/vids2Words';
 
 const pickRandom = <T,>(xs: readonly T[]): T | undefined =>
   (xs.length ? xs[Math.floor(Math.random() * xs.length)] : undefined);
 
-/** The intro, made: its clip for the stage, the moment it gets to them (clip
- *  seconds, for degen mode's BOOM), and anything its renderer wanted said. */
+/** A promise and the means to settle it, for something that arrives by
+ *  callback. Settling it a second time does nothing. */
+function later<T>() {
+  let resolve!: (v: T) => void;
+  const promise = new Promise<T>((r) => { resolve = r; });
+  return { promise, resolve };
+}
+
+/** A call nobody may end up waiting on — its Generate failed, or the words it
+ *  was for were typed by hand — marked as seen, so its failing isn't reported
+ *  as unhandled. Whoever does wait on it still gets the failure. */
+function quiet<T>(p: Promise<T>): Promise<T> {
+  p.catch(() => { /* seen */ });
+  return p;
+}
+
+/** The trade recording in its slot, the way every Vids 2 build has it. */
+const tradePick = (row: VidRow) => ({
+  ...freshPick('bottomB', row),
+  // At the speed every filed Bottom B is rendered at (INTAKE_SPEED): a
+  // screen recording of the site runs slow to watch back, and one made
+  // here is the same recording as one made with a screen grabber.
+  speed: INTAKE_SPEED,
+  // Dead centre. The house nudges a Bottom B left (BOTTOM_B_LEFT)
+  // because one filmed off a screen wants it; this one is the page
+  // itself, drawn square on to fill the frame, and wants the middle.
+  centred: true,
+});
+
+/** The intro, made: its clip for the stage, the first zoom pulse on their
+ *  highlighted name (clip seconds, for degen mode's BOOM), and anything its
+ *  renderer wanted said. */
 interface IntroClip { row: VidRow; pick: number; notes: string[] }
 
 export function Vids2Section({ active }: { active: boolean }) {
@@ -69,14 +113,15 @@ export function Vids2Section({ active }: { active: boolean }) {
   const [picks, setPicks] = useState<Picks>({});
   const [build, setBuild] = useState<Vids2Build | null>(null);
   /** On the form rather than on the video. True until the first Generate, and
-   *  again whenever Change is pressed — the build is kept behind it, so the
-   *  way back is a button rather than another two minutes of rendering. */
+   *  again after Reset, which lets the video go as well (see `reset`). */
   const [onForm, setOnForm] = useState(true);
   const [job, setJob] = useState<Vids2Job | null>(null);
   const [jobError, setJobError] = useState<string | null>(null);
   const jobRef = useRef<AbortController | null>(null);
   const ensuredRef = useRef(false);
   const buildNo = useRef(0);
+  // For the captions Generate asks for while the recordings render.
+  const emojiPalette = useEmojiPalette();
 
   useEffect(() => { saveSetup(setup); }, [setup]);
 
@@ -173,6 +218,20 @@ export function Vids2Section({ active }: { active: boolean }) {
     setJob(null);
   };
 
+  /** Reset, top right of the tuning page: Vids 2 as it opens. The answers go
+   *  back to empty, the recordings are let go, and the build goes — which
+   *  unmounts the tuning page and everything it was holding (the song, the
+   *  words, the BOOMs) — so the form mounts fresh on its first question. */
+  const reset = () => {
+    cancel();
+    dropLocal(picksRef.current);
+    setPicks({});
+    setBuild(null);
+    setSetup(EMPTY_SETUP);
+    setJobError(null);
+    setOnForm(true);
+  };
+
   /** Generate: the recordings, then the whole stage, then the tuning page.
    *
    *  The intro and the trade are made at the same time. Neither needs
@@ -189,12 +248,26 @@ export function Vids2Section({ active }: { active: boolean }) {
    *  failure on either side leaves the form exactly as it was, with a reason
    *  on it, rather than half a video behind it. The first real failure aborts
    *  the pair, so the survivor stops rather than rendering for a build that
-   *  will never be shown. */
+   *  will never be shown.
+   *
+   *  The words don't wait for any of it (lib/vids2/vids2Words). The hook and
+   *  the post captions are asked for the moment this is pressed — they are
+   *  written off who, which way, the mode and the persona, and neither
+   *  recording adds to that. The rest of the captions go the moment both
+   *  recordings have laid themselves out, which each does before drawing its first frame
+   *  (onPlanned): that is when their lengths and beats are known, and those
+   *  are all the writers read off them. The frames are the long part, so the
+   *  words are mostly back by the time the stage is, and the tuning page
+   *  takes them (Vids2Early) rather than asking again. A failure or a cancel
+   *  aborts them along with the recordings; one of them failing fails
+   *  nothing but itself. */
   const generate = async () => {
     if (!setupReady(setup) || job) return;
     const persona = personas.find((p) => p.id === setup.personaId) ?? null;
     if (!persona) { setJobError('That persona is no longer in the library. Choose another.'); return; }
-    const { direction, theme, mode, intro } = setup;
+    const { direction, mode, intro } = setup;
+    // Light or dark is not asked: every Generate rolls its own (rollTheme).
+    const theme = rollTheme();
     const question = intro === 'chatgpt' ? setup.question.trim() : '';
     const story = intro === 'news' ? storyFor(setup) : null;
     if (intro === 'news' && !story) { setJobError('Choose a story first.'); return; }
@@ -218,6 +291,79 @@ export function Vids2Section({ active }: { active: boolean }) {
     /** The first real failure takes the other one down with it. */
     const stopBoth = (e: unknown) => { if (!cancelled(e)) ctrl.abort(); throw e; };
 
+    // The rest of the stage — the persona's three clips and an End — settled
+    // now rather than once the recordings are back: the words are written
+    // against the whole video, and these are most of it.
+    const base = personaPicks(persona);
+    const end = pickRandom(clipsForSlot('end'));
+    if (end) base.end = freshPick('end', end);
+    const personaContext = personaContextOf(persona, base);
+
+    // The hook and the post captions need nothing either recording has, so
+    // they go now, and the whole render is theirs to come back in.
+    const hook: Vids2Early['hook'] = {
+      person: setup.person,
+      start: quiet(writeHook({ mode, person: setup.person, direction, personaContext }, ctrl.signal)
+        .then((r) => r.start)),
+    };
+    // Who and which way told outright, so the route goes straight to the news
+    // search without reading them off the recordings first; fresh, so a second
+    // video on them today gets words of its own.
+    const post: Vids2Early['post'] = {
+      person: setup.person,
+      position: direction,
+      draft: quiet(writePostCaptions({ person: setup.person, position: direction, fresh: true }, ctrl.signal)),
+    };
+
+    // Each recording as the plan will see it, the moment it has been laid out
+    // — or, should a renderer never say, once it is done.
+    const introLaid = later<VidRow | null>();
+    const tradeLaid = later<{ row: VidRow; person: string }>();
+    if (intro === 'none') introLaid.resolve(null);
+    // Then the rest of the captions, off the stage those recordings will make.
+    // Handed back inside an object: a promise returned bare from .then would
+    // be waited on, and the stage would wait for the words.
+    const linesP = quiet(Promise.all([introLaid.promise, tradeLaid.promise]).then(([introRow, trade]) => {
+      const draft: Picks = { ...base, bottomB: tradePick(trade.row) };
+      if (introRow) draft.bottomA = freshPick('bottomA', introRow);
+      // The captions are timed against the clips' lengths, so they are only
+      // drafted here when every length is known up front — the recordings'
+      // always are, the library's nearly always. Otherwise the tuning page
+      // waits for the browser to measure them, as it always has.
+      const known = Object.values(draft).every((p) => !p || isPhoto(p.video) || (p.video.duration ?? 0) > 0);
+      return {
+        lines: known ? quiet(draftLines({
+          plan: buildPlan(draft, {}, VIDS2_BARS, VIDS2_PACE),
+          picks: draft,
+          pace: VIDS2_PACE,
+          intro,
+          person: trade.person,
+          direction,
+          personaName: persona.name,
+          personaContext,
+          emojiPalette,
+          signal: ctrl.signal,
+        })) : null,
+      };
+    }));
+
+    /** The ChatGPT recording as it is filed, bar its bytes and poster. */
+    const chatMeta = (p: ClipPlan & { reply: Reply }): LocalClipMeta => {
+      // The name the answer led with ("Donald Trump" for "Trump") is what
+      // the context says the answer was.
+      const answer = p.reply.picks[0]?.name.trim() || setup.person;
+      return {
+        name: bottomAName(setup.person, direction),
+        context: bottomAContext(question, answer),
+        marks: bottomAMarks(p.beats, question, answer),
+        duration: p.seconds,
+        width: p.width,
+        height: p.height,
+        // Its audio track is the keyboard under the typing and nothing else.
+        hasSfx: true,
+      };
+    };
+
     // The intro, whichever it is, as a clip for the stage — made by the file
     // that owns the recording and filed here the way a hand-filed Bottom A
     // is: a name to read, a context and marks for the caption writer.
@@ -230,24 +376,14 @@ export function Vids2Section({ active }: { active: boolean }) {
         onProgress: (p) => leg('intro', p.stage === 'ask'
           ? { label: 'Asking ChatGPT…', frac: null }
           : { label: 'Rendering the ChatGPT search', frac: p.frac }),
+        onPlanned: (p) => introLaid.resolve(plannedClip(chatMeta(p))),
       }).then(
         (chat) => {
           leg('intro', { label: 'ChatGPT search — done', frac: 1, done: true });
-          // The name the answer led with ("Donald Trump" for "Trump") is what
-          // the context says the answer was.
-          const answer = chat.reply.picks[0]?.name.trim() || setup.person;
-          const row = makeLocalClip(chat.blob, {
-            name: bottomAName(setup.person, direction),
-            context: bottomAContext(question, answer),
-            marks: bottomAMarks(chat.beats, question, answer),
-            duration: chat.seconds,
-            width: chat.width,
-            height: chat.height,
-            // Its audio track is the keyboard under the typing and nothing else.
-            hasSfx: true,
-            poster: chat.poster,
-          });
-          return { row, pick: chat.beats.choosing.start, notes: [] };
+          const row = makeLocalClip(chat.blob, { ...chatMeta(chat), poster: chat.poster });
+          introLaid.resolve(row);
+          // Degen's first BOOM waits for the zoom on the name, not the drag.
+          return { row, pick: chat.pulseAt, notes: [] };
         },
         stopBoth,
       )
@@ -262,10 +398,12 @@ export function Vids2Section({ active }: { active: boolean }) {
             : p.stage === 'layout'
               ? { label: 'Laying the pages out…', frac: null }
               : { label: 'Rendering the news story', frac: p.frac }),
+          onPlanned: (meta) => introLaid.resolve(plannedClip(meta)),
         }).then(
           (r) => {
             leg('intro', { label: 'News story — done', frac: 1, done: true });
-            return { row: r.row, pick: r.nameAt, notes: r.notes };
+            introLaid.resolve(r.row);
+            return { row: r.row, pick: r.pulseAt, notes: r.notes };
           },
           stopBoth,
         )
@@ -278,8 +416,13 @@ export function Vids2Section({ active }: { active: boolean }) {
       onProgress: (p) => leg('trade', p.stage === 'load'
         ? { label: 'Reading them off Pauv…', frac: null }
         : { label: 'Rendering the Pauv trade', frac: p.frac }),
+      onPlanned: (meta, person) => tradeLaid.resolve({ row: plannedClip(meta), person: person.name }),
     }).then(
-      (r) => { leg('trade', { label: 'Pauv trade — done', frac: 1, done: true }); return r; },
+      (r) => {
+        leg('trade', { label: 'Pauv trade — done', frac: 1, done: true });
+        tradeLaid.resolve({ row: r.row, person: r.person.name });
+        return r;
+      },
       stopBoth,
     );
 
@@ -300,21 +443,11 @@ export function Vids2Section({ active }: { active: boolean }) {
       const introClip = introR.value;
       const trade = tradeR.value;
 
-      const next: Picks = personaPicks(persona);
+      const next: Picks = { ...base, bottomB: tradePick(trade.row) };
       if (introClip) next.bottomA = freshPick('bottomA', introClip.row);
-      next.bottomB = {
-        ...freshPick('bottomB', trade.row),
-        // At the speed every filed Bottom B is rendered at (INTAKE_SPEED): a
-        // screen recording of the site runs slow to watch back, and one made
-        // here is the same recording as one made with a screen grabber.
-        speed: INTAKE_SPEED,
-        // Dead centre. The house nudges a Bottom B left (BOTTOM_B_LEFT)
-        // because one filmed off a screen wants it; this one is the page
-        // itself, drawn square on to fill the frame, and wants the middle.
-        centred: true,
-      };
-      const end = pickRandom(clipsForSlot('end'));
-      if (end) next.end = freshPick('end', end);
+      // Settled already — both recordings were laid out before their first
+      // frame — and never a reason for Generate to fail.
+      const { lines } = await linesP.catch(() => ({ lines: null }));
 
       // The video before this one goes now rather than at any point earlier:
       // until here, a failure still had the old one to fall back on.
@@ -340,6 +473,7 @@ export function Vids2Section({ active }: { active: boolean }) {
           tradeOpen: trade.beats.analyzing.start,
           tradePlaced: trade.beats.confirming.start,
         },
+        early: { hook, lines, post },
       });
       setOnForm(false);
     } catch (e) {
@@ -381,10 +515,9 @@ export function Vids2Section({ active }: { active: boolean }) {
 
         {/* Hidden rather than unmounted while the form is up, the way
             StudioShell hides a section: the song, the words, the BOOMs and
-            where each caption was dragged to are all the builder's own state,
-            and pressing Change to re-read a question should not cost them.
+            where each caption was dragged to are all the builder's own state.
             Inactive as well as hidden, so it stops playing and the space bar
-            belongs to the form. */}
+            belongs to the form. Reset is what unmounts it, on purpose. */}
         {build && (
           <div
             className="flex min-h-0 min-w-0 flex-1"
@@ -399,7 +532,7 @@ export function Vids2Section({ active }: { active: boolean }) {
               active={active && !showForm}
               libraryLoaded={loaded}
               build={build}
-              onBackToForm={() => setOnForm(true)}
+              onReset={reset}
             />
           </div>
         )}

@@ -298,6 +298,10 @@ const nameTopOf = (m: PageMeasure) => (m.name ? Math.min(...m.name.chars.map(c =
 export interface NewsClipSource {
   /** The name that was searched: whose name gets highlighted. */
   name: string;
+  /** The short form the search found in the headline ("Putin", "AOC") when
+   *  that is how it names them — NewsHit.namedAs — so that is what gets
+   *  highlighted there, even where it is no part of the name. */
+  namedAs?: string;
   article: NewsArticle;
   rail: RailItem[];
   /** The photos the page was drawn with, cut to their boxes. */
@@ -415,10 +419,10 @@ export async function loadNewsAssets(src: NewsClipSource, signal?: AbortSignal):
     src.photos.hero ? loadImage(src.photos.hero.src) : Promise.resolve(null),
     paintNewsPage(page, {
       scale: PAGE_RASTER_SCALE,
-      measure: root => measureNewsPage(root, src.name),
-      // As far as the wheel goes: DOWN_NOTCHES down, or to the name, plus the
-      // screen under that.
-      heightFor: (m, h) => Math.max(DOWN_NOTCHES * NOTCH, readScrollFor(nameTopOf(m), h)) + VIEW_A + 2,
+      measure: root => measureNewsPage(root, src.name, src.namedAs),
+      // As far as the wheel goes: DOWN_NOTCHES down, or to the name — which
+      // it may pass by up to half a notch — plus the screen under that.
+      heightFor: (m, h) => Math.max(DOWN_NOTCHES * NOTCH, readScrollFor(nameTopOf(m), h) + NOTCH / 2) + VIEW_A + 2,
     }),
     loadGoogleSans(),
     loadPointers(),
@@ -454,6 +458,14 @@ export interface NewsClip {
   /** The pointer pressing down on the name — the start of the drag, the
    *  moment the recording gets to them. Clip seconds, inside `choosing`. */
   nameAt: number;
+  /** The first of the hard in-out zoom pulses on the name, once it has been
+   *  dragged over. Clip seconds, inside `choosing`. */
+  pulseAt: number;
+  /** Google going off the screen: the blank flash after the click, before
+   *  the story paints. Google stays up for most of a second after the click,
+   *  so this is the first moment nothing on screen is Google. Clip seconds,
+   *  inside `loading`. */
+  leftGoogleAt: number;
   /** Every press of the mouse — the click on the story, the drag's press and
    *  release — see buildNewsAudio. */
   clicks: ClickEvent[];
@@ -520,16 +532,33 @@ export function createNewsClip(ctx: Ctx, a: NewsAssets): NewsClip {
   // The pointer rips around from just after the click until the page is up.
   const T_LOOP: [number, number] = [T_CLICK + 0.14, T_PAINT + 0.32];
   // The story: down DOWN_NOTCHES, up three, then to the name.
+  //
+  // A short page — the Times' has no article text, a BBC story can be a few
+  // paragraphs — runs out under the wheel: the notches down stop at the
+  // bottom, which is almost never on the 100px grid, and a notch up that meets
+  // the top does nothing. Two things follow. The steps are planned once and
+  // kept, never read back off the notches (a notch that did nothing has no
+  // direction to read, and taking it for a notch down sent the page back down
+  // after it had reached the top). And the notches to the name are counted to
+  // land nearest it, not past it — from off the grid they can't land on it —
+  // unless it is the top or the bottom of the page, which the page itself
+  // stops at, so going past lands exactly.
   const T_A = T_PAINT + 0.7;
   const T_UP = T_A + DOWN_NOTCHES * 0.07 + 0.33;
-  const first = planNotches([...run(T_A, DOWN_NOTCHES, 1, 0.07), ...run(T_UP, 3, -1, 0.07)], pageMax);
-  const after = endOf(first);
-  const toName = Math.ceil(Math.abs(readScroll - after) / NOTCH - 1e-6);
+  const roam = [...run(T_A, DOWN_NOTCHES, 1, 0.07), ...run(T_UP, 3, -1, 0.07)];
+  const after = endOf(planNotches(roam, pageMax));
+  const atEnd = readScroll <= 0 || readScroll >= pageMax;
+  const toName = (atEnd ? Math.ceil : Math.round)(Math.abs(readScroll - after) / NOTCH - (atEnd ? 1e-6 : 0));
   const aNotches = planNotches([
-    ...first.map(n => ({ t: n.t, dir: (n.to >= n.from ? 1 : -1) as 1 | -1 })),
+    ...roam,
     ...run(T_UP + 0.5, toName, readScroll >= after ? 1 : -1, 0.06),
   ], pageMax);
   const T_LAST = aNotches.length ? aNotches[aNotches.length - 1].t : T_UP + 0.4;
+  /** Where the wheel really leaves the page for the drag — within half a notch
+   *  of readScroll, and exactly it on a long page. Everything about the name
+   *  on screen is worked out from this, so the highlight is always drawn where
+   *  the page is, wherever the wheel stopped. */
+  const readAt = endOf(aNotches);
   // The drag across the name, two hard in-out zoom pulses, three fast laps, out.
   const T_DRAG: [number, number] = [T_LAST + 0.6, T_LAST + 0.95];
   const PULSE = 0.13;
@@ -567,11 +596,11 @@ export function createNewsClip(ctx: Ctx, a: NewsAssets): NewsClip {
     return { x, y, w: Math.max(b.x + b.w, r.x + r.w) - x, h: Math.max(b.y + b.h, r.y + r.h) - y };
   });
   const toFrame = (r: Rect, scroll: number): Rect => ({ x: WINDOW_X + r.x * kA, y: WINDOW_Y + (r.y - scroll) * kA, w: r.w * kA, h: r.h * kA });
-  const sel = toFrame(nameBox, readScroll);
+  const sel = toFrame(nameBox, readAt);
   const selCX = sel.x + sel.w / 2;
   const selCY = sel.y + sel.h / 2;
-  const firstC = toFrame(chars[0], readScroll);
-  const lastC = toFrame(chars[chars.length - 1], readScroll);
+  const firstC = toFrame(chars[0], readAt);
+  const lastC = toFrame(chars[chars.length - 1], readAt);
   const wob = mulberry32(hashStr(a.source.name));
   const dragFrom: Pt = { x: firstC.x + 2 + wob() * 2, y: firstC.y + firstC.h * 0.62 + wob() * 3 };
   const dragTo: Pt = { x: lastC.x + lastC.w + 1 + wob() * 4, y: lastC.y + lastC.h * 0.58 + wob() * 4 };
@@ -663,7 +692,7 @@ export function createNewsClip(ctx: Ctx, a: NewsAssets): NewsClip {
   // ── What is selected under the drag ───────────────────────────────────────
   // A character joins once the pointer passes its middle, the way browsers
   // do it — a line above the pointer is all in, a line below not yet.
-  const frameChars = chars.map(c => toFrame(c, readScroll));
+  const frameChars = chars.map(c => toFrame(c, readAt));
   const selectedAt = (t: number): Rect[] => {
     if (t >= T_DRAG[1]) return frameChars;
     const p = cursorAt(t);
@@ -777,7 +806,7 @@ export function createNewsClip(ctx: Ctx, a: NewsAssets): NewsClip {
     const c = cursorAt(t);
     drawPointer(ctx, kindAt(t, c), c.x, c.y, POINTER_SIZE);
   };
-  return { draw, seconds, beats, nameAt: T_DRAG[0], clicks };
+  return { draw, seconds, beats, nameAt: T_DRAG[0], pulseAt: T_PULSE, leftGoogleAt: T_NAV, clicks };
 }
 
 // ── The sound ───────────────────────────────────────────────────────────────
@@ -795,14 +824,24 @@ export function buildNewsAudio(clip: Pick<NewsClip, 'seconds' | 'clicks'>, seed:
 // ── Render + encode ─────────────────────────────────────────────────────────
 export interface RenderOptions {
   onProgress?: (done: number, total: number) => void;
+  /** The clip as it will come out — its beats, its length, its size — the
+   *  moment it is worked out, before the first frame is drawn. For whoever has
+   *  something to start on those while the frames go. */
+  onPlanned?: (p: NewsPlan) => void;
   signal?: AbortSignal;
 }
+/** Everything a render hands back that is known before it starts drawing. */
+export type NewsPlan = Pick<RenderResult, 'beats' | 'nameAt' | 'pulseAt' | 'leftGoogleAt' | 'seconds' | 'width' | 'height'>;
 export interface RenderResult {
   blob: Blob;
   filename: string;
   beats: NewsBeats;
   /** The pointer pressing on the name, clip seconds — see NewsClip.nameAt. */
   nameAt: number;
+  /** The first zoom pulse on the name, clip seconds — see NewsClip.pulseAt. */
+  pulseAt: number;
+  /** Google going off the screen, clip seconds — see NewsClip.leftGoogleAt. */
+  leftGoogleAt: number;
   /** How long the file runs, in seconds — whole frames. */
   seconds: number;
   /** The file's size in pixels (the screen times RENDER_SCALE). */
@@ -823,6 +862,10 @@ export async function renderNewsVideo(assets: NewsAssets, o: RenderOptions = {})
   const clip = createNewsClip(ctx, assets);
   const { draw, seconds, beats } = clip;
   const frames = Math.round(seconds * FPS);
+  o.onPlanned?.({
+    beats, nameAt: clip.nameAt, pulseAt: clip.pulseAt, leftGoogleAt: clip.leftGoogleAt,
+    seconds, width: canvas.width, height: canvas.height,
+  });
 
   // H.264 in an MP4 wherever the browser can encode it (Chrome and Edge on a
   // normal machine); VP9/VP8 in a WebM otherwise.
@@ -878,6 +921,8 @@ export async function renderNewsVideo(assets: NewsAssets, o: RenderOptions = {})
     filename: `news-${slug}-${assets.source.article.outlet}.${mp4 ? 'mp4' : 'webm'}`,
     beats,
     nameAt: clip.nameAt,
+    pulseAt: clip.pulseAt,
+    leftGoogleAt: clip.leftGoogleAt,
     seconds,
     width: canvas.width,
     height: canvas.height,

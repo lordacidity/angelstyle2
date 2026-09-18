@@ -215,8 +215,10 @@ function StylePicker({ styleId, setStyleId }: { styleId: string; setStyleId: (id
  *  A marked clip shows a row per mark, so a mark left blank — Bottom B's first,
  *  when the seam was merged into A's last line — is still there, its words as
  *  the placeholder, for you to give a line of its own. */
-function CaptionRows({ label, group, laid, lines, moments = [], always = false, onChange, onResetPos }: {
+function CaptionRows({ label, labelAction, group, laid, lines, moments = [], always = false, onChange, onResetPos }: {
   label: string;
+  /** Anything that sits beside the label — Vids 2's ? on Start. */
+  labelAction?: ReactNode;
   group: CaptionGroup;
   laid: Caption[];
   lines: CaptionLine[];
@@ -232,7 +234,10 @@ function CaptionRows({ label, group, laid, lines, moments = [], always = false, 
   if (!lines.length || (!always && !moments.length && !lines.some((l) => l.text.trim()))) return null;
   return (
     <div>
-      <p className="mb-1 text-[9px] font-semibold uppercase tracking-wider text-zinc-400">{label}</p>
+      <div className="mb-1 flex items-center gap-1">
+        <p className="text-[9px] font-semibold uppercase tracking-wider text-zinc-400">{label}</p>
+        {labelAction}
+      </div>
       <div className="space-y-1">
         {lines.map((l, i) => {
           // Matched by the line it was laid out from, not by position: a blank
@@ -307,11 +312,14 @@ interface Props {
   /** Somebody typed the hook themselves. From then on it is theirs and the
    *  writer leaves it alone — see the builder's `startTouched`. */
   onStartTyped: () => void;
+  /** Beside the Start label: Vids 2 puts a ? there that opens how its hook is
+   *  written (Vids2HookGuide). Simpler leaves it out. */
+  startHelp?: ReactNode;
 }
 
 export function VidsCaptionsRail({
   canCaption, lines, setLines, laid, windows, hasLines, writing, error,
-  styleId, setStyleId, size, setSize, onRewrite, canRewrite, onResetPos, onStartTyped,
+  styleId, setStyleId, size, setSize, onRewrite, canRewrite, onResetPos, onStartTyped, startHelp,
 }: Props) {
   const momentsOf = (w: CaptionWindows['bottomA']) => (w?.marks ?? []).map((m) => m.text);
   // Bottom A on Fast: two lines the writer put where it chose, not one per mark.
@@ -361,6 +369,7 @@ export function VidsCaptionsRail({
             <div className="space-y-2">
               <CaptionRows
                 label="Start"
+                labelAction={startHelp}
                 group="start"
                 laid={laid.start}
                 lines={[lines.start]}

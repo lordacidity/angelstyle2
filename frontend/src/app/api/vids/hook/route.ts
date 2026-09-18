@@ -21,6 +21,19 @@
 //   shorting drake mid haircut                          trade + activity
 //   how to make a lawyer's salary shorting kanye        analogy + trade
 //
+// Middle's fourth combo is the CLOCK: the money against how little time it
+// took, with no trade and no name. Its time is a task — one off a fixed pool,
+// or what he is doing on camera said as a task — or a drawn number with what
+// he is doing after "while". Like Degen, the line is put together here: the
+// model gives the parts (the money, and the task or the activity when the
+// branch needs one), so it can't open wrong, lose its "while" or carry a
+// number and a task at once. A context that is only a place or a state has no
+// task in it, and the task comes off the pool instead.
+//
+//   making rent in the time it takes to lose an argument            pool
+//   making rent in the time it takes to put a hammer in my mouth    context
+//   making a car payment in 41 seconds while eating cereal          number
+//
 // DEGEN is descriptor + trade + nickname + (bracket) + emoji, every part but
 // the nickname from a fixed list. So the model is asked for the nickname and
 // nothing else, and the line is put together here. A bracket that says "i love
@@ -28,7 +41,7 @@
 // short form can have one.
 //
 //   chopped kid shorts musky (i need serious help) 🔥
-//   down bad guy goes long on swifty (i love you swifty)
+//   tweaker goes long on swifty (i love you swifty)
 //
 // Whatever the mode, one hook in five is a TWIST instead, one of three at even
 // odds: a MYSTERY, the trade on someone described but never named; HYPE, the
@@ -47,30 +60,45 @@
 // nickname — so builds spread across them instead of resting on whichever one
 // the model favours. Down is always "shorting" / "shorts"; up is "going long
 // on" or "trading on" / "goes long on" or "trades on", even odds. A Middle
-// build with no persona context has no activity to name, so it is always
-// analogy + trade.
+// build with no persona context has no activity to name, so it is analogy +
+// trade or the clock off the pool. The lists, the odds and every guide's examples live in
+// lib/vids2/hookRules, which the tuning page's guide to all of this
+// (components/vids2/Vids2HookGuide) reads too.
 //
 // What the model writes is held to the rules rather than trusted with them:
 // lower-cased, stripped of emoji, quotes and a full stop, and a trade said on
 // the wrong verb has it swapped for the drawn one. A Serious or Middle line
 // with no trade where one was asked for, or with "man" in it, is written again.
+// So is a clock line with a trading verb in it, a "while" or a time of its own
+// in its task, or no activity where the number branch needs one.
 // A Degen nickname that comes back as nothing is the plain name. A mystery that
 // names them, a hype line that opens on a trade, or a me if out of its frame
 // is written again.
 //
-// Written by Claude Opus 5 rather than the Gemini Flash-Lite the rest of the
-// words use. The job is tone plus knowing the person well enough to name a real
-// moment in their year or a nickname that lands, which is where the bigger
-// model earns its few extra seconds.
+// Written by Claude Sonnet 5 at low effort rather than the Gemini Flash-Lite the
+// rest of the words use. The job is tone plus knowing the person well enough to
+// name a real moment in their year or a nickname that lands, which Flash-Lite
+// wrote flat. It was Claude Opus 5 at medium effort until 2026-09-18; Sonnet 5
+// is $2 / $10 per million tokens against Opus's $5 / $25, low effort spends
+// fewer of them, and since the code draws most of
+// every line (verbs, combos, Degen's parts, the clock's frame), what is left
+// for the model is short enough that the bigger one wasn't earning its price.
 
 import Anthropic from '@anthropic-ai/sdk';
 import { NextRequest, NextResponse } from 'next/server';
 import { z } from 'zod';
+import {
+  CLOCK_BRANCH_ODDS, CLOCK_BRANCHES, CLOCK_EXAMPLES, CLOCK_NUMBERS, CLOCK_TASKS, COMBOS, DEGEN_EMOJI,
+  DEGEN_EXAMPLES, DEGEN_VERBS, DESCRIPTORS, HOOK_ATTEMPTS, HYPE_NAMED, HYPE_NICKNAMED, LOVE_MAX, LOVE_ODDS,
+  ME_IF_NAMED, ME_IF_NICKNAMED, MIDDLE_EXAMPLES, MYSTERY_EXAMPLES, NICKNAME_EXAMPLES, NO_CONTEXT_CLOCK_BRANCH,
+  NO_CONTEXT_COMBOS, SELF_OWNS, SERIOUS_EXAMPLES, TWIST_ODDS, TWISTS, VERBS,
+  type ClockBranch, type Combo, type Twist,
+} from '@/lib/vids2/hookRules';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
 
-const MODEL = 'claude-opus-5';
+const MODEL = 'claude-sonnet-5';
 
 const Body = z.object({
   mode: z.enum(['serious', 'middle', 'degen']),
@@ -86,12 +114,6 @@ type Input = z.infer<typeof Body>;
 type Direction = Input['direction'];
 
 const pick = <T,>(xs: readonly T[]): T => xs[Math.floor(Math.random() * xs.length)];
-
-/** How a trade is said in Serious and Middle, by the way it goes. */
-const VERBS: Record<Direction, readonly string[]> = {
-  up: ['going long on', 'trading on'],
-  down: ['shorting'],
-};
 
 const PAUV = 'You write the first caption of a short vertical video. It sits over a guy on camera, and the video goes on to show him placing a trade on Pauv, where people trade on real public figures the way they would trade on a stock.';
 
@@ -130,23 +152,7 @@ RULES
 - Flat and matter-of-fact. The humour comes from how straight-faced it is, so say it like a plan, not a joke.
 
 EXAMPLES
-${examples([
-  'trading on trump ahead of midterms to double the account',
-  'going long on taylor swift before the tour announcement to cover a year of rent',
-  'shorting drake before the album drops to pay off the car',
-  'going long on lebron through the playoffs for a six figure year',
-  'shorting kanye after the next interview to fund a house down payment',
-  'trading on elon every earnings call to replace a salary',
-  'going long on sabrina carpenter before the grammys for a five figure month',
-  'shorting jake paul before fight night to retire by 30',
-  'trading on messi all season to out-earn the boss',
-  'going long on mrbeast before the next video to clear student loans',
-  'shorting zuckerberg after the next product launch to fund a year off',
-  'trading on travis kelce through the super bowl for a second income',
-  'going long on ishowspeed before the world tour to hit a full salary by december',
-  'shorting bezos after the next rocket launch to pay off the credit cards',
-  'trading on ronaldo through the world cup to quit the 9 to 5',
-])}
+${examples(SERIOUS_EXAMPLES)}
 
 They show the order and the tone. Write a new line for this person; never hand one of these back.
 
@@ -154,9 +160,6 @@ ${REPLY}`;
 
 // ── Middle ───────────────────────────────────────────────────────────────────
 
-/** Middle's three pairings of its three parts. */
-const COMBOS = ['analogy + activity', 'trade + activity', 'analogy + trade'] as const;
-type Combo = (typeof COMBOS)[number];
 const hasTrade = (c: Combo) => c.includes('trade');
 const hasActivity = (c: Combo) => c.includes('activity');
 
@@ -180,88 +183,143 @@ RULES
 - All lower case, names and acronyms included.
 
 EXAMPLES
-${examples([
-  "making a surgeon's salary from the hot tub",
-  'shorting drake mid haircut',
-  'how to make lebron money trading on bronny',
-  'going long on taylor swift in the grocery line',
-  'making a year of rent before my coffee gets cold',
-  "how to make a lawyer's salary shorting kanye",
-  "trading on elon at my cousin's wedding",
-  'going long on messi with a mouth full of cereal',
-  'out-earning my landlord shorting zuckerberg',
-  "making a ceo's bonus from a lawn chair",
-  'how to make mrbeast money trading on mrbeast',
-  'shorting jake paul on the treadmill',
-  'making tuition money going long on sabrina carpenter',
-  'trading on trump in a bubble bath',
-  'how to make an nba salary from the toilet',
-])}
+${examples(MIDDLE_EXAMPLES)}
 
 They show the combos and the tone. Write a new line for this video; never hand one of these back.
 
 ${REPLY}`;
 
-// ── Degen ────────────────────────────────────────────────────────────────────
+// ── Middle's clock ───────────────────────────────────────────────────────────
 
-const DESCRIPTORS = ['chopped kid', 'homeless man', 'tweaker', 'down bad guy', 'dude', 'kid'] as const;
+const CLOCK = `${PAUV}
 
-const DEGEN_VERBS: Record<Direction, readonly string[]> = {
-  up: ['goes long on', 'trades on'],
-  down: ['shorts'],
+THIS CAPTION IS THE MONEY AGAINST THE CLOCK: what the payout is worth, next to how little time it took. No trade, no trading verb, no one's name. The line is put together from the parts you give, so you write only the parts asked for.
+
+THE LINE comes out one of two ways:
+  <opener> <money analogy> in the time it takes to <task>
+  <opener> <money analogy> in <how long> while <what he is doing>
+
+OPENER: "making" or "out-earning", yours to choose, "making" most of the time. With "out-earning" the analogy is who or what gets out-earned, like "my landlord".
+MONEY ANALOGY: the payout next to something relatable. Small and everyday beats big: a week of groceries, a month of gas, a year of netflix, rent, a bartender's night, a car payment. A salary-sized one ("a surgeon's salary", "lebron money") is fine now and then, never the default. Pick one that plays against the task or the time given.
+TASK (only when asked for): what the guy in the video is doing, given below, said as a task with a clear start and end, first person: "put a hammer in my mouth", "tape my mouth shut", "put on a suit of armor", "crack open a beer". Wearing or being in something he could put on becomes putting it on. Take it only from what the video shows and never make one up. A place he is at or a state he is just in is not a task: "sit in a chair", "lie in the road", "be in a grocery store" are not tasks, and when that is all the video gives you, the task is "" and the line takes one of its own. Say it your own way rather than copying the words given.
+WHAT HE IS DOING (only when asked for): what the guy in the video is doing, said casually so it reads straight after "while": "in the hot tub", "half asleep", "eating cereal", "getting a haircut", "on the toilet". Give it without the "while". Take it from what the video shows and never make one up.
+
+RULES
+- Never the word "man".
+- No trading verb, no "how to", no one's name except inside a money analogy like "lebron money".
+- No "while" in a task, and no time or number in a task or what he is doing: the line already has its time.
+- No emoji, no hashtags, no quote marks, no full stop. All lower case.
+
+EXAMPLES, whole lines as they come out
+${examples([...CLOCK_EXAMPLES.pool, ...CLOCK_EXAMPLES.context, ...CLOCK_EXAMPLES.number])}
+
+They show the shape and the tone. Write new parts for this video; never hand one of these back.
+
+Reply as JSON: {"opener": "...", "analogy": "...", "task": "...", "activity": "..."}, with "" for any part not asked for.`;
+
+const CLOCK_FORMAT: Anthropic.Beta.BetaJSONOutputFormat = {
+  type: 'json_schema',
+  schema: {
+    type: 'object',
+    properties: {
+      opener: { type: 'string', enum: ['making', 'out-earning'] },
+      analogy: { type: 'string' },
+      task: { type: 'string' },
+      activity: { type: 'string' },
+    },
+    required: ['opener', 'analogy', 'task', 'activity'],
+    additionalProperties: false,
+  },
 };
 
-/** The brackets that go down on himself. Each takes one of DEGEN_EMOJI. */
-const SELF_OWNS = [
-  'i need serious help',
-  'dear god please help me',
-  'i need serious therapy',
-  'i live in my car',
-  'this is my last dollar',
-  'i have never been hugged',
-  'im on the edge rn',
-  'me at my low',
-  'is there no end',
-] as const;
+/** The branch a clock line takes: by CLOCK_BRANCH_ODDS with a context to take
+ *  a task or an activity from, the pool without one. */
+function clockBranch(hasContext: boolean): ClockBranch {
+  if (!hasContext) return NO_CONTEXT_CLOCK_BRANCH;
+  let r = Math.random();
+  for (const b of CLOCK_BRANCHES) {
+    r -= CLOCK_BRANCH_ODDS[b];
+    if (r < 0) return b;
+  }
+  return CLOCK_BRANCHES[CLOCK_BRANCHES.length - 1];
+}
 
-const DEGEN_EMOJI = ['💯', '🔥', '😎', '🥀'] as const;
+/** Every way a trade is said, Degen's included, which a clock line never has. */
+const ANY_TRADE = /\b(trading on|going long on|shorting|shorts|goes long on|trades on)\b/;
+/** A time of its own, which a task or an activity must not bring: the line's
+ *  time is already drawn. */
+const A_TIME = /\bin the time it takes\b|\b\d+\s*(seconds?|secs?|minutes?|mins?|hours?)\b/;
 
-/** How often a nickname with a short form gets "(i love you <short>)" instead
- *  of a self-own: a quarter of the examples do, and those are only the ones
- *  with a short form to say it with. */
-const LOVE_ODDS = 1 / 3;
-/** Longer than this and "i love you ___" stops reading as a pet name. */
-const LOVE_MAX = 8;
+/** One part of the model's reply as the line takes it: no emoji, hashtags,
+ *  quotes or trailing stop, lower case, one line — and anything it repeated
+ *  from the frame around it (`frame`, at the start) taken off. */
+const clockPart = (v: unknown, frame: RegExp): string => (typeof v === 'string' ? v : '')
+  .replace(EMOJI, '')
+  .replace(/#\S+/g, '')
+  .replace(/["“”`]/g, '')
+  .replace(/^['‘’]+|['‘’]+$/g, '')
+  .toLowerCase()
+  .replace(/\s+/g, ' ')
+  .replace(/[\s.!,;:]+$/, '')
+  .trim()
+  .replace(frame, '')
+  .trim();
+
+function clockPlan(personaContext: string): Plan {
+  const branch = clockBranch(!!personaContext);
+  // Drawn for the pool, and for the context branch to fall back on when the
+  // context has no task in it.
+  const task = pick(CLOCK_TASKS);
+  const number = pick(CLOCK_NUMBERS);
+  const ask = branch === 'pool'
+    ? ['write: the opener and the money analogy', `task (already chosen): ${task}`]
+    : branch === 'context'
+      ? ['write: the opener, the money analogy and the task', `what the guy in the video is doing: ${personaContext}`]
+      : [
+        'write: the opener, the money analogy and what he is doing',
+        `how long (already chosen): ${number}`,
+        `what the guy in the video is doing: ${personaContext}`,
+      ];
+  return {
+    system: CLOCK,
+    ask: ask.join('\n'),
+    format: CLOCK_FORMAT,
+    finish: (reply) => {
+      let j: { opener?: unknown; analogy?: unknown; task?: unknown; activity?: unknown } = {};
+      try { j = JSON.parse(reply) as typeof j; } catch { return null; }
+      const opener = j.opener === 'out-earning' ? 'out-earning' : 'making';
+      const analogy = clockPart(j.analogy, /^(how to make|how to|making|make|out-earning)\s+/);
+      if (!analogy || A_TIME.test(analogy) || /\bwhile\b/.test(analogy)) return null;
+      let time: string;
+      if (branch === 'number') {
+        const activity = clockPart(j.activity, /^while\s+/);
+        if (!activity || A_TIME.test(activity)) return null;
+        time = `in ${number} while ${activity}`;
+      } else {
+        const written = branch === 'context' ? clockPart(j.task, /^(in the time it takes\s+)?(to\s+)?/) : '';
+        // The context branch's task has no "while" and no time of its own; an
+        // empty one is a context with no task in it, and the pool stands in.
+        if (written && (/\bwhile\b/.test(written) || A_TIME.test(written))) return null;
+        time = `in the time it takes to ${written || task}`;
+      }
+      const line = `${opener} ${analogy} ${time}`;
+      return ANY_TRADE.test(line) ? null : line;
+    },
+  };
+}
+
+// ── Degen ────────────────────────────────────────────────────────────────────
+
+// The descriptors, verbs, self-owns, emoji and the odds on "(i love you ...)"
+// are all in lib/vids2/hookRules.
 
 /** What a Degen nickname is — shared with Degen's hype line, which says it too. */
 const NICKNAME_RULE = 'a funny shorthand of their name, the kind a group chat would call them, when one lands. When nothing lands, their plain name. Lower case.';
 
-const NICKNAMES = examples([
-  'elon musk: musky',
-  'vladimir putin: daddy vlady',
-  'mark zuckerberg: zuckey',
-  'taylor swift: swifty',
-  'drake: drizzy',
-  'lebron james: bron bron',
-  'tom holland: tom holley',
-  'kanye west: yeezy',
-  'ishowspeed: speedy',
-  'jake paul: jakey paul',
-  'cristiano ronaldo: cr7',
-  'donald trump: trumpy',
-  'sabrina carpenter: sabby c',
-  'jeff bezos: jeffy b',
-  'kim kardashian: kimmy k',
-  'mrbeast: mr beef',
-  'lionel messi: messi goat',
-  'kai cenat: kai cenat (nothing landed, so the plain name)',
-  'travis kelce: travvy k',
-  'timothée chalamet: timmy chalamet',
-]);
+const NICKNAMES = examples(NICKNAME_EXAMPLES);
 
 const DEGEN = `You come up with the nickname for one person in the caption of a short vertical video, where a guy trades on real public figures on Pauv. The caption reads like:
-  chopped kid shorts musky (i need serious help) 🔥
-  down bad guy goes long on swifty (i love you swifty)
+${examples(DEGEN_EXAMPLES)}
 The rest of the caption is already written. You give the nickname, and its short form.
 
 NICKNAME: ${NICKNAME_RULE}
@@ -306,9 +364,6 @@ function degenLine(reply: string, person: string, descriptor: string, verb: stri
 
 // ── The twists: mystery, hype and me if ──────────────────────────────────────
 
-/** How often a hook is one of the twists instead of its mode's own. */
-const TWIST_ODDS = 0.2;
-
 const MYSTERY = `${PAUV}
 
 THIS CAPTION NEVER SAYS WHO. It is the trade on someone the viewer has to recognise without their name, and the video that follows shows who it is.
@@ -325,47 +380,14 @@ RULES
 - All lower case.
 
 EXAMPLES
-${examples([
-  'shorting the greatest musician of our generation',
-  'going long on the most hated man in america',
-  'shorting the most overrated athlete of all time',
-  'going long on the most famous woman on earth',
-  "shorting every girl's celebrity crush",
-  "trading on the guy your dad won't stop talking about",
-  'shorting the goat',
-  'going long on the most annoying streamer alive',
-  'shorting the best rapper alive',
-  'going long on the most divisive man in the nfl',
-  "shorting your mom's favorite actor",
-  'going long on the most unhinged billionaire',
-  "shorting the internet's favorite boyfriend",
-  'going long on the most washed athlete in sports',
-  'shorting the man everyone pretends to like',
-])}
+${examples(MYSTERY_EXAMPLES)}
 
 They show the shape and the tone. Write one that fits this person; take one of these only when it fits them better than anything new would.
 
 ${REPLY}`;
 
 /** Hype says the name everyone calls them — or, in Degen, the nickname — so
- *  its examples come both ways, the same six lines. */
-const HYPE_NAMED = [
-  'putin to the skyyyyy',
-  'messi to the stratosphere',
-  'kanye to the heavens',
-  'lebron through the roof',
-  'taylor swift to outer space',
-  'zuckerberg to the top floor',
-];
-const HYPE_NICKNAMED = [
-  'daddy vlady to the skyyyyy',
-  'messi goat to the stratosphere',
-  'yeezy to the heavens',
-  'bron bron through the roof',
-  'swifty to outer space',
-  'zuckey to the top floor',
-];
-
+ *  its examples come both ways (HYPE_NAMED, HYPE_NICKNAMED). */
 const hype = (nickname: boolean) => `${PAUV}
 
 THE ORDER:
@@ -389,24 +411,7 @@ They show the shape and the tone. Write a new one for this person; never hand on
 ${REPLY}`;
 
 /** Me if says the name everyone calls them — or, in Degen, the nickname — so
- *  its examples come both ways too. */
-const ME_IF_NAMED = [
-  'me if shorting lebron in a chipotle was legal',
-  'me if going long on taylor swift at church was legal',
-  'me if trading on elon during jury duty was legal',
-  'me if shorting drake at a funeral was legal',
-  'me if going long on messi at the dmv was legal',
-  'me if trading on trump in a job interview was legal',
-];
-const ME_IF_NICKNAMED = [
-  'me if shorting bron bron in a chipotle was legal',
-  'me if going long on swifty at church was legal',
-  'me if trading on musky during jury duty was legal',
-  'me if shorting drizzy at a funeral was legal',
-  'me if going long on messi goat at the dmv was legal',
-  'me if trading on trumpy in a job interview was legal',
-];
-
+ *  its examples come both ways too (ME_IF_NAMED, ME_IF_NICKNAMED). */
 const meIf = (nickname: boolean) => `${PAUV}
 
 THE ORDER, every time:
@@ -521,15 +526,17 @@ function holdVerb(line: string, verb: string, opens: boolean): string | null {
 const noMan = (line: string | null, person: string): string | null =>
   line && /\bman\b/.test(line) && !/\bman\b/i.test(person) ? null : line;
 
-/** The twists a trade can take, by the way it goes. Hype only ever goes up. */
-const TWISTS: Record<Direction, readonly ((input: Input) => Plan)[]> = {
-  up: [mysteryPlan, hypePlan, meIfPlan],
-  down: [mysteryPlan, meIfPlan],
+/** Each twist's plan. Which ones a trade can take is TWISTS — hype only ever
+ *  goes up. */
+const TWIST_PLAN: Record<Twist, (input: Input) => Plan> = {
+  mystery: mysteryPlan,
+  hype: hypePlan,
+  meIf: meIfPlan,
 };
 
 /** What this call writes: now and then a twist, otherwise the mode's own. */
 function planFor(input: Input): Plan {
-  return Math.random() < TWIST_ODDS ? pick(TWISTS[input.direction])(input) : modePlan(input);
+  return Math.random() < TWIST_ODDS ? TWIST_PLAN[pick(TWISTS[input.direction])](input) : modePlan(input);
 }
 
 function modePlan({ mode, person, direction, personaContext }: Input): Plan {
@@ -551,7 +558,12 @@ function modePlan({ mode, person, direction, personaContext }: Input): Plan {
       finish: (reply) => noMan(holdVerb(clean(reply), verb, true), person),
     };
   }
-  const combo: Combo = personaContext ? pick(COMBOS) : 'analogy + trade';
+  const combo: Combo = pick(personaContext ? COMBOS : NO_CONTEXT_COMBOS);
+  // The clock has a guide and a shape of its own; "man" is held off it too.
+  if (combo === 'analogy + clock') {
+    const clock = clockPlan(personaContext);
+    return { ...clock, finish: (reply) => noMan(clock.finish(reply), person) };
+  }
   const verb = hasTrade(combo) ? pick(VERBS[direction]) : null;
   return {
     system: MIDDLE,
@@ -581,11 +593,12 @@ async function draft(plan: Plan): Promise<string> {
     model: MODEL,
     max_tokens: 8000,
     thinking: { type: 'adaptive' },
-    output_config: { effort: 'medium', ...(plan.format ? { format: plan.format } : {}) },
-    // A decline on a line about a real public figure is re-run on the
-    // fallback model inside the same call rather than coming back empty.
-    betas: ['server-side-fallback-2026-07-01'],
-    fallbacks: 'default',
+    // One short line: low effort thinks a little, where medium spent tokens
+    // the line didn't need.
+    output_config: { effort: 'low', ...(plan.format ? { format: plan.format } : {}) },
+    // No server-side fallback: Sonnet 5 has no allowed fallback models (the
+    // Models API lists none), so a decline comes back as a refusal and the
+    // second go below draws afresh.
     system: plan.system,
     messages: [{ role: 'user', content: plan.ask }],
   });
@@ -605,7 +618,7 @@ export async function POST(req: NextRequest) {
   // Two goes, each drawing afresh — twist and all: the realistic failures are
   // a line with no trade where one was asked for, one with "man" in it, or a
   // mystery that names them, and a fresh draw fixes those more often than not.
-  for (let attempt = 0; attempt < 2; attempt++) {
+  for (let attempt = 0; attempt < HOOK_ATTEMPTS; attempt++) {
     try {
       const plan = planFor(parsed.data);
       const line = plan.finish(await draft(plan));

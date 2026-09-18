@@ -17,8 +17,65 @@ export interface NewsHit {
   link: string;
   /** The outlet's own URL for the story, already checked to be an article page. */
   url: string;
-  /** Whether the headline has the searched name in it. */
+  /** Whether the headline has the searched name in it — whole, or one of the
+   *  short forms the press uses for them (lib/news/name-forms). */
   named: boolean;
+  /** Which of those it is — "Vladimir Putin", or "Putin". Only when named. */
+  namedAs?: string;
+}
+
+/** Somebody on Pauv a headline or a story names (lib/news/roster-match). */
+export interface NamedPerson {
+  name: string;
+  ticker: string;
+  /** "Sports", "Music", "Politics"… as Pauv files them. */
+  industry: string;
+}
+
+/** Who a story read off an outlet names, for a link nobody searched for:
+ *  the ones in the headline first, then by how often the story says them. */
+export interface StoryPerson extends NamedPerson {
+  inHeadline: boolean;
+  mentions: number;
+}
+
+/** How far back the trending list looks. */
+export type TrendWindow = '24h' | '6h' | '1h';
+
+/** One row of the trending list: a fresh story from an approved outlet whose
+ *  headline names somebody on Pauv (lib/news/trending). */
+export interface TrendingHit extends NewsHit {
+  /** Everyone on Pauv the headline names, in the order it names them. Never
+   *  empty. `named` is always true and `namedAs` is the first of them. */
+  people: NamedPerson[];
+  /** A politics story: a politician in the headline, the outlet's politics
+   *  desk in the link, or the AI's reading of the headline. */
+  politics: boolean;
+  /** How hard the headline would stop somebody scrolling, 0–100, as the AI
+   *  read it — how big, shocking or talked-about, not how important. Null
+   *  when the AI didn't read this one. */
+  heat: number | null;
+  /** The hook in a few words ("traded to the lakers"), with the heat. */
+  why: string | null;
+  /** How many of the window's headlines name the most-named of `people`. */
+  buzz: number;
+}
+
+/** How the trending list is ordered: by heat, or by the clock. */
+export type TrendSort = 'hot' | 'new';
+
+export interface TrendingResponse {
+  /** Newest first; the form sorts. The hottest, the hottest politics and the
+   *  newest — more than are shown, so either order, with politics hidden or
+   *  not, fills the list. */
+  hits: TrendingHit[];
+  /** How many fresh headlines were read to find them, and how many of those
+   *  named somebody. */
+  scanned: number;
+  matched: number;
+  /** Whether the AI read every one (false: name matches as they fell,
+   *  politics by the person and the link alone, some or all with no heat). */
+  ai: boolean;
 }
 
 /** The verified article a page is rendered from. */

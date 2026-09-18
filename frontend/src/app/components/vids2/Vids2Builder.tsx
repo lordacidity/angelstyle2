@@ -11,12 +11,13 @@
 //
 //   Sound     the song under the video, how loud the clips sit, how loud the
 //             BOOMs land.
-//   Captions  written by the model off the clips' context the moment the build
-//             lands, editable by hand, and the look — and the size — they are
-//             drawn in.
+//   Captions  written by the model off the clips' context — asked for by
+//             Generate while the recordings were still rendering, so they are
+//             usually there when the build lands — editable by hand, and the
+//             look — and the size — they are drawn in.
 //   BOOMs     Insert boom arms one and the bar says where.
-//   Caption   the post caption for Instagram, drafted on its own, with a Copy
-//             button. Then Download MP4.
+//   Caption   the post captions for Instagram and TikTok, asked for the moment
+//             Generate is pressed, each with a Copy button. Then Download MP4.
 //
 // The two clip cards Simpler has at the top of its sidebar are gone. In their
 // place is a line saying what the form asked for and a way back to it: change
@@ -52,31 +53,31 @@ import type { CSSProperties, PointerEvent, SyntheticEvent } from 'react';
 import type { VidPersona, VidRecipe, VidRow } from '@/lib/vids-types';
 import { isPhoto } from '@/lib/vids-types';
 import {
-  DEFAULT_BARS, DEFAULT_BOTTOM_A_PACE, SLOTS,
-  buildPlan, boomIdOf, boomLayer, boomPlanItem, drawPlanItem, freshPick, isBoomItem, slotSpeed, smoothScaling,
+  SLOTS,
+  buildPlan, boomIdOf, boomLayer, boomPlanItem, drawPlanItem, freshPick, isBoomItem, smoothScaling,
   type BoomInsert, type LayerId, type Picks, type Plan, type PlanItem, type Rect, type SlotId,
 } from '@/lib/simpler/vidsPlan';
 // The house BOOM and the way a name is squeezed into a key, from Simpler's own
 // Bottom logic. Nothing that reads a person off a filed clip is wanted here:
 // Vids 2 knows who it is, because the form said so.
 import { HOUSE_BOOM, boomFromBottomB, personKey } from '@/lib/simpler/vidsBottom';
+import { degenBoomSound, degenBooms, type Vids2Build } from '@/lib/vids2/vids2Build';
 import {
-  bottomBFixed, bottomBTrade, degenBoomSound, degenBooms, NEWS_BOTTOM_A_LINES, type Vids2Build,
-} from '@/lib/vids2/vids2Build';
+  CAPTION_EMOJIS, CAPTION_NOTES, VIDS2_BARS, VIDS2_PACE,
+  draftLines, personaContextOf, useEmojiPalette, type Vids2Early,
+} from '@/lib/vids2/vids2Words';
 import { composeSequence } from '@/lib/simpler/vidsCompose';
 import {
-  CAPTION_STYLES, DEFAULT_CAPTION_SCALE, DEFAULT_CAPTION_STYLE, EMPTY_LINES, FAST_BOTTOM_A_CAPTIONS,
-  MIN_SHARE, ONE_LINE_DEFAULT,
-  bareFixedLine, bottomBOpen, buildCaptions, capLine, captionAt,
-  captionStyle, captionWindows, drawCaption, fixedLine, layoutCaption, preloadCaptionEmoji,
-  scaleCaptionStyle, seamNeedsMerge, wantedCount,
-  type CaptionLines, type CaptionPos, type CaptionRef, type CaptionWindow,
+  CAPTION_STYLES, DEFAULT_CAPTION_SCALE, DEFAULT_CAPTION_STYLE, EMPTY_LINES, ONE_LINE_DEFAULT,
+  buildCaptions, capLine, captionAt,
+  captionStyle, captionWindows, drawCaption, layoutCaption, preloadCaptionEmoji,
+  scaleCaptionStyle,
+  type CaptionLines, type CaptionPos, type CaptionRef,
 } from '@/lib/simpler/vidsCaptions';
 import { VidsCaptionsRail } from '@/app/components/simpler/VidsCaptionsRail';
-import { emojiByUnified } from '@/lib/emoji';
-import { pinnedUnifieds, useEmojiPrefs } from '@/lib/emoji-prefs-store';
-import { VidsPostCaption } from '@/app/components/simpler/VidsPostCaption';
-import { createRecipe, deleteRecipe, writeCaptions, writeHook } from '@/lib/vids-client';
+import { Vids2HookGuide } from './Vids2HookGuide';
+import { Vids2PostCaption } from './Vids2PostCaption';
+import { createRecipe, deleteRecipe, writeHook } from '@/lib/vids-client';
 import { specFromBuild } from '@/lib/simpler/vidsRecipe';
 import {
   DEFAULT_BOOM_LEVEL, DEFAULT_CLIP_LEVEL, DEFAULT_MUSIC, DEFAULT_ROOM_TONE,
@@ -99,10 +100,10 @@ const OUT_H = 1920;
  *  file is written on this grid: the phone it ends up on wants no more, and a
  *  file that followed the fastest clip was twice the frames for nothing. */
 const OUT_FPS = 30;
-/** No bars, always — nothing here switches them on, but the plan still asks. */
-const BARS = DEFAULT_BARS;
-/** Bottom A is always sped up to fit its ten seconds. */
-const PACE = DEFAULT_BOTTOM_A_PACE;
+/** No bars, and Bottom A always on Fast — the same plan Generate drafted the
+ *  words against (lib/vids2/vids2Words). */
+const BARS = VIDS2_BARS;
+const PACE = VIDS2_PACE;
 
 const STAGE_PAD = 32;  // px of breathing room around the stage
 /** Slack around a caption's own box, so a short line is still easy to grab. */
@@ -135,6 +136,23 @@ const BOOM_PREVIEW_LAYER = boomLayer(BOOM_PREVIEW_ID);
 
 const pickRandom = <T,>(xs: readonly T[]): T | undefined =>
   (xs.length ? xs[Math.floor(Math.random() * xs.length)] : undefined);
+
+/** How often each caption look comes up: Gold, the loud one, a fifth of the
+ *  time, Clean and Soft two fifths each. A look added to CAPTION_STYLES later
+ *  is never rolled until it is given odds here. */
+const STYLE_ODDS: Record<string, number> = { clean: 0.4, soft: 0.4, gold: 0.2 };
+
+/** One look by STYLE_ODDS. Every roll is its own — the look the last video had
+ *  has no say, or Gold would come up more often than its fifth. */
+function rollStyleId(): string | null {
+  const total = CAPTION_STYLES.reduce((n, s) => n + (STYLE_ODDS[s.id] ?? 0), 0);
+  let r = Math.random() * total;
+  for (const s of CAPTION_STYLES) {
+    r -= STYLE_ODDS[s.id] ?? 0;
+    if (r < 0) return s.id;
+  }
+  return null;
+}
 
 /** The songs the randomizer may reach for. A degen build can roll any song;
  *  any other build never rolls one marked degen on the Music page. This is the
@@ -413,13 +431,14 @@ interface Props {
   /** What the form asked for and Generate made. Its `id` goes up on every
    *  Generate, and that is what tells this page the clips under it are new. */
   build: Vids2Build;
-  /** Back to the five answers, as they were left. */
-  onBackToForm: () => void;
+  /** Start Vids 2 over: every answer cleared, this video let go, the form on
+   *  its first question (Vids2Section `reset`). */
+  onReset: () => void;
 }
 
 export function Vids2Builder({
   picks, onPicksChange, clipsForSlot,
-  personas, appliedPersonaId, active, libraryLoaded, build, onBackToForm,
+  personas, appliedPersonaId, active, libraryLoaded, build, onReset,
 }: Props) {
   const outW = OUT_W;
   const outH = OUT_H;
@@ -476,11 +495,12 @@ export function Vids2Builder({
   const picksRef = useRef(picks);
   useEffect(() => { picksRef.current = picks; }, [picks]);
   // The words are waiting on the clips: `pendingWrite` holds the ids still to
-  // report a length, and `busy` is what the sidebar says while they do. The
-  // captions are written off the clips as the browser measured them, so they
-  // cannot go until every clip has reported in (or failed).
+  // report a length, and `busy` is what the sidebar says while they do. Only
+  // a build Generate couldn't draft the words for comes this way — one with a
+  // clip whose length the library didn't know — since the words are timed
+  // against the clips' lengths. `early` is whatever Generate did ask for.
   const [busy, setBusy] = useState(false);
-  const pendingWrite = useRef<{ ids: Set<string> } | null>(null);
+  const pendingWrite = useRef<{ ids: Set<string>; early?: Vids2Early } | null>(null);
 
   const stageWrapRef = useRef<HTMLDivElement>(null);
   const stageRef = useRef<HTMLDivElement>(null);
@@ -584,25 +604,19 @@ export function Vids2Builder({
   const [capScale, setCapScale] = useState(DEFAULT_CAPTION_SCALE);
   const [writing, setWriting] = useState(false);
   const [captionError, setCaptionError] = useState<string | null>(null);
-  // What the writer is steered with. Nothing here sets either any more — the
-  // captions write themselves — but both still go to the route and into the
-  // record, so a build says what it was written from.
-  const notes = '';
-  // Two or three emoji across the whole set, where one actually lands: these
-  // are captions for short vertical video, and a bare set reads flat next to
-  // everything else on the feed.
-  const emojis = true;
-  // Which emoji the writer may use: the ones pinned in the sidebar's Emojis
-  // drawer — the set already chosen to reach for — handed over as their
-  // characters. They are drawn from the app's Apple images on the stage and in
-  // the file (lib/simpler/vidsCaptions), so what is picked from here is what goes out.
-  const { prefs: emojiPrefs } = useEmojiPrefs();
-  const emojiPalette = useMemo(
-    () => pinnedUnifieds(emojiPrefs).map((u) => emojiByUnified(u)?.char).filter((c): c is string => !!c),
-    [emojiPrefs],
-  );
+  /** The ? beside Start: how the hook is written, every mode, as a page over
+   *  this one (Vids2HookGuide). */
+  const [hookGuide, setHookGuide] = useState(false);
+  const closeHookGuide = useCallback(() => setHookGuide(false), []);
+  const emojiPalette = useEmojiPalette();
   const windows = useMemo(() => captionWindows(plan), [plan]);
-  const caption = useMemo(() => buildCaptions(windows, lines), [windows, lines]);
+  // The hook is always two lines here, the type shrunk until they fit
+  // (CaptionLine.twoLines). Put on as the captions are laid out rather than
+  // stored on the line, so no rewrite or hand edit of the hook can leave it off.
+  const caption = useMemo(
+    () => buildCaptions(windows, { ...lines, start: { ...lines.start, twoLines: true } }),
+    [windows, lines],
+  );
   const captions = caption.all;
   const capStyle = useMemo(() => scaleCaptionStyle(captionStyle(styleId), capScale), [styleId, capScale]);
   const canCaption = !!windows.start || !!windows.bottomA || !!windows.bottomB || !!windows.end;
@@ -610,119 +624,55 @@ export function Vids2Builder({
     lines.start.text.trim() || lines.bottomA.length || lines.bottomB.length
     || lines.end.text.trim()
   );
-  // Who the build trades on — what the fixed lines put in place of {name}
-  // ("lock in ronaldo", "search ronaldo"). Lower-cased, since that is how the
-  // written lines around them say a name. Simpler has to read this off the
-  // Bottom B clip's file name; here the form said it outright, so it is simply
-  // the answer, squeezed the same way.
-  const capName = personKey(build.person);
 
-  // What the writer is told about one screen recording: its overall context and,
-  // when it has been marked up, the ordered steps — which is what makes the
-  // captions land on the beat rather than merely inside the clip.
-  const clipBrief = (w: CaptionWindow | null, context: string | undefined) => (w
-    ? { context: context ?? '', marks: w.marks.map((m) => m.text), count: wantedCount(w) }
-    : null);
+  /** Which write is the latest. A build that lands while the words for the
+   *  one before are still out starts a write of its own, and whatever the
+   *  older one brings back is about clips that are gone. */
+  const writeSeq = useRef(0);
 
-  // The hook is the persona's bit, so it comes from the persona's context; a
-  // build with no persona applied falls back to whatever the Start clip itself
-  // says. The screen-recording lines come from each bottom clip's own context.
-  const writeLines = async () => {
+  /** The words, written off the clips (lib/vids2/vids2Words): the hook to the
+   *  mode's own guide (api/vids/hook), and everything else off each bottom
+   *  clip's context and marks. `early` is what Generate already asked for
+   *  while the recordings were being drawn — taken instead of asking again.
+   *  Rewrite passes nothing, and asks afresh from the stage. */
+  const writeLines = async (early?: Vids2Early) => {
     if (!canCaption) return;
+    const seq = ++writeSeq.current;
+    const latest = () => seq === writeSeq.current;
     const persona = personas.find((p) => p.id === appliedPersonaId) ?? null;
-    // Bottom A on Fast carries FAST_BOTTOM_A_CAPTIONS lines, and the writer
-    // says when each goes up as well as what it says: it is handed the clip's
-    // moments on the sped-up window, and what comes back is put on the clip's
-    // own clock, so a line stays on its moment whatever the pace does later.
-    // Except a marked clip Fast has not had to speed up — one that already
-    // fits, playing at its own speed, like the ChatGPT recording the Bottom
-    // card makes, marked by the renderer beat by beat (search, wait, pick).
-    // Its marks are exact and there is room for them, so it is captioned like
-    // any marked clip: one line each, on the mark.
-    const aWin = windows.bottomA;
-    const aItem = plan.items.find((i) => i.slot === 'bottomA') ?? null;
-    const aSped = !!aItem && !!picks.bottomA
-      && aItem.speed > slotSpeed('bottomA', picks.bottomA.speed, aItem.sourceLength, 'normal') + 1e-6;
-    // A news intro is always captioned on its marks: three lines, the first
-    // two fixed outright (NEWS_BOTTOM_A_LINES), the pick rolled — never the
-    // two placed lines Fast asks the writer for.
-    const newsA = build.intro === 'news';
-    const placeA = bottomAPace === 'fast' && !newsA && !!aWin && !!aItem
-      && (aSped || !aWin.marks.length)
-      && aWin.end - aWin.start >= FAST_BOTTOM_A_CAPTIONS * MIN_SHARE;
-    const briefA = clipBrief(aWin, picks.bottomA?.video.context);
-    const personaContext = persona?.context || picks.start?.video.context || '';
+    const personaContext = personaContextOf(persona, picks);
     // A hook somebody wrote themselves is not the model's to write. The rest
     // of the words still follow on from it, but nothing is asked for another.
     // Somebody who starts typing after this has gone out is covered too:
     // whatever comes back for the hook is dropped on arrival if the box has
     // words in it by then.
     const wantHook = !!windows.start && !hookIsTheirs(startTouched.current, lines);
-    // The hook is written to the mode's own guide (api/vids/hook), off who,
-    // which way and what the persona is doing — nothing on the screen
-    // recordings — so it goes out beside the rest of the words rather than
-    // inside them, and each lands as it comes back.
+    // Generate asked with the form's name for them; it stands as long as that
+    // is the name Pauv came back with.
+    const earlyHook = early?.hook && personKey(early.hook.person) === personKey(build.person)
+      ? early.hook.start
+      : null;
+    // The hook is written off who, which way and what the persona is doing —
+    // nothing on the screen recordings — so it goes out beside the rest of the
+    // words rather than inside them, and each lands as it comes back.
     setWriting(true);
     setCaptionError(null);
     const hook = wantHook
-      ? writeHook({ mode: build.mode, person: build.person, direction: build.direction, personaContext })
-        .then(({ start }) => setLines((prev) => (hookIsTheirs(startTouched.current, prev)
-          ? prev
-          : { ...prev, start: { ...capLine(start, prev.start.oneLine), pos: prev.start.pos } })))
+      ? (earlyHook ?? writeHook({
+        mode: build.mode, person: build.person, direction: build.direction, personaContext,
+      }).then((r) => r.start))
+        .then((start) => {
+          if (!latest()) return;
+          setLines((prev) => (hookIsTheirs(startTouched.current, prev)
+            ? prev
+            : { ...prev, start: { ...capLine(start, prev.start.oneLine), pos: prev.start.pos } }));
+        })
       : null;
-    const rest = (async () => {
-      const draft = await writeCaptions({
-        personaName: persona?.name ?? '',
-        personaContext,
-        wantStart: false,
-        notes: notes.trim(),
-        bottomA: placeA && briefA && aWin
-          ? {
-            ...briefA,
-            count: FAST_BOTTOM_A_CAPTIONS,
-            placed: {
-              length: aWin.end - aWin.start,
-              spans: aWin.marks.map((m) => ({ start: m.start - aWin.start, end: m.end - aWin.start })),
-            },
-          }
-          : briefA,
-        bottomB: clipBrief(windows.bottomB, picks.bottomB?.video.context),
-        wantEnd: !!windows.end,
-        endContext: picks.end?.video.context ?? '',
-        emojis,
-        emojiPalette,
-        // The one place two marks share a line, and only when the timeline
-        // says neither side has room for its own. Never across a placed
-        // Bottom A: its two lines are the search and the pick.
-        mergeSeam: !placeA && seamNeedsMerge(windows),
-        // Bottom B is always the rendered trade here, so the writer is told its
-        // chart and confirmation lines are fixed and its trade line carries $.
-        renderedTrade: true,
-      });
-      const atA = placeA ? draft.bottomAAt : undefined;
-      const toClip = (at: number) => (aItem ? Math.round((aItem.trimStart + at * aItem.speed) * 100) / 100 : at);
-      // Two of Bottom A's lines are not the model's to write — the wait and the
-      // pick — so whatever came back in those slots is dropped for one of the
-      // fixed lines (lib/simpler/vidsCaptions). They are taken by mark, so they
-      // only stand in on a clip marked the way the rendered ChatGPT recording
-      // is: three beats, one line each, never the two placed lines Fast asks for.
-      const fixedA = !placeA && draft.bottomA.length >= 3;
-      /** What stands in for the writer's line at Bottom A's index, if
-       *  anything: on a news intro the first two lines outright, then the
-       *  rolled pick; on a ChatGPT one the rolled wait and pick. */
-      const standInA = (i: number): string | null =>
-        (newsA && NEWS_BOTTOM_A_LINES[i]) || (fixedA ? fixedLine('bottomA', i, capName) : null);
-      const textA = draft.bottomA.map((t, i) => (fixedA && fixedLine('bottomA', i, capName)) || t);
-      // Bottom B is the rendered trade, and three of its four lines are not the
-      // model's either: the opener, the chart and the confirmation. The trade
-      // between them is, held to having its amount in $ (lib/vids2
-      // bottomBFixed, bottomBTrade). The chart and confirmation steer clear of
-      // whatever Bottom A just said.
-      const fixedB = draft.bottomB.length >= 4;
-      const saidA = textA.map(bareFixedLine);
-      const textB = draft.bottomB.map((t, i) => (i === 0 ? bottomBOpen(capName)
-        : !fixedB ? t
-        : bottomBFixed(i, saidA) ?? (i === 2 ? bottomBTrade(t, capName, build.direction) : t)));
+    const rest = (early?.lines ?? draftLines({
+      plan, picks, pace: bottomAPace, intro: build.intro, person: build.person, direction: build.direction,
+      personaName: persona?.name ?? '', personaContext, emojiPalette,
+    })).then((d) => {
+      if (!latest()) return;
       // A rewrite keeps whatever was set to one line, and wherever a line was
       // dragged to, matched up by position — both are about the shape and place
       // of the caption slot rather than its wording. A line that wasn't there
@@ -731,36 +681,34 @@ export function Vids2Builder({
         // The hook is its own call's to write, whichever of the two lands
         // first; everything else is filled in around it.
         start: prev.start,
-        bottomA: textA.map((t, i) => {
-          const at = atA?.[i];
-          return {
-            ...capLine(standInA(i) || t,
-              prev.bottomA[i]?.oneLine ?? ONE_LINE_DEFAULT.bottomA),
-            pos: prev.bottomA[i]?.pos,
-            ...(at != null && Number.isFinite(at) ? { at: toClip(at) } : {}),
-          };
-        }),
-        bottomB: textB.map((t, i) => ({
+        bottomA: d.bottomA.map((l, i) => ({
+          ...capLine(l.text, prev.bottomA[i]?.oneLine ?? ONE_LINE_DEFAULT.bottomA),
+          pos: prev.bottomA[i]?.pos,
+          ...(l.at != null ? { at: l.at } : {}),
+        })),
+        bottomB: d.bottomB.map((t, i) => ({
           ...capLine(t, prev.bottomB[i]?.oneLine ?? ONE_LINE_DEFAULT.bottomB),
           pos: prev.bottomB[i]?.pos,
         })),
-        end: { ...capLine(draft.end, prev.end.oneLine), pos: prev.end.pos },
+        end: { ...capLine(d.end, prev.end.oneLine), pos: prev.end.pos },
       }));
-    })();
+    });
     // One failing leaves whatever the other wrote standing.
     const failed = (await Promise.allSettled([rest, hook]))
       .flatMap((r) => (r.status === 'rejected' ? [r.reason] : []));
+    if (!latest()) return;
     if (failed.length) setCaptionError(failed.map((e) => (e instanceof Error ? e.message : String(e))).join(' · '));
     setWriting(false);
   };
   const broken = plan.items.filter((i) => errors[i.video.id]);
 
-  // The captions, once the clips are in. They are written off the clips as
-  // the browser measured them, so the words wait until every clip just picked
-  // has loaded or failed. One that says neither within ROLL_WAIT_MS is written
-  // around from the library's own figures rather than leaving the stage half
-  // done. The ref keeps the effect on the current writeLines without
-  // re-subscribing it every render.
+  // The captions, once the clips are in, for a build that has to wait for
+  // them (see pendingWrite). They are written off the clips as the browser
+  // measured them, so the words wait until every clip just picked has loaded
+  // or failed. One that says neither within ROLL_WAIT_MS is written around
+  // from the library's own figures rather than leaving the stage half done.
+  // The ref keeps the effect on the current writeLines without re-subscribing
+  // it every render.
   const writeLinesRef = useRef(writeLines);
   useEffect(() => { writeLinesRef.current = writeLines; });
   useEffect(() => {
@@ -769,7 +717,7 @@ export function Vids2Builder({
     const finish = () => {
       pendingWrite.current = null;
       setBusy(false);
-      void writeLinesRef.current();
+      void writeLinesRef.current(pending.early);
     };
     const heard = Array.from(pending.ids).every((id) => id in durations || id in errors);
     if (heard) { finish(); return; }
@@ -1402,7 +1350,8 @@ export function Vids2Builder({
   const toggleRef = useRef(() => {});
   useEffect(() => { toggleRef.current = () => { if (playing) pause(); else play(); }; });
   useEffect(() => {
-    if (!active) return;
+    // The hook guide is a page over this one, and keeps the keyboard to itself.
+    if (!active || hookGuide) return;
     const onKey = (e: globalThis.KeyboardEvent) => {
       // An armed BOOM is the one thing on this page waiting on a press
       // somewhere else, so it is the one thing there is to back out of.
@@ -1415,7 +1364,7 @@ export function Vids2Builder({
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
-  }, [active]);
+  }, [active, hookGuide]);
 
   // ── Export ──
   /** What an export is called when no code could be written for it. */
@@ -1436,38 +1385,14 @@ export function Vids2Builder({
       const item = boomItems.find((i) => i.slot === boomLayer(b.id));
       return item ? [{ ...b, at: item.start }] : [];
     }),
-    lines, styleId, captionScale: capScale, notes, emojis,
+    lines, styleId, captionScale: capScale, notes: CAPTION_NOTES, emojis: CAPTION_EMOJIS,
   });
   const currentBrief = () => ({
-    personaContext: appliedPersona?.context || picks.start?.video.context || '',
+    personaContext: personaContextOf(appliedPersona, picks),
     bottomAContext: picks.bottomA?.video.context ?? '',
     bottomBContext: picks.bottomB?.video.context ?? '',
     endContext: picks.end?.video.context ?? '',
   });
-
-  // What the post caption is read from: the screen recordings and the ending
-  // — what each shows and, where a clip was marked up, its moments in order.
-  // Not the persona: the caption is about the person being traded, and he is
-  // on the screen, not on camera. It is about which clips are on the stage
-  // and nothing else — trimming, moving or re-captioning them leaves it alone
-  // — so the caption is drafted again exactly when it would be about someone
-  // else. Empty until there is a vid, since the vid is where the person is.
-  const postBrief = useMemo(() => {
-    // A build with no intro has the one recording, and it is still the vid.
-    if (!picks.bottomA && !picks.bottomB) return '';
-    const say = (label: string, context: string | undefined, marks: readonly { text: string }[] = []) => {
-      const said = (context ?? '').trim();
-      const beats = marks.map((m) => m.text.trim()).filter(Boolean);
-      if (!said && !beats.length) return '';
-      return `${label}: ${said || '(no context given)'}${beats.length ? `. Moments, in order: ${beats.join('; ')}` : ''}`;
-    };
-    return [
-      picks.bottomA ? say('Screen recording 1', picks.bottomA.video.context, picks.bottomA.video.marks) : '',
-      say(picks.bottomA ? 'Screen recording 2, on pauv.com' : 'Screen recording, on pauv.com',
-        picks.bottomB?.video.context, picks.bottomB?.video.marks),
-      say('Ending, him showing what the trade made', picks.end?.video.context),
-    ].filter(Boolean).join('\n');
-  }, [picks]);
 
   const runExport = async () => {
     if (!plan.items.length || broken.length || exporting) return;
@@ -1597,9 +1522,9 @@ export function Vids2Builder({
 
   /** Hold the captions back until every one of those clips has reported its
    *  length (or failed), then write them. The sidebar says so meanwhile. */
-  const queueWrite = (ids: Set<string>) => {
+  const queueWrite = (ids: Set<string>, early?: Vids2Early) => {
     if (!ids.size || writing || exporting) return;
-    pendingWrite.current = { ids };
+    pendingWrite.current = { ids, early };
     setBusy(true);
   };
 
@@ -1628,12 +1553,23 @@ export function Vids2Builder({
     // picks one when it lands (below).
     rollMusic();
     rollStyle();
-    queueWrite(clipIds(picksRef.current));
+    // The words have been on their way since the recordings were laid out —
+    // Generate asked for them off the same plan this stage is showing — so
+    // they are taken as they land, with nothing to wait for. Only a build
+    // Generate couldn't draft waits for its clips to be measured first.
+    const { early } = build;
+    if (early.lines) {
+      pendingWrite.current = null;
+      setBusy(false);
+      void writeLines(early);
+    } else {
+      queueWrite(clipIds(picksRef.current), early);
+    }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [buildId]);
 
   /** Degen mode's BOOMs, laid on for you — see degenBooms in lib/vids2: the
-   *  intro getting to them, their page coming up, the money going in (two
+   *  intro's zoom on their name, their page coming up, the money going in (two
    *  without an intro). Each moment is a second into its own recording, so it
    *  is put on the timeline through that slot's item — where the slot starts,
    *  where it was trimmed from, and how fast it plays — rather than guessed at.
@@ -1708,24 +1644,18 @@ export function Vids2Builder({
     setMusic((m) => ({ ...m, url: t?.url ?? null, label: t?.label ?? '' }));
   };
 
-  /** A look for the captions off the shelf, and not the one already on when
-   *  there is another to be had — the song's rule, for the song's reason: a
-   *  look nobody chose is easier to swap than one nobody thought to try.
-   *  Reset uses it; the page rolls one itself the first time it opens
-   *  (below). */
+  /** A look for the captions off the shelf, by STYLE_ODDS — Gold a fifth of
+   *  the time. Every new build rolls one; the page rolls one itself the first
+   *  time it opens (below). */
   const rollStyle = () => {
-    const pool = CAPTION_STYLES.filter((s) => s.id !== styleId);
-    const s = pickRandom(pool.length ? pool : CAPTION_STYLES);
-    if (!s) return;
+    const id = rollStyleId();
+    if (!id) return;
     styleChosenRef.current = true;
-    setStyleId(s.id);
+    setStyleId(id);
   };
   useEffect(() => {
     if (!active || styleChosenRef.current) return;
-    const s = pickRandom(CAPTION_STYLES);
-    if (!s) return;
-    styleChosenRef.current = true;
-    setStyleId(s.id);
+    rollStyle();
   }, [active]);
 
 
@@ -1744,8 +1674,8 @@ export function Vids2Builder({
   const buildThumb = picks.bottomB?.video.thumbUrl ?? picks.bottomA?.video.thumbUrl ?? null;
   const status = (() => {
     if (working) return 'Putting it together — the sound and the captions.';
-    if (broken.length) return 'One of these clips would not load — press Change, then Generate again.';
-    if (!appliedPersonaId) return 'The persona\u2019s clips aren\u2019t on the stage — press Change and pick one that has all three.';
+    if (broken.length) return 'One of these clips would not load — press Reset and make it again.';
+    if (!appliedPersonaId) return 'The persona\u2019s clips aren\u2019t on the stage — press Reset and pick one that has all three.';
     return `Ready${total ? ` · ${fmtTime(total)}` : ''} — play it, then download it.`;
   })();
 
@@ -2062,13 +1992,17 @@ export function Vids2Builder({
         <div className="border-b border-zinc-800 px-3 py-3">
           <div className="mb-2 flex items-center gap-2">
             <p className="min-w-0 flex-1 truncate text-[12px] font-semibold text-zinc-200">Tune it up</p>
+            {/* Throws away a video that took a minute to render, and every
+                bit of tuning on it, so it asks first. */}
             <button
-              onClick={onBackToForm}
+              onClick={() => {
+                if (window.confirm('Start over? This video, its sound and its captions go, and every answer is cleared.')) onReset();
+              }}
               disabled={!!exporting}
-              title="Back to the five answers, as you left them. Change one and press Generate again — both recordings are made afresh."
+              title="Start Vids 2 over — the video goes, every answer is cleared, and the form opens on its first question."
               className="shrink-0 rounded border border-zinc-700 px-1.5 py-0.5 text-[10px] text-zinc-400 transition-colors hover:border-zinc-500 hover:text-white disabled:border-zinc-900 disabled:text-zinc-700 disabled:hover:border-zinc-900 disabled:hover:text-zinc-700"
             >
-              Change
+              Reset
             </button>
           </div>
 
@@ -2234,13 +2168,30 @@ export function Vids2Builder({
           canRewrite={canCaption && !working && !exporting}
           onResetPos={(ref) => setLinePos(ref, undefined)}
           onStartTyped={() => { startTouched.current = true; }}
+          startHelp={(
+            <button
+              type="button"
+              onClick={() => setHookGuide(true)}
+              title="How the Start caption is written — every mode, every percentage"
+              aria-label="How the Start caption is written"
+              className="flex h-3.5 w-3.5 shrink-0 items-center justify-center rounded-full border border-zinc-600 text-[8px] font-bold leading-none text-zinc-400 transition-colors hover:border-zinc-300 hover:text-white"
+            >
+              ?
+            </button>
+          )}
         />
 
-        <VidsPostCaption
-          brief={postBrief}
-          // The code the export just minted, so the caption ends on it as the
+        <Vids2PostCaption
+          buildId={build.id}
+          person={build.person}
+          position={build.direction}
+          // What Generate asked for the moment it was pressed.
+          early={build.early.post}
+          // The code the export just minted, so the captions end on it as the
           // file name does.
           code={lastRecipe?.code ?? null}
+          // Starting an export tries again a draft that failed.
+          exporting={!!exporting}
         />
 
         {/* mt-auto puts it at the foot of a short sidebar; sticky keeps it
@@ -2283,6 +2234,15 @@ export function Vids2Builder({
           {recipeError && <p className="mt-2 text-[11px] text-amber-300">{recipeError}</p>}
         </div>
       </aside>
+
+      {hookGuide && (
+        <Vids2HookGuide
+          mode={build.mode}
+          direction={build.direction}
+          hasContext={!!(appliedPersona?.context || picks.start?.video.context)}
+          onClose={closeHookGuide}
+        />
+      )}
     </div>
   );
 }

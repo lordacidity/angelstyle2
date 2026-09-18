@@ -746,20 +746,31 @@ export function createTradeClip(ctx: Ctx, a: TradeAssets, direction: Direction):
   // It circles their card, then clicks it.
   const T_CARD_LOOP: [number, number] = [T_TYPED + 0.3, T_TYPED + 1.2];
   const T_PICK = T_TYPED + 1.45;
-  const T_CHART: [number, number] = [T_PICK + 0.15, T_PICK + 1.05];
+  // The analysis — their page up to the trade card — and the trade — the
+  // flips, the amount, Place trade — each run ANALYZE_PACE / TRADE_PACE times
+  // their old length: every moment in them sits that much further from the
+  // start of its beat. The loops are laps a second, so the whip over the chart
+  // runs longer at the same frenzy rather than slower. Everything heard and
+  // captioned follows by itself: the keys, the clicks and the beats are all
+  // read off these times.
+  const ANALYZE_PACE = 1.5;
+  const TRADE_PACE = 1.5;
+  const ana = (s: number) => T_PICK + s * ANALYZE_PACE;
+  const T_CHART: [number, number] = [ana(0.15), ana(1.05)];
   // A frantic whip of circles over the chart, then straight to the toggle.
-  const T_CHART_LOOP: [number, number] = [T_PICK + 0.95, T_PICK + 2.15];
-  const T_TRADE = T_CHART_LOOP[1] + 0.4;
+  const T_CHART_LOOP: [number, number] = [ana(0.95), ana(2.15)];
+  const T_TRADE = ana(2.55);
+  const trd = (s: number) => s * TRADE_PACE;
   // Three presses: the chosen way, the other, the chosen way again.
-  const FLIP_GAP = 0.45;
+  const FLIP_GAP = trd(0.45);
   const flipOrder: Direction[] = direction === 'down' ? ['down', 'up', 'down'] : ['up', 'down', 'up'];
   const flips = flipOrder.map((to, i) => ({ t: T_TRADE + i * FLIP_GAP, to }));
   const T_LAST_FLIP = flips[flips.length - 1].t;
   // It clicks the amount, $10 types in, it clicks Place trade.
-  const T_AMOUNT_CLICK = T_LAST_FLIP + 0.5;
-  const T_AMOUNT = T_AMOUNT_CLICK + 0.25;
-  const amountAt = [T_AMOUNT, T_AMOUNT + 0.2];
-  const T_PLACE = T_AMOUNT + 1.0;
+  const T_AMOUNT_CLICK = T_LAST_FLIP + trd(0.5);
+  const T_AMOUNT = T_AMOUNT_CLICK + trd(0.25);
+  const amountAt = [T_AMOUNT, T_AMOUNT + trd(0.2)];
+  const T_PLACE = T_AMOUNT + trd(1.0);
   const T_CONFIRM = T_PLACE + 1.2;
   // It circles while the order places, rests, and leaves out of the top.
   const T_WAIT: [number, number] = [T_PLACE + 0.12, T_CONFIRM + 0.1];
@@ -1560,12 +1571,12 @@ export function createTradeClip(ctx: Ctx, a: TradeAssets, direction: Direction):
     { t: T_CARD_LOOP[0], ...cardLoopAt(T_CARD_LOOP[0]) },
     { t: T_CARD_LOOP[1], ...cardLoopAt(T_CARD_LOOP[1]) },
     { t: T_PICK, ...pickPt },
-    { t: T_PICK + 0.35, ...pickPt },
+    { t: ana(0.35), ...pickPt },
     { t: T_CHART_LOOP[0], ...chartLoopAt(T_CHART_LOOP[0]) },
     { t: T_CHART_LOOP[1], ...chartLoopAt(T_CHART_LOOP[1]) },
-    ...flips.flatMap(f => [{ t: f.t, ...togglePt(f.to) }, { t: f.t + 0.15, ...togglePt(f.to) }]),
+    ...flips.flatMap(f => [{ t: f.t, ...togglePt(f.to) }, { t: f.t + trd(0.15), ...togglePt(f.to) }]),
     { t: T_AMOUNT_CLICK, ...amountPt },
-    { t: T_AMOUNT + 0.4, ...amountPt },
+    { t: T_AMOUNT + trd(0.4), ...amountPt },
     { t: T_PLACE, ...buttonPt },
     { t: T_WAIT[0], ...buttonPt },
     { t: T_WAIT[1], ...waitLoopAt(T_WAIT[1]) },
@@ -1680,6 +1691,10 @@ export function createTradeClip(ctx: Ctx, a: TradeAssets, direction: Direction):
 export interface RenderOptions {
   direction: Direction;
   onProgress?: (done: number, total: number) => void;
+  /** The clip's beats and length the moment they are worked out, before the
+   *  first frame is drawn. For whoever has something to start on those while
+   *  the frames go. */
+  onPlanned?: (p: Pick<RenderResult, 'beats' | 'seconds'>) => void;
   signal?: AbortSignal;
 }
 export async function renderTradeVideo(assets: TradeAssets, o: RenderOptions): Promise<RenderResult> {
@@ -1693,6 +1708,7 @@ export async function renderTradeVideo(assets: TradeAssets, o: RenderOptions): P
   const clip = createTradeClip(ctx, assets, o.direction);
   const { draw, seconds, beats } = clip;
   const frames = Math.round(seconds * FPS);
+  o.onPlanned?.({ beats, seconds });
 
   const codec = await mb.getFirstEncodableVideoCodec(['avc', 'vp9', 'vp8'], { width: canvas.width, height: canvas.height });
   if (!codec) throw new Error('No video encoder is available in this browser.');

@@ -158,8 +158,8 @@ export interface CaptionDraft {
   bottomAAt?: number[];
 }
 
-export const writeCaptions = (input: CaptionRequest) =>
-  api<CaptionDraft>('/captions', { method: 'POST', body: JSON.stringify(input) });
+export const writeCaptions = (input: CaptionRequest, signal?: AbortSignal) =>
+  api<CaptionDraft>('/captions', { method: 'POST', body: JSON.stringify(input), signal });
 
 // ── The hook ──────────────────────────────────────────────────────────────────
 
@@ -176,8 +176,8 @@ export interface HookRequest {
 }
 
 /** The Start caption alone, written to the mode's guide. */
-export const writeHook = (input: HookRequest) =>
-  api<{ start: string }>('/hook', { method: 'POST', body: JSON.stringify(input) });
+export const writeHook = (input: HookRequest, signal?: AbortSignal) =>
+  api<{ start: string }>('/hook', { method: 'POST', body: JSON.stringify(input), signal });
 
 // ── The question ──────────────────────────────────────────────────────────────
 
@@ -211,6 +211,9 @@ export interface PostCaptionRequest {
   brief?: string;
   person?: string;
   position?: TradePosition | null;
+  /** Vids 2's post-captions only: write a new pair rather than hand back one
+   *  kept for this exact request today. */
+  fresh?: boolean;
 }
 
 /** The caption, and the person and position it was written for. */
@@ -218,6 +221,19 @@ export interface PostCaptionDraft { caption: string; person: string; position: T
 
 export const writePostCaption = (input: PostCaptionRequest) =>
   api<PostCaptionDraft>('/post-caption', { method: 'POST', body: JSON.stringify(input) });
+
+/** Vids 2's pair: an Instagram caption and a TikTok one, written from the
+ *  person's news this week, and why to hold the post when the news says to. */
+export interface PostCaptionsDraft {
+  ig: string;
+  tiktok: string;
+  hold: string | null;
+  person: string;
+  position: TradePosition;
+}
+
+export const writePostCaptions = (input: PostCaptionRequest, signal?: AbortSignal) =>
+  api<PostCaptionsDraft>('/post-captions', { method: 'POST', body: JSON.stringify(input), signal });
 
 // ── Upload ────────────────────────────────────────────────────────────────────
 

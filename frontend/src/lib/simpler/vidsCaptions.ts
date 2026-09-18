@@ -85,6 +85,13 @@ export interface CaptionPos { x: number; y: number }
 export interface CaptionLine {
   text: string;
   oneLine: boolean;
+  /** Always exactly two lines, broken where the two come out closest in
+   *  width, and the type shrunk until the wider one fits across — never a
+   *  third line, never one long one. Wins over `oneLine`. A single word has
+   *  nowhere to break and stays one line. Only Vids 2 sets it, on its Start
+   *  hook, and only as the captions are laid out (Vids2Builder), so it is
+   *  never written down with a build. */
+  twoLines?: boolean;
   /** Where it was dragged to, if it has been. */
   pos?: CaptionPos;
   /** When it comes up, when the writer chose that itself — Bottom A on Fast
@@ -644,8 +651,9 @@ export const scaleCaptionStyle = (style: CaptionStyle, scale: number): CaptionSt
 /** How wide a line may run before it wraps. */
 const MAX_LINE_OF_WIDTH = 0.86;
 const LINE_HEIGHT = 1.22;
-/** A one-line caption will not shrink past this much of its normal size — below
- *  it the text is too small to read, and wrapping was the better answer. */
+/** A one- or two-line caption will not shrink past this much of its normal
+ *  size — below it the text is too small to read, and wrapping was the better
+ *  answer. */
 const MIN_ONE_LINE_SCALE = 0.45;
 /** The gap between the top edge of the picture and the top of a top-placed
  *  block, as a share of the frame height — a little way in from the edge, so
@@ -660,6 +668,24 @@ const TOP_GAP = 0.09;
  *  worse than one long line. */
 const wrap = (ctx: CanvasRenderingContext2D, text: string, maxWidth: number, emojiSize: number): string[] =>
   wrapRichText(ctx, text.replace(/\s+/g, ' ').trim(), maxWidth, emojiSize);
+
+/** `text` broken between two words into the pair whose wider line is as
+ *  narrow as it can be — the two as close to the same width as the words
+ *  allow, the top one taking the extra word on a tie. Null for a single word,
+ *  which has nowhere to break. Measured at whatever size the context is set
+ *  to; the widths scale together, so the break is the same at any size. */
+function balancedPair(ctx: CanvasRenderingContext2D, text: string, emojiSize: number): [string, string] | null {
+  const words = text.replace(/\s+/g, ' ').trim().split(' ');
+  if (words.length < 2) return null;
+  let best: [string, string] | null = null;
+  let bestWidth = Infinity;
+  for (let k = 1; k < words.length; k++) {
+    const pair: [string, string] = [words.slice(0, k).join(' '), words.slice(k).join(' ')];
+    const width = Math.max(measureRichWidth(ctx, pair[0], emojiSize), measureRichWidth(ctx, pair[1], emojiSize));
+    if (width <= bestWidth) { bestWidth = width; best = pair; }
+  }
+  return best;
+}
 
 /** Where a caption's block lands and how it is set, worked out on `ctx` without
  *  painting anything. The stage measures with this to know what a pointer is
@@ -711,7 +737,17 @@ export function layoutCaption(
   apply(size);
 
   let lines: string[];
-  if (caption.oneLine) {
+  const pair = caption.twoLines ? balancedPair(ctx, text, size) : null;
+  if (pair) {
+    // Two lines, then smaller until the wider of them fits across. Past the
+    // floor it wraps like any other caption, for the reason one line does.
+    const w = Math.max(measureRichWidth(ctx, pair[0], size), measureRichWidth(ctx, pair[1], size));
+    const needed = w > maxWidth ? Math.floor(size * (maxWidth / w)) : size;
+    const floor = Math.round(size * MIN_ONE_LINE_SCALE);
+    size = Math.max(floor, needed);
+    apply(size);
+    lines = needed < floor ? wrap(ctx, text, maxWidth, size) : pair;
+  } else if (caption.oneLine) {
     // Shrink until the whole thing fits across, rather than letting it wrap.
     const w = measureRichWidth(ctx, text, size);
     const needed = w > maxWidth ? Math.floor(size * (maxWidth / w)) : size;

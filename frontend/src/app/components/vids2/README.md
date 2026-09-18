@@ -4,15 +4,14 @@ A form, then a tuning page. It sits under Simpler in the left sidebar and
 lives at `/vids-2`.
 
 Vids and Simpler both open on the builder: an empty stage and cards to fill it
-from. Vids 2 opens on six questions instead, asked one at a time —
+from. Vids 2 opens on five questions instead, asked one at a time —
 
 1. **Who** — anybody on Pauv, from the roster itself (`/api/ai/talents`), not
    from what has been filmed.
 2. **Mode** — 👔 Serious, 😐 Middle or 💀 Degen (`Vids2Mode`). Each is below.
 3. **Which way** — up or down.
-4. **Look** — light or dark.
-5. **Persona** — Simpler's own chooser (`components/simpler/VidsPicker`).
-6. **Intro** — what opens the video, Bottom A (`Vids2Intro`). Three ways:
+4. **Persona** — Simpler's own chooser (`components/simpler/VidsPicker`).
+5. **Intro** — what opens the video, Bottom A (`Vids2Intro`). Three ways:
    - **No intro** — nothing before the trade; the video goes straight to
      trading on them on Pauv. Bottom A stays empty.
    - **ChatGPT** — the question typed into ChatGPT. Write it, or have it
@@ -20,23 +19,109 @@ from. Vids 2 opens on six questions instead, asked one at a time —
    - **News article** — a real story about them, found the way Studio > News
      finds one (`lib/news/client`): choose how far back to look (a week, to
      start), Search for articles — the list opens on headlines with the name
-     in them — and pick one. It is read off the outlet and
+     in them — and pick one. The search goes by the whole name and by what
+     headlines call them for short (`lib/news/name-forms`, below). It is read
+     off the outlet and
      checked, and its page is drawn on the form — grey where the photos will
      go — to scroll through. Generate finds the photos and records it
      (`makeNewsClip` in `lib/vids2`). A story is kept with the answers, and
      is only an answer for the person it was found for: change Who and it
-     has to be searched again.
+     has to be searched again. A **link can be pasted** instead of searched
+     for — any article page on an approved outlet, read and checked the same
+     way (`pastedLinkProblem`, `hitFromStory` in `lib/news/client`).
+
+## Choose by news — the form from the other end
+
+**📰 Choose by news**, top right of the first question, turns the form round
+(`Vids2Flow`): instead of picking somebody and then looking for a story, see
+who is trending and make the video straight from the story. Four questions —
+
+1. **News** — every story the approved outlets have put out in the past 24
+   hours (dropdown: 6 hours, 1 hour) whose **headline names somebody on
+   Pauv**, twenty shown, each with who it names, when it went out, and its
+   **heat** — the AI's read, out of 100, of how hard the headline would stop
+   somebody scrolling, with the hook in a few words ("traded to the lakers").
+   **🔥 Biggest** first, to start; **🕒 Newest** is the other order. **Refresh**
+   reads them again; **Hide politics** leaves those out.
+   Pick one — or paste a link — and it is read off the outlet and checked.
+   That answers Who *and* the intro: the person is whoever the headline names
+   (the others a press away under "Trading on" when it names two, or when the
+   story itself names more), and the intro is the story.
+
+   Nothing from an earlier visit is left standing on this question. The list
+   is about *now*, so the story kept from last time is dropped as the first
+   read goes out — unless it is the story of the video behind the form, which
+   Back to the video still has to mean — and neither the old list nor the
+   chosen story shows while a read is running, or while the next story is
+   being read off its outlet.
+2. **Which way**, 3. **Mode**, 4. **Persona** — and Generate is on Persona.
+
+**👤 Choose by who** goes back. It is one set of answers whichever flow asked
+for them, so switching loses nothing; a news-flow setup always has
+`intro: 'news'`, and Generate gets exactly what it gets from the other flow.
+
+The list is `lib/news/trending` behind `GET /api/news/trending?window=24h`:
+
+- **Headlines** — Google News, one feed per outlet per window. A feed stops at
+  100 items and a day of ESPN is more than that, so a day is read as the day
+  *and* as its last six hours. `when:` is only roughly kept to (a years-old
+  item turns up in a `when:1h` feed), so everything is held to the window by
+  its own timestamp. IMDb comes from its own lists.
+- **Names** — `lib/news/roster-match`: whole names only, off the whole roster
+  (`pauvPeople`), accents folded, a dot or a trailing Jr. optional. One-word
+  names match as the roster spells them or in capitals, never lower case, so
+  "the future of AI" is not Future. Short forms ("Putin", "LeBron") are *not*
+  matched here — `name-forms` asks Gemini one name at a time, which is no way
+  to go through 1,255 people — so the trending list under-counts people the
+  press calls by one name. Searching them by Who still finds those.
+  How many of the window's headlines name each person is kept too (`buzz`):
+  somebody in nine of them is what today is about.
+- **The read** — Gemini (the site's flash model, minimal thinking) over every
+  match in the window, up to 200, forty headlines to a call with the calls
+  side by side, so it is a few seconds rather than most of a minute. Three
+  things a name match can't know: whether "Future" is the rapper or "Dave" is
+  Dave Chappelle; whether the story is politics; and its **heat** — 0 to 100
+  against a fixed scale (90+ a death, an arrest, a scandal, a blockbuster
+  trade, a feud blowing up; 70s a lawsuit, an injury, a remark; 40–69 ordinary
+  news; under 40 filler), eyeballs and not importance, leaning up for somebody
+  in a lot of headlines and for the more famous. The scale is absolute so
+  scores from different calls sort together. The **whole window** is read,
+  not its newest: the biggest story of the day may be ten hours old.
+  Without Gemini the matches stand, less the one-word names that are also
+  ordinary words (`isOrdinaryName` in `roster-match` — Future, Dave, Offset,
+  Rosé as "Rose"), Biggest falls back to `buzz` and then the clock, and the
+  form says so.
+- **Links** — only what is sent is resolved to the outlet's URL: the 30
+  hottest that aren't politics, the 15 hottest that are, and the 25 newest
+  (they overlap). Video, live and section pages are left out, as search does.
+  The newest are resolved while Gemini reads.
+- **Politics** is any of: somebody filed under Politics on Pauv in the
+  headline, `/politics/` in the outlet's link, or the AI's reading. The form
+  shows 20 of what is sent and does the ordering and the hiding itself
+  (`sortTrending` in `lib/news/client`), so either order, politics in or out,
+  fills the list without another read.
+
+A pasted link has nobody searched for, so `api/news/article` now also returns
+`people`: everyone on Pauv the story names, the headline's first, then by how
+often the story says them. It has no AI check, so those ordinary one-word
+names are left out of it: a pasted story about Future has to be made from
+Who. Studio > News uses the same `people` for its own paste box.
 
 Nothing moves on by itself: pick an answer, then press Next; Back goes back
 one. A strip along the top holds every answer given so far,
-and pressing one goes back to it. The form opens on Who, or on the intro
-when Change brought you back from a video.
+and pressing one goes back to it. The form opens on its first question.
+**🎲 Randomize**, above the persona chooser, picks one of the personas that
+have all three clips in the library (never the one already chosen, when
+there is another).
 
 — and **Generate**, on the last question, makes the whole video from the answers before showing you
 anything. Then it lands on the tuning page, which is Simpler's builder with
 the deciding taken out: the sound, the captions, the BOOMs, the post caption
-and Download MP4. **Change** goes back to the form with the answers as they
-were left; Generate again replaces the video.
+and Download MP4. **Reset**, top right, starts Vids 2 over after a confirm:
+the video, its sound and its words go, every answer is cleared, and the form
+opens on its first question. (It replaced Change, which went back to the form
+with the video kept behind it; the form's "Back to the video" is left over
+from that and no longer shows.)
 
 ## One video, every recording rendered here
 
@@ -57,7 +142,7 @@ a name, a context that says Google and the outlet, and three abutting marks
 — Google up to the click, the story from the click to the pointer pressing on
 their name (`nameAt`), the name from there to the end. Its captions are three,
 one per mark, and the first two are fixed outright (`NEWS_BOTTOM_A_LINES`):
-"find a news article on google", then "look for someone trending"; the third
+"look for trending news on google", then "find someone trending"; the third
 is the pick, rolled from `BOTTOM_A_PICK` the way a ChatGPT clip's is ("lock
 in trump"). A news intro is never captioned on Fast's two placed lines.
 
@@ -78,7 +163,8 @@ The other questions say what the video *is*. The mode says how it talks.
 Serious and Middle each change one line — the hook — and nothing else. Degen
 changes the hook and two more things.
 
-Every hook is written in `api/vids/hook`, by Claude Opus 5, on its own call
+Every hook is written in `api/vids/hook`, by Claude Sonnet 5 at low effort
+(Opus 5 at medium until 2026-09-18, swapped for cost), on its own call
 beside the one that writes the rest of the words (`api/vids/captions`, which
 Vids 2 never asks for a hook). None is written off the screen recordings, so
 none waits on them: the hook lands as it comes back. The trading verb is drawn
@@ -94,13 +180,27 @@ does. Nothing about what the persona is doing, no "man", no emoji, lower case.
 > shorting drake before the album drops to pay off the car
 
 **Middle** uses exactly two of three parts — a money analogy, what the persona
-is doing (off the persona's context), the trade — and the route draws which
-two. A build with no persona context has no activity to name, so it is always
-analogy + trade.
+is doing (off the persona's context), the trade — or the **clock**, and the
+route draws which, a quarter each. A build with no persona context has no
+activity to name, so it is analogy + trade or the clock, half each.
 
 > making a surgeon's salary from the hot tub
 > shorting drake mid haircut
 > how to make a lawyer's salary shorting kanye
+
+**The clock** is the money against how little time it took — no trade, no
+name. Its time is a task off a fixed pool of thirteen (a quarter of clock
+lines), what the persona is doing said as a task (a quarter), or one of four
+drawn numbers with what they are doing after "while" (half). Without a
+context it is always the pool. A context that is only a place or a state
+("in a grocery store") has no task in it, and the pool stands in. The route
+puts the line together from the model's parts — opener, analogy, and the task
+or activity when the branch needs one — so it can't open wrong, lose its
+"while" or carry a number and a task together.
+
+> making rent in the time it takes to lose an argument
+> making a car payment in the time it takes to put on a suit of armor
+> making rent in 67 seconds while half asleep
 
 **One hook in five is a twist**, whatever the mode, one of three at even odds:
 a **mystery** — the trade on someone described but never named — **hype** —
@@ -117,6 +217,18 @@ a me if that breaks its frame, is written again.
 > me if shorting drake at a funeral was legal
 > me if going long on swifty at church was legal (Degen)
 
+Every fixed list, every odd and every guide's examples live in
+`lib/vids2/hookRules.ts`, which the route draws from. The **?** beside Start in
+the tuning page's captions opens `Vids2HookGuide`, a page over everything that
+lays all of it out — every mode, every twist, every percentage — read off that
+same file, so it can't say one thing while the route does another.
+
+**The hook is always two lines** on the frame, broken where the two come out
+closest in width, the type shrunk — Start only — until the wider fits
+(`CaptionLine.twoLines` in `lib/simpler/vidsCaptions`). Vids2Builder puts it on
+as the captions are laid out, never on the line itself, so no rewrite or hand
+edit can leave it off; Simpler never sets it. A one-word hook stays one line.
+
 ### Degen
 
 Degen changes three things and nothing else.
@@ -132,12 +244,12 @@ hand from the builder's Music list stays on any build.
 (bracket) + emoji.
 
 > chopped kid shorts musky (i need serious help) 🔥
-> down bad guy goes long on swifty (i love you swifty)
+> tweaker goes long on swifty (i love you swifty)
 
 Every part but the nickname comes off a fixed list, so the route draws those
 itself and asks Claude for the nickname alone — a funny shorthand when one
 lands, the plain name when not — plus its one-word short form. The descriptor
-is one of chopped kid, homeless man, tweaker, down bad guy, dude, kid. The
+is one of chopped kid, homeless man, tweaker, dude, kid. The
 bracket is one of nine self-owns followed by 💯 🔥 😎 or 🥀; or, a third of the
 time when the nickname has a short form of eight letters or fewer,
 "(i love you <short>)" with no emoji. The step-by-step lines still teach
@@ -149,7 +261,7 @@ the beats somebody watching would react on — two, with no intro:
 
 | When | Sound | Picture |
 | --- | --- | --- |
-| The intro gets to them — ChatGPT reaching the name (the `choosing` beat), or the pointer pressing on their name in the story (`nameAt`) | fahh (2.2s) | the BOOM |
+| The intro zooms in on them — the first quick in-out zoom pulse on their highlighted name, once it has been dragged over, in the ChatGPT answer or the story alike (each renderer's `pulseAt`). Never on the pointer going for the name or the drag | fahh (2.2s) | the BOOM |
 | Their page opens, the click after the search (Bottom B, `analyzing`) | oh hell nah (7.4s) | **none** |
 | Place trade goes in (Bottom B, `confirming`) | fahh (2.2s) | the BOOM |
 
@@ -188,16 +300,20 @@ Simpler's logic outright:
 | What | Where | Whose |
 | --- | --- | --- |
 | The plan, compose, audio, captions, edit, recipe, local clips | `lib/simpler/*` | **shared with Simpler** |
-| The captions rail, the post caption, the persona chooser | `components/simpler/*` | **shared with Simpler** |
+| The captions rail, the persona chooser | `components/simpler/*` | **shared with Simpler** |
+| The post captions (Copy for IG, Copy for TikTok), written from a news search, asked for the moment Generate is pressed | `components/vids2/Vids2PostCaption.tsx`, `api/vids/post-captions` | Vids 2's own (Simpler keeps its one caption) |
+| Asking for the words off the plan, so Generate can while the frames are drawn | `lib/vids2/vids2Words.ts` | Vids 2's own |
 | The ChatGPT recording | `components/chatgpt/chatgpt-video.ts` | shared with everybody |
 | The news recording | `components/news/news-video.ts` | shared with Studio > News |
 | Searching, reading and photographing a story | `lib/news/client.ts` | shared with Studio > News |
+| The trending list, and finding Pauv's people in text | `lib/news/trending.ts`, `lib/news/roster-match.ts`, `api/news/trending` | the news side's; Vids 2 the only caller of the list |
 | The Pauv trade recording | `components/trade/trade-video.ts` | shared with everybody |
 | The form, the tuning page, the section | `components/vids2/*` | Vids 2's own |
 | The answers, degen mode, the roster, the news-story-as-a-Bottom-A, the trade-as-a-Bottom-B | `lib/vids2/vids2Build.ts` | Vids 2's own |
 | The degen hook (`DEGEN_HOOK`, behind an optional `degen` flag) | `api/vids/captions` | shared route, Vids 2 the only caller |
 | The five answers, degen mode, the roster, the trade-as-a-Bottom-B | `lib/vids2/vids2Build.ts` | Vids 2's own |
 | The hook for each mode | `api/vids/hook` | Vids 2's own |
+| The hook's fixed lists, odds and examples; the ? guide to them | `lib/vids2/hookRules.ts`, `components/vids2/Vids2HookGuide.tsx` | Vids 2's own |
 
 **So a change to how Simpler builds a video is a change to how Vids 2 builds
 one** — the opposite of the Vids/Simpler rule, and chosen deliberately: a third
@@ -206,14 +322,14 @@ others forever. What is forked is only what actually differs — the pages.
 
 `Vids2Builder.tsx` *is* a fork of `components/simpler/VidsBuilder.tsx`, because
 it diverges on purpose: no Persona card, no Bottom card, no Reset, a summary of
-the form's answers in their place, and the captions written when a build lands
-rather than when a bottom is chosen. Fixes to the parts they still share — the
+the form's answers in their place, and the captions asked for by Generate while
+the recordings render rather than when a bottom is chosen. Fixes to the parts they still share — the
 stage, the transport, the export — have to be made in both by hand.
 
 ## What Vids 2 added to the shared files
 
-Two things, both optional, both defaulting to how it has always been — so
-nothing Simpler or Vids does moved.
+These, all optional, all defaulting to how it has always been — so nothing
+Simpler, Vids or the Studio pages do moved.
 
 - **`LocalClipMeta.theme`** (`lib/simpler/vidsLocal.ts`). A Bottom B carries
   which way Pauv was, because that is what the frame puts either side of the
@@ -224,6 +340,15 @@ nothing Simpler or Vids does moved.
   `BOTTOM_B_LEFT` (5%) to the left, because one filmed off a screen wants it.
   Vids 2's is the page itself, drawn square on to fill the frame, so it sits
   dead centre. Left unset everywhere else, which is the nudge.
+- **`onPlanned`** on the three renderers (`renderChatVideo` /
+  `makeChatGptClip`, `renderNewsVideo`, `renderTradeVideo`): the clip's beats,
+  length and size, called once they are worked out and before the first frame
+  is drawn. With **`plannedClip`** (`lib/simpler/vidsLocal.ts`) — the row a
+  clip will have, minus its bytes — that is enough to lay out the plan while
+  the frames are still going.
+- **An optional `signal`** on `writeCaptions`, `writeHook` and
+  `writePostCaptions` (`lib/vids-client.ts`), so a cancelled Generate stops
+  the calls it set off.
 
 ## The trade's captions
 
@@ -247,8 +372,33 @@ both sets).
 
 ## Things worth knowing
 
-- **Light / dark is the Pauv page only.** The ChatGPT renderer has no light
-  mode; that recording is dark whatever the form says.
+- **The words are written while the frames are drawn.** Generate asks for the
+  hook and both post captions the moment it is pressed: they are written off
+  who, which way, the mode and the persona, nothing on a recording. The post
+  captions are told who and which way outright, so the route skips reading
+  them off the recordings and goes straight to the news search, and each ask
+  is `fresh` — a second video on the same person the same day gets its own
+  pair rather than the one the route kept. The rest of the captions go the
+  moment both recordings have been laid out (`onPlanned`), off the plan they
+  are about to make. The tuning page takes what comes back (`Vids2Early`)
+  instead of asking again, so the words are usually there when the stage is,
+  "Consider holding" included. Rewrite still asks afresh from the stage. A
+  build with a library clip whose length isn't known waits for the browser to
+  measure it, then writes, as it used to.
+
+- **Light / dark is rolled, not asked** — even odds on every Generate
+  (`rollTheme`), and the tuning page's summary says which came up. It is the
+  Pauv page only: the ChatGPT renderer has no light mode, so that recording is
+  always dark.
+- **The news search knows short names.** `lib/news/name-forms` asks Gemini
+  once per name (cached for the server's life) which short forms the press
+  uses: ones safe to search alone ("Putin", "LeBron", "AOC") get a Google
+  News feed of their own beside the whole name's, and ones too common to
+  search alone ("Swift", "James", "Paul") only count in the headline of a
+  story found for the whole name. Either kind counts as the name being in the
+  title, and the recording drags over the form the headline uses
+  (`NewsHit.namedAs`). Without Gemini it falls back to the surname and first
+  name, headline-only. Studio > News shares all of it.
 - **The question keeps its capitals.** Only the two Generate question buttons
   come back lower case, the way a search bar is typed into; a question written
   by hand goes to ChatGPT exactly as it is written.
