@@ -1,6 +1,7 @@
 'use client';
 
 import { useState } from 'react';
+import { withBase } from '@/lib/clipping';
 
 // Site password gate UI. Posts to /api/unlock; on success the cookie is set and we send the
 // user to wherever they were headed (?next=), defaulting to the app root.
@@ -14,7 +15,7 @@ export default function UnlockPage() {
     setBusy(true);
     setError('');
     try {
-      const res = await fetch('/api/unlock', {
+      const res = await fetch(withBase('/api/unlock'), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ password }),
@@ -27,7 +28,10 @@ export default function UnlockPage() {
       const next = new URLSearchParams(window.location.search).get('next');
       // Only allow same-site relative redirects (no protocol-relative // open redirects).
       const dest = next && next.startsWith('/') && !next.startsWith('//') ? next : '/';
-      window.location.href = dest;
+      // withBase: ?next= is basePath-relative (middleware reads it off nextUrl,
+      // which strips the prefix), so in the clipper build this has to be put back
+      // on or a successful unlock lands on pauv.io itself rather than /clipping.
+      window.location.href = withBase(dest);
     } catch {
       setError('Something went wrong — try again');
       setBusy(false);

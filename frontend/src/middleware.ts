@@ -53,6 +53,9 @@ const CLIPPER_API = [
   '/api/news/photos/thumbs',
   '/api/charts/list-audio',
   '/api/charts/image-proxy',
+  // The emoji a caption can carry, and which ones have been reached for before
+  // — the captions rail reads and writes them (lib/emoji-prefs-store).
+  '/api/emoji-prefs',
 ];
 
 // Routes with something after them that still belong to the clipper: a saved

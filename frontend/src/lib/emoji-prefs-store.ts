@@ -9,6 +9,7 @@
 // Mutations are optimistic and persisted to Railway via /api/emoji-prefs.
 
 import { useEffect, useSyncExternalStore } from 'react';
+import { withBase } from '@/lib/clipping';
 
 export interface EmojiPref {
   unified: string;
@@ -50,7 +51,7 @@ export function loadEmojiPrefs(force = false): Promise<void> {
   if (loadPromise && !force) return loadPromise;
   loadPromise = (async () => {
     try {
-      const res = await fetch('/api/emoji-prefs', { cache: 'no-store' });
+      const res = await fetch(withBase('/api/emoji-prefs'), { cache: 'no-store' });
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       const rows = (await res.json()) as EmojiPref[];
       const prefs: EmojiPrefMap = {};
@@ -84,7 +85,7 @@ export async function setEmojiPref(
   setState({ prefs: { ...state.prefs, [unified]: optimistic }, loaded: state.loaded });
 
   try {
-    const res = await fetch('/api/emoji-prefs', {
+    const res = await fetch(withBase('/api/emoji-prefs'), {
       method: 'PUT',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ unified, ...patch }),
