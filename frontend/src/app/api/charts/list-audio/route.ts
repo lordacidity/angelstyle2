@@ -2,7 +2,8 @@ import { NextResponse } from 'next/server';
 import { readdirSync } from 'fs';
 import { existsSync } from 'fs';
 import { AUDIO_DIR, isTrackFile, readTrackMeta, trackUrl } from '@/lib/audio-library';
-import { listDegenTracks, listTrackNames } from '@/lib/vids-db';
+import { listClipableKeys, listDegenTracks, listTrackNames } from '@/lib/vids-db';
+import { CLIPPERS } from '@/lib/clipping';
 
 export const runtime = 'nodejs';
 // Never cache: tracks are saved and renamed between requests.
@@ -89,5 +90,15 @@ export async function GET() {
     return { url, label, durationMs: meta.durationMs ?? 20000, degen: isDegen };
   });
 
-  return NextResponse.json(tracks);
+  // The clipper deployment is offered only the songs switched on for it. The
+  // Studio's own listing is untouched, and so are the charts and the carousel —
+  // they run in the Studio build, where CLIPPERS is false. A listing made while
+  // the database is away has no approved songs rather than all of them: silence
+  // is the safe way to be wrong about what somebody else may use.
+  if (!CLIPPERS) return NextResponse.json(tracks);
+  const approved = await listClipableKeys('music').catch((err) => {
+    console.error('[list-audio] clipable songs unavailable:', err instanceof Error ? err.message : err);
+    return new Set<string>();
+  });
+  return NextResponse.json(tracks.filter((t) => approved.has(t.url)));
 }

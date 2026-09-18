@@ -14,6 +14,7 @@
 // from a client component (it would leak the DB string + storage secret).
 
 import { randomInt } from 'node:crypto';
+import { CLIPPERS } from '@/lib/clipping';
 import pg from 'pg';
 import { createClient, type SupabaseClient } from '@supabase/supabase-js';
 import {
@@ -386,12 +387,34 @@ export async function listLibrary(): Promise<VidsLibraryPayload> {
     pool.query<LinkDb>(`SELECT ${LINK_COLS} FROM vids_links ORDER BY created_at`),
     pool.query<ClipableDb>(`SELECT ${CLIPABLE_COLS} FROM vids_clipable ORDER BY created_at`),
   ]);
-  return {
+  const all: VidsLibraryPayload = {
     folders: f.rows.map(toFolder),
     videos: v.rows.map(toVideo),
     personas: p.rows.map(toPersona),
     links: l.rows.map(toLink),
     clipable: c.rows.map(toClipable).filter((x): x is VidClipableFlag => x !== null),
+  };
+  return CLIPPERS ? clipableOnly(all) : all;
+}
+
+/** The library as the clipper deployment is allowed to see it: only what has
+ *  been switched on for it on the Clippers page. Cut here, in the one place the
+ *  library is read, rather than in the page that shows it — "off" means ours
+ *  alone, and that has to be true of the API and not just of the UI.
+ *
+ *  A persona's own clips come with it whichever way they are flagged. Switching
+ *  a persona on is switching on the three parts it *is*; leaving them behind
+ *  would offer a clipper somebody whose video can't be built. Everything else —
+ *  every Bottom A, Bottom B and End — is offered one clip at a time. */
+function clipableOnly(lib: VidsLibraryPayload): VidsLibraryPayload {
+  const personas = lib.personas.filter((p) => p.clipable);
+  const parts = new Set(
+    personas.flatMap((p) => [p.startId, p.topAId, p.topBId].filter((id): id is string => !!id)),
+  );
+  return {
+    ...lib,
+    personas,
+    videos: lib.videos.filter((v) => v.clipable || parts.has(v.id)),
   };
 }
 
@@ -451,6 +474,15 @@ export async function setClipable(kind: ClipableKind, key: string, on: boolean):
   } else {
     await getPool().query('DELETE FROM vids_clipable WHERE kind = $1 AND key = $2', [kind, key]);
   }
+}
+
+/** The keys switched on for the clippers, of one kind — song urls, or caption
+ *  look ids. Read by the listings that have to narrow themselves in the clipper
+ *  build (list-audio); the library itself narrows in listLibrary. */
+export async function listClipableKeys(kind: ClipableKind): Promise<Set<string>> {
+  await ensureSchema();
+  const r = await getPool().query<{ key: string }>('SELECT key FROM vids_clipable WHERE kind = $1', [kind]);
+  return new Set(r.rows.map((row) => row.key));
 }
 
 // ── Links ─────────────────────────────────────────────────────────────────────

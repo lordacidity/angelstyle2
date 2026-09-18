@@ -4,6 +4,8 @@
 // answer back as an earlier turn. Shared by the live chat (ChatGptSection) and
 // the recording renderer (chatgpt-video), so both show the same thing.
 
+import { withBase } from '@/lib/clipping';
+
 export type Direction = 'up' | 'down';
 export interface Pick { name: string; text: string }
 export interface Reply { intro: string; picks: Pick[]; outro: string }
@@ -56,7 +58,7 @@ export const totalLen = (blocks: Block[]) => blocks.reduce((n, b) => n + b.len, 
 export async function askChatGpt(
   name: string, direction: Direction, messages: { role: 'user' | 'assistant'; content: string }[], signal?: AbortSignal,
 ): Promise<Reply> {
-  const r = await fetch('/api/ai/chatgpt', {
+  const r = await fetch(withBase('/api/ai/chatgpt'), {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ name, direction, messages }),

@@ -10,7 +10,16 @@ import path from "node:path";
 const rootEnv = path.join(process.cwd(), "..", ".env");
 if (fs.existsSync(rootEnv)) process.loadEnvFile(rootEnv);
 
+// One source tree, two sites. The clipper page at pauv.io/clipping is this same
+// app, built with NEXT_PUBLIC_APP=clippers on its own Vercel project. basePath
+// puts that build's pages, its /_next assets and its API routes all under
+// /clipping/*, so pauv.io forwards one prefix and nothing of ours collides with
+// its own routes. src/lib/clipping.ts reads the same flag for the URLs Next does
+// not prefix by itself (bare fetches, image src, audio src) — keep the two in step.
+const CLIPPERS = process.env.NEXT_PUBLIC_APP === "clippers";
+
 const nextConfig: NextConfig = {
+  ...(CLIPPERS ? { basePath: "/clipping" } : {}),
   poweredByHeader: false,
   // The Pricer reads its master list (and, once, its two seed CSVs) from disk at request time. Vercel only ships
   // files the bundler can see, so list them for the three routes that read them (src/lib/pricer/pipeline.js).

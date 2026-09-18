@@ -24,7 +24,7 @@ import { useEmojiField } from './EmojiPicker';
 import {
   CAPTION_SCALE_STEP, CAPTION_STYLES, MAX_CAPTION_SCALE, MIN_CAPTION_SCALE, clampCaptionScale,
   type Caption, type CaptionGroup, type CaptionLine, type CaptionLines,
-  type CaptionRef, type CaptionWindows, type LaidOutCaptions,
+  type CaptionRef, type CaptionStyle, type CaptionWindows, type LaidOutCaptions,
 } from '@/lib/simpler/vidsCaptions';
 import { emojiSrcForChar } from '@/lib/emoji';
 import { fmtTime } from '@/lib/utils';
@@ -169,9 +169,9 @@ const styleFont = (s: (typeof CAPTION_STYLES)[number]): CSSProperties => {
  *  Every row keeps a dark background, selected or not: these are colours meant
  *  for a video, and white on a light highlight would be a blank row. The tick
  *  says which one is on. */
-function StylePicker({ styleId, setStyleId }: { styleId: string; setStyleId: (id: string) => void }) {
+function StylePicker({ styleId, setStyleId, looks }: { styleId: string; setStyleId: (id: string) => void; looks: readonly CaptionStyle[] }) {
   const [open, setOpen] = useState(false);
-  const current = CAPTION_STYLES.find((s) => s.id === styleId) ?? CAPTION_STYLES[0];
+  const current = looks.find((s) => s.id === styleId) ?? looks[0];
   return (
     <div className="relative">
       <button
@@ -187,7 +187,7 @@ function StylePicker({ styleId, setStyleId }: { styleId: string; setStyleId: (id
           {/* Anywhere else puts it away, including the page behind it. */}
           <div className="fixed inset-0 z-40" onPointerDown={() => setOpen(false)} />
           <div className="absolute left-0 right-0 top-full z-50 mt-1 overflow-hidden rounded border border-zinc-700 bg-black shadow-xl">
-            {CAPTION_STYLES.map((s) => (
+            {looks.map((s) => (
               <button
                 key={s.id}
                 onClick={() => { setStyleId(s.id); setOpen(false); }}
@@ -315,11 +315,16 @@ interface Props {
   /** Beside the Start label: Vids 2 puts a ? there that opens how its hook is
    *  written (Vids2HookGuide). Simpler leaves it out. */
   startHelp?: ReactNode;
+  /** The looks there are to choose from. Every one of them unless somebody
+   *  hands over fewer — which the clipper build does, where a look is on offer
+   *  only if it has been switched on for the clippers. */
+  looks?: readonly CaptionStyle[];
 }
 
 export function VidsCaptionsRail({
   canCaption, lines, setLines, laid, windows, hasLines, writing, error,
   styleId, setStyleId, size, setSize, onRewrite, canRewrite, onResetPos, onStartTyped, startHelp,
+  looks = CAPTION_STYLES,
 }: Props) {
   const momentsOf = (w: CaptionWindows['bottomA']) => (w?.marks ?? []).map((m) => m.text);
   // Bottom A on Fast: two lines the writer put where it chose, not one per mark.
@@ -426,7 +431,7 @@ export function VidsCaptionsRail({
       </Section>
 
       <Section title="Caption style">
-        <StylePicker styleId={styleId} setStyleId={setStyleId} />
+        <StylePicker styleId={styleId} setStyleId={setStyleId} looks={looks} />
         {/* How big the words are drawn, either side of the size the look asks
             for — 100% is the look as it comes. The stage shows it as it moves,
             and it is what the file is written with. */}

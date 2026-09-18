@@ -19,6 +19,7 @@
 
 import type * as MB from 'mediabunny';
 import { isPhoto } from '@/lib/vids-types';
+import { withBase } from '@/lib/clipping';
 import { localClipBlob } from '@/lib/simpler/vidsLocal';
 import {
   drawPlanItem, isBoomItem, smoothScaling, videoBitrate,
@@ -83,7 +84,7 @@ function loadStill(url: string): Promise<HTMLImageElement> {
     img.crossOrigin = 'anonymous';
     img.onload = () => resolve(img);
     img.onerror = () => reject(new Error('image failed to load'));
-    img.src = url;
+    img.src = withBase(url);
   });
 }
 
@@ -135,7 +136,7 @@ export async function composeSequence(opts: ComposeOptions): Promise<Blob> {
       // from its bytes; everything else is fetched from the bucket in ranges.
       const local = localClipBlob(item.video);
       const input = new Input({
-        source: local ? new BlobSource(local) : new UrlSource(item.video.url),
+        source: local ? new BlobSource(local) : new UrlSource(withBase(item.video.url)),
         formats: ALL_FORMATS,
       });
       inputs.push(input);

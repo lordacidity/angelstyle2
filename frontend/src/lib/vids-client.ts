@@ -9,6 +9,7 @@ import type {
   ClipableKind, CreateVideoInput, SignUploadResponse, VidClipablePatch, VidContextPatch, VidEdit, VidFolder, VidLink,
   VidMark, VidPersona, VidRow, VidTheme, VidThemePatch, CreateRecipeInput, VideoProbe, VidRecipe, VidsLibraryPayload,
 } from '@/lib/vids-types';
+import { withBase } from '@/lib/clipping';
 
 /** The clip ids on a persona — all optional, so one part can be re-pointed alone. */
 export interface PersonaParts {
@@ -18,7 +19,7 @@ export interface PersonaParts {
 }
 
 async function api<T>(path: string, init?: RequestInit): Promise<T> {
-  const res = await fetch(`/api/vids${path}`, {
+  const res = await fetch(withBase(`/api/vids${path}`), {
     ...init,
     headers: { 'Content-Type': 'application/json', ...(init?.headers ?? {}) },
   });

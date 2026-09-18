@@ -11,6 +11,8 @@ export type PointerKind = 'arrow' | 'hand' | 'beam' | 'cross';
 /** The pointer's 32px cell, in the units of a 1000px-wide frame: Windows'
  *  pointer at 130%. A clip can draw it smaller or larger with drawPointer's
  *  `size`. */
+import { withBase } from '@/lib/clipping';
+
 export const POINTER_CELL = 32 * 1.3;
 
 const BITMAP_PX = 128;
@@ -37,7 +39,7 @@ export function loadPointers(): Promise<void> {
     const img = new Image();
     img.onload = () => { images[kind] = img; resolve(); };
     img.onerror = () => reject(new Error(`Pointer image missing: ${BITMAPS[kind].src}`));
-    img.src = BITMAPS[kind].src;
+    img.src = withBase(BITMAPS[kind].src);
   }))).then(() => undefined, err => { loading = null; throw err; });
   return loading;
 }

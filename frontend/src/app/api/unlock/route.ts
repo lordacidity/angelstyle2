@@ -6,6 +6,7 @@ import {
   SITE_SCOPE,
   COOKIE_TTL_MS,
 } from '@/lib/auth';
+import { BASE_PATH } from '@/lib/clipping';
 
 // Verifies the shared site password and, on success, sets the signed `site_auth` cookie
 // that the middleware checks on every other route.
@@ -28,7 +29,10 @@ export async function POST(req: NextRequest) {
     httpOnly: true,
     secure: process.env.NODE_ENV === 'production',
     sameSite: 'lax',
-    path: '/',
+    // Scoped to what this deployment serves, not to the domain. The clipper
+    // build sits under /clipping on pauv.io, which has a site of its own on the
+    // same host — our cookie has no business being sent with its requests.
+    path: BASE_PATH || '/',
     maxAge: Math.floor(COOKIE_TTL_MS / 1000),
   });
   return res;

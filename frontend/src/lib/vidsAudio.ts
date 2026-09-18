@@ -21,6 +21,8 @@
 // is only picked at build time rather than fixed here.
 
 /** Typing. Placed per clip, in Prep. */
+import { withBase } from '@/lib/clipping';
+
 export const SFX_URL = '/audio/keyboard-typing.wav';
 /** An empty room. Laid under the whole export. */
 export const ROOM_TONE_URL = '/audio/room-tone.mp3';
@@ -109,7 +111,7 @@ export const MUSIC_FADE = 0.6;
 /** The tracks there are to choose from. Listed by the server rather than named
  *  here, so whatever is in public/audio is what the picker offers. */
 export async function listMusic(signal?: AbortSignal): Promise<MusicTrack[]> {
-  const r = await fetch('/api/charts/list-audio', { signal });
+  const r = await fetch(withBase('/api/charts/list-audio'), { signal });
   if (!r.ok) throw new Error(`Couldn't load the music library (${r.status}).`);
   const rows: unknown = await r.json();
   if (!Array.isArray(rows)) return [];
@@ -129,7 +131,7 @@ const bytes = new Map<string, Promise<ArrayBuffer>>();
 export function loadAudioBytes(url: string): Promise<ArrayBuffer> {
   const cached = bytes.get(url);
   if (cached) return cached;
-  const p = fetch(url)
+  const p = fetch(withBase(url))
     .then((r) => {
       if (!r.ok) throw new Error(`Couldn't load ${url} (${r.status}).`);
       return r.arrayBuffer();

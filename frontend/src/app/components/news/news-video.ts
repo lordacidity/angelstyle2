@@ -39,6 +39,7 @@
 // file goes back with its beats in clip seconds (NewsBeats) so a Bottom made
 // this way can be marked up like a hand-cut one.
 
+import { withBase } from '@/lib/clipping';
 import { mixClicks, type ClickEvent } from '@/lib/clipSfx';
 import { measureNewsPage, type PageMeasure, type Rect } from '@/lib/news/page-measure';
 import { paintNewsPage } from '@/lib/news/rasterize';
@@ -182,7 +183,7 @@ function loadImage(src: string): Promise<HTMLImageElement | null> {
     const img = new Image();
     img.onload = () => resolve(img);
     img.onerror = () => resolve(null);
-    img.src = src;
+    img.src = withBase(src);
   });
 }
 

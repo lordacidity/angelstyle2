@@ -24,6 +24,7 @@
 import {
   loadNewsAssets, renderNewsVideo, type NewsBeats, type NewsPlan,
 } from '@/app/components/news/news-video';
+import { withBase } from '@/lib/clipping';
 import {
   AMOUNT_USD, createTradeClip, loadTradeAssets, renderTradeVideo, VIDEO_H, VIDEO_W,
   type Direction, type Theme, type TradeBeats, type TradeTalent,
@@ -319,7 +320,7 @@ let rosterP: Promise<TradeTalent[]> | null = null;
 export function loadRoster(signal?: AbortSignal): Promise<TradeTalent[]> {
   if (!rosterP) {
     rosterP = (async () => {
-      const r = await fetch('/api/ai/talents');
+      const r = await fetch(withBase('/api/ai/talents'));
       const data = await r.json().catch(() => null) as TradeTalent[] | { error?: string } | null;
       if (!r.ok || !Array.isArray(data)) {
         throw new Error((data && !Array.isArray(data) && data.error) || `Pauv roster: HTTP ${r.status}`);

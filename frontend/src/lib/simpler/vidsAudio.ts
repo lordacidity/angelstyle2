@@ -20,6 +20,8 @@
 // production. Music is served from that same origin for the same reasons; it
 // is only picked at build time rather than fixed here.
 
+import { withBase } from '@/lib/clipping';
+
 /** Typing. Placed per clip, in Prep. */
 export const SFX_URL = '/audio/keyboard-typing.wav';
 /** An empty room. Laid under the whole export. */
@@ -112,7 +114,7 @@ export const MUSIC_FADE = 0.6;
 /** The tracks there are to choose from. Listed by the server rather than named
  *  here, so whatever is in public/audio is what the picker offers. */
 export async function listMusic(signal?: AbortSignal): Promise<MusicTrack[]> {
-  const r = await fetch('/api/charts/list-audio', { signal });
+  const r = await fetch(withBase('/api/charts/list-audio'), { signal });
   if (!r.ok) throw new Error(`Couldn't load the music library (${r.status}).`);
   const rows: unknown = await r.json();
   if (!Array.isArray(rows)) return [];
@@ -156,7 +158,7 @@ export const boomGain = (level: number): number => clampBoomLevel(level);
 /** The sounds there are to choose from. Listed by the server rather than named
  *  here, for the reason the music is: whatever is in the folder is the list. */
 export async function listBoomSounds(signal?: AbortSignal): Promise<BoomSound[]> {
-  const r = await fetch('/api/vids/boom-sounds', { signal });
+  const r = await fetch(withBase('/api/vids/boom-sounds'), { signal });
   if (!r.ok) throw new Error(`Couldn’t load the BOOM sounds (${r.status}).`);
   const rows: unknown = await r.json();
   if (!Array.isArray(rows)) return [];
@@ -176,7 +178,7 @@ const bytes = new Map<string, Promise<ArrayBuffer>>();
 export function loadAudioBytes(url: string): Promise<ArrayBuffer> {
   const cached = bytes.get(url);
   if (cached) return cached;
-  const p = fetch(url)
+  const p = fetch(withBase(url))
     .then((r) => {
       if (!r.ok) throw new Error(`Couldn't load ${url} (${r.status}).`);
       return r.arrayBuffer();

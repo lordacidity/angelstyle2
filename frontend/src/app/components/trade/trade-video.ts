@@ -50,6 +50,7 @@
 // The result goes back with its beats in clip seconds (TradeBeats) so a
 // Bottom B made this way can be marked up like a hand-cut one.
 
+import { withBase } from '@/lib/clipping';
 import { safeExportName } from '@/lib/canvasVideoExport';
 import { mixClicks, mixKeys, type ClickEvent } from '@/lib/clipSfx';
 import { decodeAudio, SFX_URL } from '@/lib/vidsAudio';
@@ -654,10 +655,10 @@ function loadImage(src: string, cors: boolean): Promise<HTMLImageElement | null>
     if (cors) img.crossOrigin = 'anonymous';
     img.onload = () => resolve(img);
     img.onerror = () => resolve(null);
-    img.src = src;
+    img.src = withBase(src);
   });
 }
-const proxied = (url: string) => `/api/charts/image-proxy?url=${encodeURIComponent(url)}`;
+const proxied = (url: string) => withBase(`/api/charts/image-proxy?url=${encodeURIComponent(url)}`);
 
 // The changes the price history gives: since the first trade (the way the
 // page is overall) and over the last 30 days; null when the history is
@@ -666,7 +667,7 @@ export interface HistoryChanges { lifetimePct: number | null; monthPct: number |
 async function loadHistoryChanges(ticker: string, signal?: AbortSignal): Promise<HistoryChanges> {
   const none: HistoryChanges = { lifetimePct: null, monthPct: null };
   try {
-    const r = await fetch(`/api/markets/batch-history?slugs=${encodeURIComponent(ticker)}&window=all`, { signal });
+    const r = await fetch(withBase(`/api/markets/batch-history?slugs=${encodeURIComponent(ticker)}&window=all`), { signal });
     if (!r.ok) return none;
     const data = await r.json() as Record<string, { price: number; timestamp: string }[]>;
     const pts = (data[ticker] ?? []).filter(p => p.price > 0);
@@ -687,7 +688,7 @@ const GRID_COUNT = 15;
  *  photos, the homepage screenshot for the theme, the wordmark, the fonts, the
  *  pointer. */
 export async function loadTradeAssets(name: string, theme: Theme, signal?: AbortSignal): Promise<TradeAssets> {
-  const r = await fetch('/api/ai/talents', { signal });
+  const r = await fetch(withBase('/api/ai/talents'), { signal });
   const data = await r.json().catch(() => null) as TradeTalent[] | { error?: string } | null;
   if (!r.ok || !Array.isArray(data)) throw new Error((data && !Array.isArray(data) && data.error) || `Pauv roster: HTTP ${r.status}`);
   const person = matchTalent(data, name);

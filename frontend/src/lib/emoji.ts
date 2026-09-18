@@ -33,10 +33,11 @@ export interface EmojiDef {
 // metadata. The tokenizer below buckets these chars by their first code unit so
 // matching stays fast even at this size.
 import EMOJI_DATA from './emoji-data.json';
+import { withBase } from '@/lib/clipping';
 
 export const EMOJIS: EmojiDef[] = EMOJI_DATA as EmojiDef[];
 
-export const emojiSrc = (unified: string) => `/emoji/${unified}.png`;
+export const emojiSrc = (unified: string) => withBase(`/emoji/${unified}.png`);
 
 const CHAR_TO_UNIFIED = new Map(EMOJIS.map(e => [e.char, e.unified]));
 const UNIFIED_TO_EMOJI = new Map(EMOJIS.map(e => [e.unified, e]));

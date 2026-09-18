@@ -7,6 +7,7 @@
 // of itself filling the sides, the way news sites and TV show portrait shots.
 // Thumbnails are simply cropped to fill.
 
+import { withBase } from '@/lib/clipping';
 import type { NewsPhoto, PersonPhoto } from './types';
 import type { PhotoSize } from './templates';
 
@@ -22,7 +23,7 @@ function load(url: string): Promise<HTMLImageElement> {
     img.onload = () => resolve(img);
     img.onerror = () => reject(new Error("Couldn't load the photo."));
     // Same-origin through the proxy, so the canvas can be exported.
-    img.src = `/api/charts/image-proxy?url=${encodeURIComponent(url)}`;
+    img.src = withBase(`/api/charts/image-proxy?url=${encodeURIComponent(url)}`);
   });
 }
 

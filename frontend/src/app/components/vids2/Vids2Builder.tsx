@@ -72,11 +72,12 @@ import {
   buildCaptions, capLine, captionAt,
   captionStyle, captionWindows, drawCaption, layoutCaption, preloadCaptionEmoji,
   scaleCaptionStyle,
-  type CaptionLines, type CaptionPos, type CaptionRef,
+  type CaptionLines, type CaptionPos, type CaptionRef, type CaptionStyle,
 } from '@/lib/simpler/vidsCaptions';
 import { VidsCaptionsRail } from '@/app/components/simpler/VidsCaptionsRail';
 import { Vids2HookGuide } from './Vids2HookGuide';
 import { Vids2PostCaption } from './Vids2PostCaption';
+import { withBase } from '@/lib/clipping';
 import { createRecipe, deleteRecipe, writeHook } from '@/lib/vids-client';
 import { specFromBuild } from '@/lib/simpler/vidsRecipe';
 import {
@@ -245,7 +246,7 @@ function MusicPicker({ tracks, music, level, onChoose }: {
   const preview = useCallback((track: MusicTrack) => {
     if (previewing === track.url) { stop(); return; }
     stop();
-    const el = new Audio(track.url);
+    const el = new Audio(withBase(track.url));
     el.preload = 'auto';
     el.volume = Math.min(1, Math.max(0, level));
     audioRef.current = el;
@@ -434,11 +435,14 @@ interface Props {
   /** Start Vids 2 over: every answer cleared, this video let go, the form on
    *  its first question (Vids2Section `reset`). */
   onReset: () => void;
+  /** The caption looks on offer — all of them in the Studio, only the ones
+   *  switched on for the clippers out at pauv.io/clipping. */
+  looks: readonly CaptionStyle[];
 }
 
 export function Vids2Builder({
   picks, onPicksChange, clipsForSlot,
-  personas, appliedPersonaId, active, libraryLoaded, build, onReset,
+  personas, appliedPersonaId, active, libraryLoaded, build, onReset, looks,
 }: Props) {
   const outW = OUT_W;
   const outH = OUT_H;
@@ -472,6 +476,20 @@ export function Vids2Builder({
   // re-picked slot never carries a stale value.
   const [durations, setDurations] = useState<Record<string, number>>({});
   const [errors, setErrors] = useState<Record<string, string>>({});
+  /** A failure is only ever about the last attempt. An element that errors and
+   *  then loads — a request the browser dropped while several were in flight
+   *  for the same file, a dev-server restart mid-fetch — has nothing wrong with
+   *  it any more, so the mark comes off the moment a frame arrives. Without
+   *  this the very first hiccup stood until the whole build was thrown away,
+   *  which is what made one dropped request look like a clip that never loads. */
+  const clearError = useCallback((key: string) => {
+    setErrors((prev) => {
+      if (!(key in prev)) return prev;
+      const rest = { ...prev };
+      delete rest[key];
+      return rest;
+    });
+  }, []);
   const [playing, setPlaying] = useState(false);
   const [time, setTime] = useState(0);
   // The frame the paused stage is currently showing. Kept so a redraw that
@@ -597,6 +615,14 @@ export function Vids2Builder({
     [],
   );
   const [styleId, setStyleId] = useState<string>(DEFAULT_CAPTION_STYLE);
+  // A look that is not on offer is not one this video may be drawn in — the
+  // picker listing fewer of them is not enough, since the words are drawn from
+  // styleId and not from what the list happens to show. Out at pauv.io/clipping
+  // that is the looks switched on for the clippers; in the Studio `looks` is
+  // all of them and this never fires.
+  useEffect(() => {
+    if (looks.length && !looks.some((s) => s.id === styleId)) setStyleId(looks[0].id);
+  }, [looks, styleId]);
   /** How big the words are drawn, as a multiple of whatever the look asks for.
    *  Set by hand under the picker; a fresh look is never rolled with one, so
    *  this is the size somebody chose and Reset leaves it alone — the same way
@@ -700,7 +726,10 @@ export function Vids2Builder({
     if (failed.length) setCaptionError(failed.map((e) => (e instanceof Error ? e.message : String(e))).join(' · '));
     setWriting(false);
   };
-  const broken = plan.items.filter((i) => errors[i.video.id]);
+  // A slot is known by its clip, a BOOM by itself: every BOOM is the same file,
+  // so keying their failures by clip would have one of them condemn the lot —
+  // which is how two of them came to be named by a single dropped request.
+  const broken = plan.items.filter((i) => errors[i.slot] ?? errors[i.video.id]);
 
   // The captions, once the clips are in, for a build that has to wait for
   // them (see pendingWrite). They are written off the clips as the browser
@@ -1693,10 +1722,10 @@ export function Vids2Builder({
             <img
               key={`${s.id}:${p.video.id}`}
               ref={layerRefs.image(s.id)}
-              src={p.video.url}
+              src={withBase(p.video.url)}
               crossOrigin="anonymous"
               alt=""
-              onLoad={() => draw(timeRef.current)}
+              onLoad={() => { clearError(p.video.id); draw(timeRef.current); }}
               onError={() => setErrors((prev) => ({ ...prev, [p.video.id]: 'Could not load this photo.' }))}
               className="pointer-events-none absolute h-px w-px opacity-0"
               aria-hidden
@@ -1707,13 +1736,13 @@ export function Vids2Builder({
           <video
             key={`${s.id}:${p.video.id}`}
             ref={layerRefs.video(s.id)}
-            src={p.video.url}
+            src={withBase(p.video.url)}
             crossOrigin="anonymous"
             playsInline
             preload="auto"
             muted={p.muted}
             onLoadedMetadata={handleMeta(p.video.id)}
-            onLoadedData={handleFrame(s.id)}
+            onLoadedData={(e) => { clearError(p.video.id); handleFrame(s.id)(e); }}
             onSeeked={handleFrame(s.id)}
             onError={() => setErrors((prev) => ({ ...prev, [p.video.id]: 'Could not load this clip (unsupported codec or network error).' }))}
             className="pointer-events-none absolute h-px w-px opacity-0"
@@ -1731,14 +1760,14 @@ export function Vids2Builder({
         <video
           key={boomLayer(b.id)}
           ref={layerRefs.video(boomLayer(b.id))}
-          src={b.video.url}
+          src={withBase(b.video.url)}
           crossOrigin="anonymous"
           playsInline
           preload="auto"
           onLoadedMetadata={handleMeta(b.video.id)}
-          onLoadedData={handleFrame(boomLayer(b.id))}
+          onLoadedData={(e) => { clearError(boomLayer(b.id)); handleFrame(boomLayer(b.id))(e); }}
           onSeeked={handleFrame(boomLayer(b.id))}
-          onError={() => setErrors((prev) => ({ ...prev, [b.video.id]: 'Could not load the BOOM.' }))}
+          onError={() => setErrors((prev) => ({ ...prev, [boomLayer(b.id)]: 'Could not load the BOOM.' }))}
           className="pointer-events-none absolute h-px w-px opacity-0"
           aria-hidden
         />
@@ -1756,9 +1785,9 @@ export function Vids2Builder({
             if (el) boomAudioEls.current.set(b.id, el);
             else boomAudioEls.current.delete(b.id);
           }}
-          src={b.sound.url}
+          src={withBase(b.sound.url)}
           preload="auto"
-          onLoadedMetadata={() => syncElements(timeRef.current, playing, true)}
+          onLoadedMetadata={() => { clearError(b.sound!.url); syncElements(timeRef.current, playing, true); }}
           onError={() => setErrors((prev) => ({
             ...prev,
             [b.sound!.url]: `Could not load the BOOM sound (${b.sound!.label}).`,
@@ -1776,7 +1805,7 @@ export function Vids2Builder({
         <video
           key={BOOM_PREVIEW_LAYER}
           ref={layerRefs.video(BOOM_PREVIEW_LAYER)}
-          src={boomClip.url}
+          src={withBase(boomClip.url)}
           crossOrigin="anonymous"
           playsInline
           muted
@@ -2158,6 +2187,7 @@ export function Vids2Builder({
           hasLines={hasLines}
           writing={writing}
           error={captionError}
+          looks={looks}
           styleId={styleId}
           setStyleId={setStyleId}
           size={capScale}

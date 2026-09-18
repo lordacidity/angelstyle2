@@ -18,6 +18,7 @@
 // calling of them and what is done with the answers. No React in here, and
 // nothing about what a caller shows or saves.
 
+import { withBase } from '@/lib/clipping';
 import { framePersonPhoto, frameThumb, photoCredit } from './frame-photo';
 import type { NewsRange } from './google-news';
 import type { NameForms } from './name-forms';
@@ -42,7 +43,7 @@ export const isNewsRange = (v: unknown): v is NewsRange =>
 export const errorText = (err: unknown) => (err instanceof Error ? err.message : String(err));
 
 export async function postJson<T>(url: string, body: unknown, signal?: AbortSignal): Promise<T> {
-  const res = await fetch(url, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body), signal });
+  const res = await fetch(withBase(url), { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body), signal });
   const j = await res.json().catch(() => ({}));
   if (!res.ok) throw new Error((j as { error?: string }).error ?? `${url} answered ${res.status}`);
   return j as T;
@@ -68,7 +69,7 @@ export interface NewsSearch { hits: NewsHit[]; forms: NameForms }
  *  with the route's reason. */
 export async function searchNews(q: string, outlets: readonly OutletId[], range: NewsRange, signal?: AbortSignal): Promise<NewsSearch> {
   const params = new URLSearchParams({ q, outlets: outlets.join(','), range });
-  const res = await fetch(`/api/news/search?${params}`, { signal });
+  const res = await fetch(withBase(`/api/news/search?${params}`), { signal });
   const j = await res.json().catch(() => ({})) as { hits?: NewsHit[]; forms?: NameForms; error?: string };
   if (!res.ok) throw new Error(j.error ?? `Search failed (${res.status})`);
   return { hits: j.hits ?? [], forms: j.forms ?? { search: [], headline: [], ai: false } };
@@ -124,7 +125,7 @@ export const isTrendWindow = (v: unknown): v is TrendWindow =>
 /** Fresh stories whose headlines name somebody on Pauv, each with its heat
  *  (lib/news/trending). Throws with the route's reason. */
 export async function loadTrending(window: TrendWindow, signal?: AbortSignal): Promise<TrendingResponse> {
-  const res = await fetch(`/api/news/trending?window=${window}`, { signal, cache: 'no-store' });
+  const res = await fetch(withBase(`/api/news/trending?window=${window}`), { signal, cache: 'no-store' });
   const j = await res.json().catch(() => ({})) as Partial<TrendingResponse> & { error?: string };
   if (!res.ok) throw new Error(j.error ?? `Trending failed (${res.status})`);
   return { hits: j.hits ?? [], scanned: j.scanned ?? 0, matched: j.matched ?? 0, ai: j.ai ?? false };

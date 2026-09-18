@@ -45,6 +45,8 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useVidsLibrary } from '@/app/hooks/useVidsLibrary';
+import { CLIPPERS } from '@/lib/clipping';
+import { CAPTION_STYLES } from '@/lib/simpler/vidsCaptions';
 import { Vids2Builder } from './Vids2Builder';
 import { Vids2Form, type Vids2Job, type Vids2Leg } from './Vids2Form';
 import {
@@ -108,6 +110,22 @@ interface IntroClip { row: VidRow; pick: number; notes: string[] }
 export function Vids2Section({ active }: { active: boolean }) {
   const lib = useVidsLibrary(active);
   const { loaded, loading, folders, videos, personas, ensureFolders } = lib;
+
+  // The caption looks this build may draw in. The Studio has all of them; the
+  // clipper page at pauv.io/clipping has the ones switched on for the clippers
+  // (Studio > Vids > Clippers). The clips, personas and songs are narrowed
+  // server side — a look has no row of its own, only a flag against an id named
+  // in code, so it is narrowed here off the flags the library brings with it.
+  //
+  // With nothing switched on it is the default look alone rather than none: a
+  // clipper with no look to draw in has no video either, and one house look is
+  // a better answer to an empty list than a dead page.
+  const looks = useMemo(() => {
+    if (!CLIPPERS) return CAPTION_STYLES;
+    const on = new Set(lib.clipable.filter((c) => c.kind === 'captionStyle').map((c) => c.key));
+    const offered = CAPTION_STYLES.filter((s) => on.has(s.id));
+    return offered.length ? offered : CAPTION_STYLES.slice(0, 1);
+  }, [lib.clipable]);
 
   const [setup, setSetup] = useState<Vids2Setup>(loadSetup);
   const [picks, setPicks] = useState<Picks>({});
@@ -533,6 +551,7 @@ export function Vids2Section({ active }: { active: boolean }) {
               libraryLoaded={loaded}
               build={build}
               onReset={reset}
+              looks={looks}
             />
           </div>
         )}

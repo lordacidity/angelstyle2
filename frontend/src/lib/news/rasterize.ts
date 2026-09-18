@@ -15,6 +15,13 @@
 // is, where the photos are — since the page is only ever a DOM in step 1.
 
 import { PAGE_WIDTH, type RenderedPage } from './templates';
+import { BASE_PATH, withBase } from '@/lib/clipping';
+
+/** The templates write their logos as <img src="/news/…">, a path this app
+ *  serves. In the clipper build it serves them under /clipping, so the markup
+ *  is rebased on the way into the frame — here rather than in each template,
+ *  so a new outlet cannot be added without it. */
+const rebase = (html: string) => (BASE_PATH ? html.replace(/(\ssrc=")\/(?!\/)/g, `$1${BASE_PATH}/`) : html);
 
 export interface NewsImage {
   blob: Blob;
@@ -84,7 +91,7 @@ async function layOut(page: RenderedPage): Promise<{ frame: HTMLIFrameElement; r
   frame.setAttribute('aria-hidden', 'true');
   frame.style.cssText = `position:fixed;left:-100000px;top:0;width:${PAGE_WIDTH}px;height:900px;border:0;visibility:hidden;pointer-events:none;`;
   const loaded = new Promise<void>(resolve => frame.addEventListener('load', () => resolve(), { once: true }));
-  frame.srcdoc = `<!doctype html><html><head><meta charset="utf-8"><link rel="stylesheet" href="${page.fontsHref}"><style>html,body{margin:0;padding:0;}${page.css}</style></head><body>${page.html}</body></html>`;
+  frame.srcdoc = `<!doctype html><html><head><meta charset="utf-8"><link rel="stylesheet" href="${page.fontsHref}"><style>html,body{margin:0;padding:0;}${page.css}</style></head><body>${rebase(page.html)}</body></html>`;
   document.body.appendChild(frame);
   await loaded;
   const doc = frame.contentDocument!;
@@ -101,7 +108,7 @@ async function svgImageOf(root: HTMLElement, page: RenderedPage, height: number)
   // Logos and any other images become data URLs so the SVG is self-contained.
   for (const img of [...root.querySelectorAll('img')]) {
     const src = img.getAttribute('src');
-    if (src && !src.startsWith('data:')) img.setAttribute('src', await toDataUrl(new URL(src, window.location.href).href));
+    if (src && !src.startsWith('data:')) img.setAttribute('src', await toDataUrl(new URL(withBase(src), window.location.href).href));
   }
   const fontCss = await inlineFontCss(page.fontsHref);
   const markup = new XMLSerializer().serializeToString(root);
