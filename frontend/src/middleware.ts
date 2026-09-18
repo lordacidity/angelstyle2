@@ -122,5 +122,12 @@ export async function middleware(req: NextRequest) {
 export const config = {
   // Run on everything except Next internals, the favicon, and heavy upload endpoints
   // (mix-audio sends large video blobs — excluding it avoids Next's 10MB middleware body limit).
-  matcher: ['/((?!_next/static|_next/image|favicon\.ico|api/charts/mix-audio).*)'],
+  //
+  // '/' is listed separately and is NOT redundant. Next compiles these with
+  // path-to-regexp, where the '(...)' below is a required parameter — it has to
+  // match at least one character, so the pattern alone never matches the site
+  // root. Without this line the root is the one path with no password gate, no
+  // clipper allowlist and no rewrite: it served the whole Studio shell,
+  // unauthenticated, at pauv.io/clipping.
+  matcher: ['/', '/((?!_next/static|_next/image|favicon\\.ico|api/charts/mix-audio).*)'],
 };
