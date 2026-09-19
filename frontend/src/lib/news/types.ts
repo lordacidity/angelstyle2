@@ -30,6 +30,10 @@ export interface NamedPerson {
   ticker: string;
   /** "Sports", "Music", "Politics"… as Pauv files them. */
   industry: string;
+  /** The finer grain under it — "Basketball", "Rap", "Cycling" — or null where
+   *  Pauv files them under the industry alone. What a typed category matches
+   *  against first (lib/news/categories). */
+  subcategory: string | null;
 }
 
 /** Who a story read off an outlet names, for a link nobody searched for:
@@ -40,7 +44,7 @@ export interface StoryPerson extends NamedPerson {
 }
 
 /** How far back the trending list looks. */
-export type TrendWindow = '24h' | '6h' | '1h';
+export type TrendWindow = '1h' | '6h' | '24h' | '7d';
 
 /** One row of the trending list: a fresh story from an approved outlet whose
  *  headline names somebody on Pauv (lib/news/trending). */
@@ -76,6 +80,22 @@ export interface TrendingResponse {
   /** Whether the AI read every one (false: name matches as they fell,
    *  politics by the person and the link alone, some or all with no heat). */
   ai: boolean;
+  /** The category this list was read for, when it was read for one — the
+   *  headlines were asked of Google with it, rather than filtered after. Null
+   *  for the ordinary list, which is everything the outlets put out. */
+  topic: string | null;
+}
+
+/** One category the form can be asked for: an industry Pauv files people
+ *  under, or one of the finer grains beneath it, with how many are in it.
+ *  What the box suggests as you type (lib/news/categories). */
+export interface NewsCategory {
+  label: string;
+  kind: 'industry' | 'subcategory';
+  /** The industry this sits under, for a subcategory; its own name for an
+   *  industry. Shown beside the suggestion so "Rap" reads as Music's. */
+  under: string;
+  count: number;
 }
 
 /** The verified article a page is rendered from. */

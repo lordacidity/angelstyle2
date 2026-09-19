@@ -29,17 +29,17 @@ All behind the site gate (`middleware.ts`), like every `/api/*` route.
 | `GET /api/pricer/price?name=…&hint=…` | One pricing as a server-sent-event stream: `info` → `step` (running / done / error per step) → `done`, or `error`. Open for 30 s to 5 min. Closing it aborts the run's API calls. |
 | `GET /api/pricer/log` | Every completed pricing as `pauv_priced.csv`. |
 
-Each run spends about $0.22 in API calls. There is no queue, throttle or cache: every submit runs everything.
+Each run spends about $0.14 in API calls. There is no queue, throttle or cache: every submit runs everything.
 
 ## Environment (root `.env`)
 
 | Variable | Required | Notes |
 |---|---|---|
 | `GEMINI_API_KEY` | yes | Bio, news and industry steps, and the peer lines. |
-| `ANTHROPIC_API_KEY` | yes | Social step (Haiku 4.5 with web search) and the judge (Opus 5). |
+| `ANTHROPIC_API_KEY` | yes | Social step (Haiku 4.5 with web search) and the judge (Sonnet 5). |
 | `DATABASE_PUBLIC_URL` | yes | The store. |
 | `PRICER_GEMINI_MODEL` | no | Default `gemini-3.8-flash`. Deliberately **not** the site's `GEMINI_MODEL`, which is the caption model; the pricer was calibrated on 3.8 Flash. |
-| `JUDGE_MODEL`, `JUDGE_EFFORT`, `JUDGE_CACHE_TTL`, `SOCIAL_MODEL`, `PAUV_CREDITS_PER_USD`, `NEWS_WINDOW_DAYS`, `ONLINE_CELEB_DISCOUNT` | no | As documented in HOW_IT_WORKS.md. |
+| `JUDGE_EFFORT`, `JUDGE_CACHE_TTL`, `SOCIAL_MODEL`, `PAUV_CREDITS_PER_USD`, `NEWS_WINDOW_DAYS`, `ONLINE_CELEB_DISCOUNT` | no | As documented in HOW_IT_WORKS.md. |
 
 ## Changing the master list
 

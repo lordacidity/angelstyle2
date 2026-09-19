@@ -452,7 +452,7 @@ export const captionAt = (captions: Caption[], t: number): Caption | undefined =
 // ── Fixed lines ───────────────────────────────────────────────────────────────
 // Three of a build's captions are chosen rather than written. Bottom A is always
 // the rendered ChatGPT recording now, marked by the renderer beat for beat
-// (search, wait, pick — lib/vidsBottom bottomAMarks), and its middle two beats
+// (search, wait, pick — lib/simpler/vidsBottom bottomAMarks), and its middle two beats
 // say nothing that changes from one build to the next: the answer is loading,
 // then he takes the name off it. A model writing those fresh each time only
 // finds new ways to say the same thing, so they come from a fixed set instead —

@@ -12,14 +12,23 @@ import {
   ACTIVITY,
   buildTradeAudio,
   AMOUNT_USD, createTradeClip, loadTradeAssets, renderTradeVideo, VIDEO_H, VIDEO_W, VIEWPORT_W,
-  type Direction, type Theme, type TradeAssets, type TradeBeats, type TradeClip,
+  ZOOM_LEVELS,
+  type Direction, type Theme, type TradeAssets, type TradeBeats, type TradeClip, type ZoomLevel,
 } from './trade-video';
 
 const SETUP_KEY = 'studio-trade-setup-v1';
 
-interface Setup { name: string; direction: Direction; theme: Theme }
+/** The camera, from the still frame to a hard push. */
+const ZOOMS: { value: ZoomLevel; label: string }[] = [
+  { value: 'off', label: 'Off' },
+  { value: 'subtle', label: 'Subtle' },
+  { value: 'normal', label: 'Normal' },
+  { value: 'punchy', label: 'Punchy' },
+];
+
+interface Setup { name: string; direction: Direction; theme: Theme; zoom: ZoomLevel }
 function loadSetup(): Setup {
-  const fallback: Setup = { name: '', direction: 'up', theme: 'light' };
+  const fallback: Setup = { name: '', direction: 'up', theme: 'light', zoom: 'normal' };
   if (typeof window === 'undefined') return fallback;
   try {
     const raw = localStorage.getItem(SETUP_KEY);
@@ -29,6 +38,7 @@ function loadSetup(): Setup {
       name: typeof j.name === 'string' ? j.name : '',
       direction: j.direction === 'down' ? 'down' : 'up',
       theme: j.theme === 'dark' ? 'dark' : 'light',
+      zoom: typeof j.zoom === 'string' && j.zoom in ZOOM_LEVELS ? j.zoom as ZoomLevel : fallback.zoom,
     };
   } catch {
     return fallback;
@@ -60,6 +70,8 @@ export function TradeSection({ active }: { active: boolean }) {
   const [name, setName] = useState(() => loadSetup().name);
   const [direction, setDirection] = useState<Direction>(() => loadSetup().direction);
   const [theme, setTheme] = useState<Theme>(() => loadSetup().theme);
+  // The camera: how hard the frame pushes in on what the pointer is doing.
+  const [zoom, setZoom] = useState<ZoomLevel>(() => loadSetup().zoom);
   // Loading the person or rendering the file (label + 0..1 once frames go).
   const [busy, setBusy] = useState<{ label: string; pct: number | null } | null>(null);
   const [note, setNote] = useState<{ ok: boolean; text: string } | null>(null);
@@ -90,7 +102,7 @@ export function TradeSection({ active }: { active: boolean }) {
   // user has paused or scrubbed doesn't start anyway.
   const soundTokenRef = useRef(0);
 
-  useEffect(() => { saveSetup({ name, direction, theme }); }, [name, direction, theme]);
+  useEffect(() => { saveSetup({ name, direction, theme, zoom }); }, [name, direction, theme, zoom]);
 
   const drawAt = useCallback((t: number) => {
     const clip = clipRef.current;
@@ -180,13 +192,13 @@ export function TradeSection({ active }: { active: boolean }) {
   useEffect(() => () => stopPlayback(), [stopPlayback]);
 
   // Build (or rebuild) the clip on the preview canvas from the assets, for the
-  // direction chosen now. Cheap: no network, no decoding.
-  const buildClip = useCallback((a: TradeAssets, dir: Direction, at: number) => {
+  // direction and camera chosen now. Cheap: no network, no decoding.
+  const buildClip = useCallback((a: TradeAssets, dir: Direction, at: number, zm: ZoomLevel) => {
     const canvas = canvasRef.current;
     if (!canvas) return;
     const ctx = canvas.getContext('2d', { alpha: false });
     if (!ctx) return;
-    const clip = createTradeClip(ctx, a, dir);
+    const clip = createTradeClip(ctx, a, dir, { zoom: zm });
     clipRef.current = clip;
     // A re-cut moves the typing and the clicks, so the bed is mixed again —
     // started now so it is ready by the time Play is pressed.
@@ -198,11 +210,12 @@ export function TradeSection({ active }: { active: boolean }) {
     drawAt(Math.min(at, clip.seconds - 1 / 30));
   }, [drawAt]);
 
-  // A new direction re-cuts the preview in place; the assets are the same.
+  // A new direction or camera re-cuts the preview in place, at the frame it is
+  // on, so the two can be watched against each other; the assets are the same.
   useEffect(() => {
     const a = assetsRef.current;
-    if (a) buildClip(a.assets, direction, timeRef.current);
-  }, [direction, buildClip]);
+    if (a) buildClip(a.assets, direction, timeRef.current, zoom);
+  }, [direction, zoom, buildClip]);
 
   function cancel() {
     ctrlRef.current?.abort();
@@ -236,7 +249,7 @@ export function TradeSection({ active }: { active: boolean }) {
       const a = await prepare(ctrl.signal);
       if (ctrl.signal.aborted) return;
       timeRef.current = 0;
-      buildClip(a, direction, 0);
+      buildClip(a, direction, 0, zoom);
       startPlayback();
     } catch (err) {
       if (!ctrl.signal.aborted) setNote({ ok: false, text: err instanceof Error ? err.message : String(err) });
@@ -256,10 +269,11 @@ export function TradeSection({ active }: { active: boolean }) {
     try {
       const a = await prepare(ctrl.signal);
       if (ctrl.signal.aborted) return;
-      if (!clipRef.current) buildClip(a, direction, 0);
+      if (!clipRef.current) buildClip(a, direction, 0, zoom);
       setBusy({ label: 'Rendering…', pct: 0 });
       const { blob, filename, seconds } = await renderTradeVideo(a, {
         direction,
+        zoom,
         signal: ctrl.signal,
         onProgress: (done, total) => setBusy({ label: `Rendering ${Math.round((done / total) * 100)}%`, pct: done / total }),
       });
@@ -283,6 +297,7 @@ export function TradeSection({ active }: { active: boolean }) {
     setName('');
     setDirection('up');
     setTheme('light');
+    setZoom('normal');
     try { localStorage.removeItem(SETUP_KEY); } catch { /* ignore */ }
     const canvas = canvasRef.current;
     const ctx = canvas?.getContext('2d');
@@ -374,6 +389,30 @@ export function TradeSection({ active }: { active: boolean }) {
                 {' '}<code className="text-amber-200">frontend/public/pauv-home-dark.png</code>.
               </span>
             )}
+          </div>
+          <div className="flex flex-col gap-2">
+            <span className="text-sm uppercase tracking-wide text-zinc-500">Camera</span>
+            <div className="grid grid-cols-4 gap-2">
+              {ZOOMS.map(z => (
+                <button
+                  key={z.value}
+                  type="button"
+                  onClick={() => setZoom(z.value)}
+                  className={`h-12 rounded-xl border text-sm font-semibold transition-colors ${
+                    zoom === z.value
+                      ? 'bg-white/10 border-zinc-400 text-white'
+                      : 'bg-black border-zinc-800 text-zinc-500 hover:text-zinc-300'
+                  }`}
+                >
+                  {z.label}
+                </button>
+              ))}
+            </div>
+            <span className="text-sm text-zinc-600">
+              The frame slides in on the search, their card, the chart and the trade card and back out between them,
+              and holds still wherever it lands — it never moves with the pointer. Off is the whole page, still, the
+              way it was.
+            </span>
           </div>
           <div className="flex flex-col gap-3">
             <div className="grid grid-cols-2 gap-3">

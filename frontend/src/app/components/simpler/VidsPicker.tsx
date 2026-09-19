@@ -1,9 +1,12 @@
 'use client';
 
-// VidsPicker — the chooser that opens when you click the Persona card in the
-// builder's sidebar, and the shell the Bottom popup is built on (VidsBottom).
-// Each persona is one row: its three clips as thumbnails, its name, and how
-// many of the three it actually has. Clicking one picks it and closes.
+// VidsPicker — the chooser that opens when you click the persona on Vids 2's
+// form. Each persona is one row: its three clips as thumbnails, its name, and
+// how many of the three it actually has. Clicking one picks it and closes.
+//
+// `Shell` and `Empty` are the popup frame it is built out of. They are exported
+// because Simpler's Bottom popup was built on them too; that card is gone, so
+// VidsPersonaPicker is the only caller left.
 
 import { useEffect } from 'react';
 import type { VidPersona, VidRow } from '@/lib/vids-types';

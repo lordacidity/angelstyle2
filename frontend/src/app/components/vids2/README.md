@@ -1,25 +1,41 @@
 # Vids 2
 
-A form, then a tuning page. It sits under Simpler in the left sidebar and
-lives at `/vids-2`.
+A form, then a tuning page. It sits under Vids in the left sidebar and lives at
+`/vids-2`. Since 2026-09-18 it is the only place a video is built here: Vids
+itself is the library its footage is filed in, and the Simpler section — whose
+build logic this one runs on, still under `lib/simpler/` — is gone.
 
-Vids and Simpler both open on the builder: an empty stage and cards to fill it
-from. Vids 2 opens on five questions instead, asked one at a time —
+Vids and Simpler both used to open on a builder: an empty stage and cards to
+fill it from. Vids 2 opens on **five cards, top to bottom** — Who, Intro,
+Which way, Mode, Persona — and one Generate button at the foot of the page.
+One card is open at a time and it is always the next thing to do: the cards
+above it are folded to their answer (press one to change it), the cards below
+are dim until the form gets there. **Pressing an answer is the answer** — a
+name, a story, Up, Degen, a persona tile each moves the form on by itself.
+Only the two things that are typed (a ChatGPT question, a story searched for
+somebody already chosen) wait for **Continue**. Which way and Mode have a
+default but are still asked once each. On a return visit every answer is
+already there, every card is folded, and Generate is lit.
 
-1. **Who** — anybody on Pauv, from the roster itself (`/api/ai/talents`), not
-   from what has been filmed.
-2. **Mode** — 👔 Serious, 😐 Middle or 💀 Degen (`Vids2Mode`). Each is below.
-3. **Which way** — up or down.
-4. **Persona** — Simpler's own chooser (`components/simpler/VidsPicker`).
-5. **Intro** — what opens the video, Bottom A (`Vids2Intro`). Three ways:
+The five cards —
+
+1. **Who** — two tabs. **👤 By name**: anybody on Pauv, from the roster itself
+   (`/api/ai/talents`), not from what has been filmed. The box opens its list
+   as it is focused: the **Suggested** names starred in gold at the top, then
+   the roster by who is moving on Pauv — today's change, then the week's, then
+   holders (`byTrending`) — with today's change beside each name. **🔥 In the news**:
+   the trending list, read the moment the tab is opened (below). Picking a
+   story answers Who *and* the intro, and a story that names more than one
+   person on Pauv asks which before moving on.
+2. **Intro** — what opens the video, Bottom A (`Vids2Intro`). Three ways:
    - **No intro** — nothing before the trade; the video goes straight to
      trading on them on Pauv. Bottom A stays empty.
    - **ChatGPT** — the question typed into ChatGPT. Write it, or have it
      written (Ragebait / Factual, `api/vids/question`).
    - **News article** — a real story about them, found the way Studio > News
-     finds one (`lib/news/client`): choose how far back to look (a week, to
-     start), Search for articles — the list opens on headlines with the name
-     in them — and pick one. The search goes by the whole name and by what
+     finds one (`lib/news/client`): the search runs by itself the moment News
+     is pressed, for the range chosen (a week, to start), and picking a story
+     is the answer. The search goes by the whole name and by what
      headlines call them for short (`lib/news/name-forms`, below). It is read
      off the outlet and
      checked, and its page is drawn on the form — grey where the photos will
@@ -29,36 +45,77 @@ from. Vids 2 opens on five questions instead, asked one at a time —
      has to be searched again. A **link can be pasted** instead of searched
      for — any article page on an approved outlet, read and checked the same
      way (`pastedLinkProblem`, `hitFromStory` in `lib/news/client`).
+3. **Which way** — up or down.
+4. **Mode** — 👔 Serious, 😐 Middle or 💀 Degen (`Vids2Mode`). Each is below.
+5. **Persona** — every persona in the library as a tile (its Top A still and
+   its name), with a **🎲 Random** tile first that picks one of the personas
+   with all three clips. A tile pressed is the last answer, and Generate lights.
 
-## Choose by news — the form from the other end
+The order is what each recording waits on, soonest first — because each one
+**starts as soon as its own answers are in**, not when Generate is pressed.
 
-**📰 Choose by news**, top right of the first question, turns the form round
-(`Vids2Flow`): instead of picking somebody and then looking for a story, see
-who is trending and make the video straight from the story. Four questions —
+## The head start
 
-1. **News** — every story the approved outlets have put out in the past 24
-   hours (dropdown: 6 hours, 1 hour) whose **headline names somebody on
+`makeNewsClip` wants the story, `makeChatGptClip` the question, `makeTradeClip`
+the name and the direction. Nothing any of them reads is asked after question
+3, so each is started the moment the question it was waiting on is left behind
+(`headStart` in `Vids2Section`, `onHeadStart` in `Vids2Form`), and **Generate
+takes what is already running** rather than starting it. Answer Mode and
+Persona at a normal pace and both recordings are usually done before Generate
+is pressed; a small pill on the Intro card and the Which way card says so
+(✓ Ready, or the percentage), and Generate's own progress picks their lines up
+where the head start left them.
+
+It is a render and nothing else: no stage, no words, no video until Generate.
+
+Each run is keyed by the answers it was started from (`warmKey`). Change one
+and the run is for a video nobody is making — it is dropped, its bytes let go
+(`stopRun`), and the answer that replaced it starts its own when it settles, so
+a question being retyped does not start a render on every letter. Two details:
+
+- **Which way** is in a ChatGPT intro's key, because the model is told the
+  direction before it writes a word — pressing it at question 3 starts that
+  intro again. It is *not* in a news intro's key: those frames are the same
+  either way and only the filed name carries it, so the run is kept and the
+  name re-stamped (`stamp` in `generate`).
+- **Light or dark** is rolled where the render starts rather than where
+  Generate does (`rollTheme`), since by then the frames are already drawn.
+
+A head start that fails is not taken: Generate makes that recording itself and
+fails the way it would have anyway. Reset, leaving the page, and a Generate
+that is cancelled all let the bytes go.
+
+Mode (the hook's guide, the BOOMs) and Persona (the three clips around the
+trade) are read by neither recording, which is why they are what gets asked
+over the top of the rendering.
+
+## In the news — the second tab of Who
+
+**🔥 In the news** turns the form round: instead of picking somebody and then
+looking for a story, see who is trending and make the video straight from the
+story. It is one tab, not a second form —
+
+1. **The list** — every story the approved outlets have put out in the past 24
+   hours (1h, 6h and a week a press away) whose **headline names somebody on
    Pauv**, twenty shown, each with who it names, when it went out, and its
    **heat** — the AI's read, out of 100, of how hard the headline would stop
    somebody scrolling, with the hook in a few words ("traded to the lakers").
-   **🔥 Biggest** first, to start; **🕒 Newest** is the other order. **Refresh**
-   reads them again; **Hide politics** leaves those out.
+   **🔥 Biggest** first, to start; **🕒 Newest** is the other order. **↻**
+   reads them again; **No politics** leaves those out. The list is read the
+   moment the tab is opened, not on a button.
    Pick one — or paste a link — and it is read off the outlet and checked.
    That answers Who *and* the intro: the person is whoever the headline names
-   (the others a press away under "Trading on" when it names two, or when the
-   story itself names more), and the intro is the story.
+   first, and when the story names more than one person on Pauv the card asks
+   **Who is the video about?** with a button each before moving on (the same
+   names sit under "Trading on" on the Intro card, to swap later).
+2. The form skips Intro, since the story is the intro, and opens **Which way**;
+   then **Mode** and **Persona** as above. Open Intro from its folded card to
+   see the story's page, pick another story, or switch to ChatGPT or no intro.
 
-   Nothing from an earlier visit is left standing on this question. The list
-   is about *now*, so the story kept from last time is dropped as the first
-   read goes out — unless it is the story of the video behind the form, which
-   Back to the video still has to mean — and neither the old list nor the
-   chosen story shows while a read is running, or while the next story is
-   being read off its outlet.
-2. **Which way**, 3. **Mode**, 4. **Persona** — and Generate is on Persona.
-
-**👤 Choose by who** goes back. It is one set of answers whichever flow asked
-for them, so switching loses nothing; a news-flow setup always has
-`intro: 'news'`, and Generate gets exactly what it gets from the other flow.
+It is one set of answers whichever tab answered Who, and `flow` only records
+which (`'news'` when a story did) — Generate gets exactly the same setup either
+way. Switching the intro to anything but News puts `flow` back to `'who'`,
+because `loadSetup` makes a saved news flow a news intro again.
 
 The list is `lib/news/trending` behind `GET /api/news/trending?window=24h`:
 
@@ -107,21 +164,13 @@ often the story says them. It has no AI check, so those ordinary one-word
 names are left out of it: a pasted story about Future has to be made from
 Who. Studio > News uses the same `people` for its own paste box.
 
-Nothing moves on by itself: pick an answer, then press Next; Back goes back
-one. A strip along the top holds every answer given so far,
-and pressing one goes back to it. The form opens on its first question.
-**🎲 Randomize**, above the persona chooser, picks one of the personas that
-have all three clips in the library (never the one already chosen, when
-there is another).
-
-— and **Generate**, on the last question, makes the whole video from the answers before showing you
-anything. Then it lands on the tuning page, which is Simpler's builder with
-the deciding taken out: the sound, the captions, the BOOMs, the post caption
-and Download MP4. **Reset**, top right, starts Vids 2 over after a confirm:
-the video, its sound and its words go, every answer is cleared, and the form
-opens on its first question. (It replaced Change, which went back to the form
-with the video kept behind it; the form's "Back to the video" is left over
-from that and no longer shows.)
+**Generate**, at the foot of the page, is lit once all five cards are answered
+and makes the whole video from the answers before showing you anything; while
+it runs it is the progress bar. Then it lands on the tuning page — a fork of
+what was Simpler's builder, with the deciding taken out: the sound, the
+captions, the BOOMs, the post caption and Download MP4. **← Start over**, top
+right, starts Vids 2 over after a confirm: the video, its sound and its words
+go, every answer is cleared, and the form opens on its first card.
 
 ## One video, every recording rendered here
 
@@ -204,18 +253,23 @@ or activity when the branch needs one — so it can't open wrong, lose its
 
 **One hook in five is a twist**, whatever the mode, one of three at even odds:
 a **mystery** — the trade on someone described but never named — **hype** —
-the name and how high it is going — or **me if** — the trade somewhere it
-would be out of line, "was legal". Hype only goes up, so a down trade's twist
-is a mystery or a me if. Degen's hype and me if say the nickname; everything
-else about the three is the same in every mode. A mystery that names them, or
-a me if that breaks its frame, is written again.
+the name and how high it is going — or **me if** — the trade caught in the
+middle of what he is doing on camera, "was legal". Hype only goes up, so a down
+trade's twist is a mystery or a me if. Degen's hype and me if say the nickname;
+everything else about the three is the same in every mode. A mystery that names
+them, or a me if that breaks its frame, is written again.
+
+Me if is the one twist written off the video: where it catches him is the
+persona's context, the same place Middle's activity comes from, and is never
+invented. A build with no context has nothing to catch him at, so it draws from
+the twists that need none (`NO_CONTEXT_TWISTS`).
 
 > shorting the greatest musician of our generation
 > going long on the most unhinged billionaire
 > messi to the stratosphere
 > swifty to outer space (Degen)
-> me if shorting drake at a funeral was legal
-> me if going long on swifty at church was legal (Degen)
+> me if shorting drake mid haircut was legal
+> me if going long on swifty in the hot tub was legal (Degen)
 
 Every fixed list, every odd and every guide's examples live in
 `lib/vids2/hookRules.ts`, which the route draws from. The **?** beside Start in
@@ -256,22 +310,19 @@ time when the nickname has a short form of eight letters or fewer,
 someone how Pauv works and the closing word is the same fixed comment line,
 because that is what the video is for.
 
-**Three BOOMs lay themselves** (`degenBooms` in `lib/vids2/vids2Build.ts`), on
-the beats somebody watching would react on — two, with no intro:
+**Two BOOMs lay themselves** (`degenBooms` in `lib/vids2/vids2Build.ts`), on
+the beats somebody watching would react on — one, with no intro:
 
 | When | Sound | Picture |
 | --- | --- | --- |
 | The intro zooms in on them — the first quick in-out zoom pulse on their highlighted name, once it has been dragged over, in the ChatGPT answer or the story alike (each renderer's `pulseAt`). Never on the pointer going for the name or the drag | fahh (2.2s) | the BOOM |
-| Their page opens, the click after the search (Bottom B, `analyzing`) | oh hell nah (7.4s) | **none** |
 | Place trade goes in (Bottom B, `confirming`) | fahh (2.2s) | the BOOM |
 
-The middle one is the noise and nothing else. It runs 7.4 seconds — nearly four
-times `BOOM_LENGTH` — and it is a reaction *to* what is on the screen, so
-covering that screen with a BOOM for two seconds of it would cover the joke.
-That is `BoomInsert.picture: false`: the item is still on the timeline, because
-that is what carries the bang and what the bar marks, and both renderers simply
-never draw it. Its mark on the bar is half height so it reads as a noise rather
-than a hit.
+Until 2026-09-18 a third lay itself between them: an "oh hell nah" (7.4s) on
+their page opening, the noise alone. It was dropped — it should not come by
+itself — but what carried it stays: `BoomInsert.picture: false` is a BOOM that
+is on the timeline (the bang, and the bar's mark, half height so it reads as a
+noise rather than a hit) that neither renderer draws.
 
 Every bang plays its own full length wherever it lands — the preview drives it
 from its own `<audio>` and the export lays it with `scheduleOnce`, neither of
@@ -282,26 +333,28 @@ Each moment is a second into its *own* recording, straight off that renderer's
 beats, and the tuning page puts it on the timeline through the slot's plan item
 — where the slot starts, where it was trimmed from, how fast it plays. Once
 they are down they are ordinary BOOMs: the bar marks them, pressing a mark
-takes that one off, Insert adds a fourth. They are laid once per build, held by
-the build's number, so taking all three off does not bring them back.
+takes that one off, Insert adds a third. They are laid once per build, held by
+the build's number, so taking both off does not bring them back.
 
 The sounds come out of `public/audio/booms` and are matched on the file name
-(`/fa+h+/i`, `/hell.?nah|oh.?hell/i`), not named outright — so a better take
+(`/fa+h+/i`), not named outright — so a better take
 dropped in under a near-enough name is picked up, and a folder tidy-up does not
 break a build. A sound that is not there leaves its BOOM silent rather than not
 laid at all.
 
 ## It is NOT a third copy
 
-Simpler is a deliberate fork of Vids — its own components, its own build logic,
-nothing shared, everything hand-synced. **Vids 2 is not that.** It shares
-Simpler's logic outright:
+Simpler was a deliberate fork of Vids — its own components, its own build logic,
+nothing shared, everything hand-synced. **Vids 2 is not that.** It took
+Simpler's logic outright rather than copying it, which is why deleting that
+section left the engine standing: `lib/simpler/*` and the captions rail under
+`components/simpler/` are Vids 2's now, kept under the old name.
 
 | What | Where | Whose |
 | --- | --- | --- |
-| The plan, compose, audio, captions, edit, recipe, local clips | `lib/simpler/*` | **shared with Simpler** |
-| The captions rail, the persona chooser | `components/simpler/*` | **shared with Simpler** |
-| The post captions (Copy for IG, Copy for TikTok), written from a news search, asked for the moment Generate is pressed | `components/vids2/Vids2PostCaption.tsx`, `api/vids/post-captions` | Vids 2's own (Simpler keeps its one caption) |
+| The plan, compose, audio, captions, edit, recipe, local clips | `lib/simpler/*` | Vids 2's, under the old name |
+| The captions rail | `components/simpler/VidsCaptionsRail` | Vids 2's, under the old name |
+| The post captions (Copy for IG, Copy for TikTok), written from a news search, asked for the moment Generate is pressed | `components/vids2/Vids2PostCaption.tsx`, `api/vids/post-captions` | Vids 2's own |
 | Asking for the words off the plan, so Generate can while the frames are drawn | `lib/vids2/vids2Words.ts` | Vids 2's own |
 | The ChatGPT recording | `components/chatgpt/chatgpt-video.ts` | shared with everybody |
 | The news recording | `components/news/news-video.ts` | shared with Studio > News |
@@ -315,21 +368,23 @@ Simpler's logic outright:
 | The hook for each mode | `api/vids/hook` | Vids 2's own |
 | The hook's fixed lists, odds and examples; the ? guide to them | `lib/vids2/hookRules.ts`, `components/vids2/Vids2HookGuide.tsx` | Vids 2's own |
 
-**So a change to how Simpler builds a video is a change to how Vids 2 builds
-one** — the opposite of the Vids/Simpler rule, and chosen deliberately: a third
-hand-synced copy of nine thousand lines would have to be kept in step with two
-others forever. What is forked is only what actually differs — the pages.
+**So a change to `lib/simpler/*` is a change to how Vids 2 builds a video** —
+there is nothing else left in there to break, and no second copy to keep in
+step. That was the point: a third hand-synced copy of nine thousand lines would
+have had to be kept in step with two others forever. What is forked is only what
+actually differs — the pages.
 
-`Vids2Builder.tsx` *is* a fork of `components/simpler/VidsBuilder.tsx`, because
-it diverges on purpose: no Persona card, no Bottom card, no Reset, a summary of
+`Vids2Builder.tsx` began as a fork of `components/simpler/VidsBuilder.tsx`,
+diverging on purpose: no Persona card, no Bottom card, no Reset, a summary of
 the form's answers in their place, and the captions asked for by Generate while
-the recordings render rather than when a bottom is chosen. Fixes to the parts they still share — the
-stage, the transport, the export — have to be made in both by hand.
+the recordings render rather than when a bottom is chosen. That original is gone
+with its section, so it is nobody's twin now — there is nothing left to sync it
+with by hand.
 
 ## What Vids 2 added to the shared files
 
-These, all optional, all defaulting to how it has always been — so nothing
-Simpler, Vids or the Studio pages do moved.
+These, all optional, all defaulting to how it has always been — so nothing Vids
+or the Studio pages do moved.
 
 - **`LocalClipMeta.theme`** (`lib/simpler/vidsLocal.ts`). A Bottom B carries
   which way Pauv was, because that is what the frame puts either side of the

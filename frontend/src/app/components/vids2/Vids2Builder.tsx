@@ -88,7 +88,6 @@ import {
   type BoomSound, type Music, type MusicTrack,
 } from '@/lib/simpler/vidsAudio';
 import { fmtTime, safeExportName } from '@/lib/utils';
-import { BTN_TEXT } from '@/lib/ui-constants';
 import { DownloadIcon, SpinnerIcon, VideoIcon } from '@/lib/icons';
 
 // The one size a vid is made at. There is no picker for it: every build goes
@@ -1598,15 +1597,15 @@ export function Vids2Builder({
   }, [buildId]);
 
   /** Degen mode's BOOMs, laid on for you — see degenBooms in lib/vids2: the
-   *  intro's zoom on their name, their page coming up, the money going in (two
-   *  without an intro). Each moment is a second into its own recording, so it
-   *  is put on the timeline through that slot's item — where the slot starts,
-   *  where it was trimmed from, and how fast it plays — rather than guessed at.
+   *  intro's zoom on their name and the money going in (one without an
+   *  intro). Each moment is a second into its own recording, so it is put on
+   *  the timeline through that slot's item — where the slot starts, where it
+   *  was trimmed from, and how fast it plays — rather than guessed at.
    *
    *  Once they are down they are ordinary BOOMs: the bar marks them, pressing
-   *  a mark takes that one off, and Insert adds a fourth. Which is why this is
+   *  a mark takes that one off, and Insert adds a third. Which is why this is
    *  held by the build's number rather than by whether there are any BOOMs —
-   *  taking all three off must not bring them straight back.
+   *  taking both off must not bring them straight back.
    *
    *  It waits for two things that arrive a beat after the clips do: the
    *  bottoms the build has on the plan, and the list of sounds. A sound the
@@ -1889,7 +1888,7 @@ export function Vids2Builder({
             data-vids-play
             onClick={playing ? pause : play}
             disabled={!plan.items.length}
-            className={`${BTN_TEXT} w-16 justify-center border-zinc-700 bg-zinc-900 text-zinc-200 hover:border-zinc-500`}
+            className="flex h-9 w-[4.5rem] shrink-0 items-center justify-center rounded-lg border border-zinc-700 bg-zinc-900 text-[13px] font-semibold text-zinc-200 transition-colors hover:border-zinc-500 disabled:cursor-not-allowed disabled:opacity-30"
           >
             {playing ? 'Pause' : 'Play'}
           </button>
@@ -1897,7 +1896,7 @@ export function Vids2Builder({
             onClick={restart}
             disabled={!plan.items.length}
             title="Play it again from the start"
-            className={`${BTN_TEXT} justify-center border-zinc-700 bg-zinc-900 px-2 text-zinc-200 hover:border-zinc-500`}
+            className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg border border-zinc-700 bg-zinc-900 text-zinc-200 transition-colors hover:border-zinc-500 disabled:cursor-not-allowed disabled:opacity-30"
           >
             <svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor" aria-hidden>
               <rect x="5" y="5" width="2.5" height="14" rx="1" />
@@ -1979,7 +1978,7 @@ export function Vids2Builder({
                 ? 'Now press the bar on the moment it should land — Esc to leave it'
                 : 'Lay a BOOM over the whole video: press here, then press the bar.'
                   + ' As many as you like; press a mark on the bar to take that one off'}
-              className={`${BTN_TEXT} justify-center px-2 ${
+              className={`flex h-9 shrink-0 items-center justify-center rounded-lg border px-2.5 text-[13px] font-semibold transition-colors disabled:cursor-not-allowed disabled:opacity-30 ${
                 boomArming
                   ? 'border-amber-500 bg-amber-950/60 text-amber-200 hover:border-amber-400'
                   : 'border-zinc-700 bg-zinc-900 text-zinc-200 hover:border-zinc-500'
@@ -1999,7 +1998,7 @@ export function Vids2Builder({
               title={boomSounds.length
                 ? 'The sound the next BOOM makes — drop more into public/audio/booms'
                 : 'Nothing in public/audio/booms yet'}
-              className={`${BTN_TEXT} max-w-[7.5rem] cursor-pointer appearance-none truncate border-zinc-700 bg-zinc-900 px-2 text-zinc-300 hover:border-zinc-500`}
+              className="h-9 max-w-[7.5rem] cursor-pointer appearance-none truncate rounded-lg border border-zinc-700 bg-zinc-900 px-2 text-[13px] text-zinc-300 transition-colors hover:border-zinc-500 disabled:cursor-not-allowed disabled:opacity-30"
             >
               <option value="">Silent</option>
               {boomSounds.map((snd) => (
@@ -2009,7 +2008,7 @@ export function Vids2Builder({
             {/* Where it went and how to be rid of it are both the mark on the
                 bar, so nothing stands here saying so a second time. */}
             {boomArming && (
-              <span className="whitespace-nowrap text-[10px] text-amber-400/90">Press the bar</span>
+              <span className="whitespace-nowrap text-xs text-amber-400/90">Press the bar</span>
             )}
           </div>
         </div>
@@ -2018,9 +2017,9 @@ export function Vids2Builder({
       {/* The one sidebar: the two clip choices, the sound, the captions, the
           post caption and the way out. */}
       <aside className="flex w-[320px] shrink-0 flex-col overflow-y-auto border-l border-zinc-800">
-        <div className="border-b border-zinc-800 px-3 py-3">
-          <div className="mb-2 flex items-center gap-2">
-            <p className="min-w-0 flex-1 truncate text-[12px] font-semibold text-zinc-200">Tune it up</p>
+        <div className="border-b border-zinc-800 px-3 py-4">
+          <div className="mb-3 flex items-center gap-2">
+            <p className="min-w-0 flex-1 truncate text-sm font-semibold text-white">Tune it up</p>
             {/* Throws away a video that took a minute to render, and every
                 bit of tuning on it, so it asks first. */}
             <button
@@ -2029,9 +2028,9 @@ export function Vids2Builder({
               }}
               disabled={!!exporting}
               title="Start Vids 2 over — the video goes, every answer is cleared, and the form opens on its first question."
-              className="shrink-0 rounded border border-zinc-700 px-1.5 py-0.5 text-[10px] text-zinc-400 transition-colors hover:border-zinc-500 hover:text-white disabled:border-zinc-900 disabled:text-zinc-700 disabled:hover:border-zinc-900 disabled:hover:text-zinc-700"
+              className="shrink-0 rounded-lg border border-zinc-700 px-2.5 py-1 text-xs font-semibold text-zinc-300 transition-colors hover:border-zinc-500 hover:text-white disabled:border-zinc-900 disabled:text-zinc-700 disabled:hover:border-zinc-900 disabled:hover:text-zinc-700"
             >
-              Reset
+              ← Start over
             </button>
           </div>
 
@@ -2040,7 +2039,7 @@ export function Vids2Builder({
               on the other page now. The still is the trade's — it is the one
               of the two recordings with a face in it. */}
           <div className="flex items-center gap-2.5">
-            <span className="flex h-11 w-11 shrink-0 items-center justify-center overflow-hidden rounded bg-black">
+            <span className="flex h-12 w-12 shrink-0 items-center justify-center overflow-hidden rounded-lg bg-black">
               {buildThumb ? (
                 // eslint-disable-next-line @next/next/no-img-element
                 <img src={buildThumb} alt="" className="h-full w-full object-cover" draggable={false} />
@@ -2049,32 +2048,32 @@ export function Vids2Builder({
               )}
             </span>
             <div className="min-w-0 flex-1">
-              <p className="truncate text-[12px] text-zinc-100" title={build.person}>
+              <p className="truncate text-[13px] font-semibold text-zinc-100" title={build.person}>
                 {build.person}
                 <span className={`ml-1.5 ${build.direction === 'up' ? 'text-emerald-400' : 'text-red-400'}`}>
-                  {build.direction === 'up' ? '↑ up' : '↓ down'}
+                  {build.direction === 'up' ? '📈 Up' : '📉 Down'}
                 </span>
               </p>
-              <p className="truncate text-[10px] text-zinc-500">
+              <p className="truncate text-xs text-zinc-500">
                 {appliedPersona?.name ?? 'no persona'} · {build.theme}
               </p>
               {/* The intro: the question ChatGPT was asked, the story that
                   was opened, or that there wasn't one. */}
               {build.intro === 'chatgpt' ? (
-                <p className="truncate text-[9px] text-zinc-600" title={build.question}>&ldquo;{build.question}&rdquo;</p>
+                <p className="truncate text-xs text-zinc-500" title={build.question}>&ldquo;{build.question}&rdquo;</p>
               ) : build.intro === 'news' && build.story ? (
-                <p className="truncate text-[9px] text-zinc-600" title={`${build.story.outlet}: ${build.story.headline}`}>
+                <p className="truncate text-xs text-zinc-500" title={`${build.story.outlet}: ${build.story.headline}`}>
                   {build.story.outlet}: {build.story.headline}
                 </p>
               ) : (
-                <p className="truncate text-[9px] text-zinc-600">no intro — straight to the trade</p>
+                <p className="truncate text-xs text-zinc-500">no intro — straight to the trade</p>
               )}
             </div>
           </div>
           {/* What the renderers wanted known — a name that wasn't on the
               page, a photo that couldn't be found. */}
           {build.notes.length > 0 && (
-            <ul className="mt-1.5 space-y-0.5 text-[9px] leading-snug text-amber-300/90">
+            <ul className="mt-2 space-y-0.5 text-xs leading-snug text-amber-300/90">
               {build.notes.map((n) => <li key={n}>{n}</li>)}
             </ul>
           )}
@@ -2082,8 +2081,8 @@ export function Vids2Builder({
           {/* One line for how it is getting on. Stands down when there is
               nothing to say. */}
           {status && (
-            <div className="mt-2 flex items-start gap-1.5 text-[10px] text-zinc-500">
-              {working && <SpinnerIcon size={10} className="mt-px shrink-0 animate-spin" />}
+            <div className="mt-3 flex items-start gap-1.5 text-xs text-zinc-500">
+              {working && <SpinnerIcon size={12} className="mt-px shrink-0 animate-spin" />}
               <p className="min-w-0 flex-1">{status}</p>
             </div>
           )}
@@ -2092,14 +2091,14 @@ export function Vids2Builder({
         {/* Sound: the song and how loud it and the clips sit. Room tone rides
             under every build (DEFAULT_ROOM_TONE) with nothing to switch it. */}
         <div className="border-b border-zinc-800 px-3 py-3">
-          <p className="mb-2 text-[10px] font-semibold uppercase tracking-wider text-zinc-500">Sound</p>
+          <p className="mb-2 text-xs font-semibold uppercase tracking-wider text-zinc-500">Sound</p>
           {/* The song and how loud it is are one thing in two rows, so the
               word for them sits against the pair rather than against the top
               of it: the label column is centred on the block beside it, which
               with a song chosen puts "Music" between the list and its volume,
               and with none puts it against the list on its own. */}
           <div className="flex items-center gap-2">
-            <span className="w-10 shrink-0 text-[11px] text-zinc-300">Music</span>
+            <span className="w-10 shrink-0 text-xs text-zinc-300">Music</span>
             <div className="flex min-w-0 flex-1 flex-col">
               <MusicPicker
                 tracks={tracks}
@@ -2135,7 +2134,7 @@ export function Vids2Builder({
             </div>
           </div>
           <div className="mt-2 flex items-center gap-2">
-            <span className="w-10 shrink-0 text-[11px] text-zinc-300">Clips</span>
+            <span className="w-10 shrink-0 text-xs text-zinc-300">Clips</span>
             <input
               type="range"
               min={MIN_CLIP_LEVEL}
@@ -2157,7 +2156,7 @@ export function Vids2Builder({
               video, and until a BOOM is laid it would be about nothing. */}
           {booms.some((b) => b.sound) && (
             <div className="mt-2 flex items-center gap-2">
-              <span className="w-10 shrink-0 text-[11px] text-zinc-300">BOOM</span>
+              <span className="w-10 shrink-0 text-xs text-zinc-300">BOOM</span>
               <input
                 type="range"
                 min={MIN_BOOM_LEVEL}
@@ -2232,15 +2231,15 @@ export function Vids2Builder({
         <div className="sticky bottom-0 mt-auto border-t border-zinc-800 bg-[var(--background)] px-3 py-3">
           {exporting ? (
             <div>
-              <div className="flex items-center gap-2 text-[11px] text-zinc-300">
-                <SpinnerIcon size={12} className="animate-spin" />
+              <div className="flex items-center gap-2 text-sm text-zinc-300">
+                <SpinnerIcon size={13} className="animate-spin" />
                 <span className="flex-1 truncate">{exporting.label}</span>
                 <span className="font-mono text-zinc-500">{Math.round(exporting.frac * 100)}%</span>
               </div>
               <div className="mt-2 h-1.5 w-full overflow-hidden rounded-full bg-zinc-800">
                 <div className="h-full bg-white transition-[width]" style={{ width: `${exporting.frac * 100}%` }} />
               </div>
-              <button onClick={() => abortRef.current?.abort()} className="mt-2 text-[10px] text-zinc-500 hover:text-red-400">
+              <button onClick={() => abortRef.current?.abort()} className="mt-2 text-xs text-zinc-500 hover:text-red-400">
                 Cancel
               </button>
             </div>
@@ -2251,17 +2250,17 @@ export function Vids2Builder({
                 onClick={() => void runExport()}
                 disabled={!plan.items.length || broken.length > 0}
                 title="Render the MP4 and save it to this PC"
-                className={`${BTN_TEXT} w-full justify-center border-zinc-600 bg-white text-black hover:bg-zinc-200`}
+                className="flex h-11 w-full items-center justify-center gap-2 rounded-xl bg-white text-sm font-semibold text-black transition-colors hover:bg-zinc-200 disabled:cursor-not-allowed disabled:opacity-30"
               >
-                <DownloadIcon size={13} /> Download MP4
+                <DownloadIcon size={15} /> Download MP4
               </button>
-              <p className="mt-1.5 text-[10px] text-zinc-600">
+              <p className="mt-2 text-xs text-zinc-500">
                 {outW}×{outH} · H.264 + AAC · {OUT_FPS} fps{total ? ` · ${fmtTime(total)}` : ''}
               </p>
             </>
           )}
-          {exportError && <p className="mt-2 text-[11px] text-red-400">{exportError}</p>}
-          {recipeError && <p className="mt-2 text-[11px] text-amber-300">{recipeError}</p>}
+          {exportError && <p className="mt-2 text-sm text-red-400">{exportError}</p>}
+          {recipeError && <p className="mt-2 text-sm text-amber-300">{recipeError}</p>}
         </div>
       </aside>
 

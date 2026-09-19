@@ -63,26 +63,11 @@ const NAV: { id: AppSection; label: string; icon: React.ReactNode }[] = [
     ),
   },
   {
-    id: 'simpler',
-    label: 'Simpler',
-    // The same film strip, cut down to a single frame — Vids stripped to the
-    // bare minimum of making one: the same builder with the controls and
-    // configs taken out. Sits directly under Vids because that is what it is a
-    // version of.
-    icon: (
-      <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
-        <rect x="5" y="3" width="14" height="18" rx="2"/>
-        <path d="M5 8h3M5 16h3M16 8h3M16 16h3"/>
-      </svg>
-    ),
-  },
-  {
     id: 'vids2',
     label: 'Vids 2',
-    // The single frame again, with a play button in it: Simpler's builder, but
-    // nothing to build — five answers and one press make the whole video, and
-    // the page it lands on is only for tuning it. Sits under Simpler because
-    // that is what it is made of.
+    // A single frame with a play button in it: nothing to build — five answers
+    // and one press make the whole video, and the page it lands on is only for
+    // tuning it. Sits under Vids because that is where its footage is filed.
     icon: (
       <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
         <rect x="5" y="3" width="14" height="18" rx="2"/>

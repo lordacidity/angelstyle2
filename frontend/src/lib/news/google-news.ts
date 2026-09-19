@@ -95,7 +95,9 @@ export function storyKey(outlet: OutletId, url: URL): string {
 }
 
 /** Short forms as one Google clause: "(Putin OR "King Charles")". */
-function anyOf(forms: string[]): string {
+/** `(a OR "b c")` — the shape Google takes a list of alternatives in.
+ *  Quoted where a form has a space in it, so a name stays one phrase. */
+export function anyOf(forms: string[]): string {
   const q = forms.map(f => (/\s/.test(f) ? `"${f}"` : f));
   return q.length === 1 ? q[0] : `(${q.join(' OR ')})`;
 }

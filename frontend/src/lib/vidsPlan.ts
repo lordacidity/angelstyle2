@@ -1,6 +1,9 @@
-// Pure timeline + layout logic for the Vids builder — no DOM at import time, so
-// the live preview (VidsBuilder) and the exporter (vidsCompose) share it and
-// agree frame-for-frame.
+// Pure timeline + layout logic for a Vids sequence — no DOM at import time. The
+// builder that reads it is Vids 2's (its own copy of this file lives under
+// lib/simpler); what is left here is what the rest of the Vids section needs:
+// the slots and the folders that feed them, the trim and speed rules the clip
+// editor works in, and the encoder settings the screen recordings are written
+// with.
 //
 // The six slots and how they play out:
 //   Start     full screen, first.

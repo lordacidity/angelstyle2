@@ -2,8 +2,8 @@
 // the mode Vids 2's form was set to. None of these hooks is written off the
 // screen recordings, so none of them is written alongside the step-by-step
 // lines (api/vids/captions): each is written here, from who the video trades
-// on, which way, and — for Middle, which says what he is doing — the persona's
-// context.
+// on, which way, and — for the two that say what he is doing, Middle and the
+// me if twist — the persona's context.
 //
 // SERIOUS is one flat line in a fixed order: the trading verb, the person, now
 // and then a real-world moment that gives the trade a reason, and what the
@@ -45,15 +45,19 @@
 //
 // Whatever the mode, one hook in five is a TWIST instead, one of three at even
 // odds: a MYSTERY, the trade on someone described but never named; HYPE, the
-// name and how high they are going; or ME IF, the trade somewhere it would be
-// out of line, "was legal". Hype only goes up, so a down trade's twist is a
-// mystery or a me if. Degen's hype and me if say the nickname; everything else
-// about the three is the same in every mode, Serious and Middle's trading
-// verbs included.
+// name and how high they are going; or ME IF, the trade caught in the middle of
+// what he is doing on camera, "was legal". Hype only goes up, so a down trade's
+// twist is a mystery or a me if. Degen's hype and me if say the nickname;
+// everything else about the three is the same in every mode, Serious and
+// Middle's trading verbs included.
 //
 //   shorting the greatest musician of our generation     mystery
 //   messi to the stratosphere                            hype
-//   me if shorting drake at a funeral was legal          me if
+//   me if shorting drake mid haircut was legal           me if
+//
+// Me if is the one twist written off the video: like Middle's activity, where
+// it catches him comes from the persona's context and is never invented, so a
+// build with no context draws from the other twists instead (NO_CONTEXT_TWISTS).
 //
 // Everything that is a choice between fixed options is drawn here rather than
 // left to the model — the verb, Middle's combo, and all of Degen but the
@@ -91,7 +95,7 @@ import {
   CLOCK_BRANCH_ODDS, CLOCK_BRANCHES, CLOCK_EXAMPLES, CLOCK_NUMBERS, CLOCK_TASKS, COMBOS, DEGEN_EMOJI,
   DEGEN_EXAMPLES, DEGEN_VERBS, DESCRIPTORS, HOOK_ATTEMPTS, HYPE_NAMED, HYPE_NICKNAMED, LOVE_MAX, LOVE_ODDS,
   ME_IF_NAMED, ME_IF_NICKNAMED, MIDDLE_EXAMPLES, MYSTERY_EXAMPLES, NICKNAME_EXAMPLES, NO_CONTEXT_CLOCK_BRANCH,
-  NO_CONTEXT_COMBOS, SELF_OWNS, SERIOUS_EXAMPLES, TWIST_ODDS, TWISTS, VERBS,
+  NO_CONTEXT_COMBOS, NO_CONTEXT_TWISTS, SELF_OWNS, SERIOUS_EXAMPLES, TWIST_ODDS, TWISTS, VERBS,
   type ClockBranch, type Combo, type Twist,
 } from '@/lib/vids2/hookRules';
 
@@ -411,27 +415,35 @@ They show the shape and the tone. Write a new one for this person; never hand on
 ${REPLY}`;
 
 /** Me if says the name everyone calls them — or, in Degen, the nickname — so
- *  its examples come both ways too (ME_IF_NAMED, ME_IF_NICKNAMED). */
+ *  its examples come both ways too (ME_IF_NAMED, ME_IF_NICKNAMED).
+ *
+ *  Where it catches him is Middle's activity in another frame: taken off what
+ *  the video shows, never invented. It asked for "somewhere it would be out of
+ *  line" and was told nothing about the footage until 2026-09-18, so the model
+ *  had to make the moment up, and the line landed on the stage claiming
+ *  something the video never showed. A build with no context has nothing to
+ *  catch him at, so the twist is not drawn at all — see NO_CONTEXT_TWISTS. */
 const meIf = (nickname: boolean) => `${PAUV}
 
 THE ORDER, every time:
-  me if <trading verb> <${nickname ? 'their nickname' : 'their name'}> <somewhere it would be out of line> was legal
+  me if <trading verb> <${nickname ? 'their nickname' : 'their name'}> <what he is in the middle of> was legal
 
 TRADING VERB: one of "trading on", "going long on" or "shorting", and the one to use is given below. Use exactly that one.
 ${nickname
     ? `NICKNAME: ${NICKNAME_RULE}\n\nNICKNAMES THAT LANDED\n${NICKNAMES}\n`
     : 'NAME: the name everyone actually calls them, the way the examples write it. No nicknames.'}
-SOMEWHERE IT WOULD BE OUT OF LINE: a place, a moment or something he is in the middle of where pulling out a phone to trade would be wrong, said casually: in a ..., at ..., during ..., doing a .... Mundane or solemn; the more out of place, the better.
+WHAT HE IS IN THE MIDDLE OF: what the guy in the video is doing, given below, said casually so it reads straight after the name: "in the hot tub", "mid haircut", "half asleep", "with a mouth full of cereal", "on the treadmill". Take it only from what the video shows and never make one up — the joke is that he is trading through the very thing he is doing, and a moment he was never in is a lie about the video rather than a joke. Say it your own way rather than copying the words given.
 
 RULES
 - It always opens "me if" and always ends "was legal".
+- Nothing about where he is that the video does not show: no funerals, weddings, jury duty or job interviews unless that is what is given below.
 - No emoji, no hashtags, no quote marks, no full stop.
 - All lower case.
 
 EXAMPLES
 ${examples(nickname ? ME_IF_NICKNAMED : ME_IF_NAMED)}
 
-They show the shape and the tone. Write a new one for this person; never hand one of these back.
+They show the shape and the tone. Write a new one for this video; never hand one of these back.
 
 ${REPLY}`;
 
@@ -471,11 +483,16 @@ function hypePlan({ mode, person }: Input): Plan {
   };
 }
 
-function meIfPlan({ mode, person, direction }: Input): Plan {
+function meIfPlan({ mode, person, direction, personaContext }: Input): Plan {
   const verb = pick(VERBS[direction]);
   return {
     system: meIf(mode === 'degen'),
-    ask: [`person: ${person}`, which(direction), `trading verb: ${verb}`].join('\n'),
+    ask: [
+      `person: ${person}`,
+      which(direction),
+      `trading verb: ${verb}`,
+      `what the guy in the video is doing: ${personaContext}`,
+    ].join('\n'),
     // Held to its frame: "me if", the trade on the drawn verb straight after
     // it, and "was legal" at the end.
     finish: (reply) => {
@@ -534,9 +551,13 @@ const TWIST_PLAN: Record<Twist, (input: Input) => Plan> = {
   meIf: meIfPlan,
 };
 
-/** What this call writes: now and then a twist, otherwise the mode's own. */
+/** What this call writes: now and then a twist, otherwise the mode's own. Me if
+ *  is written off what the video shows, so a build with no context draws from
+ *  the twists that need none. */
 function planFor(input: Input): Plan {
-  return Math.random() < TWIST_ODDS ? TWIST_PLAN[pick(TWISTS[input.direction])](input) : modePlan(input);
+  if (Math.random() >= TWIST_ODDS) return modePlan(input);
+  const twists = input.personaContext ? TWISTS : NO_CONTEXT_TWISTS;
+  return TWIST_PLAN[pick(twists[input.direction])](input);
 }
 
 function modePlan({ mode, person, direction, personaContext }: Input): Plan {

@@ -26,11 +26,14 @@ import { OUTLETS, articleUrlProblem, outletForHost } from './outlets';
 import { rasterizeNewsPage, type NewsImage } from './rasterize';
 import { PHOTO_SLOTS, renderNewsPage, type PagePhotos } from './templates';
 import type {
-  NewsArticle, NewsHit, NewsPhoto, OutletId, PersonPhoto, PersonPhotosResponse, RailItem, StoryPerson,
-  ThumbPhotosResponse, TrendingHit, TrendingResponse, TrendSort, TrendWindow,
+  NewsArticle, NewsCategory, NewsHit, NewsPhoto, OutletId, PersonPhoto, PersonPhotosResponse, RailItem,
+  StoryPerson, ThumbPhotosResponse, TrendingHit, TrendingResponse, TrendSort, TrendWindow,
 } from './types';
 
 export type { NewsRange, TrendSort, TrendWindow };
+// The category filter itself lives in lib/news/categories — the same code the
+// server holds a widened read to, so the box and the search can't disagree.
+export { matchesCategory, readCategory, normalCategory } from './categories';
 
 /** How far back a search looks — the same four api/news/search takes. */
 export const NEWS_RANGES: readonly NewsRange[] = ['1d', '7d', '30d', 'any'];
@@ -116,19 +119,40 @@ export function hitFromStory(article: NewsArticle, people: readonly StoryPerson[
 
 // ── Trending ─────────────────────────────────────────────────────────────────
 
-/** How far back the trending list looks — the three api/news/trending takes. */
-export const TREND_WINDOWS: readonly TrendWindow[] = ['24h', '6h', '1h'];
-export const TREND_WINDOW_LABEL: Record<TrendWindow, string> = { '24h': 'Past 24 hours', '6h': 'Past 6 hours', '1h': 'Past hour' };
+/** How far back the trending list looks — the four api/news/trending takes. */
+export const TREND_WINDOWS: readonly TrendWindow[] = ['1h', '6h', '24h', '7d'];
+export const TREND_WINDOW_LABEL: Record<TrendWindow, string> = { '1h': 'Past hour', '6h': 'Past 6 hours', '24h': 'Past 24 hours', '7d': 'Past week' };
 export const isTrendWindow = (v: unknown): v is TrendWindow =>
   typeof v === 'string' && (TREND_WINDOWS as readonly string[]).includes(v);
 
 /** Fresh stories whose headlines name somebody on Pauv, each with its heat
- *  (lib/news/trending). Throws with the route's reason. */
-export async function loadTrending(window: TrendWindow, signal?: AbortSignal): Promise<TrendingResponse> {
-  const res = await fetch(withBase(`/api/news/trending?window=${window}`), { signal, cache: 'no-store' });
+ *  (lib/news/trending). Throws with the route's reason.
+ *
+ *  `topic` asks Google for a category — "cycling" — instead of reading
+ *  everything the outlets put out. The form only sends one when filtering the
+ *  list it already has left too little to choose from: see matchesCategory in
+ *  lib/news/categories, which is what does the filtering and costs nothing. */
+export async function loadTrending(window: TrendWindow, topic = '', signal?: AbortSignal): Promise<TrendingResponse> {
+  const q = topic.trim() ? `&topic=${encodeURIComponent(topic.trim())}` : '';
+  const res = await fetch(withBase(`/api/news/trending?window=${window}${q}`), { signal, cache: 'no-store' });
   const j = await res.json().catch(() => ({})) as Partial<TrendingResponse> & { error?: string };
   if (!res.ok) throw new Error(j.error ?? `Trending failed (${res.status})`);
-  return { hits: j.hits ?? [], scanned: j.scanned ?? 0, matched: j.matched ?? 0, ai: j.ai ?? false };
+  return {
+    hits: j.hits ?? [], scanned: j.scanned ?? 0, matched: j.matched ?? 0,
+    ai: j.ai ?? false, topic: j.topic ?? null,
+  };
+}
+
+/** The categories the box suggests, biggest first (api/news/categories). An
+ *  empty list is not an error: the box still takes anything typed into it. */
+export async function loadNewsCategories(signal?: AbortSignal): Promise<NewsCategory[]> {
+  try {
+    const res = await fetch(withBase('/api/news/categories'), { signal, cache: 'no-store' });
+    const j = await res.json().catch(() => ({})) as { categories?: NewsCategory[] };
+    return res.ok ? (j.categories ?? []) : [];
+  } catch {
+    return [];
+  }
 }
 
 /** The two orders the trending list comes in. Biggest: the AI's heat — how

@@ -27,7 +27,7 @@ import {
 import { withBase } from '@/lib/clipping';
 import {
   AMOUNT_USD, createTradeClip, loadTradeAssets, renderTradeVideo, VIDEO_H, VIDEO_W,
-  type Direction, type Theme, type TradeBeats, type TradeTalent,
+  type Direction, type Theme, type TradeBeats, type TradeTalent, type ZoomLevel,
 } from '@/app/components/trade/trade-video';
 import {
   findPagePhotos, isNewsRange, isTrendSort, isTrendWindow, pagePhotosFrom,
@@ -67,11 +67,12 @@ export const VIDS2_INTROS: readonly Vids2Intro[] = ['none', 'chatgpt', 'news'];
 export const isVids2Intro = (v: unknown): v is Vids2Intro =>
   typeof v === 'string' && (VIDS2_INTROS as readonly string[]).includes(v);
 
-/** Which end the form starts from. Who: the person first, the intro last —
- *  five questions. News: the other way round — it opens on the stories going
- *  out right now that name somebody on Pauv (lib/news/trending), and picking
- *  one answers Who and the intro both, so what is left is which way, the mode
- *  and the persona. A news-flow setup always has a news intro. */
+/** Which end the form starts from. Who: the person, then what opens the video,
+ *  then which way, the mode and the persona — five questions. News: the other
+ *  way round — it opens on the stories going out right now that name somebody
+ *  on Pauv (lib/news/trending), and picking one answers Who and the intro
+ *  both, so what is left is which way, the mode and the persona. A news-flow
+ *  setup always has a news intro. */
 export type Vids2Flow = 'who' | 'news';
 export const isVids2Flow = (v: unknown): v is Vids2Flow => v === 'who' || v === 'news';
 
@@ -107,8 +108,12 @@ export interface Vids2Setup {
   story: Vids2Story | null;
   /** Serious, Middle or Degen — see Vids2Mode. */
   mode: Vids2Mode;
-  /** Which end the form starts from — see Vids2Flow. */
-  flow: Vids2Flow;
+  /** Which end the form starts from — see Vids2Flow. Null until it has been
+   *  chosen: the form opens on the two buttons and asks nothing until one of
+   *  them is pressed, so nobody is put in a flow they did not pick. Saved like
+   *  every other answer but never restored (loadSetup), so a reload — and
+   *  Reset, and Back off the first question — is that choice again. */
+  flow: Vids2Flow | null;
   /** How far back the news flow's trending list looks. */
   trendWindow: TrendWindow;
   /** Whether that list leaves politics out. */
@@ -116,12 +121,17 @@ export interface Vids2Setup {
   /** Its order: the biggest stories first — the AI's read of what would stop
    *  somebody scrolling — or the newest. */
   trendSort: TrendSort;
+  /** A category the list is narrowed to — "cycling", "rap", "politics", or
+   *  anything else somebody types. Filters the rows on the spot by what the
+   *  people in them are known for; only a press of Search wider puts the words
+   *  to Google (lib/news/categories). Empty is the whole list. */
+  trendCategory: string;
 }
 
 export const EMPTY_SETUP: Vids2Setup = {
   personaId: null, person: '', direction: 'up',
   intro: 'chatgpt', question: '', newsRange: '7d', story: null, mode: 'serious',
-  flow: 'who', trendWindow: '24h', hidePolitics: false, trendSort: 'hot',
+  flow: null, trendWindow: '24h', hidePolitics: false, trendSort: 'hot', trendCategory: '',
 };
 
 /** Which way Pauv is in the trade recording: not asked, rolled at even odds on
@@ -166,23 +176,30 @@ export function loadSetup(): Vids2Setup {
     if (!raw) return EMPTY_SETUP;
     // A saved `theme` is from when Look was a question; it is simply not read.
     const j = JSON.parse(raw) as Partial<Record<keyof Vids2Setup | 'degen', unknown>>;
-    const flow = isVids2Flow(j.flow) ? j.flow : 'who';
+    // Which end to start from is asked every time and never restored: the two
+    // ways in are the first thing the form puts up, and which one somebody
+    // wants is about the video they are making now, not the one they made
+    // last. It is still read — a news-flow save had a news intro, and that
+    // answer is kept like every other — only never handed back as a choice
+    // already made.
+    const saved = isVids2Flow(j.flow) ? j.flow : null;
     return {
       personaId: typeof j.personaId === 'string' ? j.personaId : null,
       person: typeof j.person === 'string' ? j.person : '',
       direction: j.direction === 'down' ? 'down' : 'up',
       // Answers saved before there was a choice of intro were ChatGPT ones.
       // The news flow has no intro question: its intro is the story.
-      intro: flow === 'news' ? 'news' : isVids2Intro(j.intro) ? j.intro : 'chatgpt',
+      intro: saved === 'news' ? 'news' : isVids2Intro(j.intro) ? j.intro : 'chatgpt',
       question: typeof j.question === 'string' ? j.question : '',
       newsRange: isNewsRange(j.newsRange) ? j.newsRange : EMPTY_SETUP.newsRange,
       story: isStory(j.story) ? j.story : null,
       // Answers saved before there were three modes had a degen switch.
       mode: isVids2Mode(j.mode) ? j.mode : j.degen === true ? 'degen' : 'serious',
-      flow,
+      flow: null,
       trendWindow: isTrendWindow(j.trendWindow) ? j.trendWindow : EMPTY_SETUP.trendWindow,
       hidePolitics: j.hidePolitics === true,
       trendSort: isTrendSort(j.trendSort) ? j.trendSort : EMPTY_SETUP.trendSort,
+      trendCategory: typeof j.trendCategory === 'string' ? j.trendCategory.slice(0, 60) : '',
     };
   } catch {
     return EMPTY_SETUP;
@@ -252,12 +269,13 @@ export const introReady = (s: Vids2Setup): boolean =>
 /** Whether the form has been answered enough to press Generate. A persona with
  *  no clips is caught later, by the stage having nothing on it. */
 export const setupReady = (s: Vids2Setup): boolean =>
-  !!s.personaId && !!s.person.trim() && introReady(s);
+  !!s.flow && !!s.personaId && !!s.person.trim() && introReady(s);
 
 // ── Degen mode's BOOMs ───────────────────────────────────────────────────────
 
-/** The two bangs degen reaches for. */
-export type DegenSound = 'fahh' | 'ohHellNah';
+/** The bang degen reaches for. (It reached for an "oh hell nah" too, over
+ *  their page opening, until 2026-09-18; nothing lays that one by itself now.) */
+export type DegenSound = 'fahh';
 
 /** Matched against the file name rather than named outright, so a better take
  *  dropped into public/audio/booms under a near-enough name is picked up and a
@@ -266,7 +284,6 @@ export type DegenSound = 'fahh' | 'ohHellNah';
  *  the picture, silently, rather than not landing at all. */
 const DEGEN_SOUND: Record<DegenSound, RegExp> = {
   fahh: /fa+h+/i,
-  ohHellNah: /hell.?nah|oh.?hell/i,
 };
 
 export const degenBoomSound = (sounds: readonly BoomSound[], kind: DegenSound): BoomSound | null =>
@@ -287,25 +304,20 @@ export interface DegenBoom {
   on: string;
 }
 
-/** The BOOMs every degen build gets, in play order — three with an intro, two
+/** The BOOMs every degen build gets, in play order — two with an intro, one
  *  without. They are the beats somebody watching would react on: the intro
  *  zooming in and out on their highlighted name (in the ChatGPT answer or the
- *  story), their page coming up, and the money going in. Nothing places them
- *  by hand — degen mode is a switch, not a job — and every one of them can
- *  still be taken off on the bar like any other, because they are ordinary
- *  BOOMs once they are down.
- *
- *  The middle one is its noise and nothing else (`picture: false`). The oh hell
- *  nah runs for several seconds, far longer than a BOOM is ever on screen, and
- *  it is a reaction TO what is on the screen — their page coming up — so it
- *  plays out in full over that page instead of covering it. The two fahhs are
- *  the whole thing, hit and all. Every bang plays its own length wherever it
- *  is laid, and two that run into each other simply both play. */
+ *  story), and the money going in. Nothing places them by hand — degen mode
+ *  is a switch, not a job — and every one of them can still be taken off on
+ *  the bar like any other, because they are ordinary BOOMs once they are
+ *  down. Each is the whole thing, hit and all, and every bang plays its own
+ *  length wherever it is laid. (Their page opening used to get an "oh hell
+ *  nah" of its own, the noise alone — `picture: false` — dropped 2026-09-18;
+ *  Insert boom still lays one by hand.) */
 export const degenBooms = (b: Vids2Beats): DegenBoom[] => [
   ...(b.introPick == null ? [] : [
     { slot: 'bottomA', at: b.introPick, sound: 'fahh', picture: true, on: 'the zoom on their name' } as const,
   ]),
-  { slot: 'bottomB', at: b.tradeOpen, sound: 'ohHellNah', picture: false, on: 'their page opening' },
   { slot: 'bottomB', at: b.tradePlaced, sound: 'fahh', picture: true, on: 'the trade going in' },
 ];
 
@@ -530,7 +542,19 @@ export interface MakeTradeClipOptions {
    *  turned out to have, as soon as the renderer has laid it out — before the
    *  first frame (renderTradeVideo onPlanned). */
   onPlanned?: (meta: LocalClipMeta, person: TradeTalent) => void;
+  /** How hard the recording pushes in on the trade card — the one thing it
+   *  moves for (components/trade/trade-video, "The camera"). A Bottom B plays
+   *  in the bottom half of a 9:16 frame, so the trade card is small twice
+   *  over; the push is what makes the toggle, the amount and the fee readable
+   *  at the size it is actually watched. TRADE_ZOOM unless a caller says
+   *  otherwise — the renderer's own default is 'off', which is the still frame
+   *  every caller had before there was a camera. */
+  zoom?: ZoomLevel;
 }
+
+/** What a Vids 2 trade is shot at: the same push Studio > Trade opens on, so
+ *  what is previewed there is what gets laid in. */
+export const TRADE_ZOOM: ZoomLevel = 'normal';
 
 /** The Pauv trade recording for this one video, as a clip the stage, the plan,
  *  the captions and the exporter take like any other. Rendered by
@@ -554,13 +578,15 @@ export async function makeTradeClip(
     // where it doesn't fill the bottom half (vidsPlan itemBacking).
     theme: o.theme,
   });
+  const zoom = o.zoom ?? TRADE_ZOOM;
   const r = await renderTradeVideo(assets, {
     direction: o.direction,
+    zoom,
     signal: o.signal,
     onProgress: (done, total) => o.onProgress?.({ stage: 'render', frac: done / total }),
     onPlanned: (p) => o.onPlanned?.(meta(p), assets.person),
   });
-  const row = makeLocalClip(r.blob, { ...meta(r), poster: await tradePoster(assets, o.direction, r.beats) });
+  const row = makeLocalClip(r.blob, { ...meta(r), poster: await tradePoster(assets, o.direction, r.beats, zoom) });
   return { row, person: assets.person, beats: r.beats };
 }
 
@@ -573,6 +599,7 @@ async function tradePoster(
   assets: Awaited<ReturnType<typeof loadTradeAssets>>,
   direction: Direction,
   beats: TradeBeats,
+  zoom: ZoomLevel,
 ): Promise<Blob | null> {
   try {
     const canvas = document.createElement('canvas');
@@ -580,7 +607,9 @@ async function tradePoster(
     canvas.height = VIDEO_H;
     const ctx = canvas.getContext('2d', { alpha: false });
     if (!ctx) return null;
-    const clip = createTradeClip(ctx, assets, direction);
+    // Shot the same way as the clip, so the card is the frame the video is
+    // on at that moment rather than a different view of it.
+    const clip = createTradeClip(ctx, assets, direction, { zoom });
     clip.draw(Math.min(beats.confirming.start + 0.8, Math.max(0, clip.seconds - 0.1)));
     return await new Promise<Blob | null>((resolve) => canvas.toBlob(resolve, 'image/jpeg', 0.8));
   } catch {

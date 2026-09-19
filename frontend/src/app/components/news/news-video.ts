@@ -59,7 +59,7 @@ export const FILE_W = VIDEO_W * RENDER_SCALE;
 export const FILE_H = VIDEO_H * RENDER_SCALE;
 /** What a clip runs to, about: the script is timed to land here, and only a
  *  name deep in a long story pushes past it (more notches to reach it). */
-export const CLIP_SECONDS = 8;
+export const CLIP_SECONDS = 9;
 const FPS = 30;
 const MAX_ZOOM = 1.9;
 /** The app's own rate for these beds (lib/clipSfx), so this clip mixes with
@@ -284,8 +284,9 @@ const kA = WINDOW_W / PAGE_WIDTH;
 /** Page CSS px the window shows. */
 const VIEW_A = WINDOW_H / kA;
 /** How far down the story the wheel goes before coming back up: a screen and
- *  a bit (VIEW_A is about 1060 CSS px), so it is well into the story. */
-const DOWN_NOTCHES = 12;
+ *  a half (VIEW_A is about 1060 CSS px), so it is well into the story. Was 12
+ *  until 2026-09-18 — a little longer, so there is time to read. */
+const DOWN_NOTCHES = 16;
 /** Where the wheel settles to read the name: the name about two fifths down
  *  the screen, on a notch, inside the page. */
 function readScrollFor(nameTop: number, pageHeight: number): number {
@@ -475,26 +476,58 @@ export interface NewsClip {
 /** A wheel notch as Chrome takes it: the target moves NOTCH from wherever the
  *  last one left it, never past the ends; one at the end of the page does
  *  nothing. `from`/`to` are what it animates between. */
-interface Notch { t: number; from: number; to: number }
-interface Step { t: number; dir: 1 | -1 }
+interface Notch { t: number; from: number; to: number; dur: number }
+interface Step { t: number; dir: 1 | -1; dur: number }
 function planNotches(steps: Step[], max: number, from = 0): Notch[] {
   const out: Notch[] = [];
   let pos = from;
   for (const s of steps) {
     const to = clamp(pos + s.dir * NOTCH, 0, max);
-    out.push({ t: s.t, from: pos, to });
+    out.push({ t: s.t, from: pos, to, dur: s.dur });
     pos = to;
   }
   return out;
 }
-const run = (t0: number, n: number, dir: 1 | -1, gap: number): Step[] => Array.from({ length: n }, (_, i) => ({ t: t0 + i * gap, dir }));
-/** Where the page sits at t: every notch so far, each easing out over
- *  NOTCH_DUR, on top of each other the way quick notches stack. */
+/** A flick of the wheel: `n` notches one way, across exactly the stretch of
+ *  time an even run would have taken, but not evenly spread and not all
+ *  decaying alike.
+ *
+ *  Evenly spaced notches are what made this read as a page being animated
+ *  rather than somebody scrolling. A hand does not tick: two or three notches
+ *  arrive almost on top of each other, then there is a beat while the eye
+ *  catches up, then another scramble. So the gaps are drawn mostly short with
+ *  the odd long one — the beats — and then normalised back to the same total,
+ *  which is what keeps the run ending when it used to. Everything downstream
+ *  is timed off the end of a run (the click on the story, the drag over the
+ *  name, the length of the clip), so the span is not ours to move.
+ *
+ *  Each notch also gets its own decay: a sharp one bites and settles, a lazy
+ *  one drifts. Same seed as everything else in the clip, so a given story
+ *  always scrolls the same way. */
+const run = (t0: number, n: number, dir: 1 | -1, gap: number, rnd: () => number): Step[] => {
+  if (n <= 0) return [];
+  const dur = () => NOTCH_DUR * (0.65 + rnd() * 0.5);
+  if (n === 1) return [{ t: t0, dir, dur: dur() }];
+  // Mostly tight, one in four a beat. Normalised to the span below, so the
+  // mix changes the texture and never the timing.
+  const gaps = Array.from({ length: n - 1 }, () => (rnd() < 0.25 ? 1.9 + rnd() * 1.3 : 0.35 + rnd() * 0.45));
+  const total = gaps.reduce((a, b) => a + b, 0);
+  const span = (n - 1) * gap;
+  const out: Step[] = [];
+  let t = t0;
+  for (let i = 0; i < n; i++) {
+    out.push({ t, dir, dur: dur() });
+    if (i < n - 1) t += (gaps[i] / total) * span;
+  }
+  return out;
+};
+/** Where the page sits at t: every notch so far, each easing out over its own
+ *  duration, on top of each other the way quick notches stack. */
 function scrollOf(notches: Notch[], t: number, from = 0): number {
   let s = notches.length ? notches[0].from : from;
   for (const n of notches) {
     if (t < n.t) break;
-    s += (n.to - n.from) * easeOut((t - n.t) / NOTCH_DUR);
+    s += (n.to - n.from) * easeOut((t - n.t) / n.dur);
   }
   return s;
 }
@@ -519,7 +552,8 @@ export function createNewsClip(ctx: Ctx, a: NewsAssets): NewsClip {
   // ── Timeline ──────────────────────────────────────────────────────────────
   // Google: down four, up four, down two, up two, all fast; then the story.
   const gNotches = planNotches([
-    ...run(0.32, 4, 1, 0.07), ...run(0.78, 4, -1, 0.07), ...run(1.2, 2, 1, 0.07), ...run(1.5, 2, -1, 0.07),
+    ...run(0.32, 4, 1, 0.07, rnd), ...run(0.78, 4, -1, 0.07, rnd),
+    ...run(1.2, 2, 1, 0.07, rnd), ...run(1.5, 2, -1, 0.07, rnd),
   ], gMax);
   const T_GO = 1.66;
   const T_HOVER = 1.98;
@@ -544,15 +578,17 @@ export function createNewsClip(ctx: Ctx, a: NewsAssets): NewsClip {
   // land nearest it, not past it — from off the grid they can't land on it —
   // unless it is the top or the bottom of the page, which the page itself
   // stops at, so going past lands exactly.
-  const T_A = T_PAINT + 0.7;
+  // A beat and a half on the headline before the wheel moves (0.7s until
+  // 2026-09-18): the headline is the story, and it wants reading.
+  const T_A = T_PAINT + 1.5;
   const T_UP = T_A + DOWN_NOTCHES * 0.07 + 0.33;
-  const roam = [...run(T_A, DOWN_NOTCHES, 1, 0.07), ...run(T_UP, 3, -1, 0.07)];
+  const roam = [...run(T_A, DOWN_NOTCHES, 1, 0.07, rnd), ...run(T_UP, 3, -1, 0.07, rnd)];
   const after = endOf(planNotches(roam, pageMax));
   const atEnd = readScroll <= 0 || readScroll >= pageMax;
   const toName = (atEnd ? Math.ceil : Math.round)(Math.abs(readScroll - after) / NOTCH - (atEnd ? 1e-6 : 0));
   const aNotches = planNotches([
     ...roam,
-    ...run(T_UP + 0.5, toName, readScroll >= after ? 1 : -1, 0.06),
+    ...run(T_UP + 0.5, toName, readScroll >= after ? 1 : -1, 0.06, rnd),
   ], pageMax);
   const T_LAST = aNotches.length ? aNotches[aNotches.length - 1].t : T_UP + 0.4;
   /** Where the wheel really leaves the page for the drag — within half a notch

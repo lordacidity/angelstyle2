@@ -7,7 +7,7 @@
 //   keyboard   typing, laid over the stretches a clip marks. Placed per clip in
 //              Prep and baked into that clip's file (see lib/vidsEdit).
 //   room tone  a room breathing under the whole thing, laid once across the
-//              finished timeline at export (see lib/vidsCompose). One
+//              finished timeline at export (see lib/simpler/vidsCompose). One
 //              continuous bed rather than a per-clip layer — that is the point
 //              of room tone, and it means the joins between clips stop sounding
 //              like joins.

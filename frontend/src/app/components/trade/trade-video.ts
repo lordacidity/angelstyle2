@@ -42,6 +42,13 @@
 //   7. the card flips green — Trade confirmed — holds, and the pointer leaves
 //      out of the top
 //
+// Over all of that runs a camera (see "The camera"), and it moves exactly
+// once: the frame is the whole page, still, until the trade card is reached,
+// pushes in on it — and out past the page's right edge, so the card sits near
+// the middle of the frame rather than three quarters across — and goes back
+// out the moment the trade is confirmed. Nothing else is pushed in on. `zoom`
+// says how far in it goes, and 'off' is the still frame throughout.
+//
 // The page is laid out in pauv.com's own CSS pixels, straight from
 // pauv-the-app's components (its root font size is 90%, so 1rem is 14.4px:
 // see REM), for a 1280px-wide viewport, and scaled to fill the frame — the
@@ -93,6 +100,17 @@ const HOME_SHOT: Record<Theme, { x: number; span: number }> = {
   light: { x: 324, span: 2339 },
   dark: { x: 324, span: 2339 },
 };
+
+/** How hard the camera pushes in on what the hand is doing: 'off' is the
+ *  still frame — the page whole, the whole way through — and the rest scale
+ *  every zoom written into the track. */
+export const ZOOM_LEVELS = { off: 0, subtle: 0.55, normal: 1, punchy: 1.45 } as const;
+export type ZoomLevel = keyof typeof ZOOM_LEVELS;
+
+export interface ClipOptions {
+  /** Default 'off': a caller that says nothing gets the frame it always had. */
+  zoom?: ZoomLevel;
+}
 
 export type Direction = 'up' | 'down';
 export type Theme = 'light' | 'dark';
@@ -720,7 +738,8 @@ export async function loadTradeAssets(name: string, theme: Theme, signal?: Abort
 }
 
 // ── The clip ────────────────────────────────────────────────────────────────
-export function createTradeClip(ctx: Ctx, a: TradeAssets, direction: Direction): TradeClip {
+export function createTradeClip(ctx: Ctx, a: TradeAssets, direction: Direction, o: ClipOptions = {}): TradeClip {
+  const ZOOM = ZOOM_LEVELS[o.zoom ?? 'off'];
   const P = PALETTES[a.theme];
   const person = a.person;
   const price = person.price.usd ?? 1;
@@ -1143,10 +1162,9 @@ export function createTradeClip(ctx: Ctx, a: TradeAssets, direction: Direction):
     if (t < T_SEARCH) return;
     const alpha = clamp((t - T_SEARCH) / 0.2, 0, 1);
     ctx.globalAlpha = alpha;
-    ctx.save();
-    ctx.setTransform(1, 0, 0, 1, 0, 0);
-    ctx.drawImage(blurred, 0, 0);
-    ctx.restore();
+    // Made at frame size, laid back over the page it was made from: at rest
+    // that is pixel for pixel, and the camera scales it with everything else.
+    ctx.drawImage(blurred, 0, 0, VIEWPORT_W, VIEW_H);
     drawSearchInput(t);
     if (t >= T_FIRST_CHAR) drawGrid(t);
     ctx.globalAlpha = 1;
@@ -1673,23 +1691,109 @@ export function createTradeClip(ctx: Ctx, a: TradeAssets, direction: Direction):
     drawTradeCard(t);
   }
 
+  // ── The camera ────────────────────────────────────────────────────────────
+  // The recording moves once. The frame pushes in on the trade card — the
+  // only thing in the clip worth pushing in on — and pulls back out when the
+  // trade is confirmed. Everything either side of that is the still frame: the
+  // whole page, held.
+  //
+  // It used to visit the search, their card and the chart on the way, the way
+  // a screen recording is zoomed after the fact. That read as a tour, and the
+  // shot the video exists for arrived as one more stop on it.
+  //
+  // Each key is a zoom and the page point held in the middle of the frame.
+  // Between keys both ease in and out of rest, so the frame slides in and then
+  // sits; it never moves with the pointer. That is deliberate: the hand is a
+  // squirrel with too much caffeine, and a frame that tried to keep up with it
+  // — however filtered — shook. Still under erratic circles is what makes them
+  // read as erratic.
+  //
+  // ZOOM scales every push: at 0 the frame is the still one the clip had
+  // before any of this and nothing else changes. Nothing else knows about it
+  // either — the page, the pointer, the hover and the sound are all still
+  // worked out in page px, and the camera is applied on the way to the canvas.
+  interface CamKey {
+    t: number; z: number; x: number; y: number;
+    /** How much of the push past the page's right edge to take, 0 to 1. The
+     *  trade card lives in the right rail, so a frame held inside the page can
+     *  never get it near the middle — at this zoom it sits about three
+     *  quarters across, which is what made the most important shot in the clip
+     *  look like an afterthought. Letting the frame run on past the edge puts
+     *  the card where the eye already is. Nothing is lost off the right: the
+     *  page's background and the canvas's are the same fill, so the margin
+     *  beyond it reads as more page. */
+    pan?: number;
+  }
+  /** The still frame: the whole page, which is where the clip sits whenever it
+   *  is not on the trade. */
+  const pageMid = { x: VIEWPORT_W / 2, y: VIEW_H / 2 };
+  const tcMid = { x: tc.x + tc.w / 2, y: tc.y + tc.h / 2 };
+  // The trade is the whole point of the recording, so it is the only thing the
+  // frame ever moves for. Everything before it — the homepage, the search, the
+  // grid, the chart — is watched from where the clip has always sat, whole and
+  // still. The push used to visit each of those in turn, and the cost of that
+  // was the one shot that matters arriving as just another stop on the tour.
+  const TRADE_Z = 1.5;
+  /** Not quite dead centre: the last of the push would only buy a wider band
+   *  of empty margin on the right. */
+  const TRADE_PAN = 0.85;
+  const camKeys: CamKey[] = [
+    { t: 0, z: 1, ...pageMid },
+    { t: Math.max(0.3, T_TRADE - 0.5), z: 1, ...pageMid },
+    // In on the trade card, and right with it.
+    { t: T_TRADE + 0.2, z: TRADE_Z, ...tcMid, pan: TRADE_PAN },
+    { t: T_CONFIRM, z: TRADE_Z, ...tcMid, pan: TRADE_PAN },
+    // Confirmed: straight back out to the whole page, and still again for the
+    // hold and the pointer leaving.
+    { t: T_CONFIRM + 0.55, z: 1, ...pageMid },
+    { t: seconds + 1, z: 1, ...pageMid },
+  ];
+  // Whatever the name does to the timeline, no move is ever cut shorter than
+  // this: the frame slides, it never jumps.
+  const CAM_MIN = 0.4;
+  for (let i = 1; i < camKeys.length; i++) camKeys[i].t = Math.max(camKeys[i].t, camKeys[i - 1].t + CAM_MIN);
+  /** The zoom now, and the page point the frame's top left sits on. */
+  const camAt = (t: number) => {
+    if (ZOOM <= 0) return { z: 1, left: 0, top: 0 };
+    let i = 0;
+    while (i < camKeys.length - 2 && camKeys[i + 1].t <= t) i++;
+    const k0 = camKeys[i];
+    const k1 = camKeys[i + 1];
+    const u = easeInOut(clamp((t - k0.t) / (k1.t - k0.t), 0, 1));
+    const z = 1 + (lerp(k0.z, k1.z, u) - 1) * ZOOM;
+    const x = lerp(k0.x, k1.x, u);
+    const y = lerp(k0.y, k1.y, u);
+    const vw = VIEWPORT_W / z;
+    const vh = VIEW_H / z;
+    // How far past the page's right edge this key wants to sit: the whole of
+    // what centring its point would take, times how much of it it asked for.
+    // Worked out from the zoom actually in force, so it stays right at every
+    // ZOOM level rather than only at 'normal'.
+    const overOf = (k: CamKey) => (k.pan ? Math.max(0, k.x + vw / 2 - VIEWPORT_W) * k.pan : 0);
+    const over = lerp(overOf(k0), overOf(k1), u);
+    return { z, left: clamp(x - vw / 2, 0, VIEWPORT_W - vw + over), top: clamp(y - vh / 2, 0, VIEW_H - vh) };
+  };
+
   const draw = (t: number) => {
+    const cam = camAt(t);
+    const k = SCALE * cam.z;
     ctx.setTransform(1, 0, 0, 1, 0, 0);
     ctx.fillStyle = P.background;
     ctx.fillRect(0, 0, VIDEO_W, VIDEO_H);
     ctx.save();
-    ctx.scale(SCALE, SCALE);
+    ctx.setTransform(k, 0, 0, k, -cam.left * k, -cam.top * k);
     if (t < T_PICK) drawHome(t);
     else drawMarket(t);
     ctx.restore();
+    // The pointer is part of the picture, so it grows with it.
     const c = cursorAt(t);
-    drawPointer(ctx, cursorKind(t, c), c.x * SCALE, c.y * SCALE, POINTER_SIZE);
+    drawPointer(ctx, cursorKind(t, c), (c.x - cam.left) * k, (c.y - cam.top) * k, POINTER_SIZE * cam.z);
   };
   return { draw, seconds, beats, keys: keystrokes, clicks };
 }
 
 // ── Render + encode ─────────────────────────────────────────────────────────
-export interface RenderOptions {
+export interface RenderOptions extends ClipOptions {
   direction: Direction;
   onProgress?: (done: number, total: number) => void;
   /** The clip's beats and length the moment they are worked out, before the
@@ -1706,7 +1810,7 @@ export async function renderTradeVideo(assets: TradeAssets, o: RenderOptions): P
   canvas.height = VIDEO_H;
   const ctx = canvas.getContext('2d', { alpha: false });
   if (!ctx) throw new Error('Canvas 2D is unavailable.');
-  const clip = createTradeClip(ctx, assets, o.direction);
+  const clip = createTradeClip(ctx, assets, o.direction, o);
   const { draw, seconds, beats } = clip;
   const frames = Math.round(seconds * FPS);
   o.onPlanned?.({ beats, seconds });

@@ -1,7 +1,7 @@
 'use client';
 
-// VidsPrep — page one of the Vids section: get footage in, make each clip what
-// you want it to be, and file it.
+// VidsPrep — page one of the Vids section, and what the section is mostly for:
+// get footage in, make each clip what you want it to be, and file it.
 //
 //   Left    the folder rows, and the clips of whichever list is open. Click a
 //           clip to edit it; drag it onto a folder to file it. There is no drop
@@ -10,13 +10,14 @@
 //           in the Inbox.
 //   Right   two pages under one strip:
 //           Upload   the intake stage: the whole middle is a drop target, and
-//                    a drop runs the pipeline in VidsIntake. One clip walks
-//                    folder → context → edit → save; three at once is taken
-//                    to be a persona and walks name + one context → trim each
-//                    of the three. Dropping onto a folder on the left still
-//                    just files footage, and clicking a clip still opens it
-//                    on its own — the pipeline is a way through, not the only
-//                    way in.
+//                    a drop runs the pipeline in VidsIntake. One video is taken
+//                    to be a persona made of that clip three times, and three at
+//                    once a persona from three; either way it walks name + one
+//                    context → trim each part. Anything else — two files, four,
+//                    a photo — walks folder → context → edit → save. Dropping
+//                    onto a folder on the left still just files footage, and
+//                    clicking a clip still opens it on its own — the pipeline is
+//                    a way through, not the only way in.
 //           Edit     the editor for the open clip — trim, cut, speed, sound,
 //                    save. Opening a clip from anywhere lands here.
 //           A run turns the page for you — Upload while it is asking
@@ -25,12 +26,12 @@
 //           (What the clippers' app gets is its own page of the section,
 //           beside this one — see VidsClippers.)
 //
-// Bottom A is not here at all — not a folder, not somewhere to file, and no
-// Link page pairing one with its Bottom B. Nobody shoots a Bottom A: the Build
-// page's Bottom card renders the ChatGPT search itself, files it under Bottom A
-// and writes down the pair (see VidsBottom). So footage dropped in by hand is a
-// Bottom B, an End or a persona, and a Bottom B is asked one extra thing as it
-// is filed — which way Pauv was on the screen, light or dark (see VidTheme).
+// Nobody shoots a Bottom A, and these days nobody shoots a Bottom B either:
+// Vids 2 renders both screen recordings as it builds and keeps them in the tab
+// rather than filing them. So footage dropped in here is a persona, an End, or a
+// bottom clip somebody wants on the shelf anyway — and a Bottom B is asked one
+// extra thing as it is filed: which way Pauv was on the screen, light or dark
+// (see VidTheme).
 //
 // Right-click says what a piece of footage is showing: a clip's thumbnail opens
 // the context popup for that clip, a persona row (or one of its part tiles) for
@@ -686,8 +687,10 @@ export function VidsPrep({ lib, active }: { lib: VidsLib; active: boolean }) {
     // since the stage takes no drop while it is asking something.
     endRun();
     // Three files is a persona only when all three are footage: a persona is one
-    // performance, and a photo is never part of one.
-    const persona = list.length === PERSONA_DROP && list.every(isVideoFile);
+    // performance, and a photo is never part of one. One file on its own is a
+    // persona too — that clip three times over (see startPersona) — for the
+    // same reason and with the same rule: footage, not a photo.
+    const persona = (list.length === PERSONA_DROP || list.length === 1) && list.every(isVideoFile);
     setIntake({
       mode: persona ? 'persona' : 'clips',
       step: persona ? 'setup' : 'folder',
@@ -710,23 +713,36 @@ export function VidsPrep({ lib, active }: { lib: VidsLib; active: boolean }) {
     setIntake((prev) => (prev ? { ...prev, step: 'context', folderId: choice.id, folderName: choice.name } : prev));
   }, []);
 
-  /** Persona setup is done: the three take their parts' names, in the order
-   *  given, and go straight to trimming. The persona itself is made when the
-   *  first trim is saved, alongside that part — so a run cancelled before then
-   *  leaves nothing behind, not even an empty persona. */
+  /** Persona setup is done: the parts take their names, in the order given, and
+   *  go straight to trimming. The persona itself is made when the first trim is
+   *  saved, alongside that part — so a run cancelled before then leaves nothing
+   *  behind, not even an empty persona.
+   *
+   *  One clip stands in for all three parts: it is copied up to the three the
+   *  run needs, so Start, Top A and Top B are trimmed and filed separately off
+   *  the one recording. The copies are File objects of their own over the same
+   *  bytes, rather than the one object three times over, because a part is told
+   *  apart by its file's identity all the way from here to its save: the same
+   *  object three times finds the same local row three times, and all three
+   *  saves would land on Start. */
   const startPersona = useCallback((name: string, context: VidContext, order: File[], degen: boolean) => {
     if (!intake) return;
     const clean = name.trim();
-    const local = order.map((f, i) => ({
+    const parts = order.length === 1
+      ? [order[0], ...Array.from({ length: PERSONA_DROP - 1 }, () => (
+          new File([order[0]], order[0].name, { type: order[0].type, lastModified: order[0].lastModified })
+        ))]
+      : order;
+    const local = parts.map((f, i) => ({
       ...(intake.local[intake.files.indexOf(f)] ?? localRow(f, f.name)),
       name: `${clean} — ${PERSONA_PART_LABEL[PERSONA_PARTS[i]]}`,
     }));
     setIntake({
       ...intake,
       step: 'edit',
-      files: order,
+      files: parts,
       local,
-      rows: order.map(() => null),
+      rows: parts.map(() => null),
       folderId: personaFolderId,
       folderName: PERSONA_FOLDER,
       personaId: null,
@@ -941,7 +957,7 @@ export function VidsPrep({ lib, active }: { lib: VidsLib; active: boolean }) {
 
   /** One line beside the strip saying what the open page is for. */
   const tabHint = tab === 'upload'
-    ? 'Drop footage in the middle. One clip walks through folder, name, edit and save; three at once make a persona.'
+    ? 'Drop footage in the middle. One clip is a persona made of it three times; three at once are a persona from three.'
     : (openVideo ? `Editing ${openVideo.name}` : 'Click a clip on the left to open it here.');
 
   return (

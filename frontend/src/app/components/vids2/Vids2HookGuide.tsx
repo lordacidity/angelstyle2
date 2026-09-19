@@ -16,7 +16,7 @@ import {
   CLOCK_BRANCH_ODDS, CLOCK_BRANCHES, CLOCK_EXAMPLES, CLOCK_NUMBERS, CLOCK_TASKS, COMBOS, DEGEN_EMOJI,
   DEGEN_EXAMPLES, DEGEN_VERBS, DESCRIPTORS, HOOK_ATTEMPTS, HYPE_NAMED, HYPE_NICKNAMED, LOVE_MAX, LOVE_ODDS,
   ME_IF_NAMED, ME_IF_NICKNAMED, MIDDLE_EXAMPLES, MYSTERY_EXAMPLES, NICKNAME_EXAMPLES, NO_CONTEXT_CLOCK_BRANCH,
-  NO_CONTEXT_COMBOS, SELF_OWNS, SERIOUS_EXAMPLES, TWIST_ODDS, TWISTS, VERBS,
+  NO_CONTEXT_COMBOS, NO_CONTEXT_TWISTS, SELF_OWNS, SERIOUS_EXAMPLES, TWIST_ODDS, TWISTS, VERBS,
   type ClockBranch, type HookDirection, type HookMode, type Twist,
 } from '@/lib/vids2/hookRules';
 
@@ -26,7 +26,13 @@ const even = (xs: readonly unknown[]) => 1 / xs.length;
 
 /** How often a hook is its mode's own line rather than a twist. */
 const OWN = 1 - TWIST_ODDS;
-const twistShare = (d: HookDirection, t: Twist) => (TWISTS[d].includes(t) ? TWIST_ODDS / TWISTS[d].length : 0);
+/** Me if is written off what the video shows, so without a context it is not
+ *  drawn and the twists that are left split its share. */
+const twistsFor = (d: HookDirection, hasContext: boolean) => (hasContext ? TWISTS : NO_CONTEXT_TWISTS)[d];
+const twistShare = (d: HookDirection, t: Twist, hasContext: boolean) => {
+  const xs = twistsFor(d, hasContext);
+  return xs.includes(t) ? TWIST_ODDS / xs.length : 0;
+};
 
 const DIRECTIONS: readonly HookDirection[] = ['up', 'down'];
 const DIRECTION_LABEL: Record<HookDirection, string> = { up: '📈 Up', down: '📉 Down' };
@@ -177,7 +183,9 @@ export function Vids2HookGuide({ mode, direction, hasContext, onClose }: Props) 
           <p>
             Whatever the mode, {pct(TWIST_ODDS)} of hooks are a twist instead of the mode&rsquo;s own line, the twist
             drawn at even odds from those the trade can take. Hype only goes up, so a down trade&rsquo;s twist is a
-            mystery or a me if.
+            mystery or a me if. Me if is written off what the video shows, so a persona with no context leaves the
+            other twists to split its share — the numbers below are for{' '}
+            <b className="text-zinc-200">{hasContext ? 'a persona with a context, as on this video' : 'a persona with no context, as on this video'}</b>.
           </p>
           <table className="w-full text-left text-[12px]">
             <thead>
@@ -200,7 +208,9 @@ export function Vids2HookGuide({ mode, direction, hasContext, onClose }: Props) 
                   <td className="py-1.5">Twist · {TWIST_LABEL[t]}</td>
                   {DIRECTIONS.map((d) => (
                     <td key={d} className="py-1.5 text-right">
-                      {twistShare(d, t) ? <Pct of={twistShare(d, t)} /> : <span className="text-zinc-600">never</span>}
+                      {twistShare(d, t, hasContext)
+                        ? <Pct of={twistShare(d, t, hasContext)} />
+                        : <span className="text-zinc-600">never</span>}
                     </td>
                   ))}
                 </tr>
@@ -453,7 +463,7 @@ export function Vids2HookGuide({ mode, direction, hasContext, onClose }: Props) 
           <div className="space-y-2 rounded-md border border-zinc-800 p-3">
             <p className="text-[13px] font-semibold text-zinc-100">
               Mystery <span className="ml-1 text-[11px] font-normal text-zinc-500">
-                up <Pct of={twistShare('up', 'mystery')} /> · down <Pct of={twistShare('down', 'mystery')} /> of all hooks
+                up <Pct of={twistShare('up', 'mystery', hasContext)} /> · down <Pct of={twistShare('down', 'mystery', hasContext)} /> of all hooks
               </span>
             </p>
             <p><Q>&lt;trading verb&gt; &lt;who they are, never by name&gt;</Q> — the trade on someone the viewer has to recognise; the video shows who.</p>
@@ -467,7 +477,7 @@ export function Vids2HookGuide({ mode, direction, hasContext, onClose }: Props) 
           <div className="space-y-2 rounded-md border border-zinc-800 p-3">
             <p className="text-[13px] font-semibold text-zinc-100">
               Hype <span className="ml-1 text-[11px] font-normal text-zinc-500">
-                up <Pct of={twistShare('up', 'hype')} /> of all hooks · never down
+                up <Pct of={twistShare('up', 'hype', hasContext)} /> of all hooks · never down
               </span>
             </p>
             <p><Q>&lt;name&gt; &lt;where they are headed&gt;</Q> — no trading verb, no money. Up as high as it goes; a stretched word when it lands (skyyyyy).</p>
@@ -482,12 +492,21 @@ export function Vids2HookGuide({ mode, direction, hasContext, onClose }: Props) 
           <div className="space-y-2 rounded-md border border-zinc-800 p-3">
             <p className="text-[13px] font-semibold text-zinc-100">
               Me if <span className="ml-1 text-[11px] font-normal text-zinc-500">
-                up <Pct of={twistShare('up', 'meIf')} /> · down <Pct of={twistShare('down', 'meIf')} /> of all hooks
+                up <Pct of={twistShare('up', 'meIf', hasContext)} /> · down <Pct of={twistShare('down', 'meIf', hasContext)} /> of all hooks
               </span>
             </p>
-            <p><Q>me if &lt;trading verb&gt; &lt;name&gt; &lt;somewhere it would be out of line&gt; was legal</Q></p>
+            <p><Q>me if &lt;trading verb&gt; &lt;name&gt; &lt;what he is in the middle of&gt; was legal</Q></p>
+            <p className="text-[11px] text-zinc-500">
+              The one twist written off the video: where it catches him is the persona&rsquo;s context, the same place
+              Middle&rsquo;s activity comes from, and is never made up. A build with no context has nothing to catch
+              him at, so me if isn&rsquo;t drawn at all{!hasContext && <span className="text-zinc-400"> — as on this video</span>}.
+            </p>
             <Label>Drawn · the verb</Label>
             <Verbs verbs={VERBS} direction={direction} />
+            <Label>Written by the model</Label>
+            <Rules>
+              <li><b className="text-zinc-200">What he is in the middle of</b> — what the video shows him doing, said so it reads straight after the name: in the hot tub, mid haircut, half asleep, on the treadmill. Never a place or a moment the video doesn&rsquo;t show.</li>
+            </Rules>
             <Label>Thrown out when</Label>
             <Rules><li>it doesn&rsquo;t open &ldquo;me if&rdquo;, end &ldquo;was legal&rdquo;, and have the trade straight after &ldquo;me if&rdquo;.</li></Rules>
             <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">

@@ -62,20 +62,11 @@ const VidsSection = lazy(() =>
   import('./components/vids/VidsSection').then(m => ({ default: m.VidsSection }))
 );
 
-// Simpler — Vids cut down to the bare minimum of making one. It is a second
-// copy rather than a mode of the first: its own components under
-// components/simpler and its own build logic under lib/simpler, sharing only
-// the /api/vids routes and the library they read (the same folders, the same
-// clips). A change to the logic of one is meant to be made to the other by
-// hand; nothing propagates on its own.
-const SimplerSection = lazy(() =>
-  import('./components/simpler/SimplerSection').then(m => ({ default: m.SimplerSection }))
-);
-
-// Vids 2 — a form, then Simpler's builder with the deciding taken out. Unlike
-// Simpler it is not a third copy: it shares lib/simpler outright and forks
-// only the pages (components/vids2). Both screen recordings are rendered for
-// the one video rather than picked off a shelf.
+// Vids 2 — a form, then one press, then a page for tuning what came out. The
+// only place a video is built: Vids itself is the library the footage is filed
+// in. Its build logic lives under lib/simpler and two of its rails under
+// components/simpler — the Simpler section those were written for is gone, but
+// the engine is Vids 2's own and kept where it was.
 const Vids2Section = lazy(() =>
   import('./components/vids2/Vids2Section').then(m => ({ default: m.Vids2Section }))
 );
@@ -298,11 +289,6 @@ export function StudioShell() {
   // tab switches once the section has been opened.
   const [vidsEverVisited, setVidsEverVisited] = useState(false);
   useEffect(() => { if (activeSection === 'vids') setVidsEverVisited(true); }, [activeSection]);
-
-  // Simpler the same way, and separately from Vids: the two hold their own
-  // picks, so leaving one to look at the other doesn't disturb either build.
-  const [simplerEverVisited, setSimplerEverVisited] = useState(false);
-  useEffect(() => { if (activeSection === 'simpler') setSimplerEverVisited(true); }, [activeSection]);
 
   // Vids 2 the same way, and for a stronger reason than either: a Generate is
   // two screen recordings rendering in this tab, and switching away from the
@@ -537,26 +523,10 @@ export function StudioShell() {
           </div>
         )}
 
-        {simplerEverVisited && (
-          <div style={{ display: activeSection === 'simpler' ? undefined : 'none' }}>
-            <ErrorBoundary>
-              {/* Laid out exactly like Vids above — plain black, the builder
-                  filling the window, kept mounted after the first visit. */}
-              <div className="flex flex-col h-screen">
-                <div className="flex-1 min-h-0">
-                  <Suspense fallback={<SectionLoader />}>
-                    <SimplerSection active={activeSection === 'simpler'} />
-                  </Suspense>
-                </div>
-              </div>
-            </ErrorBoundary>
-          </div>
-        )}
-
         {vids2EverVisited && (
           <div style={{ display: activeSection === 'vids2' ? undefined : 'none' }}>
             <ErrorBoundary>
-              {/* Laid out exactly like Simpler above: plain black, the page
+              {/* Laid out exactly like Vids above: plain black, the page
                   filling the window, kept mounted after the first visit. */}
               <div className="flex flex-col h-screen">
                 <div className="flex-1 min-h-0">
@@ -705,11 +675,9 @@ export function StudioShell() {
       />
 
       {/* Launch-server split button + first-time setup dropdown (see component).
-          Off on Vids: the transport bar runs along that edge, and the Phonedeck
-          list under that page's export buttons shows whether the server is up.
-          Off on Simpler and Vids 2 too — same builder, same bar along the same
-          edge. */}
-      <LaunchServerButton hidden={activeSection === 'vids' || activeSection === 'simpler' || activeSection === 'vids2'} />
+          Off on Vids, whose own bar runs along that edge, and off on Vids 2 for
+          the same reason. */}
+      <LaunchServerButton hidden={activeSection === 'vids' || activeSection === 'vids2'} />
     </div>
   );
 }

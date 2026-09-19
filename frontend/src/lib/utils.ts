@@ -20,7 +20,7 @@ export function bestVideoUrl(data: { play?: string; hdplay?: string; wmplay?: st
 }
 
 /** Strip characters Windows can't put in a filename, for a download name.
- *  Used by Simpler (components/simpler). The Charts/Vids export path has its
+ *  Used by Vids 2 (lib/simpler, components/simpler). The Charts export path has its
  *  own copy in lib/canvasVideoExport with a different fallback name; they are
  *  kept apart so a change to one export's naming can't rename the other's. */
 export function safeExportName(raw: string) {

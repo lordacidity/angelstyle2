@@ -7,7 +7,7 @@
 
 Prices a new person in six steps. Gemini writes the bio (2) and the industry comparison (5) and
 prices the recent news (4) from a dated headline list pulled from Google News, Claude Haiku 4.5
-with web search does the social step (3), and Claude Opus 5 is the judge (step 6). The only pricing reference is the master list (`pauv_master_list.csv`). Live pauv
+with web search does the social step (3), and Claude Sonnet 5 is the judge (step 6). The only pricing reference is the master list (`pauv_master_list.csv`). Live pauv
 credit prices are never used, and the models never see credits.
 
 No answer is cached. Every pricing runs every step from scratch, and the result is appended to
@@ -45,7 +45,7 @@ Needs Node 20.12+ and `GEMINI_API_KEY` and `ANTHROPIC_API_KEY`, either in `.env`
 3. **Social media price** — Claude Haiku 4.5 with web search looks up the person's accounts and reports a percentile band per account (fixed anchors, not raw counts) plus an engagement signal. It runs on Claude rather than Gemini because Gemini searched for accounts in about one run in five while Claude searched in every test, with more accounts found and engagement figures cited from trackers. **It does not choose the price.** The price is computed from what it found by a fixed table (below), so the same footprint always gives the same number.
 4. **Recent news price** — ONLY news from the past 90 days, positive and negative. The stories come from Google News's search feed (dated headlines with outlets, see below); Gemini prices from that list and never searches for itself. **Little or no news is bad news:** a quiet window prices the person below the baseline their bio suggests (a silent month for a well-known person costs at least one tier band). Heavy coverage from the person's own field confirms that baseline; only coverage that reaches general-interest outlets lifts them above it. Confidence reflects how clear the coverage picture is, so "confirmed quiet" is a high-confidence finding, not a missing one.
 5. **Industry price** — compares against the master list (minus the subject's own row, if they are already on it). Same-subindustry peers come with a **standing line** (one or two grounded sentences on who they are and where they stand, written under the same rules as the bio: no stats, nothing from the last 3 months); the rest of the industry is price-only. The analyst is told to compare only on the bio and those lines, never on its own memory of the peers. No web access at run time.
-6. **Final price** — Claude Opus 5 weighs the three by confidence and picks one price, to the cent. The scale runs from $0.01 (the default for a nobody) to $70.
+6. **Final price** — Claude Sonnet 5 weighs the three by confidence and picks one price, to the cent. The scale runs from $0.01 (the default for a nobody) to $70.
 
 Steps 3–5 run in parallel. Each analyst returns a price, a confidence score (`high` / `medium` / `low` / `none`), a two-paragraph rationale, and its evidence.
 
@@ -118,6 +118,16 @@ The table and the percentages are constants at the top of `server.mjs` (`SOCIAL_
 `SOCIAL_EXTRA_SAME_BAND`, `SOCIAL_EXTRA_NEXT_BAND`, `SOCIAL_ENGAGEMENT`). The page shows the
 arithmetic under the social price. Tune it against known names.
 
+**Which platforms the analyst searches.** Instagram, TikTok, YouTube and X/Twitter, plus one more
+when the biography says that is where the audience actually lives (Twitch or Kick for a streamer,
+Weibo or Douyin for a Chinese-language audience). Any other account — Facebook, Threads, Snapchat
+— is reported when it turns up in results the analyst already has, and still counts toward the
+additional-account percentages above, but no search is ever spent on one. Until 2026-09-18 the
+prompt listed nine platforms and the cap was 8 searches; the base price comes from the single best
+band, and that account is on one of the four for all but a handful of people, so the wider sweep
+was mostly buying the ±12% / 5% adjustments at $0.01 a search. Worth revisiting if a subject whose
+largest audience is somewhere else (a Facebook-first public figure, say) starts coming in low.
+
 ### Online-celebrity discount
 
 Streamers, gamers and internet-native famous people are priced **25% below** what the analysts
@@ -151,10 +161,10 @@ Only quoted prices are discounted — `pauv_master_list.csv` is untouched.
 | Step | Gets | Web search | Model |
 |---|---|---|---|
 | Bio | name, hint, industry taxonomy | yes | Gemini |
-| Social | bio, percentile anchors, rubric | yes (up to 8 searches) | Claude Haiku 4.5 |
+| Social | bio, percentile anchors, rubric | yes (up to 5 searches) | Claude Haiku 4.5 |
 | News | bio, tiers, rubric, 90-day date window, the dated headline list from Google News (up to 100), the "silence is negative" rule | no (the feed is fetched by code) | Gemini |
 | Industry | bio, tiers, rubric, same-subindustry peers with standing lines, rest of industry with prices | **no** | Gemini |
-| Judge | name, tiers, tier bands, the 3 prices + confidences + rationales, the social accounts found | no | Claude Opus 5 |
+| Judge | name, tiers, tier bands, the 3 prices + confidences + rationales, the social accounts found | no | Claude Sonnet 5 |
 
 Every Gemini call and the social call are a single user message with no system prompt and no
 history. The judge gets its fixed instructions (the tier table, the bands, the calibration notes
@@ -165,19 +175,21 @@ The tier table is passed verbatim in dollars to the news, industry and judge ste
 
 ### What it costs
 
-About $0.22 per pricing, measured in September 2026 at that month's rates:
+About $0.14 per pricing. The judge and Gemini rows below were measured in September 2026 at that
+month's rates; the social row is projected from the same measurement after the search cap dropped from
+8 to 5 on 2026-09-18, and has not been re-measured.
 
 | Call | Model | Per pricing | What drives it |
 |---|---|---|---|
-| Social | Claude Haiku 4.5 | ~$0.13 | 7–8 web searches at $0.01 each, plus the results Claude reads: about 68K input tokens, because the search loop re-reads the growing conversation before every search |
-| Judge | Claude Opus 5 | $0.03–0.04 | 2,700 tokens of fixed instructions (cached), 1,700–2,000 tokens of analyst reports, 700–1,000 tokens of thinking and answer. About $0.06 for the first run in an hour, which writes the cache |
+| Social | Claude Haiku 4.5 | ~$0.08 (projected) | Up to 5 web searches at $0.01 each, plus the results Claude reads. At the old cap of 8 this was $0.13 on about 68K input tokens: the loop re-reads the growing conversation before every search, so each result is billed again on every later search and the context grows faster than the search count. Cutting the cap takes back both the fees and, more than proportionally, those re-reads |
+| Judge | Claude Sonnet 5 | $0.012–0.016 | 2,700 tokens of fixed instructions (cached), 1,700–2,000 tokens of analyst reports, 700–1,000 tokens of thinking and answer. About $0.023 for the first run in an hour, which writes the cache. It was Claude Opus 5 until 2026-09-18, at $0.03–0.04 a run: Sonnet 5's rates are exactly 40% of Opus 5's on every line — input, output, cache read and cache write |
 | Bio, news, industry | Gemini 3.8 Flash | ~$0.04 together | Prompts of 1.5K–15K tokens; the industry prompt grows with the subindustry (Basketball's 133 peers make it the largest). Gemini's introductory rates double on 1 January 2027 |
 
 Both Claude calls use prompt caching. The judge's fixed instructions are cached for an hour
 (`JUDGE_CACHE_TTL`); a run inside that window reads them at a tenth of the input price. The
 social call sends a cache marker, so the API caches the search results as they accumulate and the
 loop's re-reads bill at a tenth of the rate: measured at $0.131 instead of $0.146 for a
-seven-search run. Haiku fires several searches in parallel, so there are only two or three
+seven-search run, at the old cap of 8. Haiku fires several searches in parallel, so there are only two or three
 re-reads and the saving is modest. Caching changes only the bill: the prompt, the model, the
 searches and the answer are the same. The server prints the token usage of every social and judge
 call (the `social:` and `judge:` lines). The Gemini prompts are not cached: Gemini's implicit
@@ -250,7 +262,6 @@ GEMINI_API_KEY=...                    # required
 ANTHROPIC_API_KEY=...                 # required
 APP_PASSWORD=                         # set before exposing the server
 GEMINI_MODEL=gemini-3.8-flash         # research steps
-JUDGE_MODEL=claude-opus-5             # final judge
 JUDGE_EFFORT=medium                   # judge thinking depth: low | medium | high | xhigh | max
 JUDGE_CACHE_TTL=1h                    # how long the judge's fixed prompt stays cached: 5m or 1h
 SOCIAL_MODEL=claude-haiku-4-5         # social step, with web search
@@ -260,6 +271,10 @@ ONLINE_CELEB_DISCOUNT=0.25            # streamers/gamers/online celebrities; 0 d
 HOST=0.0.0.0
 PORT=3000
 ```
+
+The judge's model is not in that list. It is hard-coded in `pipeline.js` (`claude-sonnet-5`) so that moving
+the final decision to another model is a code change reviewed with everything else, never an environment
+variable edited in the deployment. `JUDGE_EFFORT` and `JUDGE_CACHE_TTL` stay configurable.
 
 ## Files
 

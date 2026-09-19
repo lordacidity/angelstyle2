@@ -195,7 +195,7 @@ export function Vids2PostCaption({ buildId, person, position, early, code, expor
       onClick={() => void copy(which)}
       disabled={!ready}
       title={ready ? `Copy the whole ${label} caption` : 'Still being written'}
-      className="flex-1 rounded bg-white px-2.5 py-1 text-[11px] font-medium text-black hover:bg-zinc-200 disabled:opacity-40"
+      className="h-9 flex-1 rounded-lg bg-white text-[13px] font-semibold text-black transition-colors hover:bg-zinc-200 disabled:opacity-40"
     >
       {cur?.copied === which ? 'Copied' : `Copy for ${label}`}
     </button>
@@ -204,7 +204,7 @@ export function Vids2PostCaption({ buildId, person, position, early, code, expor
   return (
     <div className="border-b border-zinc-800 px-3 py-3">
       <div className="mb-2 flex items-center gap-2">
-        <p className="text-[10px] font-semibold uppercase tracking-wider text-zinc-500">Post caption</p>
+        <p className="text-xs font-semibold uppercase tracking-wider text-zinc-500">Post caption</p>
         {cur?.loading && <SpinnerIcon size={10} className="animate-spin text-zinc-500" />}
       </div>
 
@@ -215,21 +215,21 @@ export function Vids2PostCaption({ buildId, person, position, early, code, expor
 
       {cur?.error ? (
         <div className="mt-1.5 flex items-baseline gap-2">
-          <p className="min-w-0 flex-1 break-words text-[10px] text-red-400">{cur.error}</p>
+          <p className="min-w-0 flex-1 break-words text-xs text-red-400">{cur.error}</p>
           <button
             onClick={() => void generate(buildId)}
-            className="shrink-0 text-[10px] text-zinc-500 hover:text-white"
+            className="shrink-0 text-xs text-zinc-500 hover:text-white"
           >
             Try again
           </button>
         </div>
       ) : cur?.loading ? (
-        <p className="mt-1.5 text-[10px] text-zinc-600">Reading this week&apos;s news, then writing…</p>
+        <p className="mt-2 text-xs text-zinc-500">Reading this week&apos;s news, then writing…</p>
       ) : ready && cur ? (
         <>
-          <p className="mt-1.5 truncate text-[9px] text-zinc-600">{cur.person} · {cur.position}</p>
+          <p className="mt-2 truncate text-xs text-zinc-500">{cur.person} · {cur.position === 'up' ? '📈 Up' : '📉 Down'}</p>
           {cur.hold && (
-            <p className="mt-1 break-words text-[10px] leading-relaxed text-amber-400">Consider holding: {cur.hold}</p>
+            <p className="mt-1 break-words text-xs leading-relaxed text-amber-400">Consider holding: {cur.hold}</p>
           )}
         </>
       ) : null}

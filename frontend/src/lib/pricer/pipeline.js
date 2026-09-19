@@ -1,5 +1,5 @@
 // Pauv AI Pricer — prices a person in six steps: name → bio → three analysts (social, news, industry) → judge.
-// Gemini does the research, except the social step, which runs on Claude with web search; Claude Opus 5 is the judge.
+// Gemini does the research, except the social step, which runs on Claude with web search; Claude Sonnet 5 is the judge.
 //
 // This is the standalone pricer's server.mjs carried into the Studio (Studio > Pricer). The pricing mechanism is
 // unchanged; what differs from the standalone is only plumbing:
@@ -23,12 +23,17 @@ import * as store from "./store";
 // Config (the root .env, or the environment)
 // ---------------------------------------------------------------------------
 const GEMINI_MODEL = process.env.PRICER_GEMINI_MODEL || "gemini-3.8-flash";   // research steps (not the site's GEMINI_MODEL)
-const JUDGE_MODEL = process.env.JUDGE_MODEL || "claude-opus-5";         // final judge
+// The judge is hard-coded, not an env override: the deployment's environment variables should never
+// have to change to move the final decision to another model.
+const JUDGE_MODEL = "claude-sonnet-5";                                  // final judge
 const JUDGE_EFFORT = process.env.JUDGE_EFFORT || "medium";              // judge thinking depth: low | medium | high | xhigh | max
 const JUDGE_CACHE_TTL = process.env.JUDGE_CACHE_TTL || "1h";            // static judge prompt cache: 5m or 1h
 // The social step runs on Claude with web search: Gemini searched for accounts in a fifth of runs, Claude in all of them.
 const SOCIAL_MODEL = process.env.SOCIAL_MODEL || "claude-haiku-4-5";
-const SOCIAL_MAX_SEARCHES = 8;       // web searches allowed per social call ($10 per 1,000 searches, plus the result tokens)
+// Web searches allowed per social call, at $10 per 1,000 searches plus the result tokens — which are the
+// step's real weight: every result is re-read on each later turn, so the context grows faster than the
+// search count. Five, aimed at the four platforms that decide the price, instead of eight spread over nine.
+const SOCIAL_MAX_SEARCHES = 5;
 // Recent news comes from Google News's search feed: dated headlines with outlets, no key, and no model deciding
 // whether to search. Gemini then prices from that list. The Gemini-with-search path is the fallback if the feed fails.
 const NEWS_FEED_URL = "https://news.google.com/rss/search";
@@ -611,7 +616,13 @@ SUBJECT: ${name} — ${oneLine}
 BIOGRAPHY (use only to identify the right person and their official accounts):
 ${bio}
 
-Task: Use web search to find this person's accounts (Instagram, TikTok, X/Twitter, YouTube, Facebook, Threads, Twitch, Snapchat, Weibo, and any others) and establish each account's current follower count and engagement. Search for each account; do not rely on memory. Do not consider career achievements, awards, news, or comparisons to other named people.
+Task: Establish this person's current follower count and engagement with web search.
+
+WHERE TO LOOK. Four platforms decide the price: Instagram, TikTok, YouTube and X/Twitter. Search for those, and for one more only when the biography says that is where this person's audience actually lives — Twitch or Kick for a streamer, Weibo or Douyin for a Chinese-language audience. If the results you already have happen to show other accounts (Facebook, Threads, Snapchat), report those too; they count toward the footprint. Never spend a search on one.
+
+HOW TO SPEND YOUR ${SOCIAL_MAX_SEARCHES} SEARCHES. Open with one query that covers several platforms at once — a follower-count summary for the person usually lists every account they have on a single page. Then use what is left to pin down the account carrying the largest audience, because the best band alone sets the price; a smaller account only adjusts it. Do not run one search per platform, and do not answer from memory.
+
+Do not consider career achievements, awards, news, or comparisons to other named people.
 
 PERCENTILE BANDS — report each account as exactly one of these bands (the band, not a raw count, so the result stays comparable across people and survives stale numbers):
 ${PERCENTILE_ANCHORS}

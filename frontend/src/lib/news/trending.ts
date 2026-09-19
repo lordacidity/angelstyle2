@@ -33,20 +33,23 @@
 //                 as search does. The newest are resolved while Gemini reads.
 
 import { extractGeminiJson, geminiGenerate } from '@/lib/gemini';
-import { fetchFeed, outletOf, resolveGoogleNewsLinks, siteClause, storyKey, stripSourceSuffix } from './google-news';
+import { matchesCategory, peopleInCategory, topicIsCategory } from './categories';
+import { anyOf, fetchFeed, outletOf, resolveGoogleNewsLinks, siteClause, storyKey, stripSourceSuffix } from './google-news';
 import { imdbNews, imdbUrl } from './imdb';
 import { OUTLET_IDS, articleUrlProblem, outletById, outletForHost } from './outlets';
 import { pauvPeople, type PauvPerson } from './pauv-people';
 import { isOrdinaryName, rosterMatcher, type RosterFind } from './roster-match';
 import type { NamedPerson, OutletId, TrendingHit, TrendingResponse, TrendWindow } from './types';
 
-export const TREND_WINDOWS: readonly TrendWindow[] = ['24h', '6h', '1h'];
+export const TREND_WINDOWS: readonly TrendWindow[] = ['1h', '6h', '24h', '7d'];
 export const isTrendWindow = (v: unknown): v is TrendWindow =>
   typeof v === 'string' && (TREND_WINDOWS as readonly string[]).includes(v);
 
-const WINDOW_MS: Record<TrendWindow, number> = { '24h': 24 * 3_600_000, '6h': 6 * 3_600_000, '1h': 3_600_000 };
+const WINDOW_MS: Record<TrendWindow, number> = { '1h': 3_600_000, '6h': 6 * 3_600_000, '24h': 24 * 3_600_000, '7d': 7 * 24 * 3_600_000 };
 /** The `when:` clauses each window is read by — see the header. */
-const WINDOW_FEEDS: Record<TrendWindow, string[]> = { '24h': ['1d', '6h'], '6h': ['6h', '1h'], '1h': ['1h'] };
+// A week is read as the week and as its last day, for the same reason a day
+// is read as the day and its last six hours: a feed stops at 100.
+const WINDOW_FEEDS: Record<TrendWindow, string[]> = { '1h': ['1h'], '6h': ['6h', '1h'], '24h': ['1d', '6h'], '7d': ['7d', '1d'] };
 
 /** The most matches Gemini reads, newest first, and how many go in one call. */
 const READ_MAX = 200;
@@ -57,6 +60,21 @@ const SEND_HOT = 30;
 const SEND_POLITICS = 15;
 const SEND_NEW = 25;
 
+/** The most people a category is asked for by name in one query. Above this
+ *  the topic goes as its own words instead — and a category that big is one
+ *  the form never offers to widen, since filtering already fills the list. */
+const NAME_WIDEN_MAX = 20;
+
+/** A read for a category looks back a week, whatever window the form is on.
+ *  The thin categories are thin in the news as well as on Pauv — seven riders,
+ *  and most days none of them is in a headline an approved outlet ran — so a
+ *  day's worth is usually nothing at all. A week is the difference between
+ *  "cycling has no news" and Pogačar's collarbone. The rows carry their own
+ *  timestamps and the form prints the age of each, so nothing here pretends a
+ *  four-day-old story is from this morning. */
+const TOPIC_MS = 7 * 24 * 3_600_000;
+const TOPIC_FEEDS = ['7d', '1d'];
+
 // The reader is built once per roster; pauvPeople hands back the same array
 // for an hour at a time.
 let reader: { for: PauvPerson[]; read: (text: string) => RosterFind<PauvPerson>[] } | null = null;
@@ -66,7 +84,8 @@ export async function rosterReader(): Promise<(text: string) => RosterFind<PauvP
   return reader.read;
 }
 
-export const asNamed = (p: PauvPerson): NamedPerson => ({ name: p.name, ticker: p.ticker, industry: p.industry });
+export const asNamed = (p: PauvPerson): NamedPerson =>
+  ({ name: p.name, ticker: p.ticker, industry: p.industry, subcategory: p.subcategory });
 
 interface Candidate {
   outlet: OutletId;
@@ -153,18 +172,56 @@ async function readAll(rows: Candidate[]): Promise<{ verdicts: (Verdict | undefi
 
 /** Fresh stories from the approved outlets whose headlines name somebody on
  *  Pauv, each with its heat. Sent newest first; the form sorts. Throws when
- *  Google gave nothing at all to read. */
-export async function trendingNews(window: TrendWindow): Promise<TrendingResponse> {
-  const since = Date.now() - WINDOW_MS[window];
+ *  Google gave nothing at all to read.
+ *
+ *  With a `topic` — a category somebody typed, "cycling" — the words go into
+ *  the query rather than filtering what came back: the outlets put out far
+ *  more in a day than a feed will hand over, so asking Google for the category
+ *  reaches stories the plain read never saw. That is the whole point of it,
+ *  and why the form only widens this way when filtering the list it already
+ *  has comes up short (lib/news/categories). */
+export async function trendingNews(window: TrendWindow, topic = ''): Promise<TrendingResponse> {
+  const forTopic = !!topic.trim();
+  const since = Date.now() - (forTopic ? TOPIC_MS : WINDOW_MS[window]);
+  const whens = forTopic ? TOPIC_FEEDS : WINDOW_FEEDS[window];
   const google = OUTLET_IDS.filter(id => id !== 'imdb');
+  const want = topic.trim();
+  // How a category is put to Google. A bare topic word next to `site:` and
+  // `when:` is all but ignored — "cycling site:bbc.com when:1d" comes back as
+  // a day of BBC sport, cycling or not — but a NAME is honoured, and the whole
+  // point of a category here is that we know exactly who is in it. So a
+  // category Pauv files people under is asked for as its people, by name; only
+  // a topic nobody is filed under ("crypto") goes as the words themselves.
+  // Names are capped because they all go in one query, and a category too big
+  // to name is one the form never needs widened — filtering the ordinary list
+  // already fills a screen for it.
+  const roster = want ? await pauvPeople() : [];
+  const inCategory = want ? peopleInCategory(roster, want) : [];
+  const byName = inCategory.length > 0 && inCategory.length <= NAME_WIDEN_MAX;
+  const q = !want ? ''
+    : byName ? `${anyOf(inCategory.map(p => p.name))} `
+      : `${want} `;
   let failed = 0;
   const [read, imdb, ...feeds] = await Promise.all([
     rosterReader(),
     imdbNews().catch(() => []),
-    ...google.flatMap(id => WINDOW_FEEDS[window].map(when =>
-      fetchFeed(`${siteClause([id])} when:${when}`).catch(() => { failed++; return []; }))),
+    ...google.flatMap(id => whens.map(when =>
+      fetchFeed(`${q}${siteClause([id])} when:${when}`).catch(() => { failed++; return []; }))),
   ]);
   if (feeds.length > 0 && failed === feeds.length) throw new Error("Google News didn't answer. Try again in a minute.");
+
+  // The press name of each person a widened read went looking for — everything
+  // after the first word, so "Wout van Aert" is read by "van Aert" and
+  // "Mathieu van der Poel" by "van der Poel". Kept beside the real person, so
+  // what a headline matched is still filed under their full name. Short ones
+  // are left out: a four-letter surname on its own is a word waiting to be
+  // mistaken for somebody.
+  const pressNames = byName
+    ? rosterMatcher(inCategory.flatMap((p) => {
+      const rest = p.name.trim().split(/\s+/).slice(1).join(' ');
+      return rest.length >= 5 ? [{ name: rest, real: p }] : [];
+    }))
+    : null;
 
   const seen = new Set<string>();
   const all: Candidate[] = [];
@@ -175,7 +232,15 @@ export async function trendingNews(window: TrendWindow): Promise<TrendingRespons
     if (seen.has(key)) return;
     seen.add(key);
     scanned++;
-    const found = read(title).map(f => f.person);
+    let found = read(title).map(f => f.person);
+    // The roster match wants a whole name, and has to: "Future" and "Offset"
+    // are words, and there are 1,278 people to be wrong about. A widened read
+    // is the one place that can be relaxed — it went looking for at most
+    // twenty named people, so their press names can be matched too, which is
+    // how half of cycling is written ("Van Aert powers to victory on stage
+    // 13", "Pogačar has collarbone surgery"). Only as a fallback, so a whole
+    // name still wins where there is one.
+    if (!found.length && pressNames) found = pressNames(title).map(f => f.person.real);
     if (found.length) all.push({ outlet, title, publishedAt, link, found, counts: [], buzz: 1 });
   };
   for (const items of feeds) {
@@ -212,14 +277,23 @@ export async function trendingNews(window: TrendWindow): Promise<TrendingRespons
     return [{ c, people, politics, heat: v?.heat ?? null, why: v?.why ?? null }];
   });
   type Kept = (typeof kept)[number];
+  // A query is a suggestion to Google, not a filter: "cycling site:espn.com"
+  // comes back with plenty that isn't cycling. So when the topic is one of
+  // Pauv's own categories, the rows are held to it by the people they name —
+  // the same test the form filters with, so widening can only ever agree with
+  // it. A topic nobody is filed under ("crypto") has nothing to be held to,
+  // and the query is left to have done its job.
+  const onTopic = want && (await topicIsCategory(want))
+    ? kept.filter(k => matchesCategory(k.people, want))
+    : kept;
   const hotter = (a: Kept, b: Kept) => (b.heat ?? -1) - (a.heat ?? -1) || b.c.buzz - a.c.buzz || when(b.c) - when(a.c);
-  const byHeat = [...kept].sort(hotter);
+  const byHeat = [...onTopic].sort(hotter);
   const send = new Set<Kept>([
     ...byHeat.filter(k => !k.politics).slice(0, SEND_HOT),
     ...byHeat.filter(k => k.politics).slice(0, SEND_POLITICS),
-    ...kept.slice(0, SEND_NEW),
+    ...onTopic.slice(0, SEND_NEW),
   ]);
-  const sending = kept.filter(k => send.has(k));
+  const sending = onTopic.filter(k => send.has(k));
 
   const urls = await resolveGoogleNewsLinks(sending.map(k => k.c.link));
   if (sending.length > 0 && urls.every(u => u === null)) {
@@ -245,5 +319,5 @@ export async function trendingNews(window: TrendWindow): Promise<TrendingRespons
       heat: k.heat, why: k.why, buzz: k.c.buzz,
     });
   });
-  return { hits, scanned, matched: all.length, ai };
+  return { hits, scanned, matched: onTopic.length, ai, topic: want || null };
 }

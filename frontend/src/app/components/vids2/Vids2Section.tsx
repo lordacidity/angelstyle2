@@ -7,15 +7,14 @@
 // whole video from the answers, and only then shows it — so the building is
 // one press and everything after it is adjustment.
 //
-//   Form      one question at a time: who on Pauv, the mode (Serious, Middle
-//             or Degen — not about the video so much as how it talks; Degen
-//             turns the hook into a cry for help and lays BOOMs over the
-//             recordings), which way, the persona, and the intro — nothing,
-//             ChatGPT and a question, or a news story about them. Or from
-//             the other end, "Choose by news": a story going out right now
-//             that names somebody on Pauv, which answers who and the intro
-//             both, then which way, the mode and the persona. Either way it
-//             is the same answers that arrive here. See Vids2Form.
+//   Form      five cards, top to bottom, the open one always the next thing
+//             to do: who on Pauv (by name, or off the trending list — a
+//             story answers who and the intro both), the intro — nothing,
+//             ChatGPT and a question, or a news story about them — which
+//             way, the mode (Serious, Middle or Degen — not about the video
+//             so much as how it talks; Degen turns the hook into a cry for
+//             help and lays BOOMs over the recordings) and the persona.
+//             Pressing an answer moves the form on. See Vids2Form.
 //   Generate  the screen recordings, all at once: the intro (Bottom A) —
 //             ChatGPT looking them up, or the news story opened and read, or
 //             nothing at all — and the Pauv trade (Bottom B), light or dark at
@@ -28,8 +27,8 @@
 //             post captions and the hook the moment Generate is pressed — not
 //             after (lib/vids2/vids2Words).
 //   Tune      Vids2Builder: the sound, the words, the BOOMs, the post caption
-//             and Download. Change goes back to the form with the answers as
-//             they were left.
+//             and Download. Start over clears the answers and goes back to
+//             the form.
 //
 // This section owns the recordings' bytes: it made them, it lets them go
 // when a second Generate replaces them, and again when the page is left.
@@ -47,6 +46,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useVidsLibrary } from '@/app/hooks/useVidsLibrary';
 import { CLIPPERS } from '@/lib/clipping';
 import { CAPTION_STYLES } from '@/lib/simpler/vidsCaptions';
+import { suggestedFrom } from '@/lib/vids-types';
 import { Vids2Builder } from './Vids2Builder';
 import { Vids2Form, type Vids2Job, type Vids2Leg } from './Vids2Form';
 import {
@@ -63,8 +63,8 @@ import { bottomAContext, bottomAMarks, bottomAName } from '@/lib/simpler/vidsBot
 import { outletById } from '@/lib/news/outlets';
 import { writeHook, writePostCaptions } from '@/lib/vids-client';
 import {
-  EMPTY_SETUP, loadSetup, makeNewsClip, makeTradeClip, rollTheme, saveSetup, setupReady, storyFor,
-  type Vids2Build, type Vids2Setup,
+  EMPTY_SETUP, bottomANewsName, loadSetup, makeNewsClip, makeTradeClip, rollTheme, saveSetup, setupReady,
+  storyFor, type Direction, type Theme, type Vids2Build, type Vids2Setup, type Vids2Story,
 } from '@/lib/vids2/vids2Build';
 import {
   VIDS2_BARS, VIDS2_PACE, draftLines, personaContextOf, useEmojiPalette, type Vids2Early,
@@ -107,6 +107,226 @@ const tradePick = (row: VidRow) => ({
  *  renderer wanted said. */
 interface IntroClip { row: VidRow; pick: number; notes: string[] }
 
+/** A recording giving up because something else already has — not a failure,
+ *  and not what anybody should be told about. */
+const cancelled = (e: unknown) => e instanceof DOMException && e.name === 'AbortError';
+const msg = (e: unknown) => (e instanceof Error ? e.message : String(e));
+
+// ── The head start ──────────────────────────────────────────────────────────
+// The two recordings are nearly the whole of what a Generate costs, and
+// neither reads an answer the form asks late: the intro wants the intro, the
+// trade wants who and which way. So each is started the moment its own
+// answers are in — while the rest of the form is still being filled — and
+// Generate takes what is already running rather than starting it. That is
+// what the order of the questions is for (Vids2Form): answer the last one a
+// minute later and there is nothing much left to wait for.
+//
+// A head start is a render and nothing else. Nothing goes on the stage, no
+// words are written, no video is shown until Generate is pressed: it is the
+// same recording a Generate would have made, made earlier.
+//
+// Each run is keyed by the answers it was started from (warmKey). Change one
+// of them and the run is for a video nobody is making: it is dropped, its
+// bytes let go, and the answer that replaced it starts its own once it
+// settles. The one exception is which way a NEWS intro goes — those frames
+// are the same either way and only the filed name carries it, so that run is
+// kept and re-stamped rather than thrown away. A ChatGPT intro is not so
+// lucky: the model is told which way before it writes a word, so flipping
+// Which way after it has started does start it again.
+
+/** One recording on its way, wherever it was started from. */
+interface Run<T, L> {
+  /** What it is being made for — see warmKey. */
+  key: string;
+  ctrl: AbortController;
+  /** The clip as it will be filed, the moment the renderer has laid it out
+   *  and before the frames — what the caption writer reads. */
+  laid: Promise<L>;
+  /** The recording itself. Marked as seen already (quiet): a head start
+   *  nobody ever takes must not go off as an unhandled failure. */
+  done: Promise<T>;
+  /** What the line about it says right now. */
+  leg: Vids2Leg;
+  /** Where that line goes: the form's head-start row while it is only a head
+   *  start, a running Generate's own progress once that has taken it. */
+  sink: ((leg: Vids2Leg) => void) | null;
+  /** What it left behind, once it has landed — so the bytes can be let go if
+   *  the answers change before anybody takes it. */
+  out: T | null;
+  /** Why it stopped, if it did. A run that failed is never taken: Generate
+   *  starts that recording again, and fails the way it always would have. */
+  failed: string | null;
+}
+type IntroRun = Run<IntroClip, VidRow> & {
+  /** Which way it was started for, and which outlet it is of — what a news
+   *  run needs to be re-filed for the other way (stampName in generate).
+   *  The outlet is null for ChatGPT, which is started again instead. */
+  direction: Direction;
+  outlet: string | null;
+};
+type TradeOut = Awaited<ReturnType<typeof makeTradeClip>>;
+type TradeRun = Run<TradeOut, { row: VidRow; person: string }> & {
+  /** Rolled where the render starts rather than where Generate does, since by
+   *  then the frames have already been drawn one way or the other (rollTheme). */
+  theme: Theme;
+};
+
+/** What each recording is being made for, as one string. Null when the
+ *  answers it needs are not in, which is nothing to start. */
+function warmKey(kind: 'intro' | 'trade', s: Vids2Setup): string | null {
+  const person = s.person.trim().toLowerCase();
+  if (!person) return null;
+  if (kind === 'trade') return `trade|${person}|${s.direction}`;
+  if (s.intro === 'none') return null;
+  if (s.intro === 'chatgpt') {
+    const question = s.question.trim();
+    return question ? `chatgpt|${person}|${s.direction}|${question}` : null;
+  }
+  const story = storyFor(s);
+  // Which way is left out on purpose — see the note above.
+  return story ? `news|${person}|${story.hit.url}` : null;
+}
+
+/** Start the intro recording — the call Generate would make, made here so
+ *  that both callers make exactly the same one. */
+function startIntroRun(key: string, spec: {
+  person: string; direction: Direction; question: string; story: Vids2Story | null;
+}): IntroRun {
+  const ctrl = new AbortController();
+  const laid = later<VidRow>();
+  const run: IntroRun = {
+    key,
+    ctrl,
+    laid: laid.promise,
+    done: null as unknown as Promise<IntroClip>,
+    leg: {
+      label: spec.story ? 'Finding photos for the story…' : 'Asking ChatGPT…',
+      frac: null,
+      done: false,
+    },
+    sink: null,
+    out: null,
+    failed: null,
+    direction: spec.direction,
+    outlet: spec.story ? outletById(spec.story.article.outlet).name : null,
+  };
+  const note = (next: Partial<Vids2Leg>) => { run.leg = { ...run.leg, ...next }; run.sink?.(run.leg); };
+
+  /** The ChatGPT recording as it is filed, bar its bytes and poster. */
+  const chatMeta = (p: ClipPlan & { reply: Reply }): LocalClipMeta => {
+    // The name the answer led with ("Donald Trump" for "Trump") is what the
+    // context says the answer was.
+    const answer = p.reply.picks[0]?.name.trim() || spec.person;
+    return {
+      name: bottomAName(spec.person, spec.direction),
+      context: bottomAContext(spec.question, answer),
+      marks: bottomAMarks(p.beats, spec.question, answer),
+      duration: p.seconds,
+      width: p.width,
+      height: p.height,
+      // Its audio track is the keyboard under the typing and nothing else.
+      hasSfx: true,
+    };
+  };
+
+  run.done = quiet(spec.story
+    ? makeNewsClip({
+      name: spec.person,
+      direction: spec.direction,
+      story: spec.story,
+      signal: ctrl.signal,
+      onProgress: (p) => note(p.stage === 'photos'
+        ? { label: 'Finding photos for the story…', frac: null }
+        : p.stage === 'layout'
+          ? { label: 'Laying the pages out…', frac: null }
+          : { label: 'Rendering the news story', frac: p.frac }),
+      onPlanned: (meta) => laid.resolve(plannedClip(meta)),
+    }).then((r) => {
+      note({ label: 'News story — done', frac: 1, done: true });
+      laid.resolve(r.row);
+      return { row: r.row, pick: r.pulseAt, notes: r.notes };
+    })
+    : makeChatGptClip({
+      name: spec.person,
+      direction: spec.direction,
+      question: spec.question,
+      signal: ctrl.signal,
+      onProgress: (p) => note(p.stage === 'ask'
+        ? { label: 'Asking ChatGPT…', frac: null }
+        : { label: 'Rendering the ChatGPT search', frac: p.frac }),
+      onPlanned: (p) => laid.resolve(plannedClip(chatMeta(p))),
+    }).then((chat) => {
+      note({ label: 'ChatGPT search — done', frac: 1, done: true });
+      const row = makeLocalClip(chat.blob, { ...chatMeta(chat), poster: chat.poster });
+      laid.resolve(row);
+      // Degen's first BOOM waits for the zoom on the name, not the drag.
+      return { row, pick: chat.pulseAt, notes: [] };
+    }));
+  watchRun(run);
+  return run;
+}
+
+/** Start the trade recording. As above: one call, two callers. */
+function startTradeRun(key: string, spec: { person: string; direction: Direction; theme: Theme }): TradeRun {
+  const ctrl = new AbortController();
+  const laid = later<{ row: VidRow; person: string }>();
+  const run: TradeRun = {
+    key,
+    ctrl,
+    laid: laid.promise,
+    done: null as unknown as Promise<TradeOut>,
+    leg: { label: 'Reading them off Pauv…', frac: null, done: false },
+    sink: null,
+    out: null,
+    failed: null,
+    theme: spec.theme,
+  };
+  const note = (next: Partial<Vids2Leg>) => { run.leg = { ...run.leg, ...next }; run.sink?.(run.leg); };
+  run.done = quiet(makeTradeClip({
+    name: spec.person,
+    direction: spec.direction,
+    theme: spec.theme,
+    signal: ctrl.signal,
+    onProgress: (p) => note(p.stage === 'load'
+      ? { label: 'Reading them off Pauv…', frac: null }
+      : { label: 'Rendering the Pauv trade', frac: p.frac }),
+    onPlanned: (meta, person) => laid.resolve({ row: plannedClip(meta), person: person.name }),
+  }).then((r) => {
+    note({ label: 'Pauv trade — done', frac: 1, done: true });
+    laid.resolve({ row: r.row, person: r.person.name });
+    return r;
+  }));
+  watchRun(run);
+  return run;
+}
+
+/** Stop a run and let go of whatever it made. Safe whether it is still going,
+ *  has already landed, or lands a moment after being told to stop. */
+function stopRun(run: Run<{ row: VidRow }, unknown> | null): void {
+  if (!run) return;
+  run.sink = null;
+  run.ctrl.abort();
+  if (run.out) releaseLocalClip(run.out.row);
+  // A render is a few frames past the abort at worst, and those frames still
+  // make a clip — which nobody is going to show.
+  else void run.done.then((out) => releaseLocalClip(out.row), () => { /* never landed */ });
+}
+
+/** What every run does with its own ending: hold on to what it made, so
+ *  whoever is holding the run can let the bytes go, and say so on its line
+ *  when it stopped for a reason. */
+function watchRun<T extends { row: VidRow }, L>(run: Run<T, L>): void {
+  run.done.then(
+    (out) => { run.out = out; },
+    (e) => {
+      if (cancelled(e)) return;
+      run.failed = msg(e);
+      run.leg = { label: `Stopped — Generate will try again: ${run.failed}`, frac: null, done: false };
+      run.sink?.(run.leg);
+    },
+  );
+}
+
 export function Vids2Section({ active }: { active: boolean }) {
   const lib = useVidsLibrary(active);
   const { loaded, loading, folders, videos, personas, ensureFolders } = lib;
@@ -120,6 +340,10 @@ export function Vids2Section({ active }: { active: boolean }) {
   // With nothing switched on it is the default look alone rather than none: a
   // clipper with no look to draw in has no video either, and one house look is
   // a better answer to an empty list than a dead page.
+  /** The five names Vids 2 puts up before a search — see the Clippers page.
+   *  Same flags the looks come from, so they arrive with the library. */
+  const suggested = useMemo(() => suggestedFrom(lib.clipable), [lib.clipable]);
+
   const looks = useMemo(() => {
     if (!CLIPPERS) return CAPTION_STYLES;
     const on = new Set(lib.clipable.filter((c) => c.kind === 'captionStyle').map((c) => c.key));
@@ -166,6 +390,8 @@ export function Vids2Section({ active }: { active: boolean }) {
   useEffect(() => () => {
     jobRef.current?.abort();
     dropLocal(picksRef.current);
+    stopRun(warmRef.current.intro);
+    stopRun(warmRef.current.trade);
   }, []);
 
   // What the build actually uses. A pick stores the row it was made from, and a
@@ -236,12 +462,103 @@ export function Vids2Section({ active }: { active: boolean }) {
     setJob(null);
   };
 
+  // ── The head start ────────────────────────────────────────────────────
+  // The recordings already going before Generate was pressed — see the note
+  // above startIntroRun. The runs themselves are a ref: they are not what the
+  // page draws, and a render is not a reason to make one again. What the page
+  // draws is `warm`, the line each of them is on, which the form shows so
+  // that work being done in the background is work somebody can see.
+  const warmRef = useRef<{ intro: IntroRun | null; trade: TradeRun | null }>({ intro: null, trade: null });
+  const [warm, setWarm] = useState<{ intro: Vids2Leg | null; trade: Vids2Leg | null }>({ intro: null, trade: null });
+
+  const dropWarm = (kind: 'intro' | 'trade') => {
+    if (!warmRef.current[kind]) return;
+    stopRun(warmRef.current[kind]);
+    warmRef.current[kind] = null;
+    setWarm((w) => (w[kind] ? { ...w, [kind]: null } : w));
+  };
+
+  /** Start one recording for these answers, unless one for exactly them is
+   *  already going — or has already finished. */
+  const startWarm = (kind: 'intro' | 'trade', s: Vids2Setup) => {
+    const key = warmKey(kind, s);
+    if (warmRef.current[kind]?.key === key) return;
+    dropWarm(kind);
+    if (!key) return;
+    if (kind === 'intro') {
+      const run = startIntroRun(key, {
+        person: s.person,
+        direction: s.direction,
+        question: s.question.trim(),
+        // A story kept from before is not the answer unless the intro IS the
+        // story: what decides which recording this is, is the intro.
+        story: s.intro === 'news' ? storyFor(s) : null,
+      });
+      run.sink = (leg) => setWarm((w) => ({ ...w, intro: leg }));
+      warmRef.current.intro = run;
+      setWarm((w) => ({ ...w, intro: run.leg }));
+    } else {
+      const run = startTradeRun(key, { person: s.person, direction: s.direction, theme: rollTheme() });
+      run.sink = (leg) => setWarm((w) => ({ ...w, trade: leg }));
+      warmRef.current.trade = run;
+      setWarm((w) => ({ ...w, trade: run.leg }));
+    }
+  };
+
+  /** An answer has settled, so whatever it was the last of can start being
+   *  rendered: the intro once the intro is answered, the trade once which way
+   *  is. The form says when (Vids2Form onHeadStart) and hands the answers
+   *  over as they are at that moment.
+   *
+   *  The other recording is looked at too, because a settled answer can be
+   *  the undoing of one already going: the model is told which way before it
+   *  writes a word of a ChatGPT intro, so pressing Which way at question 3
+   *  starts the intro from question 2 again. Only here, where an answer has
+   *  settled — a question being retyped drops its run and waits (the effect
+   *  below), rather than starting a render on every letter. */
+  const headStart = (kind: 'intro' | 'trade', s: Vids2Setup) => {
+    // A Generate owns the renderers while it runs, and it has taken whatever
+    // was going already.
+    if (jobRef.current) return;
+    startWarm(kind, s);
+    const other = kind === 'intro' ? 'trade' : 'intro';
+    // Only one that is already going: the other question has not been
+    // answered yet if there is nothing running for it.
+    if (warmRef.current[other]) startWarm(other, s);
+  };
+
+  /** The head start for these answers, handed over to a Generate: it is the
+   *  caller's to finish and the caller's to let go. Null when there is none,
+   *  when it was started for answers that have since changed, or when it
+   *  stopped on a failure — in which case Generate makes that recording
+   *  itself, and fails the way it would have anyway. */
+  const takeWarm = (kind: 'intro' | 'trade', s: Vids2Setup): IntroRun | TradeRun | null => {
+    const run = warmRef.current[kind];
+    if (!run) return null;
+    if (run.key !== warmKey(kind, s) || run.failed) { dropWarm(kind); return null; }
+    warmRef.current[kind] = null;
+    setWarm((w) => ({ ...w, [kind]: null }));
+    return run;
+  };
+
+  // An answer changed under a head start: it is a recording for a video
+  // nobody is making. Dropped rather than started again — what replaced it
+  // starts its own when it settles, and a half-typed question is not an
+  // answer that has settled.
+  useEffect(() => {
+    if (jobRef.current) return;
+    if (warmRef.current.intro && warmRef.current.intro.key !== warmKey('intro', setup)) dropWarm('intro');
+    if (warmRef.current.trade && warmRef.current.trade.key !== warmKey('trade', setup)) dropWarm('trade');
+  }, [setup]);
+
   /** Reset, top right of the tuning page: Vids 2 as it opens. The answers go
    *  back to empty, the recordings are let go, and the build goes — which
    *  unmounts the tuning page and everything it was holding (the song, the
-   *  words, the BOOMs) — so the form mounts fresh on its first question. */
+   *  words, the BOOMs) — so the form mounts fresh on its first card. */
   const reset = () => {
     cancel();
+    dropWarm('intro');
+    dropWarm('trade');
     dropLocal(picksRef.current);
     setPicks({});
     setBuild(null);
@@ -284,28 +601,50 @@ export function Vids2Section({ active }: { active: boolean }) {
     const persona = personas.find((p) => p.id === setup.personaId) ?? null;
     if (!persona) { setJobError('That persona is no longer in the library. Choose another.'); return; }
     const { direction, mode, intro } = setup;
-    // Light or dark is not asked: every Generate rolls its own (rollTheme).
-    const theme = rollTheme();
     const question = intro === 'chatgpt' ? setup.question.trim() : '';
     const story = intro === 'news' ? storyFor(setup) : null;
     if (intro === 'news' && !story) { setJobError('Choose a story first.'); return; }
+    const tradeKey = warmKey('trade', setup);
+    if (!tradeKey) return; // setupReady has already said there is a person
+
+    // Each recording as it stands: the one already running for these answers,
+    // taken over, or a new one started here the way it always was. Light or
+    // dark is not asked — whichever run draws the trade rolled it (rollTheme),
+    // here or a minute ago.
+    const introRun = intro === 'none' ? null
+      : (takeWarm('intro', setup) as IntroRun | null) ?? startIntroRun(warmKey('intro', setup) ?? '', {
+        person: setup.person, direction, question, story,
+      });
+    const tradeRun = (takeWarm('trade', setup) as TradeRun | null) ?? startTradeRun(tradeKey, {
+      person: setup.person, direction, theme: rollTheme(),
+    });
+    const theme = tradeRun.theme;
+    /** A news head start begun before Which way was asked carries the other
+     *  way in its filed name, and nothing else: the frames are the same
+     *  either way. So it is re-stamped rather than thrown away. Every other
+     *  run was started for this direction and passes straight through. */
+    const stamp = (row: VidRow): VidRow =>
+      introRun?.outlet && introRun.direction !== direction
+        ? { ...row, name: bottomANewsName(setup.person, direction, introRun.outlet) }
+        : row;
 
     jobRef.current?.abort();
     const ctrl = new AbortController();
     jobRef.current = ctrl;
     setJobError(null);
-    setJob({
-      intro: intro === 'none' ? null : {
-        label: intro === 'chatgpt' ? 'Asking ChatGPT…' : 'Finding photos for the story…', frac: null, done: false,
-      },
-      trade: { label: 'Reading them off Pauv…', frac: null, done: false },
-    });
+    // Whatever each run has got to by now: one that has been going since the
+    // form was halfway through says so, rather than starting its line again
+    // at nothing.
+    setJob({ intro: introRun?.leg ?? null, trade: tradeRun.leg });
     /** One of the lines on the form, moved on its own. */
     const leg = (which: 'intro' | 'trade', next: Partial<Vids2Leg>) =>
       setJob((j) => (j && j[which] ? { ...j, [which]: { ...j[which], ...next } } : j));
-    /** A leg giving up because the other one already has. Not a failure, and
-     *  not what the form should be told about. */
-    const cancelled = (e: unknown) => e instanceof DOMException && e.name === 'AbortError';
+    // From here the runs report to the form's progress rather than to the
+    // head-start row, which is gone the moment they were taken.
+    if (introRun) introRun.sink = (l) => leg('intro', l);
+    tradeRun.sink = (l) => leg('trade', l);
+    // Cancel stops both renders wherever they were started from.
+    ctrl.signal.addEventListener('abort', () => { introRun?.ctrl.abort(); tradeRun.ctrl.abort(); });
     /** The first real failure takes the other one down with it. */
     const stopBoth = (e: unknown) => { if (!cancelled(e)) ctrl.abort(); throw e; };
 
@@ -333,15 +672,13 @@ export function Vids2Section({ active }: { active: boolean }) {
       draft: quiet(writePostCaptions({ person: setup.person, position: direction, fresh: true }, ctrl.signal)),
     };
 
-    // Each recording as the plan will see it, the moment it has been laid out
-    // — or, should a renderer never say, once it is done.
-    const introLaid = later<VidRow | null>();
-    const tradeLaid = later<{ row: VidRow; person: string }>();
-    if (intro === 'none') introLaid.resolve(null);
-    // Then the rest of the captions, off the stage those recordings will make.
-    // Handed back inside an object: a promise returned bare from .then would
-    // be waited on, and the stage would wait for the words.
-    const linesP = quiet(Promise.all([introLaid.promise, tradeLaid.promise]).then(([introRow, trade]) => {
+    // Each recording as the plan will see it, the moment it was laid out —
+    // which for a head start was before Generate was pressed. Then the rest
+    // of the captions, off the stage those recordings will make. Handed back
+    // inside an object: a promise returned bare from .then would be waited
+    // on, and the stage would wait for the words.
+    const introLaid: Promise<VidRow | null> = introRun ? introRun.laid.then(stamp) : Promise.resolve(null);
+    const linesP = quiet(Promise.all([introLaid, tradeRun.laid]).then(([introRow, trade]) => {
       const draft: Picks = { ...base, bottomB: tradePick(trade.row) };
       if (introRow) draft.bottomA = freshPick('bottomA', introRow);
       // The captions are timed against the clips' lengths, so they are only
@@ -365,84 +702,11 @@ export function Vids2Section({ active }: { active: boolean }) {
       };
     }));
 
-    /** The ChatGPT recording as it is filed, bar its bytes and poster. */
-    const chatMeta = (p: ClipPlan & { reply: Reply }): LocalClipMeta => {
-      // The name the answer led with ("Donald Trump" for "Trump") is what
-      // the context says the answer was.
-      const answer = p.reply.picks[0]?.name.trim() || setup.person;
-      return {
-        name: bottomAName(setup.person, direction),
-        context: bottomAContext(question, answer),
-        marks: bottomAMarks(p.beats, question, answer),
-        duration: p.seconds,
-        width: p.width,
-        height: p.height,
-        // Its audio track is the keyboard under the typing and nothing else.
-        hasSfx: true,
-      };
-    };
-
-    // The intro, whichever it is, as a clip for the stage — made by the file
-    // that owns the recording and filed here the way a hand-filed Bottom A
-    // is: a name to read, a context and marks for the caption writer.
-    const introP: Promise<IntroClip | null> = intro === 'chatgpt'
-      ? makeChatGptClip({
-        name: setup.person,
-        direction,
-        question,
-        signal: ctrl.signal,
-        onProgress: (p) => leg('intro', p.stage === 'ask'
-          ? { label: 'Asking ChatGPT…', frac: null }
-          : { label: 'Rendering the ChatGPT search', frac: p.frac }),
-        onPlanned: (p) => introLaid.resolve(plannedClip(chatMeta(p))),
-      }).then(
-        (chat) => {
-          leg('intro', { label: 'ChatGPT search — done', frac: 1, done: true });
-          const row = makeLocalClip(chat.blob, { ...chatMeta(chat), poster: chat.poster });
-          introLaid.resolve(row);
-          // Degen's first BOOM waits for the zoom on the name, not the drag.
-          return { row, pick: chat.pulseAt, notes: [] };
-        },
-        stopBoth,
-      )
-      : story
-        ? makeNewsClip({
-          name: setup.person,
-          direction,
-          story,
-          signal: ctrl.signal,
-          onProgress: (p) => leg('intro', p.stage === 'photos'
-            ? { label: 'Finding photos for the story…', frac: null }
-            : p.stage === 'layout'
-              ? { label: 'Laying the pages out…', frac: null }
-              : { label: 'Rendering the news story', frac: p.frac }),
-          onPlanned: (meta) => introLaid.resolve(plannedClip(meta)),
-        }).then(
-          (r) => {
-            leg('intro', { label: 'News story — done', frac: 1, done: true });
-            introLaid.resolve(r.row);
-            return { row: r.row, pick: r.pulseAt, notes: r.notes };
-          },
-          stopBoth,
-        )
-        : Promise.resolve(null);
-    const tradeP = makeTradeClip({
-      name: setup.person,
-      direction,
-      theme,
-      signal: ctrl.signal,
-      onProgress: (p) => leg('trade', p.stage === 'load'
-        ? { label: 'Reading them off Pauv…', frac: null }
-        : { label: 'Rendering the Pauv trade', frac: p.frac }),
-      onPlanned: (meta, person) => tradeLaid.resolve({ row: plannedClip(meta), person: person.name }),
-    }).then(
-      (r) => {
-        leg('trade', { label: 'Pauv trade — done', frac: 1, done: true });
-        tradeLaid.resolve({ row: r.row, person: r.person.name });
-        return r;
-      },
-      stopBoth,
-    );
+    // The recordings themselves. A failure on either side stops the other:
+    // the survivor would be rendering for a build that is never going to be
+    // shown.
+    const introP: Promise<IntroClip | null> = introRun ? introRun.done.catch(stopBoth) : Promise.resolve(null);
+    const tradeP = tradeRun.done.catch(stopBoth);
 
     try {
       const [introR, tradeR] = await Promise.allSettled([introP, tradeP]);
@@ -462,7 +726,7 @@ export function Vids2Section({ active }: { active: boolean }) {
       const trade = tradeR.value;
 
       const next: Picks = { ...base, bottomB: tradePick(trade.row) };
-      if (introClip) next.bottomA = freshPick('bottomA', introClip.row);
+      if (introClip) next.bottomA = freshPick('bottomA', stamp(introClip.row));
       // Settled already — both recordings were laid out before their first
       // frame — and never a reason for Generate to fail.
       const { lines } = await linesP.catch(() => ({ lines: null }));
@@ -522,12 +786,13 @@ export function Vids2Section({ active }: { active: boolean }) {
             personas={personas}
             resolveVideo={resolveVideo}
             libraryLoaded={loaded}
+            suggested={suggested}
             job={job}
             jobError={jobError}
+            warm={warm}
+            onHeadStart={headStart}
             onGenerate={() => void generate()}
             onCancel={cancel}
-            hasBuild={!!build}
-            onBack={() => setOnForm(false)}
           />
         )}
 

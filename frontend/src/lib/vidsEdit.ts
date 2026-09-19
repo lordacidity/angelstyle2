@@ -340,7 +340,7 @@ const MAX_SIDE = 1920;
 const even = (n: number) => Math.max(2, Math.round(n / 2) * 2);
 
 /** Bake an edit into a new MP4, entirely in the browser (WebCodecs via
- *  mediabunny) — same reasoning as vidsCompose: no server ffmpeg, so localhost
+ *  mediabunny) — same reasoning as the exporter: no server ffmpeg, so localhost
  *  and Vercel behave identically. Kept segments are decoded in order and drawn
  *  back to back; audio is laid onto an OfflineAudioContext at the same joins and
  *  time-stretched by `speed` — its pitch left where it was, matching what the

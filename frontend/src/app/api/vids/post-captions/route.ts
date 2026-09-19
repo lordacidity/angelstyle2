@@ -15,8 +15,10 @@
 //    on the same person, or a second video, search once.
 // 3. Writing: one Claude call writes both captions and a HOLD line from that
 //    brief alone. The rules sit in the system prompt; lowercase, dashes
-//    and hashtag counts are fixed in code rather than by asking again, and the
-//    only redraw is for a banned word or a reply that lost its layout.
+//    and hashtag counts are fixed in code rather than by asking again — the
+//    tiktok caption ends on exactly five, topped up here when the model writes
+//    fewer — and the only redraw is for a banned word or a reply that lost its
+//    layout.
 //
 // A finished pair is kept too, against the exact request and the day, so the
 // same build asked again (a remount, a second export) costs nothing — unless
@@ -143,11 +145,11 @@ INSTAGRAM: 1,900 to 2,200 characters of short paragraphs separated by blank line
 8. a keyword line: 12 to 17 comma-separated phrases people search for ("<name> highlights", the event, the rival, the season). no hashtags in it.
 9. the last line: 3 to 5 hashtags: the name, the team or project, the category, #pauv.
 
-TIKTOK: 2 to 4 short sentences, then hashtags.
+TIKTOK: 2 to 4 short sentences, then the 5 hashtags.
 1. the most striking fact, as briefly as possible ("down 20 in the 4th to the no. 1 team in the country").
 2. the trade in one phrase ("the dip was the world cup loss. this is the recovery").
 3. "trade the trajectory on pauv."
-4. the last line: 4 to 6 hashtags mixing the person or event with niche ones (#crypto, #memecoins, #trading).
+4. the last line: exactly 5 hashtags, on one line, and nothing after them. 3 of them are the person and what is happening to them right now: their name, their team, label or project, the event or run in the brief. the other 2 are the trade: #pauv, and one of #trading, #crypto, #memecoins.
 
 HOLD
 If the brief's SENSITIVE line names something live (a criminal case or trial, a lawsuit, health, a loss, stepping back from public life) and this trade could read as pauv profiting off misfortune, or as a place to bet on an outcome like a verdict, recommend holding the post. Then keep the instagram caption to 600 to 900 characters, gentle, with no jokes about them. Otherwise HOLD is no.
@@ -209,6 +211,31 @@ const tidy = (s: string, maxTags: number): string =>
     .replace(/[ \t]+$/gm, '')
     .replace(/\n{3,}/g, '\n\n')
     .trim();
+
+/** The hashtags on the end of the TikTok caption that are always the same:
+ *  the platform first, then what the trading side of tiktok searches. Drawn on
+ *  in this order when the model wrote fewer than five, since the person ones
+ *  can only come out of the brief while these never change. */
+const TRADE_TAGS = ['#pauv', '#trading', '#crypto', '#memecoins', '#traders'];
+
+const TAG = String.raw`(?<=^|\s)#[\p{L}\p{N}_]+`;
+
+/** Exactly five hashtags on the TikTok caption. More than five have already
+ *  come off in `tidy`; fewer are topped up from TRADE_TAGS, onto the caption's
+ *  last line when the model put its hashtags there, otherwise a line of their
+ *  own. */
+function fiveTags(s: string): string {
+  const have = s.match(new RegExp(TAG, 'gu')) ?? [];
+  if (have.length >= 5) return s;
+  const taken = new Set(have);
+  const add = TRADE_TAGS.filter((t) => !taken.has(t)).slice(0, 5 - have.length);
+  if (!add.length) return s;
+  const lines = s.split('\n');
+  const last = lines.length - 1;
+  if (!new RegExp(TAG, 'u').test(lines[last])) return `${s}\n\n${add.join(' ')}`;
+  lines[last] = `${lines[last]} ${add.join(' ')}`;
+  return lines.join('\n');
+}
 
 /** Words that may not appear in any form: the investing words every Vids
  *  caption avoids, plus the gambling ones and "app". Whole words. */
@@ -273,7 +300,9 @@ export async function POST(req: NextRequest) {
     }
     if (!out) return NextResponse.json({ error: 'The reply came back without the two captions in it.' }, { status: 502 });
 
-    const captions: Captions = { ig: tidy(out.ig, 5), tiktok: tidy(out.tiktok, 6), hold: out.hold, person, position };
+    const captions: Captions = {
+      ig: tidy(out.ig, 5), tiktok: fiveTags(tidy(out.tiktok, 5)), hold: out.hold, person, position,
+    };
     if (written.size >= KEEP_MAX) written.clear();
     written.set(key, captions);
     return NextResponse.json(captions);

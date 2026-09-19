@@ -75,8 +75,15 @@ export function readClipablePatch(body: Record<string, unknown>, patch: VidClipa
 }
 
 /** The kinds of thing whose flag lives in the flags table rather than on a
- *  row of its own. */
-export const CLIPABLE_KINDS = ['music', 'captionStyle'] as const;
+ *  row of its own.
+ *
+ *  'suggested' is the odd one out and deliberately so: it is not about what a
+ *  clipper may use — everybody may trade on anybody — but about which five
+ *  names Vids 2 puts up before a search is typed. It sits here because the
+ *  table is a plain (kind, key) store and this is one more key with no row of
+ *  its own, and because the library payload that carries the rest carries it
+ *  to both builds for free. */
+export const CLIPABLE_KINDS = ['music', 'captionStyle', 'suggested'] as const;
 export type ClipableKind = (typeof CLIPABLE_KINDS)[number];
 export const isClipableKind = (v: unknown): v is ClipableKind =>
   typeof v === 'string' && (CLIPABLE_KINDS as readonly string[]).includes(v);
@@ -89,6 +96,14 @@ export interface VidClipableFlag {
 }
 
 export const MAX_CLIPABLE_KEY = 300;
+
+/** How many people can be suggested at once. Five is the row Vids 2 draws:
+ *  enough to be a steer, few enough that it is still a steer. */
+export const MAX_SUGGESTED = 5;
+
+/** The names put up as suggestions, in the order the flags came back. */
+export const suggestedFrom = (flags: readonly VidClipableFlag[]): string[] =>
+  flags.filter((f) => f.kind === 'suggested').map((f) => f.key);
 
 export const isClipable = (flags: readonly VidClipableFlag[], kind: ClipableKind, key: string): boolean =>
   flags.some((f) => f.kind === kind && f.key === key);

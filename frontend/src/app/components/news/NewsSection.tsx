@@ -60,7 +60,7 @@ const SETUP_KEY = 'studio-news-setup-v2';
 const OLD_SETUP_KEY = 'studio-news-setup-v1';
 interface Setup { query: string; outlets: OutletId[]; range: Range; nameInTitle: boolean }
 function loadSetup(): Setup {
-  const fallback: Setup = { query: '', outlets: OUTLETS.map(o => o.id), range: '7d', nameInTitle: true };
+  const fallback: Setup = { query: '', outlets: OUTLETS.map(o => o.id), range: '7d', nameInTitle: false };
   if (typeof window === 'undefined') return fallback;
   try {
     const saved = localStorage.getItem(SETUP_KEY);

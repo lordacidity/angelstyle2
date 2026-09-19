@@ -10,7 +10,6 @@ export const SECTION_PATHS: Record<AppSection, string> = {
   deck: '/deck',
   media: '/media',
   vids: '/vids',
-  simpler: '/simpler',
   vids2: '/vids-2',
   carousel: '/carousel',
   builder: '/builder',

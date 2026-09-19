@@ -136,6 +136,16 @@ export const TWISTS: Record<HookDirection, readonly Twist[]> = {
   down: ['mystery', 'meIf'],
 };
 
+/** Me if catches him in the middle of what the video shows, so without a
+ *  context there is nothing to catch him at — the same reason Middle drops its
+ *  activity combos (NO_CONTEXT_COMBOS). It would otherwise have to invent the
+ *  moment, which is how a line came to put the guy in a wedding toast he was
+ *  never in. Mystery and hype say nothing about him, so they stand either way. */
+export const NO_CONTEXT_TWISTS: Record<HookDirection, readonly Twist[]> = {
+  up: ['mystery', 'hype'],
+  down: ['mystery'],
+};
+
 /** How many goes the route has at a line, each drawn afresh, twist and all. */
 export const HOOK_ATTEMPTS = 2;
 
@@ -245,20 +255,26 @@ export const HYPE_NICKNAMED: readonly string[] = [
 ];
 
 /** Me if says the name everyone calls them — or, in Degen, the nickname — so
- *  its examples come both ways too. */
+ *  its examples come both ways too, the same setting either way.
+ *
+ *  Every one of them is caught in the middle of something a persona clip
+ *  actually shows, because that is where the line has to take it from. They
+ *  used to be solemn occasions nobody films — a funeral, jury duty, church —
+ *  and the model read those as licence to invent the moment rather than read
+ *  it off the video. */
 export const ME_IF_NAMED: readonly string[] = [
-  'me if shorting lebron in a chipotle was legal',
-  'me if going long on taylor swift at church was legal',
-  'me if trading on elon during jury duty was legal',
-  'me if shorting drake at a funeral was legal',
-  'me if going long on messi at the dmv was legal',
-  'me if trading on trump in a job interview was legal',
+  'me if shorting lebron in the hot tub was legal',
+  'me if going long on taylor swift in the grocery line was legal',
+  'me if trading on elon half asleep was legal',
+  'me if shorting drake mid haircut was legal',
+  'me if going long on messi with a mouth full of cereal was legal',
+  'me if trading on trump on the treadmill was legal',
 ];
 export const ME_IF_NICKNAMED: readonly string[] = [
-  'me if shorting bron bron in a chipotle was legal',
-  'me if going long on swifty at church was legal',
-  'me if trading on musky during jury duty was legal',
-  'me if shorting drizzy at a funeral was legal',
-  'me if going long on messi goat at the dmv was legal',
-  'me if trading on trumpy in a job interview was legal',
+  'me if shorting bron bron in the hot tub was legal',
+  'me if going long on swifty in the grocery line was legal',
+  'me if trading on musky half asleep was legal',
+  'me if shorting drizzy mid haircut was legal',
+  'me if going long on messi goat with a mouth full of cereal was legal',
+  'me if trading on trumpy on the treadmill was legal',
 ];

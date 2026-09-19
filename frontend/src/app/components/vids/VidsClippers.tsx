@@ -25,13 +25,19 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import type { CSSProperties, ReactNode } from 'react';
 import type { ClipableKind, VidClipableFlag, VidPersona, VidRow } from '@/lib/vids-types';
-import { PERSONA_PARTS, PERSONA_PART_LABEL, isClipable } from '@/lib/vids-types';
+import { MAX_SUGGESTED, PERSONA_PARTS, PERSONA_PART_LABEL, isClipable, suggestedFrom } from '@/lib/vids-types';
+import { withBase } from '@/lib/clipping';
 import { CAPTION_STYLES, type CaptionStyle } from '@/lib/vidsCaptions';
 import { listMusic, type MusicTrack } from '@/lib/vidsAudio';
 import { SLOT_META, type SlotId } from '@/lib/vidsPlan';
 import { ClipTile, Empty } from './VidsPicker';
 import { fmtTime } from '@/lib/utils';
 import { CloseIcon } from '@/lib/icons';
+
+/** Somebody on Pauv, as /api/ai/talents lists them. Fetched here rather than
+ *  through lib/vids2, whose roster loader comes attached to the whole news and
+ *  trade recording tree — a name and a ticker is all this page wants. */
+interface RosterPerson { name: string; ticker: string }
 
 /** The three slots picked by hand — the ones whose clips are approved one by
  *  one. Start / Top A / Top B come with the persona. */
@@ -167,13 +173,91 @@ function Switch({ on, title, onChange }: { on: boolean; title: string; onChange:
   );
 }
 
+/** The five names Vids 2 puts up before anybody types a search. Not about
+ *  what a clipper may use — the whole roster is searchable either way — but
+ *  about what is offered first, which is most of what gets made. */
+function SuggestedPeople({ chosen, roster, error, onChange }: {
+  chosen: string[];
+  roster: RosterPerson[] | null;
+  error: string | null;
+  onChange: (name: string, on: boolean) => void;
+}) {
+  const [query, setQuery] = useState('');
+  const full = chosen.length >= MAX_SUGGESTED;
+  const matches = useMemo(() => {
+    const q = query.trim().toLowerCase();
+    if (!q || !roster) return [];
+    return roster.filter((p) => p.name.toLowerCase().includes(q) && !chosen.includes(p.name)).slice(0, 8);
+  }, [query, roster, chosen]);
+
+  return (
+    <div className="px-3 py-2.5">
+      {chosen.length === 0 ? (
+        <p className="text-[11px] text-zinc-600">Nobody suggested yet — Vids 2 opens straight on the search.</p>
+      ) : (
+        <div className="flex flex-wrap gap-1.5">
+          {chosen.map((name) => (
+            <span
+              key={name}
+              className="flex items-center gap-1.5 rounded-full border border-amber-400/70 bg-gradient-to-b from-amber-200/25 to-amber-500/10 py-1 pl-3 pr-1.5 text-[12px] font-semibold text-amber-100"
+            >
+              ★ {name}
+              <button
+                type="button"
+                onClick={() => onChange(name, false)}
+                title={`Stop suggesting ${name}`}
+                className="rounded-full px-1 text-amber-200/70 transition-colors hover:bg-amber-400/20 hover:text-white"
+              >
+                ✕
+              </button>
+            </span>
+          ))}
+        </div>
+      )}
+
+      <div className="relative mt-2.5">
+        <input
+          value={query}
+          onChange={(e) => setQuery(e.target.value)}
+          disabled={full || !roster}
+          spellCheck={false}
+          placeholder={full
+            ? `${MAX_SUGGESTED} is the lot — take one off to swap it`
+            : roster ? `Add somebody — ${roster.length.toLocaleString('en-US')} on Pauv` : 'Loading the roster…'}
+          className="h-9 w-full rounded-md border border-zinc-700 bg-zinc-900 px-2.5 text-[12px] text-zinc-100 outline-none placeholder:text-zinc-600 focus:border-zinc-500 disabled:opacity-40"
+        />
+        {matches.length > 0 && (
+          <div className="absolute inset-x-0 top-full z-20 mt-1 max-h-56 overflow-y-auto rounded-md border border-zinc-700 bg-zinc-950 py-0.5 shadow-xl">
+            {matches.map((p) => (
+              <button
+                key={p.ticker}
+                type="button"
+                onMouseDown={(e) => e.preventDefault()}
+                onClick={() => { onChange(p.name, true); setQuery(''); }}
+                className="flex w-full items-center gap-2 px-2.5 py-1.5 text-left text-[12px] text-zinc-200 hover:bg-zinc-800"
+              >
+                <span className="min-w-0 flex-1 truncate">{p.name}</span>
+                <span className="shrink-0 font-mono text-[9px] text-zinc-500">{p.ticker}</span>
+              </button>
+            ))}
+          </div>
+        )}
+      </div>
+      {error && <p className="mt-1 text-[10px] text-red-400">Couldn’t load the roster: {error}</p>}
+    </div>
+  );
+}
+
 /** A section's heading: what it is, how many of it are on, and All / None. */
 function SectionHead({ title, hint, on, total, onAll, onNone }: {
   title: string;
   hint: string;
   on: number;
   total: number;
-  onAll: () => void;
+  /** Left out where putting every one on makes no sense — five suggestions
+   *  cannot be picked for you. The button is then not there at all, rather
+   *  than there and doing nothing. */
+  onAll?: () => void;
   onNone: () => void;
 }) {
   return (
@@ -187,9 +271,11 @@ function SectionHead({ title, hint, on, total, onAll, onNone }: {
         </p>
         <p className="mt-0.5 text-[10px] leading-relaxed text-zinc-500">{hint}</p>
       </div>
-      <button onClick={onAll} disabled={!total || on === total} title="Put every one of these on offer" className={SMALL_BTN}>
-        All
-      </button>
+      {onAll && (
+        <button onClick={onAll} disabled={!total || on === total} title="Put every one of these on offer" className={SMALL_BTN}>
+          All
+        </button>
+      )}
       <button onClick={onNone} disabled={on === 0} title="Take every one of these off" className={SMALL_BTN}>
         None
       </button>
@@ -359,6 +445,23 @@ export function VidsClippers({
   const [playing, setPlaying] = useState<string | null>(null);
   const [renaming, setRenaming] = useState<Renaming | null>(null);
 
+  // Who is on Pauv, for the suggestions. Fetched once, like the songs.
+  const [roster, setRoster] = useState<RosterPerson[] | null>(null);
+  const [rosterError, setRosterError] = useState<string | null>(null);
+  useEffect(() => {
+    if (!active || roster !== null) return;
+    const ctrl = new AbortController();
+    fetch(withBase('/api/ai/talents'), { signal: ctrl.signal })
+      .then(async (r) => {
+        const data = await r.json().catch(() => null);
+        if (!r.ok || !Array.isArray(data)) throw new Error((data && data.error) || `HTTP ${r.status}`);
+        return (data as RosterPerson[]).slice().sort((a, b) => a.name.localeCompare(b.name));
+      })
+      .then((list) => { setRoster(list); setRosterError(null); })
+      .catch((e) => { if (!ctrl.signal.aborted) setRosterError(e instanceof Error ? e.message : String(e)); });
+    return () => ctrl.abort();
+  }, [active, roster]);
+
   useEffect(() => {
     if (!active || tracks !== null) return;
     const ctrl = new AbortController();
@@ -383,6 +486,7 @@ export function VidsClippers({
     [tracks, flags],
   );
   const looksOn = useMemo(() => CAPTION_STYLES.filter((s) => isClipable(flags, 'captionStyle', s.id)).length, [flags]);
+  const suggested = useMemo(() => suggestedFrom(flags), [flags]);
 
   const setEvery = <T,>(items: T[], isOn: (t: T) => boolean, set: (t: T, on: boolean) => void, on: boolean) => {
     for (const it of items) if (isOn(it) !== on) set(it, on);
@@ -414,6 +518,22 @@ export function VidsClippers({
             Right-click a persona, a clip or a song to rename it; the new name is the name everywhere.
           </p>
         </div>
+
+        <Section>
+          <SectionHead
+            title="Suggested people"
+            hint={`Up to ${MAX_SUGGESTED}. Vids 2 puts these up in gold on the Who question, before anybody searches — everyone else is still a search away.`}
+            on={suggested.length}
+            total={MAX_SUGGESTED}
+            onNone={() => suggested.forEach((name) => onFlag('suggested', name, false))}
+          />
+          <SuggestedPeople
+            chosen={suggested}
+            roster={roster}
+            error={rosterError}
+            onChange={(name, on) => onFlag('suggested', name, on)}
+          />
+        </Section>
 
         <Section>
           <SectionHead
