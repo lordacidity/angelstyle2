@@ -241,7 +241,7 @@ export function Sidebar({
               }`}
             >
               {icon}
-              <span className="text-[9px] font-medium leading-none">{label}</span>
+              <span className="text-[9px] font-medium leading-none text-center">{label}</span>
             </Link>
           );
         })}
@@ -261,7 +261,7 @@ export function Sidebar({
             <line x1="9" y1="9.5" x2="9.01" y2="9.5"/>
             <line x1="15" y1="9.5" x2="15.01" y2="9.5"/>
           </svg>
-          <span className="text-[9px] font-medium leading-none">Emojis</span>
+          <span className="text-[9px] font-medium leading-none text-center">Emojis</span>
         </button>
 
         {/* X Photo — downloadable cards for posting on X (price strip, newly
@@ -279,7 +279,7 @@ export function Sidebar({
             <circle cx="7" cy="12" r="2.2"/>
             <path d="M11.5 12.5l2-1.5 1.5 2 2.5-3 2 2.5"/>
           </svg>
-          <span className="text-[9px] font-medium leading-none">X Photo</span>
+          <span className="text-[9px] font-medium leading-none text-center">X Photo</span>
         </Link>
 
       </nav>
@@ -298,7 +298,7 @@ export function Sidebar({
                 <polyline points="17 8 12 3 7 8"/>
                 <line x1="12" y1="3" x2="12" y2="15"/>
               </svg>
-              <span className="text-[10px] font-medium leading-none">Sheets</span>
+              <span className="text-[10px] font-medium leading-none text-center">Sheets</span>
             </button>
             <button
               onClick={onDisconnectGoogle}
@@ -310,7 +310,7 @@ export function Sidebar({
                 <polyline points="16 17 21 12 16 7"/>
                 <line x1="21" y1="12" x2="9" y2="12"/>
               </svg>
-              <span className="text-[10px] font-medium leading-none">Disconnect</span>
+              <span className="text-[10px] font-medium leading-none text-center">Disconnect</span>
             </button>
           </>
         ) : (
@@ -324,7 +324,7 @@ export function Sidebar({
               <polyline points="10 17 15 12 10 7"/>
               <line x1="15" y1="12" x2="3" y2="12"/>
             </svg>
-            <span className="text-[10px] font-medium leading-none">Connect</span>
+            <span className="text-[10px] font-medium leading-none text-center">Connect</span>
           </button>
         )}
 
@@ -337,7 +337,7 @@ export function Sidebar({
             <path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"/>
             <path d="M3 3v5h5"/>
           </svg>
-          <span className="text-[10px] font-medium leading-none">Reset</span>
+          <span className="text-[10px] font-medium leading-none text-center">Reset</span>
         </button>
       </div>
     </aside>

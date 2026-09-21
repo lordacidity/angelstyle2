@@ -230,7 +230,6 @@ export function BrandKit({
               title="The handle is fixed to @pauv_inc"
               className="w-full bg-zinc-900/60 border border-zinc-800 rounded-lg px-3 py-2.5 text-sm text-zinc-400 outline-none cursor-not-allowed"
             />
-            <span className="text-[11px] text-zinc-600">Always @pauv_inc</span>
           </div>
 
           {/* Category — drives the bio CTA wording ("pauv.com to trade Artists"
