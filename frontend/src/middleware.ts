@@ -91,7 +91,12 @@ export async function middleware(req: NextRequest) {
   }
 
   // The site root of the clipper deployment is the clipper page. Nothing links
-  // to /clippers from out there — pauv.io/clipping is the whole address.
+  // to /clippers from out there — pauv.io/clipping is the whole address, and a
+  // rewrite rather than a redirect is what keeps it that way: the clipper page
+  // is served AT the root, so the address bar never picks up a second path.
+  // What makes that safe to do from middleware — rather than from the routing
+  // layer, where it used to live — is that the clipper build has no Studio to
+  // serve if the gate is ever stepped around. See next.config.ts.
   const toClipperPage = () => {
     const url = req.nextUrl.clone();
     url.pathname = '/clippers';

@@ -18,6 +18,28 @@ if (fs.existsSync(rootEnv)) process.loadEnvFile(rootEnv);
 // not prefix by itself (bare fetches, image src, audio src) — keep the two in step.
 const CLIPPERS = process.env.NEXT_PUBLIC_APP === "clippers";
 
+// The clipper build has no home page of its own: its root IS the clipper
+// page. Middleware rewrites "/" to /clippers (see src/middleware.ts), so the
+// address stays pauv.io/clipping — a clipper never sees a second path.
+//
+// This used to be a redirect here in the config instead, because a gate in
+// middleware cannot defend a path whose response can be served from a cache
+// before middleware runs — and the root, a statically prerendered page, was
+// served that way: unauthenticated, 22 minutes stale, carrying the previous
+// deployment's id. The redirect worked, at the price of putting /clippers in
+// the address bar.
+//
+// What replaces it closes that hole at the source rather than routing around
+// it. Two things, together:
+//
+//   1. no-store on "/" (below, in headers()). headers() is matched on the
+//      incoming path, before middleware and before the rewrite, so the root
+//      can never be held by a shared cache and answered ahead of the gate.
+//   2. The clipper build renders no Studio at all — src/app/(studio)/layout.tsx
+//      returns null under this flag, so every page in that group, the root
+//      included, prerenders to an empty document and hydrates into nothing.
+//      Should a cache ever answer for one anyway, blank is all it can serve.
+
 const nextConfig: NextConfig = {
   ...(CLIPPERS ? { basePath: "/clipping" } : {}),
   poweredByHeader: false,
@@ -46,22 +68,6 @@ const nextConfig: NextConfig = {
   // Leave AIER_RAILWAY_URL UNSET on Railway and in local dev so the routes resolve in-process
   // (a value there would make the backend proxy to itself). rewrites() is evaluated at BUILD
   // time, so the var must be present when Vercel builds — change it → redeploy.
-  // The clipper build has no home page of its own: its root is the clipper
-  // page, and nothing else it serves is reachable from there.
-  //
-  // This is a redirect in the config rather than a rewrite in middleware, and
-  // that is the whole point. The site root resolves to a statically
-  // prerendered page, and Vercel serves those from the CDN without running
-  // middleware — so a middleware gate on "/" can be answered out of cache and
-  // never fire. It is how the Studio shell came to be served, unauthenticated,
-  // at pauv.io/clipping. redirects() is evaluated by the routing layer ahead of
-  // both the filesystem and middleware, so "/" can never resolve to a page at
-  // all: it answers 307 to /clippers, which the password gate then guards like
-  // any other path.
-  async redirects() {
-    if (!CLIPPERS) return [];
-    return [{ source: "/", destination: "/clippers", permanent: false }];
-  },
   async rewrites() {
     const backend = (process.env.AIER_RAILWAY_URL || '').replace(/\/+$/, '');
     if (!backend) return [];
@@ -78,6 +84,20 @@ const nextConfig: NextConfig = {
   },
   async headers() {
     return [
+      // The two pages the clipper build serves are never held by a cache.
+      // Both are statically prerendered, and a stored copy of either can be
+      // handed back before middleware runs — which is how the site root once
+      // answered, unauthenticated, out of a 22-minute-old cache. headers() is
+      // matched on the incoming path, ahead of middleware and ahead of the
+      // root's rewrite to /clippers, so this holds for the very request the
+      // gate is about to inspect. These two only: /_next/* assets are
+      // content-hashed and must stay cacheable.
+      ...(CLIPPERS
+        ? ['/', '/clippers'].map((source) => ({
+            source,
+            headers: [{ key: 'Cache-Control', value: 'no-store, must-revalidate' }],
+          }))
+        : []),
       {
         source: '/(.*)',
         headers: [
