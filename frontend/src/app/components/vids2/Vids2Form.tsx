@@ -53,7 +53,7 @@ import {
 } from '@/lib/vids2/vids2Build';
 import {
   ago, drawNewsPage, errorText, hitFromStory, loadNewsCategories, loadTrending, matchesCategory,
-  NEWS_RANGES, normalCategory, pastedLinkProblem, readCategory, readNewsStory,
+  NEWS_RANGES, normalCategory, pastedLinkProblem, readCategory, readNewsStory, withHighlight,
   searchNews, sortTrending, TREND_SORTS, TREND_WINDOWS,
 } from '@/lib/news/client';
 import { OUTLET_IDS, OUTLETS, outletById } from '@/lib/news/outlets';
@@ -594,16 +594,22 @@ export function Vids2Form({
     setReading(link);
     setReadError(null);
     try {
-      const { article, rail, people = [] } = await readNewsStory(link, ctrl.signal);
+      // Who the page is for, when that is known before it is read: the person
+      // answered, or the trending row's first. The answer then says how the
+      // page spells them — the recording drags over that, so a Times page
+      // that says "Kennedy" for RFK Jr. has a name on it to drag to.
+      const forName = o.byStory ? (o.from?.people[0]?.name ?? '') : setupRef.current.person.trim();
+      const { article, rail, people = [], highlight = null } = await readNewsStory(link, ctrl.signal, forName);
       if (ctrl.signal.aborted) return;
       if (!o.byStory) {
         const name = setupRef.current.person.trim();
         // The page has to say their name somewhere — the recording drags over
-        // it, and a story that never says it in full has nothing to drag to.
-        if (!people.some((p) => p.name.trim().toLowerCase() === name.toLowerCase())) {
-          throw new Error(`That story never says “${name}” in full, so there would be no name to drag over. Try another.`);
+        // it, and a story that never says it, in full or as the press writes
+        // it, has nothing to drag to.
+        if (!highlight && !people.some((p) => p.name.trim().toLowerCase() === name.toLowerCase())) {
+          throw new Error(`That story never says “${name}”, so there would be no name to drag over. Try another.`);
         }
-        const hit = o.hit ?? hitFromStory(article, people, name);
+        const hit = withHighlight(o.hit ?? hitFromStory(article, people, name), highlight);
         setStoryPeople([]);
         const chosen: Vids2Setup = { ...setupRef.current, story: { name, hit, article, rail } };
         commit(chosen);
@@ -620,12 +626,15 @@ export function Vids2Form({
       const person = rosterName(named[0]);
       const base = o.from ?? hitFromStory(article, people, named[0].name);
       setStoryPeople(named);
+      // The page's own spelling of the first person wins over the row's
+      // headline, which was the feed's and may not be the page's.
+      const hit = withHighlight(hitFor(base, named[0]), highlight);
       const chosen: Vids2Setup = {
         ...setupRef.current,
         person,
         intro: 'news',
         flow: 'news',
-        story: { name: person, hit: hitFor(base, named[0]), article, rail },
+        story: { name: person, hit, article, rail },
       };
       commit(chosen);
       // The story is who and the intro both, so the intro can go now.
@@ -918,7 +927,10 @@ export function Vids2Form({
         </div>
       ) : (
         <div className="mt-4">
-          <div className="flex items-center gap-2">
+          {/* Wraps: on a phone the windows, the order and No politics are
+              two rows, and the refresh keeps to the right of whichever
+              row it lands on. */}
+          <div className="flex flex-wrap items-center gap-2">
             <div className="flex gap-1">
               {TREND_WINDOWS.map((w) => (
                 <button
@@ -933,7 +945,7 @@ export function Vids2Form({
                 </button>
               ))}
             </div>
-            <span className="w-px self-stretch bg-zinc-800" />
+            <span className="hidden w-px self-stretch bg-zinc-800 sm:block" />
             <div className="flex gap-1">
               {TREND_SORTS.map((s) => (
                 <button key={s} type="button" onClick={() => patch({ trendSort: s })} className={pill(setup.trendSort === s)}>

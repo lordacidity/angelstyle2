@@ -520,6 +520,37 @@ export function Vids2Builder({
   const pendingWrite = useRef<{ ids: Set<string>; early?: Vids2Early } | null>(null);
 
   const stageWrapRef = useRef<HTMLDivElement>(null);
+
+  // ── Full screen ──
+  // The stage and its transport over the whole window, the sidebar out of
+  // the way: for watching it back, and for placing a caption or a BOOM on a
+  // stage big enough to see. The window itself goes full screen where the
+  // browser allows that (a desktop, an Android phone); where it doesn't (an
+  // iPhone) the page fills the window instead, which is the same thing bar
+  // the browser's own bar. Esc, or the button again, brings it back.
+  const [full, setFull] = useState(false);
+  const toggleFull = () => {
+    const next = !full;
+    setFull(next);
+    try {
+      if (next) void document.documentElement.requestFullscreen?.().catch(() => undefined);
+      else if (document.fullscreenElement) void document.exitFullscreen().catch(() => undefined);
+    } catch { /* no full screen here; the page still fills the window */ }
+  };
+  useEffect(() => {
+    if (!full) return;
+    // Leaving the browser's full screen (Esc there) leaves this one too, and
+    // Esc on a page that never went is the same press.
+    const onChange = () => { if (!document.fullscreenElement) setFull(false); };
+    const onKey = (e: globalThis.KeyboardEvent) => { if (e.key === 'Escape' && !document.fullscreenElement) setFull(false); };
+    document.addEventListener('fullscreenchange', onChange);
+    window.addEventListener('keydown', onKey);
+    return () => {
+      document.removeEventListener('fullscreenchange', onChange);
+      window.removeEventListener('keydown', onKey);
+      if (document.fullscreenElement) void document.exitFullscreen().catch(() => undefined);
+    };
+  }, [full]);
   const stageRef = useRef<HTMLDivElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
   // Text metrics for the caption box — see capHandle.
@@ -1816,8 +1847,8 @@ export function Vids2Builder({
         />
       )}
 
-      {/* Stage + transport */}
-      <div className="flex min-w-0 flex-1 flex-col">
+      {/* Stage + transport — over the whole window in full screen. */}
+      <div className={full ? 'fixed inset-0 z-[60] flex flex-col bg-black' : 'flex min-w-0 flex-1 flex-col'}>
         <div ref={stageWrapRef} className="relative flex min-h-0 flex-1 items-center justify-center overflow-hidden">
           {/* Before anything has been chosen the stage would be showing the
               End clip — the payout — which is nobody's decision and says
@@ -1902,6 +1933,21 @@ export function Vids2Builder({
               <rect x="5" y="5" width="2.5" height="14" rx="1" />
               <path d="M20 5v14L9.5 12z" />
             </svg>
+          </button>
+          <button
+            onClick={toggleFull}
+            title={full ? 'Back to the page (Esc)' : 'Fill the screen'}
+            className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg border border-zinc-700 bg-zinc-900 text-zinc-200 transition-colors hover:border-zinc-500"
+          >
+            {full ? (
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" aria-hidden>
+                <path d="M9 3v6H3M15 3v6h6M9 21v-6H3M15 21v-6h6" />
+              </svg>
+            ) : (
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" aria-hidden>
+                <path d="M3 9V3h6M21 9V3h-6M3 15v6h6M21 15v6h-6" />
+              </svg>
+            )}
           </button>
           <span data-vids-time className="w-10 text-right font-mono text-[11px] text-zinc-400">{fmtTime(time)}</span>
           {/* The bar, with the BOOM marked on it — the bar places one, shows
@@ -2016,7 +2062,7 @@ export function Vids2Builder({
 
       {/* The one sidebar: the two clip choices, the sound, the captions, the
           post caption and the way out. */}
-      <aside className="flex w-[320px] shrink-0 flex-col overflow-y-auto border-l border-zinc-800">
+      <aside className={`flex w-[320px] shrink-0 flex-col overflow-y-auto border-l border-zinc-800 ${full ? 'hidden' : ''}`}>
         <div className="border-b border-zinc-800 px-3 py-4">
           <div className="mb-3 flex items-center gap-2">
             <p className="min-w-0 flex-1 truncate text-sm font-semibold text-white">Tune it up</p>

@@ -29,6 +29,12 @@
 //   Tune      Vids2Builder: the sound, the words, the BOOMs, the post caption
 //             and Download. Start over clears the answers and goes back to
 //             the form.
+//   Reset     top right on either page: Vids 2 as it opens. On the form it
+//             is the Reset button this section draws; on the tuning page it
+//             is the builder's own Start over, in the same corner. Both
+//             clear every answer (the saved ones too), let the recordings
+//             go, and mount the form fresh — the clipper page (app/clippers)
+//             is this same section, so it has them as well.
 //
 // This section owns the recordings' bytes: it made them, it lets them go
 // when a second Generate replaces them, and again when the page is left.
@@ -357,6 +363,10 @@ export function Vids2Section({ active }: { active: boolean }) {
   /** On the form rather than on the video. True until the first Generate, and
    *  again after Reset, which lets the video go as well (see `reset`). */
   const [onForm, setOnForm] = useState(true);
+  /** Bumped by Reset: the form is keyed on it, so it mounts anew — its
+   *  searches, its trending list, a typed question and a drawn page are its
+   *  own state, and a reset that left them standing would not be one. */
+  const [formKey, setFormKey] = useState(0);
   const [job, setJob] = useState<Vids2Job | null>(null);
   const [jobError, setJobError] = useState<string | null>(null);
   const jobRef = useRef<AbortController | null>(null);
@@ -551,10 +561,11 @@ export function Vids2Section({ active }: { active: boolean }) {
     if (warmRef.current.trade && warmRef.current.trade.key !== warmKey('trade', setup)) dropWarm('trade');
   }, [setup]);
 
-  /** Reset, top right of the tuning page: Vids 2 as it opens. The answers go
-   *  back to empty, the recordings are let go, and the build goes — which
-   *  unmounts the tuning page and everything it was holding (the song, the
-   *  words, the BOOMs) — so the form mounts fresh on its first card. */
+  /** Reset, top right of either page: Vids 2 as it opens. The answers go
+   *  back to empty (and are saved that way), the recordings are let go, and
+   *  the build goes — which unmounts the tuning page and everything it was
+   *  holding (the song, the words, the BOOMs) — so the form mounts fresh on
+   *  its first card. */
   const reset = () => {
     cancel();
     dropWarm('intro');
@@ -565,6 +576,15 @@ export function Vids2Section({ active }: { active: boolean }) {
     setSetup(EMPTY_SETUP);
     setJobError(null);
     setOnForm(true);
+    setFormKey((k) => k + 1);
+  };
+
+  /** The form's Reset. A Generate under way is the one thing on the form
+   *  worth asking about before it is thrown away; answers are a few presses
+   *  to give again, so they go without a word. */
+  const resetForm = () => {
+    if (job && !window.confirm('Reset? The video being made is dropped, and every answer is cleared.')) return;
+    reset();
   };
 
   /** Generate: the recordings, then the whole stage, then the tuning page.
@@ -778,9 +798,24 @@ export function Vids2Section({ active }: { active: boolean }) {
         </div>
       )}
 
+      {/* Reset, top right, while the form is up. The tuning page has its own
+          in the same corner (Vids2Builder's Start over), so this one steps
+          aside for it rather than sitting on top of it. */}
+      {showForm && (
+        <button
+          type="button"
+          onClick={resetForm}
+          title="Clear every answer and start again"
+          className="absolute right-3 top-3 z-30 rounded-lg border border-zinc-700 bg-zinc-950/90 px-2.5 py-1 text-xs font-semibold text-zinc-300 backdrop-blur transition-colors hover:border-zinc-500 hover:text-white"
+        >
+          Reset
+        </button>
+      )}
+
       <div className="flex min-h-0 flex-1">
         {showForm && (
           <Vids2Form
+            key={formKey}
             setup={setup}
             onChange={setSetup}
             personas={personas}
