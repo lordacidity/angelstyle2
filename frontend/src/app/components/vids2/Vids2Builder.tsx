@@ -1914,10 +1914,34 @@ export function Vids2Builder({
     return `Ready${total ? ` · ${fmtTime(total)}` : ''} — play it, then download it.`;
   })();
 
+  /** Start over — the way back to the form. Throws away a video that took a
+   *  minute to render, and every bit of tuning on it, so it asks first. On the
+   *  head of the sidebar from md up, which is the top right of the window;
+   *  on a phone the sidebar is under the video, so it is drawn a second time
+   *  in the top right corner of the page itself — the corner the form's Reset
+   *  is in — over the stage's own black margin. */
+  const startOver = (cls: string) => (
+    <button
+      onClick={() => {
+        if (window.confirm('Start over? This video, its sound and its captions go, and every answer is cleared.')) onReset();
+      }}
+      disabled={!!exporting}
+      title="Start Vids 2 over — the video goes, every answer is cleared, and the form opens on its first question."
+      className={`${cls} rounded-lg border border-zinc-700 px-2.5 py-1 text-xs font-semibold text-zinc-300 transition-colors hover:border-zinc-500 hover:text-white disabled:border-zinc-900 disabled:text-zinc-700 disabled:hover:border-zinc-900 disabled:hover:text-zinc-700`}
+    >
+      ← Start over
+    </button>
+  );
+
   return (
     // A row — the stage and the sidebar — from md up; under that, one column
     // that scrolls: the stage, the transport, then the sidebar's sections.
     <div className="flex min-h-0 min-w-0 flex-1 max-md:flex-col max-md:overflow-y-auto">
+      {/* Start over, top right of the page on a phone. Positioned against
+          the section's root rather than this scroll, so it stays put while
+          the page scrolls under it; gone in full screen with the rest. */}
+      {!full && startOver('absolute right-3 top-3 z-30 bg-zinc-950/90 backdrop-blur md:hidden')}
+
       {/* Hidden decode elements — one per filled slot; the canvas samples from them. */}
       {SLOTS.map((s) => {
         const p = picks[s.id];
@@ -2032,8 +2056,13 @@ export function Vids2Builder({
       <div className={full ? 'fixed inset-0 z-[60] flex flex-col bg-black' : 'flex min-w-0 flex-1 flex-col max-md:flex-none'}>
         <div
           ref={stageWrapRef}
+          // On a phone the frame is laid out under a strip at the top
+          // (pt-11) that Start over floats in — the stage is measured by
+          // its content box, so the frame is centred below the strip and
+          // never under the button, whatever the phone's height makes of
+          // the frame's width.
           className={`relative flex items-center justify-center overflow-hidden ${
-            full ? 'min-h-0 flex-1' : 'max-md:h-[58svh] max-md:shrink-0 md:min-h-0 md:flex-1'
+            full ? 'min-h-0 flex-1' : 'max-md:h-[62svh] max-md:shrink-0 max-md:pt-11 md:min-h-0 md:flex-1'
           }`}
         >
           {/* Before anything has been chosen the stage would be showing the
@@ -2265,18 +2294,8 @@ export function Vids2Builder({
         <div className="border-b border-zinc-800 px-3 py-4">
           <div className="mb-3 flex items-center gap-2">
             <p className="min-w-0 flex-1 truncate text-sm font-semibold text-white">Tune it up</p>
-            {/* Throws away a video that took a minute to render, and every
-                bit of tuning on it, so it asks first. */}
-            <button
-              onClick={() => {
-                if (window.confirm('Start over? This video, its sound and its captions go, and every answer is cleared.')) onReset();
-              }}
-              disabled={!!exporting}
-              title="Start Vids 2 over — the video goes, every answer is cleared, and the form opens on its first question."
-              className="shrink-0 rounded-lg border border-zinc-700 px-2.5 py-1 text-xs font-semibold text-zinc-300 transition-colors hover:border-zinc-500 hover:text-white disabled:border-zinc-900 disabled:text-zinc-700 disabled:hover:border-zinc-900 disabled:hover:text-zinc-700"
-            >
-              ← Start over
-            </button>
+            {/* From md up only: on a phone it is in the page's corner (above). */}
+            {startOver('shrink-0 max-md:hidden')}
           </div>
 
           {/* What the form asked for, and what came of it. Not a control: the

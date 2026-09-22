@@ -73,6 +73,10 @@ export interface TrendingResponse {
    *  newest — more than are shown, so either order, with politics hidden or
    *  not, fills the list. */
   hits: TrendingHit[];
+  /** When the news was read for this list (ISO). The list is kept and shared
+   *  between readers (lib/news/trending-cache), so it can be minutes old —
+   *  the form says how many. Null from a route that didn't say. */
+  asOf?: string | null;
   /** How many fresh headlines were read to find them, and how many of those
    *  named somebody. */
   scanned: number;

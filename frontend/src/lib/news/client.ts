@@ -153,14 +153,18 @@ export const isTrendWindow = (v: unknown): v is TrendWindow =>
  *  everything the outlets put out. The form only sends one when filtering the
  *  list it already has left too little to choose from: see matchesCategory in
  *  lib/news/categories, which is what does the filtering and costs nothing. */
-export async function loadTrending(window: TrendWindow, topic = '', signal?: AbortSignal): Promise<TrendingResponse> {
+/** The trending list — kept on the server and shared between readers, so it
+ *  is usually back at once and a few minutes old (`asOf`). `fresh` reads the
+ *  news again regardless: the ↻ on the form. */
+export async function loadTrending(window: TrendWindow, topic = '', signal?: AbortSignal, fresh = false): Promise<TrendingResponse> {
   const q = topic.trim() ? `&topic=${encodeURIComponent(topic.trim())}` : '';
-  const res = await fetch(withBase(`/api/news/trending?window=${window}${q}`), { signal, cache: 'no-store' });
+  const f = fresh ? '&fresh=1' : '';
+  const res = await fetch(withBase(`/api/news/trending?window=${window}${q}${f}`), { signal, cache: 'no-store' });
   const j = await res.json().catch(() => ({})) as Partial<TrendingResponse> & { error?: string };
   if (!res.ok) throw new Error(j.error ?? `Trending failed (${res.status})`);
   return {
     hits: j.hits ?? [], scanned: j.scanned ?? 0, matched: j.matched ?? 0,
-    ai: j.ai ?? false, topic: j.topic ?? null,
+    ai: j.ai ?? false, topic: j.topic ?? null, asOf: j.asOf ?? null,
   };
 }
 

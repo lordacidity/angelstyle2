@@ -701,7 +701,7 @@ export function Vids2Form({
   // changes. The route sends more rows than are shown — the hottest, the
   // hottest politics, the newest — so the order and Hide politics are both
   // worked out here, and either way the list is full.
-  const [trend, setTrend] = useState<{ window: TrendWindow; hits: TrendingHit[]; scanned: number; matched: number; ai: boolean; topic: string | null } | null>(null);
+  const [trend, setTrend] = useState<{ window: TrendWindow; hits: TrendingHit[]; scanned: number; matched: number; ai: boolean; topic: string | null; asOf?: string | null } | null>(null);
   const [trendLoading, setTrendLoading] = useState(false);
   const [trendError, setTrendError] = useState<string | null>(null);
   const trendRef = useRef<AbortController | null>(null);
@@ -710,14 +710,17 @@ export function Vids2Form({
   /** Reads the list. `topic` is only ever passed by Search wider: the ordinary
    *  read takes everything the outlets put out, and a typed category filters
    *  that here for nothing. */
-  const refreshTrending = async (window: TrendWindow, topic = '') => {
+  /** `fresh` is the ↻: the list is kept on the server and shared, so an
+   *  ordinary read is whatever was read last (and how long ago is printed
+   *  under the pills); ↻ reads the news again. */
+  const refreshTrending = async (window: TrendWindow, topic = '', fresh = false) => {
     trendRef.current?.abort();
     const ctrl = new AbortController();
     trendRef.current = ctrl;
     setTrendLoading(true);
     setTrendError(null);
     try {
-      const r = await loadTrending(window, topic, ctrl.signal);
+      const r = await loadTrending(window, topic, ctrl.signal, fresh);
       if (ctrl.signal.aborted) return;
       setTrend({ window, ...r });
     } catch (e) {
@@ -1010,9 +1013,9 @@ export function Vids2Form({
             <span className="flex-1" />
             <button
               type="button"
-              onClick={() => void refreshTrending(setup.trendWindow)}
+              onClick={() => void refreshTrending(setup.trendWindow, '', true)}
               disabled={trendLoading}
-              title="Read the news again"
+              title="Read the news again now — the list is otherwise shared and refreshed every so often"
               className={`${pill(false)} w-7 px-0`}
             >
               {trendLoading ? <SpinnerIcon size={11} className="mx-auto animate-spin" /> : '↻'}
@@ -1100,6 +1103,7 @@ export function Vids2Form({
                 <>
                   <p className="mb-1.5 text-[11px] text-zinc-500">
                     {trendShown.length} of {trend.matched.toLocaleString('en-US')} stories · {WINDOW_LONG[trend.window]}
+                    {trend.asOf && ` · read ${ago(trend.asOf)}`}
                     {!trend.ai && ' · AI didn’t score all of these'}
                   </p>
                   <div className="vids-scroll max-h-[400px] space-y-1 overflow-y-auto pr-1">
@@ -1350,7 +1354,7 @@ export function Vids2Form({
         onClick={randomPersona}
         disabled={!wholePersonas.length}
         title={wholePersonas.length ? `One of ${wholePersonas.length} at random` : 'No persona has all three clips yet'}
-        className="flex aspect-[3/4] flex-col items-center justify-center rounded-xl border border-dashed border-zinc-700 text-zinc-300 transition-colors hover:border-zinc-400 hover:text-white disabled:opacity-40"
+        className="flex aspect-square flex-col items-center justify-center rounded-xl border border-dashed border-zinc-700 text-zinc-300 transition-colors hover:border-zinc-400 hover:text-white disabled:opacity-40 sm:aspect-[3/4]"
       >
         <span className="text-2xl">🎲</span>
         <span className="mt-1 text-xs font-semibold">Random</span>
@@ -1370,7 +1374,10 @@ export function Vids2Form({
               on ? 'border-white ring-1 ring-white' : 'border-zinc-800 hover:border-zinc-500'
             }`}
           >
-            <span className="block aspect-[3/4] w-full overflow-hidden">
+            {/* Square on a phone, with the name over the foot of the picture
+                — three across, and a grid to scroll; portrait with the name
+                under it from sm up. */}
+            <span className="block aspect-square w-full overflow-hidden sm:aspect-[3/4]">
               {v?.thumbUrl ? (
                 // eslint-disable-next-line @next/next/no-img-element
                 <img src={v.thumbUrl} alt="" className="h-full w-full object-cover" draggable={false} />
@@ -1378,7 +1385,10 @@ export function Vids2Form({
                 <span className="flex h-full items-center justify-center"><VideoIcon size={18} className="text-zinc-700" /></span>
               )}
             </span>
-            <span className="block truncate px-1.5 py-1 text-[11px] font-semibold text-zinc-200">{p.name}</span>
+            <span className="absolute inset-x-0 bottom-0 truncate bg-gradient-to-t from-black/90 via-black/60 to-transparent px-1.5 pb-1.5 pt-5 text-[11px] font-semibold text-white sm:hidden">
+              {p.name}
+            </span>
+            <span className="hidden truncate px-1.5 py-1 text-[11px] font-semibold text-zinc-200 sm:block">{p.name}</span>
             {filled !== 3 && (
               <span className="absolute right-1.5 top-1.5 rounded bg-black/80 px-1 text-[10px] font-bold text-amber-300">{filled}/3</span>
             )}
