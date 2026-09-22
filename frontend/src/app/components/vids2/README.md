@@ -172,6 +172,58 @@ captions, the BOOMs, the post caption and Download MP4. **← Start over**, top
 right, starts Vids 2 over after a confirm: the video, its sound and its words
 go, every answer is cleared, and the form opens on its first card.
 
+## Bringing a video back by its code
+
+Every Download writes the build down under a six-letter code
+(`lib/simpler/vidsRecipe` → `api/vids/recipes`, `vids_recipes`): a three-word
+title from the model, the persona, every slot's clip and settings, the sound,
+the captions — and, since 2026-09-22, **the form's answers** (`Vids2Answers`,
+`build.vids2` in the record), because the two recordings the record names were
+never filed and can't be pointed at. The code sits after the title in the file
+name (`Chipotle Lebron Trade - 8JEQMP.mp4`), on the end of both post captions
+on a line of its own, and on the line under the tuning page's summary. It is
+**minted in the browser as Download is pressed** (`mintRecipeCode`), so the
+captions carry it in that same press; the server writes the record under it
+and only mints its own if that one is taken (the reply says which), while the
+three-word title is written during the render. An export that fails or is
+cancelled takes the code back off the captions.
+
+**The code box** sits top left of the form, and only there (`Vids2Recall`).
+Type a code — or paste the whole file name; the code is picked out of it — and
+`loadCode` in `Vids2Section` brings the video back:
+
+1. The record is read (`GET api/vids/recipes/:code`) and its answers taken
+   off it (`answersFromRecord`): who, which way, the intro and its question or
+   story, the mode, and which way Pauv came up. A news story is only its
+   address in the record, so it is read off its outlet again
+   (`readStoryAgain`, the same route and checks a pasted link goes through);
+   the persona is looked up by its id.
+2. The form is mounted afresh on those answers — every card folded, the way it
+   opens on a return visit — and, with nothing missing, **Generate is pressed
+   for you**. Both recordings are made again from the answers (the trade
+   light or dark as it was, not rolled), and the tuning page puts the record's
+   words, look, size, song and levels on (`build.restore`, `restoreRecord` in
+   `Vids2Builder`) rather than rolling a song and a look and asking for the
+   words. Nothing is asked of the hook or captions routes; the post captions
+   are not on the record and are written fresh, as ever. Hand-laid BOOMs come
+   back where they were; a degen build's are laid on the new recordings' own
+   beats instead, since the old timeline seconds were the old recordings'.
+3. Short of an answer, it stops on the form and says why on the box: the
+   persona gone from the library, a story that can't be read any more, or a
+   record from before the answers were kept — those have only their clip
+   names to go on (`bottomBName` says who, which way and the theme;
+   `bottomAName` / `bottomANewsName` say what kind of intro), so the question
+   or story and the mode are missing and the Intro card is left open. Answer
+   what is missing and press Generate: the record is still waiting
+   (`pendingRef`) and is taken as long as the answers are still that video's
+   (`sameVideo` — the same person, way, intro and mode).
+
+The recordings are rendered anew, so a ChatGPT answer, the trade's prices and
+the story's photos are today's; the words over them are the ones that were
+exported. Reset clears a waiting record with the answers. The clipper page has
+the box too, and the recipes route is already in the clipper allowlist
+(`CLIPPER_API_UNDER` in `middleware.ts`).
+
 ## One video, every recording rendered here
 
 Bottom A is the intro — the ChatGPT search, or the news story, or nothing —

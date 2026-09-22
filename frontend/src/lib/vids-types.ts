@@ -416,6 +416,19 @@ export function parseRecipeCode(raw: string): string | null {
 /** What a finished build is called: the three-word title, then its code. */
 export const recipeName = (title: string, code: string) => `${title} - ${code}`;
 
+/** A fresh code, minted where Download is pressed so it can go on the end of
+ *  the post captions in that same press (Vids2Builder runExport) rather than
+ *  when the server answers — which waits on the model for the title. The
+ *  server writes the record under it, and mints its own only if this one is
+ *  somehow taken already (887 million to one; the reply says which). Drawn
+ *  from the same alphabet the server draws from. */
+export function mintRecipeCode(): string {
+  const draws = globalThis.crypto.getRandomValues(new Uint32Array(RECIPE_CODE_LENGTH));
+  let out = '';
+  for (const d of draws) out += RECIPE_CODE_ALPHABET[d % RECIPE_CODE_ALPHABET.length];
+  return out;
+}
+
 /** One slot as it was in the build. The clip is referenced by id, and enough of
  *  it is written down beside that to make sense of the record after the clip has
  *  been renamed, re-edited or deleted. */
@@ -445,6 +458,30 @@ export interface RecipeCaptionLine {
   /** When the writer placed the line itself (Bottom A on Fast): the clip
    *  second it comes up at. */
   at?: number;
+}
+
+/** The answers a Vids 2 video was made from, as its record carries them: enough
+ *  to fill the form again and render the same two recordings, which are never
+ *  filed and so can't be pointed at. Plain values only — this file is read on
+ *  both sides — and the story is only its address: the article is read off
+ *  its outlet again when the code is typed in (lib/vids2 readStoryAgain).
+ *  Absent on every Vids and Simpler record, and on every Vids 2 record written
+ *  before 2026-09-22; those are read off their clip names instead
+ *  (answersFromRecord), as far as the names go. */
+export interface Vids2Answers {
+  /** Who, as Pauv spells them. */
+  person: string;
+  direction: 'up' | 'down';
+  intro: 'none' | 'chatgpt' | 'news';
+  /** The ChatGPT question; empty for any other intro. */
+  question: string;
+  /** The news story, for a news intro: the outlet's own URL for it, which
+   *  outlet, and the headline — the last two for saying which story it was
+   *  once the page can no longer be read. */
+  story: { url: string; outlet: string; title: string } | null;
+  mode: 'serious' | 'middle' | 'degen';
+  /** Which way Pauv came up in the trade recording. */
+  theme: 'light' | 'dark';
 }
 
 /** Everything the builder needs to put a build back exactly as it was exported.
@@ -501,6 +538,9 @@ export interface VidBuildSpec {
     notes: string;
     emojis: boolean;
   };
+  /** The form's answers, on a Vids 2 record — what its code brings back, since
+   *  its two recordings were never filed. See Vids2Answers. */
+  vids2?: Vids2Answers;
 }
 
 /** What the title is written from, over and above the build itself: the context
@@ -513,6 +553,10 @@ export interface RecipeTitleBrief {
 }
 
 export interface CreateRecipeInput {
+  /** The code to write it down under, minted by the builder as Download was
+   *  pressed (mintRecipeCode). Left out, the server mints one; already taken,
+   *  the server mints one and the reply carries it. */
+  code?: string;
   build: VidBuildSpec;
   brief: RecipeTitleBrief;
 }

@@ -1429,7 +1429,10 @@ export function Vids2Form({
 
   return (
     <div className="vids-scroll flex min-h-0 flex-1 flex-col overflow-y-auto">
-      <div className="mx-auto w-full max-w-2xl px-6 pt-8">
+      {/* Room at the top for the two corner boxes the section floats over the
+          form — the code box at the left, Reset at the right — so the title
+          starts under them at any width. */}
+      <div className="mx-auto w-full max-w-2xl px-6 pt-14">
         <h1 className="text-2xl font-semibold text-white">Make a video</h1>
         <div className={`mt-5 flex flex-col gap-2.5 ${busy ? 'pointer-events-none opacity-50' : ''}`}>
           {STEPS.map((_, i) => card(i))}

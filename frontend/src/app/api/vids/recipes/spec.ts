@@ -4,6 +4,7 @@
 // read straight back onto the stage, so nothing absurd may get in.
 import { z } from 'zod';
 import { isUuid } from '@/lib/vids-db';
+import { isRecipeCode } from '@/lib/vids-types';
 
 const num = (lo: number, hi: number) => z.number().min(lo).max(hi);
 const id = z.string().refine(isUuid, 'must be an id');
@@ -100,6 +101,25 @@ export const BuildSpecSchema = z.object({
     notes: z.string().max(500).default(''),
     emojis: z.boolean().default(true),
   }),
+  // The form's answers, on a Vids 2 record — what its code brings back, since
+  // the two recordings it names were never filed (Vids2Answers). The story is
+  // its address alone: a link on an approved outlet, read again on restore by
+  // the same route a pasted link goes through, which checks it for itself.
+  // Absent on every other record, and on every Vids 2 record before it kept
+  // its answers.
+  vids2: z.object({
+    person: z.string().max(120),
+    direction: z.enum(['up', 'down']),
+    intro: z.enum(['none', 'chatgpt', 'news']),
+    question: z.string().max(1000).default(''),
+    story: z.object({
+      url: z.string().max(2000).url(),
+      outlet: z.string().max(40),
+      title: z.string().max(300),
+    }).nullable().default(null),
+    mode: z.enum(['serious', 'middle', 'degen']),
+    theme: z.enum(['light', 'dark']),
+  }).optional(),
 });
 
 export const TitleBriefSchema = z.object({
@@ -110,6 +130,10 @@ export const TitleBriefSchema = z.object({
 });
 
 export const CreateRecipeSchema = z.object({
+  // The code the builder minted as Download was pressed (mintRecipeCode), so
+  // the post captions could carry it in that same press. Held to the alphabet;
+  // one already taken has the server mint another instead (createRecipe).
+  code: z.string().refine(isRecipeCode, 'must be six letters and numbers, like K7Q4M2').optional(),
   build: BuildSpecSchema,
   brief: TitleBriefSchema,
 });

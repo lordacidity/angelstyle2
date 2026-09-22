@@ -30,14 +30,16 @@ import {
   type Direction, type Theme, type TradeBeats, type TradeTalent, type ZoomLevel,
 } from '@/app/components/trade/trade-video';
 import {
-  findPagePhotos, isNewsRange, isTrendSort, isTrendWindow, pagePhotosFrom,
-  type NewsRange, type TrendSort, type TrendWindow,
+  findPagePhotos, hitFromStory, isNewsRange, isTrendSort, isTrendWindow, pagePhotosFrom, readNewsStory,
+  withHighlight, type NewsRange, type TrendSort, type TrendWindow,
 } from '@/lib/news/client';
 import { isOutletId, outletById } from '@/lib/news/outlets';
 import type { NewsArticle, NewsHit, RailItem } from '@/lib/news/types';
 import type { BoomSound } from '@/lib/simpler/vidsAudio';
 import { makeLocalClip, type LocalClipMeta } from '@/lib/simpler/vidsLocal';
-import { MAX_MARK_TEXT, type VidMark, type VidRow } from '@/lib/vids-types';
+import {
+  MAX_MARK_TEXT, type VidBuildSpec, type VidMark, type VidRecipe, type VidRow, type Vids2Answers,
+} from '@/lib/vids-types';
 import type { Vids2Early } from './vids2Words';
 
 export type { Direction, NewsRange, Theme, TradeTalent, TrendSort, TrendWindow };
@@ -241,6 +243,14 @@ export interface Vids2Build {
   /** The words Generate set off while the recordings were still being drawn,
    *  for the tuning page to take rather than ask for again — see Vids2Early. */
   early: Vids2Early;
+  /** The answers as the record an export writes down carries them — who as
+   *  Pauv spells them, and the theme that came up (Vids2Answers). What a code
+   *  typed into the form brings back. */
+  answers: Vids2Answers;
+  /** The record this build was brought back from by its code, or null for a
+   *  build the form made from scratch. The tuning page takes the words, the
+   *  look and the sound off it rather than rolling and asking (Vids2Builder). */
+  restore: VidRecipe | null;
 }
 
 /** The moments degen mode hangs a BOOM on, in each recording's OWN clip
@@ -270,6 +280,111 @@ export const introReady = (s: Vids2Setup): boolean =>
  *  no clips is caught later, by the stage having nothing on it. */
 export const setupReady = (s: Vids2Setup): boolean =>
   !!s.flow && !!s.personaId && !!s.person.trim() && introReady(s);
+
+// ── A video brought back by its code ─────────────────────────────────────────
+// Every export is written down under a code (lib/simpler/vidsRecipe → the
+// recipes API), and the code sits after the title in the file name and on the
+// end of the post caption. Typed into the box at the top left of the form
+// (Vids2Recall), the record fills the form again and Generate makes the video
+// once more: the two recordings were never filed, so they are rendered again
+// from the same answers, and the words, the look and the sound go on off the
+// record rather than being rolled and asked for. What is here is the reading
+// and writing of the answers; what happens with them is the section's.
+
+/** The answers as the record carries them, off a finished Generate: who as
+ *  Pauv spells them (the trade recording's name for them), the story by its
+ *  address, and the theme that came up. */
+export function answersOf(
+  s: Pick<Vids2Setup, 'direction' | 'intro' | 'mode'>,
+  o: { person: string; question: string; story: Vids2Story | null; theme: Theme },
+): Vids2Answers {
+  return {
+    person: o.person,
+    direction: s.direction,
+    intro: s.intro,
+    question: s.intro === 'chatgpt' ? o.question : '',
+    story: s.intro === 'news' && o.story
+      ? { url: o.story.hit.url, outlet: o.story.hit.outlet, title: o.story.hit.title }
+      : null,
+    mode: s.mode,
+    theme: o.theme,
+  };
+}
+
+/** The form's answers, from a record's: over `base` (the answers as they
+ *  stand, so the trending list's settings and the like are kept), with the
+ *  persona the record names if the library still has it, and the story read
+ *  again (readStoryAgain) — or null for one that couldn't be, which leaves
+ *  the Intro card to answer. */
+export function setupFromAnswers(
+  base: Vids2Setup, a: Vids2Answers, personaId: string | null, story: Vids2Story | null,
+): Vids2Setup {
+  return {
+    ...base,
+    personaId,
+    person: a.person,
+    direction: a.direction,
+    intro: a.intro,
+    question: a.intro === 'chatgpt' ? a.question : '',
+    story,
+    mode: a.mode,
+    flow: a.intro === 'news' && story ? 'news' : 'who',
+  };
+}
+
+/** Whether `s` is still the video the record was of — the same person, the
+ *  same way, the same intro and mode. A restore waits on the form when the
+ *  record is short of an answer (a persona gone, a story that can't be read,
+ *  a record from before the answers were kept), and answers changed under it
+ *  in the meantime make it a different video, whose words the record's are
+ *  not. The question and the story are not compared: a record without them
+ *  is the very case that waits. */
+export const sameVideo = (s: Vids2Setup, a: Vids2Answers): boolean =>
+  s.person.trim().toLowerCase() === a.person.trim().toLowerCase()
+  && s.direction === a.direction && s.intro === a.intro && s.mode === a.mode;
+
+/** A record's answers, and what about them is missing. Null for a record that
+ *  is not a Vids 2 build at all.
+ *
+ *  A record written since the answers were kept has them whole. One written
+ *  before that has only its clips' names to go on — names written to be read
+ *  rather than parsed (bottomAName, bottomANewsName, bottomBName), but they
+ *  do say who, which way, which way Pauv was and what kind of intro it had,
+ *  and that is most of the form. The question or the story and the mode were
+ *  never written down: the mode is set to Serious and the Intro card is left
+ *  to answer, and both are said. */
+export function answersFromRecord(build: VidBuildSpec): { answers: Vids2Answers; problems: string[] } | null {
+  if (build.vids2) return { answers: build.vids2, problems: [] };
+  const trade = build.picks.bottomB?.videoName.match(/^(.+) (up|down) B · Pauv (light|dark)$/);
+  if (!trade) return null;
+  const [, person, direction, theme] = trade as [string, string, Direction, Theme];
+  const a = build.picks.bottomA;
+  const intro = a?.videoName.match(/^.+ (?:up|down) A · (ChatGPT|News (.+))$/);
+  const kind: Vids2Intro = !a ? 'none' : intro?.[1] === 'ChatGPT' ? 'chatgpt' : intro ? 'news' : 'none';
+  const problems = [
+    'This code was written down before Vids 2 kept its answers, so the mode is set to Serious — change it if it was not.',
+  ];
+  if (kind === 'chatgpt') problems.push('The question was not written down either: type it again, then press Generate.');
+  if (kind === 'news') problems.push(`Nor was the ${intro?.[2] ?? ''} story: find it again, then press Generate.`);
+  return {
+    answers: { person, direction, intro: kind, question: '', story: null, mode: 'serious', theme },
+    problems,
+  };
+}
+
+/** The story a record names, read off its outlet again — the same route and
+ *  the same checks a pasted link goes through (Vids2Form), for the same
+ *  person, so the page's own spelling of them is what gets highlighted.
+ *  Refused, with the reason, when the page can no longer be read or never
+ *  says them. */
+export async function readStoryAgain(person: string, url: string, signal?: AbortSignal): Promise<Vids2Story> {
+  const { article, rail, people = [], highlight = null } = await readNewsStory(url, signal, person);
+  if (!highlight && !people.some((p) => p.name.trim().toLowerCase() === person.trim().toLowerCase())) {
+    throw new Error(`The story never says “${person}”, so there would be no name to drag over.`);
+  }
+  const hit = withHighlight(hitFromStory(article, people, person), highlight);
+  return { name: person, hit, article, rail };
+}
 
 // ── Degen mode's BOOMs ───────────────────────────────────────────────────────
 

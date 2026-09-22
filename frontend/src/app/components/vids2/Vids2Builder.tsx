@@ -42,16 +42,19 @@
 // BOOM_LENGTH long, whatever the clip's own length is. See BoomInsert in
 // lib/simpler/vidsPlan.
 //
-// Every export is still written down under a short code (lib/simpler/vidsRecipe
-// → the recipes API): a three-word title from the model, plus the persona,
-// every slot's clip and settings, sound and captions. The code goes after the
-// title in the file name and on the end of the post caption, so a video found
-// later can be traced back to the build that made it.
+// Every export is written down under a short code (lib/simpler/vidsRecipe →
+// the recipes API): a three-word title from the model, plus the persona, every
+// slot's clip and settings, sound and captions — and the form's answers
+// (build.answers), since the two recordings were never filed. The code goes
+// after the title in the file name and on the end of the post caption, and
+// typed into the box on the form it brings the video back: the section makes
+// the recordings again from the answers, and this page puts the record's
+// words, look and sound on (build.restore) rather than rolling and asking.
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { CSSProperties, PointerEvent, SyntheticEvent } from 'react';
-import type { VidPersona, VidRecipe, VidRow } from '@/lib/vids-types';
-import { isPhoto } from '@/lib/vids-types';
+import type { VidBuildSpec, VidPersona, VidRecipe, VidRow } from '@/lib/vids-types';
+import { isPhoto, mintRecipeCode, recipeName } from '@/lib/vids-types';
 import {
   SLOTS,
   buildPlan, boomIdOf, boomLayer, boomPlanItem, drawPlanItem, freshPick, isBoomItem, smoothScaling,
@@ -70,7 +73,7 @@ import { composeSequence } from '@/lib/simpler/vidsCompose';
 import {
   CAPTION_STYLES, DEFAULT_CAPTION_SCALE, DEFAULT_CAPTION_STYLE, EMPTY_LINES, ONE_LINE_DEFAULT,
   buildCaptions, capLine, captionAt,
-  captionStyle, captionWindows, drawCaption, layoutCaption, preloadCaptionEmoji,
+  captionStyle, captionWindows, clampCaptionScale, drawCaption, layoutCaption, preloadCaptionEmoji,
   scaleCaptionStyle,
   type CaptionLines, type CaptionPos, type CaptionRef, type CaptionStyle,
 } from '@/lib/simpler/vidsCaptions';
@@ -498,10 +501,21 @@ export function Vids2Builder({
   const [avail, setAvail] = useState({ w: 0, h: 0 });
   const [exporting, setExporting] = useState<{ frac: number; label: string } | null>(null);
   const [exportError, setExportError] = useState<string | null>(null);
-  // The code the last export was written down under. Nothing on the page
-  // brings a build back by it any more — it is here because it goes in the
-  // file name and on the end of the post caption.
+  /** The code of the export under way or just done, minted the moment
+   *  Download is pressed (runExport): it goes on the end of both post
+   *  captions in that same press, then in the file name and on the line
+   *  under the summary. Null until the first Download, and again after an
+   *  export that failed or was cancelled. The box that brings a build back
+   *  by it is on the form (Vids2Recall). */
+  const [exportCode, setExportCode] = useState<string | null>(null);
+  /** The record that code was written down as, once the server has it — the
+   *  three-word title the file is named with. Behind exportCode by however
+   *  long the title takes to write. */
   const [lastRecipe, setLastRecipe] = useState<VidRecipe | null>(null);
+  /** What about a brought-back record did not come back whole — a song since
+   *  gone from the audio library. Under the summary, with the renderers' own
+   *  notes. */
+  const [restoreNotes, setRestoreNotes] = useState<string[]>([]);
   // Which export the code on show belongs to. The record is written down as
   // the render starts and shown straight away, so a run that then fails has to
   // be able to disown a record still on its way back.
@@ -1436,15 +1450,21 @@ export function Vids2Builder({
   // the context the title is written from, which the record itself doesn't
   // carry. Both read the moment an export starts, before anything renders.
   const appliedPersona = personas.find((p) => p.id === appliedPersonaId) ?? null;
-  const currentSpec = () => specFromBuild({
-    picks, persona: appliedPersona, bars, bottomAPace, roomTone, music, clipLevel, boomLevel, preset: PRESET_ID,
-    // Where each actually landed, not where it was pressed in — see boomItems.
-    // One that found no room on the video is not in the record either.
-    booms: booms.flatMap((b) => {
-      const item = boomItems.find((i) => i.slot === boomLayer(b.id));
-      return item ? [{ ...b, at: item.start }] : [];
+  const currentSpec = (): VidBuildSpec => ({
+    ...specFromBuild({
+      picks, persona: appliedPersona, bars, bottomAPace, roomTone, music, clipLevel, boomLevel, preset: PRESET_ID,
+      // Where each actually landed, not where it was pressed in — see boomItems.
+      // One that found no room on the video is not in the record either.
+      booms: booms.flatMap((b) => {
+        const item = boomItems.find((i) => i.slot === boomLayer(b.id));
+        return item ? [{ ...b, at: item.start }] : [];
+      }),
+      lines, styleId, captionScale: capScale, notes: CAPTION_NOTES, emojis: CAPTION_EMOJIS,
     }),
-    lines, styleId, captionScale: capScale, notes: CAPTION_NOTES, emojis: CAPTION_EMOJIS,
+    // The form's answers, so the code brings this video back (Vids2Section
+    // loadCode): the two recordings above are named in the record but were
+    // never filed, and are made again from these.
+    vids2: build.answers,
   });
   const currentBrief = () => ({
     personaContext: personaContextOf(appliedPersona, picks),
@@ -1466,15 +1486,24 @@ export function Vids2Builder({
     // failed belongs to nothing, so a late one is dropped rather than putting a
     // code on a video that never existed — see the catch.
     const run = ++exportRun.current;
-    // The title and code are worked out while the frames render, so by the
-    // time the file exists its name is waiting. The render is the long part.
-    const recipeP = createRecipe({ build: currentSpec(), brief: currentBrief() });
-    // The code goes up the moment it exists rather than when the render is
-    // done: pressing the button is what writes the build down, and the caption
-    // it belongs on is the thing being copied and pasted while the frames are
-    // still going. Waiting for the file left it to be pasted from memory.
+    // The code is minted here, in this press: pressing the button is what
+    // writes the build down, and the caption the code belongs on is the thing
+    // being copied and pasted while the frames are still going — so it goes
+    // on the end of both post captions now, not when the server answers,
+    // which waits on the model for the title. The record is written under it
+    // (the server mints its own only if this one is somehow taken, and the
+    // captions swap to that one when it lands), and the three-word title is
+    // worked out while the frames render, so by the time the file exists its
+    // name is waiting. The render is the long part.
+    const code = mintRecipeCode();
+    setExportCode(code);
+    const recipeP = createRecipe({ code, build: currentSpec(), brief: currentBrief() });
     recipeP
-      .then((r) => { if (exportRun.current === run) setLastRecipe(r); })
+      .then((r) => {
+        if (exportRun.current !== run) return;
+        setLastRecipe(r);
+        if (r.code !== code) setExportCode(r.code);
+      })
       .catch(() => { /* handled where it is awaited */ });
     try {
       const blob = await composeSequence({
@@ -1497,7 +1526,9 @@ export function Vids2Builder({
       try {
         recipe = await recipeP;
       } catch (e) {
-        // The file still goes out — under the old kind of name, and saying so.
+        // The file still goes out — under the old kind of name, and saying
+        // so. The code comes back off the captions: nothing answers to it.
+        if (exportRun.current === run) setExportCode(null);
         setRecipeError(`Exported, but no code could be saved for it: ${e instanceof Error ? e.message : String(e)}`);
       }
       const name = recipe ? `${recipe.name}.mp4` : exportName();
@@ -1511,6 +1542,7 @@ export function Vids2Builder({
       // post caption. Bumping the run first sees off a record still in flight,
       // which would otherwise land a code on a video that never rendered.
       exportRun.current++;
+      setExportCode(null);
       setLastRecipe(null);
       recipeP.then((r) => deleteRecipe(r.code)).catch(() => { /* never minted, or already gone */ });
       if (!(e instanceof DOMException && e.name === 'AbortError')) {
@@ -1595,6 +1627,37 @@ export function Vids2Builder({
    *  It runs on the build's number rather than on the picks, so tuning the
    *  video afterwards never sets a rewrite off. Only Generate does. */
   const buildId = build.id;
+
+  /** The record a code brought back, put on: every caption where it was,
+   *  the look it was drawn in and how big, the song and how loud everything
+   *  sat. Through captionStyle(), so a record drawn in a look since retired
+   *  comes back on one that exists (the looks effect narrows it again for a
+   *  clipper). A song since gone from the audio library can't be played or
+   *  exported, so the video comes back without one and says so — the label
+   *  written down with it names what it was. Only once the list has arrived:
+   *  an empty list says nothing about what is in it. */
+  const restoreRecord = (b: VidBuildSpec) => {
+    const notes: string[] = [];
+    // Over the empty set, so a record from before End had its line comes
+    // back with that line blank rather than missing.
+    setLines({ ...EMPTY_LINES, ...structuredClone(b.captions.lines) });
+    styleChosenRef.current = true;
+    setStyleId(captionStyle(b.captions.styleId).id);
+    setCapScale(clampCaptionScale(b.captions.size ?? DEFAULT_CAPTION_SCALE));
+    musicChosenRef.current = true;
+    let song: Music = b.music
+      ? { url: b.music.url ?? null, label: b.music.label ?? '', level: clampMusicLevel(b.music.level) }
+      : DEFAULT_MUSIC;
+    if (song.url && tracks.length && !tracks.some((t) => t.url === song.url)) {
+      notes.push(`Song “${song.label || song.url.split('/').pop()}” is no longer in the audio library, so this one has no music — pick another under Sound.`);
+      song = { ...song, url: null };
+    }
+    setMusic(song);
+    setClipLevel(clampClipLevel(b.clipLevel));
+    if (b.boomLevel != null) setBoomLevel(clampBoomLevel(b.boomLevel));
+    setRestoreNotes(notes);
+  };
+
   useEffect(() => {
     pause();
     // The words were written about whatever was there before — they go with it.
@@ -1605,6 +1668,16 @@ export function Vids2Builder({
     setBoomArming(false);
     timeRef.current = 0;
     setTime(0);
+    setRestoreNotes([]);
+    // A video brought back by its code: the words, the look and the sound
+    // are the record's, put on as they were written down — nothing rolled,
+    // nothing asked for. (Its BOOMs are below, once the sounds are in.)
+    if (build.restore) {
+      restoreRecord(build.restore.build);
+      pendingWrite.current = null;
+      setBusy(false);
+      return;
+    }
     // A song and a look off the shelf for each new video, the way Simpler's
     // Reset rolls them — neither is anybody's decision until somebody makes it
     // one, and a video that never rolled would be the same song every time.
@@ -1673,6 +1746,34 @@ export function Vids2Builder({
     if (laid.length) setBooms((prev) => [...prev, ...laid]);
   }, [buildId, build.mode, build.beats, boomSounds, boomClip, plan]);
 
+  /** A brought-back video's BOOMs, where the record has them laid — in the
+   *  modes where every BOOM was pressed in by hand. A degen build's are laid
+   *  above instead, on the new recordings' own beats: the record's timeline
+   *  seconds were the old recordings', and a ChatGPT answer a second longer
+   *  would put them off the beat. Held by the build's number like the degen
+   *  ones, and waiting on the sounds the same way, so each lands with the
+   *  bang it was laid with. */
+  const restoredBoomsFor = useRef(0);
+  useEffect(() => {
+    const record = build.restore?.build;
+    if (!record || restoredBoomsFor.current === buildId) return;
+    // A record written while only one BOOM was allowed called it `boom`.
+    const laid: NonNullable<VidBuildSpec['booms']> = record.booms ?? (record.boom ? [record.boom] : []);
+    if (build.mode === 'degen' || !laid.length) { restoredBoomsFor.current = buildId; return; }
+    if (!boomSounds.length) return;
+    restoredBoomsFor.current = buildId;
+    const filed = clipsForSlot('bottomB');
+    setBooms((prev) => [...prev, ...laid.map((b, i): BoomInsert => ({
+      id: `restored-${buildId}-${i}`,
+      // The BOOM it was laid with while that one is still filed, else the
+      // one there is now.
+      video: filed.find((v) => v.id === b.videoId) ?? boomClip,
+      at: b.at,
+      sound: b.sound ? boomSounds.find((s) => s.url === b.sound?.url) ?? null : null,
+      ...(b.picture === false ? { picture: false } : {}),
+    }))]);
+  }, [buildId, build.restore, build.mode, boomSounds, boomClip, clipsForSlot]);
+
   // End is the one slot nobody chooses: every build finishes on him showing
   // what he made, and which of those it is hardly matters. So it fills itself
   // from the End folder the moment the library arrives, and again whenever a
@@ -1724,6 +1825,12 @@ export function Vids2Builder({
   // that used to say a piece of this — the rack, the timeline, the Random
   // button — is gone, so it says the lot.
   const working = busy || writing;
+  /** The code under the summary: the one the export just minted — the one on
+   *  the file name and the post caption — or, until there is one, the one
+   *  this video was brought back from. */
+  const codeLine = exportCode
+    ? { verb: 'Saved as', code: exportCode, title: lastRecipe?.title ?? null }
+    : build.restore ? { verb: 'Brought back from', code: build.restore.code, title: build.restore.title } : null;
   /** There is always a build by the time this page is up — the form is what
    *  stands where an empty stage would. The trade is the one recording every
    *  build has; the intro is there or not, as the form said. */
@@ -2114,13 +2221,34 @@ export function Vids2Builder({
               ) : (
                 <p className="truncate text-xs text-zinc-500">no intro — straight to the trade</p>
               )}
+              {/* The code — the same one on the file name and on the end of
+                  the post caption — so it can be read off the page, and typed
+                  into the form's box to bring this video back. */}
+              {codeLine && (
+                // The code first: it is the part to read off the page, and
+                // the title is what a narrow sidebar cuts short.
+                <p
+                  className="truncate text-xs text-zinc-500"
+                  title={`${codeLine.verb} ${codeLine.title ? recipeName(codeLine.title, codeLine.code) : codeLine.code}`}
+                >
+                  {codeLine.verb} <span className="font-mono tracking-wider text-emerald-300">{codeLine.code}</span>
+                  {/* The title follows once the server has written it. */}
+                  {codeLine.title && (
+                    <>
+                      <span className="text-zinc-600"> · </span>
+                      <span className="text-zinc-300">{codeLine.title}</span>
+                    </>
+                  )}
+                </p>
+              )}
             </div>
           </div>
           {/* What the renderers wanted known — a name that wasn't on the
-              page, a photo that couldn't be found. */}
-          {build.notes.length > 0 && (
+              page, a photo that couldn't be found — and what about a
+              brought-back record didn't come back whole. */}
+          {(build.notes.length > 0 || restoreNotes.length > 0) && (
             <ul className="mt-2 space-y-0.5 text-xs leading-snug text-amber-300/90">
-              {build.notes.map((n) => <li key={n}>{n}</li>)}
+              {[...build.notes, ...restoreNotes].map((n) => <li key={n}>{n}</li>)}
             </ul>
           )}
 
@@ -2262,9 +2390,9 @@ export function Vids2Builder({
           position={build.direction}
           // What Generate asked for the moment it was pressed.
           early={build.early.post}
-          // The code the export just minted, so the captions end on it as the
-          // file name does.
-          code={lastRecipe?.code ?? null}
+          // The code minted as Download was pressed, so both captions end on
+          // it from that press — the same code the file name ends on.
+          code={exportCode}
           // Starting an export tries again a draft that failed.
           exporting={!!exporting}
         />

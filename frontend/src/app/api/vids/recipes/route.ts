@@ -24,7 +24,7 @@ export async function POST(req: NextRequest) {
   }
   try {
     const title = await writeTitle(build, parsed.data.brief);
-    return NextResponse.json(await createRecipe(title, build));
+    return NextResponse.json(await createRecipe(title, build, parsed.data.code));
   } catch (err) {
     console.error('[vids recipes POST]', err);
     return NextResponse.json({ error: errMessage(err) }, { status: 500 });

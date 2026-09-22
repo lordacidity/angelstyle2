@@ -35,6 +35,13 @@
 //             clear every answer (the saved ones too), let the recordings
 //             go, and mount the form fresh — the clipper page (app/clippers)
 //             is this same section, so it has them as well.
+//   Code      top left of the form only: the box a downloaded video's code
+//             goes in (Vids2Recall). The record it names fills the form
+//             again and Generate runs on it — the recordings made afresh
+//             from the same answers, the words, the look and the sound off
+//             the record (loadCode, and `restore` on the build). A record
+//             short of an answer waits on the form instead, and says what
+//             for.
 //
 // This section owns the recordings' bytes: it made them, it lets them go
 // when a second Generate replaces them, and again when the page is left.
@@ -52,9 +59,10 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useVidsLibrary } from '@/app/hooks/useVidsLibrary';
 import { CLIPPERS } from '@/lib/clipping';
 import { CAPTION_STYLES } from '@/lib/simpler/vidsCaptions';
-import { suggestedFrom } from '@/lib/vids-types';
+import { parseRecipeCode, suggestedFrom, type VidRecipe, type Vids2Answers } from '@/lib/vids-types';
 import { Vids2Builder } from './Vids2Builder';
 import { Vids2Form, type Vids2Job, type Vids2Leg } from './Vids2Form';
+import { Vids2Recall } from './Vids2Recall';
 import {
   DEFAULT_TRIM, INTAKE_SPEED, LIBRARY_FOLDERS, PERSONA_PART_SLOT, SLOT_META,
   buildPlan, folderGroupIds, freshPick, type Picks, type SlotId,
@@ -66,10 +74,11 @@ import {
 import { makeChatGptClip, type ClipPlan } from '@/app/components/chatgpt/chatgpt-video';
 import type { Reply } from '@/app/components/chatgpt/reply';
 import { bottomAContext, bottomAMarks, bottomAName } from '@/lib/simpler/vidsBottom';
-import { outletById } from '@/lib/news/outlets';
-import { writeHook, writePostCaptions } from '@/lib/vids-client';
+import { isOutletId, outletById } from '@/lib/news/outlets';
+import { getRecipe, writeHook, writePostCaptions } from '@/lib/vids-client';
 import {
-  EMPTY_SETUP, bottomANewsName, loadSetup, makeNewsClip, makeTradeClip, rollTheme, saveSetup, setupReady,
+  EMPTY_SETUP, answersFromRecord, answersOf, bottomANewsName, loadSetup, makeNewsClip, makeTradeClip,
+  readStoryAgain, rollTheme, sameVideo, saveSetup, setupFromAnswers, setupReady,
   storyFor, type Direction, type Theme, type Vids2Build, type Vids2Setup, type Vids2Story,
 } from '@/lib/vids2/vids2Build';
 import {
@@ -117,6 +126,20 @@ interface IntroClip { row: VidRow; pick: number; notes: string[] }
  *  and not what anybody should be told about. */
 const cancelled = (e: unknown) => e instanceof DOMException && e.name === 'AbortError';
 const msg = (e: unknown) => (e instanceof Error ? e.message : String(e));
+
+/** What the code box says — see loadCode. */
+interface RecallState {
+  busy: boolean;
+  /** The record last brought back, and whatever about it did not come back whole. */
+  loaded: VidRecipe | null;
+  problems: string[];
+  error: string | null;
+}
+const NO_RECALL: RecallState = { busy: false, loaded: null, problems: [], error: null };
+
+/** An outlet's name for a record that names it — or the id as written, for
+ *  one that has since left the approved list. */
+const outletName = (id: string) => (isOutletId(id) ? outletById(id).name : id);
 
 // ── The head start ──────────────────────────────────────────────────────────
 // The two recordings are nearly the whole of what a Generate costs, and
@@ -375,6 +398,14 @@ export function Vids2Section({ active }: { active: boolean }) {
   // For the captions Generate asks for while the recordings render.
   const emojiPalette = useEmojiPalette();
 
+  // ── A code typed in ─────────────────────────────────────────────────────
+  // See loadCode. `pending` is the record waiting for a Generate — taken by
+  // the next one, whether loadCode pressed it or somebody did after answering
+  // what the record was short of — and `recall` is what the box says.
+  const [recall, setRecall] = useState<RecallState>(NO_RECALL);
+  const pendingRef = useRef<{ recipe: VidRecipe; answers: Vids2Answers } | null>(null);
+  const recallRef = useRef<AbortController | null>(null);
+
   useEffect(() => { saveSetup(setup); }, [setup]);
 
   // The four library folders always exist at the top level. Vids 2 only reads
@@ -399,6 +430,7 @@ export function Vids2Section({ active }: { active: boolean }) {
   };
   useEffect(() => () => {
     jobRef.current?.abort();
+    recallRef.current?.abort();
     dropLocal(picksRef.current);
     stopRun(warmRef.current.intro);
     stopRun(warmRef.current.trade);
@@ -571,6 +603,12 @@ export function Vids2Section({ active }: { active: boolean }) {
     dropWarm('intro');
     dropWarm('trade');
     dropLocal(picksRef.current);
+    // A code on its way in, or waiting for Generate, goes with the answers
+    // it was for.
+    recallRef.current?.abort();
+    recallRef.current = null;
+    pendingRef.current = null;
+    setRecall(NO_RECALL);
     setPicks({});
     setBuild(null);
     setSetup(EMPTY_SETUP);
@@ -585,6 +623,85 @@ export function Vids2Section({ active }: { active: boolean }) {
   const resetForm = () => {
     if (job && !window.confirm('Reset? The video being made is dropped, and every answer is cleared.')) return;
     reset();
+  };
+
+  /** A code typed into the box (Vids2Recall): the record it names, back on
+   *  the form, and Generate pressed for it when nothing is missing.
+   *
+   *  What comes back is the answers — whole, on a record written since they
+   *  were kept; most of them, read off the clip names, on one from before
+   *  (answersFromRecord) — with the story read off its outlet again, since a
+   *  record carries only its address, and the persona by its id, if the
+   *  library still has it. The form is mounted afresh on them, folded, the
+   *  way it opens on a return visit. Then, with every answer in, Generate,
+   *  which takes the record as it goes (pendingRef) and hands it to the
+   *  tuning page, so the words, the look and the sound are the record's
+   *  rather than rolled and asked for. Short of an answer — the persona gone,
+   *  the story unreadable, the question never written down — it stops on the
+   *  form with the reason on the box, and the next Generate takes the record
+   *  if the answers are still that video's (sameVideo). */
+  const loadCode = async (raw: string) => {
+    const code = parseRecipeCode(raw);
+    if (!code) {
+      setRecall((r) => ({
+        ...r,
+        error: 'A code is six letters and numbers, like K7Q4M2 — it sits after the title of every downloaded video, and on the end of its caption.',
+      }));
+      return;
+    }
+    if (!loaded) {
+      setRecall((r) => ({ ...r, error: 'The library is still loading — give it a moment and try again.' }));
+      return;
+    }
+    if (job && !window.confirm(`Drop the video being made and bring back ${code} instead?`)) return;
+    cancel();
+    recallRef.current?.abort();
+    const ctrl = new AbortController();
+    recallRef.current = ctrl;
+    pendingRef.current = null;
+    setRecall((r) => ({ ...r, busy: true, error: null }));
+    try {
+      const recipe = await getRecipe(code);
+      if (ctrl.signal.aborted) return;
+      const read = answersFromRecord(recipe.build);
+      if (!read) {
+        throw new Error(`${code} is a Vids build, not a Vids 2 one — only a video made here can be brought back here.`);
+      }
+      const { answers, problems } = read;
+      const wanted = recipe.build.persona;
+      const persona = wanted ? personas.find((p) => p.id === wanted.id) ?? null : null;
+      if (!persona) {
+        problems.push(wanted
+          ? `Persona “${wanted.name}” is no longer in the library — choose another, then press Generate.`
+          : 'No persona was written down with it — choose one, then press Generate.');
+      }
+      let story: Vids2Story | null = null;
+      if (answers.intro === 'news' && answers.story) {
+        try {
+          story = await readStoryAgain(answers.person, answers.story.url, ctrl.signal);
+        } catch (e) {
+          if (cancelled(e)) return;
+          problems.push(
+            `The ${outletName(answers.story.outlet)} story “${answers.story.title}” can't be read any more (${msg(e)}) — find another, then press Generate.`,
+          );
+        }
+      }
+      if (ctrl.signal.aborted) return;
+      const next = setupFromAnswers(setup, answers, persona?.id ?? null, story);
+      setSetup(next);
+      setJobError(null);
+      // Mounted afresh on the answers: every card folded, and Generate lit
+      // once nothing is missing — the way the form opens on a return visit.
+      setFormKey((k) => k + 1);
+      pendingRef.current = { recipe, answers };
+      setRecall({ busy: false, loaded: recipe, problems, error: null });
+      if (setupReady(next)) void generate(next);
+    } catch (e) {
+      if (cancelled(e)) return;
+      setRecall((r) => ({ ...r, busy: false, error: msg(e) }));
+    } finally {
+      if (recallRef.current === ctrl) recallRef.current = null;
+    }
   };
 
   /** Generate: the recordings, then the whole stage, then the tuning page.
@@ -616,27 +733,40 @@ export function Vids2Section({ active }: { active: boolean }) {
    *  takes them (Vids2Early) rather than asking again. A failure or a cancel
    *  aborts them along with the recordings; one of them failing fails
    *  nothing but itself. */
-  const generate = async () => {
-    if (!setupReady(setup) || job) return;
-    const persona = personas.find((p) => p.id === setup.personaId) ?? null;
+  const generate = async (from: Vids2Setup) => {
+    // The ref rather than the state: loadCode cancels a job and presses this
+    // in the same breath, before the state has caught up.
+    if (!setupReady(from) || jobRef.current) return;
+    const persona = personas.find((p) => p.id === from.personaId) ?? null;
     if (!persona) { setJobError('That persona is no longer in the library. Choose another.'); return; }
-    const { direction, mode, intro } = setup;
-    const question = intro === 'chatgpt' ? setup.question.trim() : '';
-    const story = intro === 'news' ? storyFor(setup) : null;
+    const { direction, mode, intro } = from;
+    const question = intro === 'chatgpt' ? from.question.trim() : '';
+    const story = intro === 'news' ? storyFor(from) : null;
     if (intro === 'news' && !story) { setJobError('Choose a story first.'); return; }
-    const tradeKey = warmKey('trade', setup);
+    const tradeKey = warmKey('trade', from);
     if (!tradeKey) return; // setupReady has already said there is a person
+    // A record brought back by its code (loadCode), if these are still the
+    // answers it was of (sameVideo): Pauv comes up the way it did, and the
+    // tuning page puts its words, look and sound on rather than rolling and
+    // asking. Taken once, by whichever Generate is next.
+    const pending = pendingRef.current;
+    pendingRef.current = null;
+    const restore = pending && sameVideo(from, pending.answers) ? pending : null;
 
     // Each recording as it stands: the one already running for these answers,
     // taken over, or a new one started here the way it always was. Light or
     // dark is not asked — whichever run draws the trade rolled it (rollTheme),
     // here or a minute ago.
     const introRun = intro === 'none' ? null
-      : (takeWarm('intro', setup) as IntroRun | null) ?? startIntroRun(warmKey('intro', setup) ?? '', {
-        person: setup.person, direction, question, story,
+      : (takeWarm('intro', from) as IntroRun | null) ?? startIntroRun(warmKey('intro', from) ?? '', {
+        person: from.person, direction, question, story,
       });
-    const tradeRun = (takeWarm('trade', setup) as TradeRun | null) ?? startTradeRun(tradeKey, {
-      person: setup.person, direction, theme: rollTheme(),
+    // A brought-back video has Pauv the way it came up the first time, not
+    // the way a head start rolled it — so that run is let go rather than
+    // taken. The intro's frames are the same either way, and it is taken.
+    if (restore) dropWarm('trade');
+    const tradeRun = (takeWarm('trade', from) as TradeRun | null) ?? startTradeRun(tradeKey, {
+      person: from.person, direction, theme: restore?.answers.theme ?? rollTheme(),
     });
     const theme = tradeRun.theme;
     /** A news head start begun before Which way was asked carries the other
@@ -645,10 +775,9 @@ export function Vids2Section({ active }: { active: boolean }) {
      *  run was started for this direction and passes straight through. */
     const stamp = (row: VidRow): VidRow =>
       introRun?.outlet && introRun.direction !== direction
-        ? { ...row, name: bottomANewsName(setup.person, direction, introRun.outlet) }
+        ? { ...row, name: bottomANewsName(from.person, direction, introRun.outlet) }
         : row;
 
-    jobRef.current?.abort();
     const ctrl = new AbortController();
     jobRef.current = ctrl;
     setJobError(null);
@@ -677,19 +806,21 @@ export function Vids2Section({ active }: { active: boolean }) {
     const personaContext = personaContextOf(persona, base);
 
     // The hook and the post captions need nothing either recording has, so
-    // they go now, and the whole render is theirs to come back in.
-    const hook: Vids2Early['hook'] = {
-      person: setup.person,
-      start: quiet(writeHook({ mode, person: setup.person, direction, personaContext }, ctrl.signal)
+    // they go now, and the whole render is theirs to come back in. A video
+    // brought back has its hook on the record already; the post captions are
+    // not on it, and are written fresh the way they always are.
+    const hook: Vids2Early['hook'] = restore ? null : {
+      person: from.person,
+      start: quiet(writeHook({ mode, person: from.person, direction, personaContext }, ctrl.signal)
         .then((r) => r.start)),
     };
     // Who and which way told outright, so the route goes straight to the news
     // search without reading them off the recordings first; fresh, so a second
     // video on them today gets words of its own.
     const post: Vids2Early['post'] = {
-      person: setup.person,
+      person: from.person,
       position: direction,
-      draft: quiet(writePostCaptions({ person: setup.person, position: direction, fresh: true }, ctrl.signal)),
+      draft: quiet(writePostCaptions({ person: from.person, position: direction, fresh: true }, ctrl.signal)),
     };
 
     // Each recording as the plan will see it, the moment it was laid out —
@@ -706,8 +837,9 @@ export function Vids2Section({ active }: { active: boolean }) {
       // always are, the library's nearly always. Otherwise the tuning page
       // waits for the browser to measure them, as it always has.
       const known = Object.values(draft).every((p) => !p || isPhoto(p.video) || (p.video.duration ?? 0) > 0);
+      // A brought-back video's words are on the record: nothing is drafted.
       return {
-        lines: known ? quiet(draftLines({
+        lines: known && !restore ? quiet(draftLines({
           plan: buildPlan(draft, {}, VIDS2_BARS, VIDS2_PACE),
           picks: draft,
           pace: VIDS2_PACE,
@@ -776,6 +908,10 @@ export function Vids2Section({ active }: { active: boolean }) {
           tradePlaced: trade.beats.confirming.start,
         },
         early: { hook, lines, post },
+        // What the export writes down, so a code brings this video back —
+        // and the record this one was brought back from, if it was.
+        answers: answersOf(from, { person: trade.person.name, question, story, theme }),
+        restore: restore?.recipe ?? null,
       });
       setOnForm(false);
     } catch (e) {
@@ -812,6 +948,20 @@ export function Vids2Section({ active }: { active: boolean }) {
         </button>
       )}
 
+      {/* The code box, top left, while the form is up: a downloaded video's
+          code brings it back (loadCode). The tuning page has no use for it —
+          it has a video on it — and Start over is the way back to here. */}
+      {showForm && (
+        <Vids2Recall
+          disabled={!loaded}
+          busy={recall.busy}
+          loaded={recall.loaded}
+          problems={recall.problems}
+          error={recall.error}
+          onLoad={(raw) => void loadCode(raw)}
+        />
+      )}
+
       <div className="flex min-h-0 flex-1">
         {showForm && (
           <Vids2Form
@@ -826,7 +976,7 @@ export function Vids2Section({ active }: { active: boolean }) {
             jobError={jobError}
             warm={warm}
             onHeadStart={headStart}
-            onGenerate={() => void generate()}
+            onGenerate={() => void generate(setup)}
             onCancel={cancel}
           />
         )}

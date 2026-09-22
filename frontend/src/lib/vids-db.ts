@@ -18,7 +18,7 @@ import { CLIPPERS } from '@/lib/clipping';
 import pg from 'pg';
 import { createClient, type SupabaseClient } from '@supabase/supabase-js';
 import {
-  RECIPE_CODE_ALPHABET, RECIPE_CODE_LENGTH, cleanEdit, cleanMarks, cleanTheme, isClipableKind, recipeName,
+  RECIPE_CODE_ALPHABET, RECIPE_CODE_LENGTH, cleanEdit, cleanMarks, cleanTheme, isClipableKind, isRecipeCode, recipeName,
 } from '@/lib/vids-types';
 import type {
   ClipableKind, CreateVideoInput, VidBuildSpec, VidClipableFlag, VidClipablePatch, VidContextPatch, VidEdit,
@@ -778,13 +778,16 @@ function newRecipeCode(): string {
   return out;
 }
 
-/** Write a build down under a new code. The code is minted here, and a clash
- *  with one already taken simply tries again — the insert is the check. */
-export async function createRecipe(title: string, build: VidBuildSpec): Promise<VidRecipe> {
+/** Write a build down under a new code: the one the builder minted as
+ *  Download was pressed (`wanted`), so its post captions could carry the code
+ *  in that same press, or a fresh one minted here. A clash with one already
+ *  taken simply tries again with a fresh one — the insert is the check — and
+ *  the record that comes back says which code it ended up under. */
+export async function createRecipe(title: string, build: VidBuildSpec, wanted?: string): Promise<VidRecipe> {
   await ensureSchema();
   const pool = getPool();
   for (let attempt = 0; attempt < 8; attempt++) {
-    const code = newRecipeCode();
+    const code = attempt === 0 && wanted && isRecipeCode(wanted) ? wanted : newRecipeCode();
     const r = await pool.query<RecipeDb>(
       `INSERT INTO vids_recipes (code, title, build) VALUES ($1, $2, $3)
        ON CONFLICT (code) DO NOTHING RETURNING ${RECIPE_COLS}`,
