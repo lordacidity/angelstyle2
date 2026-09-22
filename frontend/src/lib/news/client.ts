@@ -26,7 +26,7 @@ import { OUTLETS, articleUrlProblem, outletForHost } from './outlets';
 import { rasterizeNewsPage, type NewsImage } from './rasterize';
 import { PHOTO_SLOTS, renderNewsPage, type PagePhotos } from './templates';
 import type {
-  NewsArticle, NewsCategory, NewsHit, NewsPhoto, OutletId, PersonPhoto, PersonPhotosResponse, RailItem,
+  NameHighlight, NewsArticle, NewsCategory, NewsHit, NewsPhoto, OutletId, PersonPhoto, PersonPhotosResponse, RailItem,
   StoryPerson, ThumbPhotosResponse, TrendingHit, TrendingResponse, TrendSort, TrendWindow,
 } from './types';
 
@@ -88,8 +88,29 @@ export const searchedForms = (q: string, forms: NameForms): string =>
  *  column, and whoever on Pauv it names (the headline's first, then by how
  *  often). Refused, with the reason, when any of the story is missing. The
  *  link is a search result's or one pasted in by hand. */
-export const readNewsStory = (link: string, signal?: AbortSignal) =>
-  postJson<{ article: NewsArticle; rail: RailItem[]; people?: StoryPerson[] }>('/api/news/article', { link }, signal);
+export const readNewsStory = (link: string, signal?: AbortSignal, name = '') =>
+  postJson<ReadStory>('/api/news/article', { link, ...(name.trim() ? { name: name.trim() } : {}) }, signal);
+
+/** What a story comes back as: the story itself, the outlet's other
+ *  headlines for the side column, whoever on Pauv it names, and — when it was
+ *  read for somebody (`name`) — the form of their name the page prints, so
+ *  the recording drags over "Kennedy" on a page that never says "RFK Jr.". */
+export interface ReadStory {
+  article: NewsArticle;
+  rail: RailItem[];
+  people?: StoryPerson[];
+  /** Only when `name` was given; null when the page never says them. */
+  highlight?: NameHighlight | null;
+}
+
+/** A result as the page spells its person: the headline names them when the
+ *  form is in it, and the form is what gets highlighted — in the headline or,
+ *  failing that, the first time the story says it. Left as it was when the
+ *  page never says them. */
+export function withHighlight(hit: NewsHit, highlight: NameHighlight | null | undefined): NewsHit {
+  if (!highlight) return hit;
+  return { ...hit, named: highlight.where === 'headline', namedAs: highlight.form };
+}
 
 // ── A link pasted in by hand ─────────────────────────────────────────────────
 

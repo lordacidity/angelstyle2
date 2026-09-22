@@ -1,9 +1,11 @@
 // Reads a real article from an approved outlet: the headline as printed, the
-// byline, the publish (and update) time and the article text, word for
-// word. Each outlet is read from the most reliable public source it offers:
+// byline, the publish (and update) time and the article body, word for word —
+// its paragraphs, and the subheadings, bullet points and pulled quotes the
+// outlet sets between them, in the order the page prints them. Each outlet is
+// read from the most reliable public source it offers:
 //
 //   CNN, Fox, TMZ,      the article page itself (its JSON-LD plus the page's
-//   BBC, People         own headline and paragraph markup)
+//   BBC, People         own headline and body markup)
 //   ESPN                ESPN's public content API (the page blocks scripted
 //                       visitors; the API serves the same story)
 //   NYT                 the Times' public oEmbed feed (the page blocks scripted
@@ -22,10 +24,10 @@ import {
 } from './html';
 import { imdbIdOf, imdbItem, imdbUrl } from './imdb';
 import { articleUrlProblem, athleticId, outletForHost, outletById } from './outlets';
-import type { NewsArticle, OutletId } from './types';
+import type { BodyBlock, NewsArticle, OutletId } from './types';
 
 // As much of the article as the outlet gives, up to a length the PNG can hold.
-const MAX_PARAGRAPHS = 60;
+const MAX_BLOCKS = 80;
 
 export class ArticleError extends Error {}
 
@@ -58,16 +60,64 @@ function isoOrNull(v: unknown): string | null {
   return Number.isFinite(t) ? new Date(t).toISOString() : null;
 }
 
+// ── The body ─────────────────────────────────────────────────────────────────
+
 // Promotions the outlets drop between paragraphs ("Get our flagship newsletter
 // with all the headlines you need to start the day. Sign up here.").
 const PROMO = /\b(sign up here|sign up for|subscribe (to|now|here)|newsletter|download the .{0,30}app|click here|follow us on|on bbc sounds|on bbc iplayer)\b/i;
 
-function articleText(paragraphs: string[]): string[] {
-  return paragraphs
-    .map(p => p.replace(/[ \s]+/g, ' ').trim())
-    .filter(p => p.length > 1 && !isShouting(p) && !(p.length < 240 && PROMO.test(p)))
-    .slice(0, MAX_PARAGRAPHS);
+/** The blocks as the page gets them: each tidied, the promos and the shouted
+ *  link lines out, a heading with nothing under it out, and no more than the
+ *  PNG can hold. */
+function articleBody(blocks: BodyBlock[]): BodyBlock[] {
+  const kept: BodyBlock[] = [];
+  for (const b of blocks) {
+    const text = b.text.replace(/[ \s]+/g, ' ').trim();
+    if (text.length <= 1) continue;
+    // A subheading is allowed its capitals; a paragraph in capitals is a promo.
+    if (b.kind !== 'h2' && isShouting(text)) continue;
+    if (text.length < 240 && PROMO.test(text)) continue;
+    kept.push({ kind: b.kind, text });
+    if (kept.length >= MAX_BLOCKS) break;
+  }
+  while (kept.length && kept[kept.length - 1].kind === 'h2') kept.pop();
+  return kept;
 }
+
+/** The paragraphs (and pulled quotes) of a body, as text. */
+const paragraphsOf = (body: BodyBlock[]): string[] =>
+  body.filter(b => b.kind === 'p' || b.kind === 'quote').map(b => b.text);
+
+/** Both at once, from whatever blocks a reader found. */
+function bodyOf(blocks: BodyBlock[]): Pick<NewsArticle, 'body' | 'paragraphs'> {
+  const body = articleBody(blocks);
+  return { body, paragraphs: paragraphsOf(body) };
+}
+
+const p = (text: string): BodyBlock => ({ kind: 'p', text });
+
+type Pick_ = BodyBlock['kind'] | 'list' | null;
+
+/** The body blocks in a run of HTML, in order: every paragraph, heading,
+ *  list and pulled quote `kindOf` says is the article's. A list is handed
+ *  back as its bullets. Anything `kindOf` leaves out — and everything inside
+ *  it — is skipped, so a list of related links never leaks its items. */
+function pickBlocks(html: string, kindOf: (tag: string, attrs: string, inner: string) => Pick_): BodyBlock[] {
+  const out: BodyBlock[] = [];
+  for (const m of html.matchAll(/<(h2|h3|blockquote|ul|ol|p|li)\b([^>]*)>([\s\S]*?)<\/\1>/gi)) {
+    const kind = kindOf(m[1].toLowerCase(), m[2], m[3]);
+    if (kind === 'list') {
+      for (const li of m[3].matchAll(/<li\b[^>]*>([\s\S]*?)<\/li>/gi)) out.push({ kind: 'li', text: textOf(li[1]) });
+    } else if (kind) {
+      out.push({ kind, text: textOf(m[3]) });
+    }
+  }
+  return out;
+}
+
+/** What a tag is when every one of them is the article's (ESPN's story HTML). */
+const plainKind = (tag: string): Pick_ =>
+  tag === 'p' ? 'p' : tag === 'li' ? 'li' : tag === 'blockquote' ? 'quote' : tag === 'ul' || tag === 'ol' ? 'list' : 'h2';
 
 async function pageHtml(url: string, outlet: OutletId): Promise<string> {
   let res;
@@ -109,8 +159,12 @@ async function readEspn(u: URL): Promise<NewsArticle> {
   const byType = (t: string) => categories.filter(c => c.type === t).map(c => ldString(c.description)).filter(Boolean) as string[];
   const byline = ldString(h.byline) ?? '';
   const authors = byline ? byline.split(/\s*(?:,|\band\b)\s*/).filter(Boolean) : byType('contributor');
-  const story = ldString(h.story) ?? '';
-  const paragraphs = story.split(/<\/p>|<p(?:\s[^>]*)?>|\n/i).map(textOf);
+  // The story is HTML: paragraphs, subheadings, lists and quotes, with ESPN's
+  // own tags for the videos and "also see" links laid between them.
+  const story = (ldString(h.story) ?? '').replace(/<alsosee\b[^>]*>[\s\S]*?<\/alsosee>|<(?:alsosee|video\d*|inline\d*)\b[^>]*\/?>/gi, '');
+  let blocks = pickBlocks(story, plainKind);
+  // An older story is plain text, a paragraph a line.
+  if (!blocks.length) blocks = story.split(/\n/).map(t => p(textOf(t)));
   const league = byType('league')[0] ?? ldString(h.section);
   const team = byType('team')[0] ?? null;
   return {
@@ -126,7 +180,7 @@ async function readEspn(u: URL): Promise<NewsArticle> {
     publishedDate: null,
     updatedAt: isoOrNull(h.lastModified),
     section: league ?? null,
-    paragraphs: articleText(paragraphs),
+    ...bodyOf(blocks),
     keyPoints: [],
     live: h.isLiveBlog === true,
     notes: team ? [`Team: ${team}`] : [],
@@ -172,6 +226,7 @@ async function readNyt(u: URL): Promise<NewsArticle> {
     publishedDate,
     updatedAt: null,
     section: afterDate === 'live' ? null : sectionName(afterDate),
+    body: [],
     paragraphs: [],
     keyPoints: [],
     live: u.pathname.includes('/live/'),
@@ -220,6 +275,7 @@ async function readAthletic(u: URL, id: string): Promise<NewsArticle> {
     publishedDate: null,
     updatedAt: null,
     section: 'The Athletic',
+    body: [],
     paragraphs: [],
     keyPoints: [],
     live: false,
@@ -236,7 +292,15 @@ async function readCnn(u: URL): Promise<NewsArticle> {
   const html = await pageHtml(u.toString(), 'cnn');
   const ld = articleLd(html) ?? {};
   const authors = ldAuthors(ld.author);
-  const paragraphs = [...html.matchAll(/<p[^>]*data-component-name="paragraph"[^>]*>([\s\S]*?)<\/p>/gi)].map(m => textOf(m[1]));
+  // CNN names every block of the story: the paragraphs, the subheadings
+  // between them, and the lists. Nothing else on the page carries the names.
+  const blocks = pickBlocks(html, (tag, attrs) => {
+    const name = attrs.match(/data-component-name="([^"]+)"/)?.[1];
+    if (tag === 'p' && name === 'paragraph') return 'p';
+    if ((tag === 'h2' || tag === 'h3') && name === 'subheader') return 'h2';
+    if ((tag === 'ul' || tag === 'ol') && name === 'list') return 'list';
+    return null;
+  });
   const section = u.pathname.match(/^\/\d{4}\/\d{2}\/\d{2}\/([a-z-]+)\//)?.[1];
   return {
     outlet: 'cnn',
@@ -251,7 +315,7 @@ async function readCnn(u: URL): Promise<NewsArticle> {
     publishedDate: null,
     updatedAt: isoOrNull(ld.dateModified),
     section: sectionName(section),
-    paragraphs: articleText(paragraphs),
+    ...bodyOf(blocks),
     keyPoints: [],
     live: u.pathname.includes('/live-news/'),
     notes: [],
@@ -267,10 +331,14 @@ async function readFox(u: URL): Promise<NewsArticle> {
   const bodyAt = html.search(/class="article-body"/);
   const body = bodyAt >= 0 ? html.slice(bodyAt, bodyAt + 200_000) : '';
   // Article paragraphs carry data-layout-index; video captions and promos in
-  // the same container don't.
-  const paragraphs = [...body.matchAll(/<p\s[^>]*data-layout-index[^>]*>([\s\S]*?)<\/p>/gi)]
-    .filter(m => !/^\s*<(strong|b)>\s*<a /i.test(m[1]))
-    .map(m => textOf(m[1]));
+  // the same container don't. A paragraph that is only a bold link is a
+  // promo ("CLICK HERE…"). The subheadings are plain <h2>s; the ones with the
+  // "title" class head the related-stories lists under the article.
+  const blocks = pickBlocks(body, (tag, attrs, inner) => {
+    if (tag === 'p') return /data-layout-index/.test(attrs) && !/^\s*<(strong|b)>\s*<a /i.test(inner) ? 'p' : null;
+    if (tag === 'h2' || tag === 'h3') return /class="[^"]*\btitle\b/.test(attrs) ? null : 'h2';
+    return null;
+  });
   return {
     outlet: 'fox',
     url: cleanUrl(u),
@@ -284,7 +352,7 @@ async function readFox(u: URL): Promise<NewsArticle> {
     publishedDate: null,
     updatedAt: isoOrNull(ld.dateModified),
     section: sectionName(u.pathname.split('/').filter(Boolean)[0]),
-    paragraphs: articleText(paragraphs),
+    ...bodyOf(blocks),
     keyPoints: [],
     live: false,
     notes: [],
@@ -307,7 +375,15 @@ async function readTmz(u: URL): Promise<NewsArticle> {
   const kicker = tmzFragment(html, 1);
   const main = tmzFragment(html, 2);
   const sub = tmzFragment(html, 3);
+  // TMZ's JSON-LD carries the story clean, a blank line between paragraphs;
+  // when it is missing, the paragraphs of the page's own article blocks.
   const bodyText = decodeEntities(ldString(ld.articleBody) ?? '');
+  let blocks = bodyText.split(/\n\s*\n/).map(t => p(t));
+  if (!bodyText.trim()) {
+    const at = html.search(/class="article__blocks/);
+    blocks = pickBlocks(at >= 0 ? html.slice(at, at + 200_000) : '', (tag, _attrs, inner) =>
+      (tag === 'p' && !/Launch Gallery|<script/i.test(inner) ? 'p' : null));
+  }
   return {
     outlet: 'tmz',
     url: cleanUrl(u),
@@ -321,7 +397,7 @@ async function readTmz(u: URL): Promise<NewsArticle> {
     publishedDate: null,
     updatedAt: isoOrNull(ld.dateModified),
     section: null,
-    paragraphs: articleText(bodyText.split(/\n\s*\n/)),
+    ...bodyOf(blocks),
     keyPoints: [],
     live: false,
     notes: [],
@@ -330,11 +406,55 @@ async function readTmz(u: URL): Promise<NewsArticle> {
 
 // ── BBC ────────────────────────────────────────────────────────────────────
 
+// BBC News lays a story out as named blocks — text-block, subheadline-block,
+// crosshead-block, the list blocks — in page order.
+function bbcNewsBlocks(html: string): BodyBlock[] {
+  const out: BodyBlock[] = [];
+  for (const m of html.matchAll(/data-component="([a-z-]+)"[^>]*>([\s\S]*?)<\/div>/gi)) {
+    const name = m[1];
+    const inner = m[2];
+    if (name === 'text-block') {
+      const ps = [...inner.matchAll(/<p\b[^>]*>([\s\S]*?)<\/p>/gi)].map(x => p(textOf(x[1])));
+      out.push(...(ps.length ? ps : [p(textOf(inner))]));
+    } else if (name === 'subheadline-block' || name === 'crosshead-block') {
+      out.push({ kind: 'h2', text: textOf(inner) });
+    } else if (/-list-(block|list)$/.test(name)) {
+      for (const li of inner.matchAll(/<li\b[^>]*>([\s\S]*?)<\/li>/gi)) out.push({ kind: 'li', text: textOf(li[1]) });
+    }
+  }
+  return out;
+}
+
+// BBC Sport is a different renderer: the story runs from the headline to the
+// topic list as rich-text blocks (the paragraphs), subheadline blocks (the
+// <h2>s), with the pictures, video players and quizzes laid between them —
+// each block named by a data-testid. Only what sits inside a rich-text or a
+// subheadline block is the story: a video player's "This video can not be
+// played" and a picture's caption are paragraphs too, but not the story's.
+function bbcSportBlocks(html: string): BodyBlock[] {
+  const start = Math.max(0, html.indexOf('data-testid="headline"'));
+  const end = html.indexOf('data-testid="topic-list"', start);
+  const region = html.slice(start, end > 0 ? end : undefined);
+  const out: BodyBlock[] = [];
+  let inside: string | null = null;
+  for (const m of region.matchAll(/data-testid="([^"]+)"|<(h2|p|li)\b([^>]*)>([\s\S]*?)<\/\2>/gi)) {
+    if (m[1]) { inside = m[1]; continue; }
+    const tag = m[2].toLowerCase();
+    const attrs = m[3];
+    if (tag === 'h2' && inside === 'subheadline') out.push({ kind: 'h2', text: textOf(m[4]) });
+    else if (inside === 'rich-text' && tag === 'p' && /-Paragraph\b/.test(attrs)) out.push(p(textOf(m[4])));
+    // The related-story links at the foot of a block are list items too.
+    else if (inside === 'rich-text' && tag === 'li' && !/LinkItem|-Link\b/.test(attrs)) out.push({ kind: 'li', text: textOf(m[4]) });
+  }
+  return out;
+}
+
 async function readBbc(u: URL): Promise<NewsArticle> {
   const html = await pageHtml(u.toString(), 'bbc');
   const ld = articleLd(html) ?? {};
   const authors = ldAuthors(ld.author);
-  const paragraphs = [...html.matchAll(/data-component="text-block"[^>]*>([\s\S]*?)<\/div>/gi)].map(m => textOf(m[1]));
+  let blocks = bbcNewsBlocks(html);
+  if (!blocks.length) blocks = bbcSportBlocks(html);
   return {
     outlet: 'bbc',
     url: cleanUrl(u),
@@ -349,7 +469,7 @@ async function readBbc(u: URL): Promise<NewsArticle> {
     publishedDate: null,
     updatedAt: isoOrNull(ld.dateModified),
     section: null,
-    paragraphs: articleText(paragraphs),
+    ...bodyOf(blocks),
     keyPoints: [],
     live: false,
     notes: [],
@@ -371,9 +491,17 @@ async function readPeople(u: URL): Promise<NewsArticle> {
   const html = await pageHtml(u.toString(), 'people');
   const ld = articleLd(html) ?? {};
   const authors = ldAuthors(ld.author);
-  // The story's own blocks; People's related-story cards and promos sit in
-  // other block types.
-  const paragraphs = [...html.matchAll(/<p[^>]*class="[^"]*mntl-sc-block-html[^"]*"[^>]*>([\s\S]*?)<\/p>/gi)].map(m => textOf(m[1]));
+  // The story's own blocks — its paragraphs and lists are "html" blocks, its
+  // subheadings "heading" blocks; People's related-story cards, promos and
+  // the NEED TO KNOW box sit in other block types.
+  const blocks = pickBlocks(html, (tag, attrs) => {
+    if (!/mntl-sc-block-(html|heading)\b/.test(attrs)) return null;
+    if (tag === 'p') return 'p';
+    if (tag === 'h2' || tag === 'h3') return 'h2';
+    if (tag === 'ul' || tag === 'ol') return 'list';
+    if (tag === 'blockquote') return 'quote';
+    return null;
+  });
   const first = u.pathname.split('/').filter(Boolean);
   return {
     outlet: 'people',
@@ -388,7 +516,7 @@ async function readPeople(u: URL): Promise<NewsArticle> {
     publishedDate: null,
     updatedAt: isoOrNull(ld.dateModified),
     section: first.length > 1 ? sectionName(first[0]) : null,
-    paragraphs: articleText(paragraphs),
+    ...bodyOf(blocks),
     keyPoints: peopleKeyPoints(html),
     live: false,
     notes: [],
@@ -420,7 +548,7 @@ async function readImdb(u: URL): Promise<NewsArticle> {
     publishedDate: null,
     updatedAt: null,
     section: null,
-    paragraphs: articleText(item.paragraphs),
+    ...bodyOf(item.paragraphs.map(t => p(t))),
     keyPoints: [],
     live: false,
     notes: [],
@@ -442,7 +570,7 @@ export async function readNewsArticle(rawUrl: string): Promise<NewsArticle> {
     people: readPeople, imdb: readImdb,
   };
   const article = await readers[outlet](u);
-  if (article.outlet !== 'nyt' && article.paragraphs.length === 0) {
+  if (article.outlet !== 'nyt' && article.body.length === 0) {
     article.notes.push(`Couldn't read the article text from ${outletById(outlet).name}; the page shows no paragraphs.`);
   }
   return requireVerified(article);

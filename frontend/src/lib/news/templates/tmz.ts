@@ -1,5 +1,5 @@
 import type { NewsArticle, RailItem } from '../types';
-import { esc, GOOGLE_G, MONTH_LONG, partsIn, photoBox, PHOTO_SLOTS, PLACEHOLDER_CSS, wasUpdated, type PagePhotos, type RenderedPage } from './shared';
+import { bodyHtml, esc, GOOGLE_G, MONTH_LONG, partsIn, PHOTO_SLOTS, photoBox, PLACEHOLDER_CSS, wasUpdated, type PagePhotos, type RenderedPage } from './shared';
 
 // TMZ article page. Layout from the approved mockup. The big headline uses
 // TMZ's own three-part split when the page has one. No EXCLUSIVE tag and no
@@ -41,6 +41,10 @@ h1.long { font-size: 64px; line-height: 62px; }
 .credit { margin-top: 6px; text-align: right; font: italic 13px "Fira Sans", Arial, sans-serif; color: var(--grey); }
 .body { margin-top: 26px; font-size: 20px; line-height: 32px; letter-spacing: .25px; color: #222; text-align: justify; }
 .body p { margin: 0 0 26px; }
+.body h2 { margin: 30px 0 14px; font: 800 30px/34px "Fira Sans Condensed", Arial, sans-serif; text-transform: uppercase; text-align: left; letter-spacing: 0; }
+.body ul, .body ol { margin: 0 0 26px; padding-left: 26px; text-align: left; }
+.body li { margin: 0 0 8px; }
+.body blockquote { margin: 0 0 26px; padding-left: 20px; border-left: 4px solid var(--red); font-style: italic; text-align: left; }
 .popular { position: relative; height: 38px; margin: 0 6px 22px 10px; }
 .popular .shadow { position: absolute; left: 0; top: 0; right: 0; bottom: 0; transform: translate(6px, 5px) skewX(-14deg); background: repeating-linear-gradient(135deg, #9b9b9b 0 1px, transparent 1px 3px); }
 .popular .bar { position: absolute; left: 0; top: 0; right: 0; bottom: 0; transform: skewX(-14deg); background: #000; }
@@ -83,7 +87,7 @@ export function renderTmz(a: NewsArticle, rail: RailItem[], _now: Date, photos: 
         ${dates ? `<div class="dates">${dates}</div>` : ''}
         ${photoBox(photos.hero?.src, slots.hero, 'margin-top:16px')}
         ${photos.hero ? `<div class="credit">${esc(photos.hero.credit)}</div>` : ''}
-        <div class="body">${a.paragraphs.map(p => `<p>${esc(p)}</p>`).join('')}</div>
+        <div class="body">${bodyHtml(a)}</div>
       </main>
       <aside>
         ${rail.length ? `<div class="popular"><i class="shadow"></i><i class="bar"></i><span>LATEST</span></div>

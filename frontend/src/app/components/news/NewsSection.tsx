@@ -40,7 +40,7 @@ import { OUTLETS, outletById } from '@/lib/news/outlets';
 // its news intro.
 import {
   ago, drawNewsPage, errorText, findPagePhotos, hitFromStory, NEWS_RANGE_LABEL, pastedLinkProblem, readNewsStory,
-  searchedForms, searchNews, type NewsRange,
+  searchedForms, searchNews, withHighlight, type NewsRange,
 } from '@/lib/news/client';
 import { NO_PHOTOS, type PagePhotos } from '@/lib/news/templates';
 import type { NewsArticle, NewsHit, NewsPhoto, OutletId, PersonPhoto, RailItem } from '@/lib/news/types';
@@ -184,10 +184,12 @@ export function NewsSection({ active = true }: { active?: boolean }) {
     setPickError(null);
     setStatus(`Reading the story from ${outletById(hit.outlet).name}…`);
     try {
-      const { article, rail } = await readNewsStory(hit.url, ctrl.signal);
+      // Read for the searched name, so the page's own spelling of it — the
+      // form the recording drags over — comes back with the story.
+      const { article, rail, highlight = null } = await readNewsStory(hit.url, ctrl.signal, searched);
       if (ctrl.signal.aborted) return;
       setStatus('Drawing the page…');
-      const next: Loaded = { hit, name: searched, article, rail, withPhotos: false, people: [], photoIndex: -1, thumbs: [], thumbSrcs: [], photoNotes: [], pagePhotos: NO_PHOTOS };
+      const next: Loaded = { hit: withHighlight(hit, highlight), name: searched, article, rail, withPhotos: false, people: [], photoIndex: -1, thumbs: [], thumbSrcs: [], photoNotes: [], pagePhotos: NO_PHOTOS };
       const { png } = await drawPage(next, 0);
       if (ctrl.signal.aborted) return;
       setLoaded(next);
@@ -220,14 +222,14 @@ export function NewsSection({ active = true }: { active?: boolean }) {
     setPickError(null);
     setStatus('Reading the story from the outlet…');
     try {
-      const { article, rail, people = [] } = await readNewsStory(url, ctrl.signal);
-      if (ctrl.signal.aborted) return;
       const typed = query.trim();
+      const { article, rail, people = [], highlight = null } = await readNewsStory(url, ctrl.signal, typed);
+      if (ctrl.signal.aborted) return;
       const name = typed || people[0]?.name || '';
       if (!typed && name) setQuery(name);
       setStatus('Drawing the page…');
       const next: Loaded = {
-        hit: hitFromStory(article, people, name), name, article, rail,
+        hit: withHighlight(hitFromStory(article, people, name), highlight), name, article, rail,
         withPhotos: false, people: [], photoIndex: -1, thumbs: [], thumbSrcs: [], photoNotes: [], pagePhotos: NO_PHOTOS,
       };
       const { png } = await drawPage(next, 0);
@@ -589,7 +591,12 @@ export function NewsSection({ active = true }: { active?: boolean }) {
                     )}
                   </dd>
                   {article.section && (<><dt className="text-zinc-500">Section</dt><dd className="text-zinc-100">{article.section}</dd></>)}
-                  <dt className="text-zinc-500">Paragraphs</dt><dd className="text-zinc-100">{article.paragraphs.length} from the article</dd>
+                  <dt className="text-zinc-500">Body</dt>
+                  <dd className="text-zinc-100">
+                    {article.paragraphs.length} paragraphs from the article
+                    {article.body.some(b => b.kind === 'h2') && ` · ${article.body.filter(b => b.kind === 'h2').length} subheadings`}
+                    {article.body.some(b => b.kind === 'li') && ` · ${article.body.filter(b => b.kind === 'li').length} bullets`}
+                  </dd>
                   <dt className="text-zinc-500">Link</dt><dd className="truncate text-zinc-400">{article.url}</dd>
                   <dt className="text-zinc-500">Photo</dt>
                   <dd className="flex flex-wrap items-center gap-x-3 gap-y-1 text-zinc-100">

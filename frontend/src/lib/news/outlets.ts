@@ -66,6 +66,7 @@ export function articleUrlProblem(outlet: OutletId, url: URL): string | null {
       return path.split('/').filter(Boolean).length >= 2 ? null : 'That Fox link is not an article page.';
     case 'nyt':
       if (path.startsWith('/athletic/')) return athleticId(url) ? null : 'That Athletic link is not an article page.';
+      if (path.startsWith('/es/')) return 'That Times link is a Spanish-language page.';
       if (/\/(video|interactive|slideshow|podcasts?)\//.test(path)) return 'That Times link is a video or interactive page, not an article.';
       return /\/\d{4}\/\d{2}\/\d{2}\//.test(path) ? null : 'That Times link is not an article page.';
     case 'tmz':

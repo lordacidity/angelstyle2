@@ -4,7 +4,7 @@
 // Every piece of article text goes through esc(). Nothing here invents
 // content: a template only lays out the NewsArticle and RailItems it is given.
 
-import type { OutletId } from '../types';
+import type { BodyBlock, NewsArticle, OutletId } from '../types';
 
 export const PAGE_WIDTH = 1440;
 
@@ -46,6 +46,29 @@ export interface RenderedPage {
 
 export function esc(s: string): string {
   return s.replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]!);
+}
+
+/** The article body as a template's .body takes it: a <p> per paragraph,
+ *  an <h2> per subheading, consecutive bullets as one <ul>, a pulled quote as
+ *  a <blockquote> — in the order the outlet printed them. A story saved
+ *  before bodies were kept has its paragraphs only, and gets them. */
+export function bodyHtml(a: Pick<NewsArticle, 'paragraphs'> & { body?: BodyBlock[] }): string {
+  const blocks: BodyBlock[] = a.body ?? a.paragraphs.map(text => ({ kind: 'p', text }));
+  let out = '';
+  let bullets: string[] = [];
+  const flush = () => {
+    if (bullets.length) out += `<ul>${bullets.map(t => `<li>${esc(t)}</li>`).join('')}</ul>`;
+    bullets = [];
+  };
+  for (const b of blocks) {
+    if (b.kind === 'li') { bullets.push(b.text); continue; }
+    flush();
+    if (b.kind === 'h2') out += `<h2>${esc(b.text)}</h2>`;
+    else if (b.kind === 'quote') out += `<blockquote>${esc(b.text)}</blockquote>`;
+    else out += `<p>${esc(b.text)}</p>`;
+  }
+  flush();
+  return out;
 }
 
 /** "A", "A and B", "A, B and C". */

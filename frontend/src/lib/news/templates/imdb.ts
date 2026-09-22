@@ -1,5 +1,5 @@
 import type { NewsArticle, RailItem } from '../types';
-import { esc, photoBox, PHOTO_SLOTS, PLACEHOLDER_CSS, type PagePhotos, type RenderedPage } from './shared';
+import { bodyHtml, esc, PHOTO_SLOTS, photoBox, PLACEHOLDER_CSS, type PagePhotos, type RenderedPage } from './shared';
 
 // IMDb news page. Layout from the screenshot of the real page: the dark bar,
 // the sponsored block, the story in a card on the left and IMDb's own news
@@ -44,6 +44,10 @@ h1 { margin: 0 0 14px; font-size: 17px; line-height: 23px; font-weight: 700; }
 h1 .ext { margin-left: 4px; }
 .body { margin-top: 16px; font-size: 15px; line-height: 24px; }
 .body p { margin: 0 0 24px; }
+.body h2 { margin: 26px 0 10px; font-size: 18px; line-height: 24px; font-weight: 700; }
+.body ul, .body ol { margin: 0 0 24px; padding-left: 22px; }
+.body li { margin: 0 0 6px; }
+.body blockquote { margin: 0 0 24px; padding-left: 16px; border-left: 3px solid var(--yellow); font-style: italic; }
 .full { font-size: 15px; line-height: 24px; color: var(--blue); }
 .meta { margin-top: 22px; display: flex; align-items: center; font-size: 13px; color: var(--grey); }
 .dot { margin: 0 8px; }
@@ -116,7 +120,7 @@ export function renderImdb(a: NewsArticle, rail: RailItem[], _now: Date, photos:
       <div class="card">
         <h1>${esc(a.headline)}${EXT('#000')}</h1>
         ${photoBox(photos.hero?.src, slots.hero, 'border-radius:4px')}
-        <div class="body">${a.paragraphs.map(p => `<p>${esc(p)}</p>`).join('')}</div>
+        <div class="body">${bodyHtml(a)}</div>
         ${a.sourceName ? `<div class="full">See full article at ${esc(a.sourceName)}${EXT('#5799ef')}</div>` : ''}
         <div class="meta">
           ${when}<span class="dot">·</span>by ${esc(a.byline)}${a.sourceName ? `<span class="dot">·</span><span class="src">${esc(a.sourceName)}${EXT('#5799ef')}</span>` : ''}

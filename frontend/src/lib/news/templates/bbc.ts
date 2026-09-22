@@ -1,5 +1,5 @@
 import type { NewsArticle, RailItem } from '../types';
-import { agoLong, esc, GOOGLE_G, MONTH_LONG, partsIn, photoBox, PHOTO_SLOTS, PLACEHOLDER_CSS, type PagePhotos, type RenderedPage } from './shared';
+import { agoLong, bodyHtml, esc, GOOGLE_G, MONTH_LONG, partsIn, PHOTO_SLOTS, photoBox, PLACEHOLDER_CSS, type PagePhotos, type RenderedPage } from './shared';
 
 // BBC article page. Layout from the approved mockup. The time is shown the
 // BBC way: relative for the first week, then the date.
@@ -35,6 +35,10 @@ h1 { margin: 30px 0 0; font: 500 44.5px/52px "Noto Serif", Georgia, serif; lette
 .hero .credit { position: absolute; left: 0; bottom: 0; max-width: 70%; background: rgba(0,0,0,.72); color: #fff; font-size: 13px; line-height: 17px; padding: 4px 8px; }
 .body { width: 632px; margin-top: 38px; font: 400 21px/31px "Noto Serif", Georgia, serif; color: var(--ink); }
 .body p { margin: 0 0 19px; }
+.body h2 { margin: 34px 0 14px; font: 600 26px/32px "Noto Serif", Georgia, serif; letter-spacing: -.2px; }
+.body ul, .body ol { margin: 0 0 19px; padding-left: 26px; }
+.body li { margin: 0 0 8px; }
+.body blockquote { margin: 0 0 19px; padding-left: 18px; border-left: 4px solid var(--blue); font-style: italic; }
 ${PLACEHOLDER_CSS}
 `;
 
@@ -64,7 +68,7 @@ export function renderBbc(a: NewsArticle, _rail: RailItem[], now: Date, photos: 
   </div>
   <div class="hero">${photoBox(photos.hero?.src, PHOTO_SLOTS.bbc.hero)}${photos.hero ? `<span class="credit">${esc(photos.hero.credit)}</span>` : ''}</div>
   <div class="col">
-    <div class="body">${a.paragraphs.map(p => `<p>${esc(p)}</p>`).join('')}</div>
+    <div class="body">${bodyHtml(a)}</div>
   </div>
 </div>`;
   return {

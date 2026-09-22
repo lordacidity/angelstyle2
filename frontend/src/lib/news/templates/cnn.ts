@@ -1,5 +1,5 @@
 import type { NewsArticle, RailItem } from '../types';
-import { esc, initials, MONTH_SHORT, partsIn, photoBox, PHOTO_SLOTS, PLACEHOLDER_CSS, wasUpdated, type PagePhotos, type RenderedPage } from './shared';
+import { bodyHtml, esc, initials, MONTH_SHORT, partsIn, PHOTO_SLOTS, photoBox, PLACEHOLDER_CSS, wasUpdated, type PagePhotos, type RenderedPage } from './shared';
 
 // CNN article page. Layout from the approved mockup; the right column lists
 // CNN's latest real headlines.
@@ -52,6 +52,10 @@ h1::before { content: ""; position: absolute; left: -95px; top: -3px; bottom: -3
 .row { display: grid; grid-template-columns: 810px 400px; gap: 40px; margin-top: 38px; padding-bottom: 70px; }
 .body { width: 602px; margin: 30px 0 0 78px; font: 18.5px/32px "Source Serif 4", Georgia, serif; }
 .body p { margin: 0 0 24px; }
+.body h2 { margin: 36px 0 16px; font: 700 24px/30px Inter, Arial, sans-serif; letter-spacing: -.3px; color: var(--ink); }
+.body ul, .body ol { margin: 0 0 24px; padding-left: 26px; }
+.body li { margin: 0 0 8px; }
+.body blockquote { margin: 0 0 24px; padding-left: 20px; border-left: 3px solid var(--red); font-style: italic; }
 .rail-title { border-top: 2px solid var(--ink); padding-top: 12px; margin: 0 0 16px; font-size: 20px; font-weight: 700; letter-spacing: -.2px; }
 .rail-title.second { margin-top: 38px; }
 .lead { padding-bottom: 18px; border-bottom: 1px solid var(--line); }
@@ -104,7 +108,7 @@ export function renderCnn(a: NewsArticle, rail: RailItem[], _now: Date, photos: 
       <main>
         ${photoBox(photos.hero?.src, slots.hero, 'border-radius:6px')}
         ${photos.hero ? `<div class="credit">${esc(photos.hero.credit)}</div>` : ''}
-        <div class="body">${a.paragraphs.map(p => `<p>${esc(p)}</p>`).join('')}</div>
+        <div class="body">${bodyHtml(a)}</div>
       </main>
       <aside>
         ${lead ? `<h3 class="rail-title">Latest</h3>

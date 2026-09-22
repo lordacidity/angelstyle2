@@ -1,15 +1,21 @@
 // News article: read and verify a story from the outlet's own page (a Google
 // News link is resolved first; search results already carry the outlet URL),
 // and collect the outlet's latest real headlines for the page's side column.
-//   POST /api/news/article  { link }  →  { article, rail, people }
+//   POST /api/news/article  { link, name? }  →  { article, rail, people, highlight }
 //
 // The link can be a search result's or one pasted in by hand — any article
 // page on an approved outlet. Nobody searched for a pasted one, so the story
 // is read for whoever on Pauv it names (lib/news/roster-match): `people`, the
 // ones in the headline first, then by how often the story says them.
+//
+// `name` is who the page is for, when that is known: `highlight` is the form
+// of their name the page prints — the whole name, or the short form the press
+// uses for them ("Kennedy" for RFK Jr.) — and whether it is in the headline
+// or the story (lib/news/highlight). What the recording drags over.
 import { NextRequest, NextResponse } from 'next/server';
 import { z } from 'zod';
 import { latestFromOutlet, resolveGoogleNewsLink } from '@/lib/news/google-news';
+import { highlightFor } from '@/lib/news/highlight';
 import { imdbIdOf, imdbRail } from '@/lib/news/imdb';
 import { ArticleError, readNewsArticle } from '@/lib/news/read-article';
 import { isOrdinaryName } from '@/lib/news/roster-match';
@@ -29,7 +35,7 @@ async function peopleIn(article: NewsArticle): Promise<StoryPerson[]> {
   try {
     const read = await rosterReader();
     const inHeadline = new Set(read(article.headline).map(f => f.person.ticker));
-    const body = [article.headline, article.dek ?? '', ...article.keyPoints, ...article.paragraphs].join('\n');
+    const body = [article.headline, article.dek ?? '', ...article.keyPoints, ...article.body.map(b => b.text)].join('\n');
     return read(body)
       .filter(f => !isOrdinaryName(f.person.name))
       .map(f => ({ ...asNamed(f.person), inHeadline: inHeadline.has(f.person.ticker), mentions: f.count }))
@@ -40,7 +46,7 @@ async function peopleIn(article: NewsArticle): Promise<StoryPerson[]> {
 }
 
 export async function POST(req: NextRequest) {
-  const parsed = z.object({ link: z.string().url() }).safeParse(await req.json().catch(() => ({})));
+  const parsed = z.object({ link: z.string().url(), name: z.string().trim().max(80).optional() }).safeParse(await req.json().catch(() => ({})));
   if (!parsed.success) return NextResponse.json({ error: 'A result link is required.' }, { status: 400 });
 
   let url: string;
@@ -63,7 +69,8 @@ export async function POST(req: NextRequest) {
     if (rail.length === 0 && (article.outlet === 'imdb' || HAS_RAIL.includes(article.outlet))) {
       article.notes.push("Couldn't load the outlet's other headlines, so the side column is empty.");
     }
-    return NextResponse.json({ article, rail, people: await peopleIn(article) });
+    const [people, highlight] = await Promise.all([peopleIn(article), highlightFor(article, parsed.data.name).catch(() => null)]);
+    return NextResponse.json({ article, rail, people, highlight });
   } catch (err) {
     const status = err instanceof ArticleError ? 422 : 500;
     return NextResponse.json({ error: err instanceof Error ? err.message : String(err), url }, { status });

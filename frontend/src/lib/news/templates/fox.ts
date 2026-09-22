@@ -1,5 +1,5 @@
 import type { NewsArticle, RailItem } from '../types';
-import { esc, MONTH_LONG, partsIn, photoBox, PHOTO_SLOTS, PLACEHOLDER_CSS, wasUpdated, type PagePhotos, type RenderedPage } from './shared';
+import { bodyHtml, esc, MONTH_LONG, partsIn, PHOTO_SLOTS, photoBox, PLACEHOLDER_CSS, wasUpdated, type PagePhotos, type RenderedPage } from './shared';
 
 // Fox News article page. Layout from the approved mockup, minus the reaction
 // counts (there is no real number to show); "More From Fox News" lists Fox's
@@ -42,6 +42,10 @@ h1 { margin: 14px auto 0; max-width: 1260px; font: 700 57px/67px "Roboto Condens
 .credit { margin-top: 10px; font-size: 14px; line-height: 20px; color: var(--muted); }
 .body { margin-top: 30px; font-size: 21px; line-height: 33px; color: #222; }
 .body p { margin: 0 0 26px; }
+.body h2 { margin: 34px 0 16px; font: 700 27px/33px "Roboto Condensed", Roboto, Arial, sans-serif; color: #1b1b1b; }
+.body ul, .body ol { margin: 0 0 26px; padding-left: 28px; }
+.body li { margin: 0 0 8px; }
+.body blockquote { margin: 0 0 26px; padding-left: 20px; border-left: 4px solid var(--navy); font-style: italic; }
 .rail h3 { margin: 0 0 10px; font-size: 21px; font-weight: 700; color: #1b1b1b; }
 .card { margin-bottom: 26px; }
 .card .img { position: relative; }
@@ -94,7 +98,7 @@ export function renderFox(a: NewsArticle, rail: RailItem[], _now: Date, photos: 
       </div>
       ${photoBox(photos.hero?.src, slots.hero, 'margin-top:40px')}
       ${photos.hero ? `<div class="credit">(${esc(photos.hero.credit)})</div>` : ''}
-      <div class="body">${a.paragraphs.map(p => `<p>${esc(p)}</p>`).join('')}</div>
+      <div class="body">${bodyHtml(a)}</div>
     </main>
     <aside class="rail">
       ${rail.length ? `<h3>More From Fox News</h3>${rail.slice(0, 4).map((r, i) => `

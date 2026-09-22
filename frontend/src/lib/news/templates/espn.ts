@@ -1,5 +1,5 @@
 import type { NewsArticle, RailItem } from '../types';
-import { agoShort, esc, MONTH_SHORT, partsIn, photoBox, PHOTO_SLOTS, PLACEHOLDER_CSS, type PagePhotos, type RenderedPage } from './shared';
+import { agoShort, bodyHtml, esc, MONTH_SHORT, partsIn, PHOTO_SLOTS, photoBox, PLACEHOLDER_CSS, type PagePhotos, type RenderedPage } from './shared';
 
 // ESPN story page. Layout from the approved mockup; every word of article text
 // comes from the NewsArticle, and the left column lists the story itself plus
@@ -41,6 +41,10 @@ h1 { margin: 0 0 26px; font-size: 50px; line-height: 58px; font-weight: 700; let
 .when { margin-top: 6px; font-size: 14px; color: var(--muted); }
 .body { margin-top: 30px; width: 800px; font: 22px/35px Georgia, serif; color: #1d1d1e; }
 .body p { margin: 0 0 28px; }
+.body h2 { margin: 40px 0 18px; font: 700 28px/34px Roboto, Arial, sans-serif; letter-spacing: -.2px; color: var(--ink); }
+.body ul, .body ol { margin: 0 0 28px; padding-left: 30px; }
+.body li { margin: 0 0 10px; }
+.body blockquote { margin: 0 0 28px; padding-left: 22px; border-left: 4px solid var(--red); font-style: italic; }
 ${PLACEHOLDER_CSS}
 `;
 
@@ -84,7 +88,7 @@ export function renderEspn(a: NewsArticle, rail: RailItem[], now: Date, photos: 
       ${photos.hero ? `<div class="credit">${esc(photos.hero.credit)}</div>` : ''}
       <div class="by">${esc(a.byline)}</div>
       ${a.publishedAt ? `<div class="when">${espnDate(a.publishedAt)}</div>` : ''}
-      <div class="body">${a.paragraphs.map(p => `<p>${esc(p)}</p>`).join('')}</div>
+      <div class="body">${bodyHtml(a)}</div>
     </main>
   </div>
 </div>`;

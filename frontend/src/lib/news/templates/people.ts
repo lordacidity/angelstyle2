@@ -1,5 +1,5 @@
 import type { NewsArticle, RailItem } from '../types';
-import { esc, MONTH_LONG, partsIn, photoBox, PHOTO_SLOTS, PLACEHOLDER_CSS, wasUpdated, type PagePhotos, type RenderedPage } from './shared';
+import { bodyHtml, esc, MONTH_LONG, partsIn, PHOTO_SLOTS, photoBox, PLACEHOLDER_CSS, wasUpdated, type PagePhotos, type RenderedPage } from './shared';
 
 // People article page. Layout from the screenshot of the real page: the
 // wordmark, the section nav, the yellow "Top Stories" strip, then the story in
@@ -70,6 +70,10 @@ h1 { margin: 0; font-size: 46px; line-height: 50px; font-weight: 800; letter-spa
 .know li i { position: absolute; left: 0; top: 10px; width: 6px; height: 6px; border-radius: 50%; background: var(--blue); }
 .body { width: 600px; margin-top: 30px; font-size: 19.5px; line-height: 27px; }
 .body p { margin: 0 0 26px; }
+.body h2 { margin: 32px 0 14px; font-size: 26px; line-height: 31px; font-weight: 800; letter-spacing: -.4px; }
+.body ul, .body ol { margin: 0 0 26px; padding-left: 24px; }
+.body li { margin: 0 0 8px; }
+.body blockquote { margin: 0 0 26px; padding-left: 18px; border-left: 3px solid var(--blue); font-style: italic; }
 .rail { width: 300px; margin-left: 44px; }
 .rail .tag { font-size: 19px; }
 .lead { margin-top: 16px; padding-bottom: 20px; border-bottom: 1px solid var(--line); }
@@ -133,7 +137,7 @@ export function renderPeople(a: NewsArticle, rail: RailItem[], _now: Date, photo
           <ul>${a.keyPoints.map(k => `<li><i></i>${esc(k)}</li>`).join('')}</ul>
         </div>
       </div>` : ''}
-      <div class="body">${a.paragraphs.map(p => `<p>${esc(p)}</p>`).join('')}</div>
+      <div class="body">${bodyHtml(a)}</div>
     </main>
     <aside class="rail">
       ${more.length ? `<span class="tag">More Top Stories<i></i></span>

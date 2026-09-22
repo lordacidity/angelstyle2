@@ -4,12 +4,14 @@
 // somebody on Pauv. It is what Vids 2's "Choose by news" opens on: see who is
 // trending, and make the video from the story.
 //
-//   1. Headlines  Google News, one feed per outlet per window (a feed stops at
-//                 100, and a day of ESPN is more than that, so a day is read
-//                 as the day and as its last six hours); IMDb from its own
-//                 lists, since Google barely carries it. Anything older than
-//                 the window by its own timestamp is dropped — `when:` is only
-//                 roughly kept to.
+//   1. Headlines  The outlets' own lists first (lib/news/outlet-feeds: ESPN's
+//                 API, the news sitemaps, the RSS feeds — thousands a day,
+//                 with the outlets' own URLs), then Google News, one feed per
+//                 outlet per window (a feed stops at 100, and a day of ESPN is
+//                 more than that, so a day is read as the day and as its last
+//                 six hours); IMDb from its own lists, since Google barely
+//                 carries it. Anything older than the window by its own
+//                 timestamp is dropped — `when:` is only roughly kept to.
 //   2. Names      lib/news/roster-match over each headline: whole names only.
 //                 How many of the window's headlines name each person is kept
 //                 too (`buzz`): somebody in nine of them is what today is
@@ -26,16 +28,24 @@
 //                 less the one-word names that are also ordinary words,
 //                 politics goes by the person and the link alone, and the
 //                 order falls back to buzz, then the clock.
-//   4. Links      only what will be sent is resolved to the outlet's own URL
+//   4. One each   the list is one story per person: ten headlines about five
+//                 things Taylor Swift did today are one row, the best of them
+//                 — the hottest, and from an outlet whose text can be read
+//                 (a BBC or Times story is chosen only when nobody else covers
+//                 them; the Times gives no article text, and the BBC's pages
+//                 are the thinnest). A story naming two people takes both.
+//   5. Links      only what will be sent is resolved to the outlet's own URL
 //                 — the hottest, the hottest politics, and the newest, so the
 //                 form can sort either way and hide politics and still have a
 //                 full list. Anything that isn't an article page is left out,
-//                 as search does. The newest are resolved while Gemini reads.
+//                 as search does. The newest are resolved while Gemini reads;
+//                 the outlets' own links need no resolving at all.
 
 import { extractGeminiJson, geminiGenerate } from '@/lib/gemini';
 import { matchesCategory, peopleInCategory, topicIsCategory } from './categories';
 import { anyOf, fetchFeed, outletOf, resolveGoogleNewsLinks, siteClause, storyKey, stripSourceSuffix } from './google-news';
 import { imdbNews, imdbUrl } from './imdb';
+import { outletHeadlines } from './outlet-feeds';
 import { OUTLET_IDS, articleUrlProblem, outletById, outletForHost } from './outlets';
 import { pauvPeople, type PauvPerson } from './pauv-people';
 import { isOrdinaryName, rosterMatcher, type RosterFind } from './roster-match';
@@ -52,8 +62,12 @@ const WINDOW_MS: Record<TrendWindow, number> = { '1h': 3_600_000, '6h': 6 * 3_60
 const WINDOW_FEEDS: Record<TrendWindow, string[]> = { '1h': ['1h'], '6h': ['6h', '1h'], '24h': ['1d', '6h'], '7d': ['7d', '1d'] };
 
 /** The most matches Gemini reads, newest first, and how many go in one call. */
-const READ_MAX = 200;
-const READ_CHUNK = 40;
+const READ_MAX = 400;
+const READ_CHUNK = 50;
+/** Outlets a person's story is taken from only when no other outlet has one
+ *  about them: the Times gives no article text at all, and the BBC's pages
+ *  carry the least. */
+const THIN_OUTLETS = new Set<OutletId>(['nyt', 'bbc']);
 /** What is sent: the hottest that aren't politics, the hottest that are, and
  *  the newest of either. The form shows twenty of whichever it is sorted by. */
 const SEND_HOT = 30;
@@ -132,7 +146,7 @@ interface Verdict { about: Set<string>; politics: boolean; heat: number | null; 
 async function readChunk(rows: Candidate[]): Promise<Map<number, Verdict> | null> {
   try {
     const raw = await geminiGenerate([{ text: prompt(rows) }], {
-      temperature: 0, maxOutputTokens: 4000, timeoutMs: 20_000, thinkingLevel: 'minimal',
+      temperature: 0, maxOutputTokens: 6000, timeoutMs: 25_000, thinkingLevel: 'minimal',
     });
     const j = JSON.parse(extractGeminiJson(raw)) as { items?: unknown };
     if (!Array.isArray(j.items)) return null;
@@ -202,13 +216,14 @@ export async function trendingNews(window: TrendWindow, topic = ''): Promise<Tre
     : byName ? `${anyOf(inCategory.map(p => p.name))} `
       : `${want} `;
   let failed = 0;
-  const [read, imdb, ...feeds] = await Promise.all([
+  const [read, imdb, own, ...feeds] = await Promise.all([
     rosterReader(),
     imdbNews().catch(() => []),
+    outletHeadlines().catch(() => []),
     ...google.flatMap(id => whens.map(when =>
       fetchFeed(`${q}${siteClause([id])} when:${when}`).catch(() => { failed++; return []; }))),
   ]);
-  if (feeds.length > 0 && failed === feeds.length) throw new Error("Google News didn't answer. Try again in a minute.");
+  if (feeds.length > 0 && failed === feeds.length && own.length === 0) throw new Error("Neither the outlets nor Google News answered. Try again in a minute.");
 
   // The press name of each person a widened read went looking for — everything
   // after the first word, so "Wout van Aert" is read by "van Aert" and
@@ -243,6 +258,9 @@ export async function trendingNews(window: TrendWindow, topic = ''): Promise<Tre
     if (!found.length && pressNames) found = pressNames(title).map(f => f.person.real);
     if (found.length) all.push({ outlet, title, publishedAt, link, found, counts: [], buzz: 1 });
   };
+  // The outlets' own lists first, so a story in both is kept with the
+  // outlet's link, which needs no resolving.
+  for (const it of own) consider(it.outlet, it.title, it.publishedAt, it.url);
   for (const items of feeds) {
     for (const it of items) {
       const outlet = outletOf(it);
@@ -287,13 +305,26 @@ export async function trendingNews(window: TrendWindow, topic = ''): Promise<Tre
     ? kept.filter(k => matchesCategory(k.people, want))
     : kept;
   const hotter = (a: Kept, b: Kept) => (b.heat ?? -1) - (a.heat ?? -1) || b.c.buzz - a.c.buzz || when(b.c) - when(a.c);
-  const byHeat = [...onTopic].sort(hotter);
+  // One story per person. Everyone's stories are looked at best first — an
+  // outlet with article text before one without, then the hottest — and a
+  // story is kept only while nobody it names has a story yet; keeping it
+  // takes everyone it names, so a Swift-and-Kelce story is the one for both.
+  const better = (a: Kept, b: Kept) =>
+    Number(THIN_OUTLETS.has(a.c.outlet)) - Number(THIN_OUTLETS.has(b.c.outlet)) || hotter(a, b);
+  const taken = new Set<string>();
+  const oneEach = [...onTopic].sort(better).filter(k => {
+    if (k.people.some(p => taken.has(p.ticker))) return false;
+    for (const p of k.people) taken.add(p.ticker);
+    return true;
+  });
+  const byHeat = [...oneEach].sort(hotter);
+  const newest = [...oneEach].sort((a, b) => when(b.c) - when(a.c));
   const send = new Set<Kept>([
     ...byHeat.filter(k => !k.politics).slice(0, SEND_HOT),
     ...byHeat.filter(k => k.politics).slice(0, SEND_POLITICS),
-    ...onTopic.slice(0, SEND_NEW),
+    ...newest.slice(0, SEND_NEW),
   ]);
-  const sending = onTopic.filter(k => send.has(k));
+  const sending = newest.filter(k => send.has(k));
 
   const urls = await resolveGoogleNewsLinks(sending.map(k => k.c.link));
   if (sending.length > 0 && urls.every(u => u === null)) {

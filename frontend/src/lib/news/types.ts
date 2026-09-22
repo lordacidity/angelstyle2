@@ -98,6 +98,17 @@ export interface NewsCategory {
   count: number;
 }
 
+/** One block of an article's body, as the outlet prints it. */
+export type BodyBlock =
+  | { kind: 'p'; text: string }
+  /** A subheading between paragraphs ("Superstar quarterbacks suffer
+   *  serious injuries"). */
+  | { kind: 'h2'; text: string }
+  /** One bullet of a list; consecutive ones are one list. */
+  | { kind: 'li'; text: string }
+  /** A pulled quote the outlet sets apart from the paragraphs. */
+  | { kind: 'quote'; text: string };
+
 /** The verified article a page is rendered from. */
 export interface NewsArticle {
   outlet: OutletId;
@@ -125,7 +136,14 @@ export interface NewsArticle {
   updatedAt: string | null;
   /** The desk or league the story sits under (e.g. "NFL", "Politics"). */
   section: string | null;
-  /** The article text, paragraph by paragraph, word for word (up to 60). */
+  /** The article as the outlet lays it out, block by block and in order:
+   *  its paragraphs, the subheadings between them, the bullet points and
+   *  the pulled quotes — everything the page prints as the story, word for
+   *  word (up to 60 blocks). What the templates draw. */
+  body: BodyBlock[];
+  /** The paragraphs alone (and pulled quotes), in order, for anything that
+   *  reads the story as text — the same words as `body` without its
+   *  headings and bullets. */
   paragraphs: string[];
   /** People puts a NEED TO KNOW box above the story on some articles; these
    *  are its bullets, as People writes them. Empty everywhere else. */
@@ -133,6 +151,14 @@ export interface NewsArticle {
   live: boolean;
   /** Anything the reader should know about what could and couldn't be read. */
   notes: string[];
+}
+
+/** The form of a person's name a story's page prints, and where — what the
+ *  recording drags over (lib/news/highlight). "Kennedy", in the headline, on
+ *  a Times page read for RFK Jr. */
+export interface NameHighlight {
+  form: string;
+  where: 'headline' | 'story';
 }
 
 /** A photo a page may use: a free one from Wikimedia Commons (with what its
