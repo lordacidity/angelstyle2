@@ -8,9 +8,10 @@
 // and the sound off the record rather than rolled and asked for again.
 //
 // Only on the form — the tuning page has a video on it already, and Start over
-// is the way back here. Just the box: what happens with the code is the
-// section's business (Vids2Section loadCode), since everything it brings back
-// lives there.
+// is the way back here — and only in the Studio: the clipper page does not
+// draw it (Vids2Section, off CLIPPERS). Just the box: what happens with the
+// code is the section's business (Vids2Section loadCode), since everything it
+// brings back lives there.
 
 import { useState, type FormEvent } from 'react';
 import type { VidRecipe } from '@/lib/vids-types';

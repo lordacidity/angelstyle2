@@ -1,5 +1,6 @@
 import type { NextConfig } from "next";
 import fs from "node:fs";
+import os from "node:os";
 import path from "node:path";
 
 // Single source of truth for env vars is the repo-root .env (one level above
@@ -17,6 +18,17 @@ if (fs.existsSync(rootEnv)) process.loadEnvFile(rootEnv);
 // its own routes. src/lib/clipping.ts reads the same flag for the URLs Next does
 // not prefix by itself (bare fetches, image src, audio src) — keep the two in step.
 const CLIPPERS = process.env.NEXT_PUBLIC_APP === "clippers";
+
+// This machine's own network addresses, so a phone on the same Wi-Fi can open
+// the dev server (http://192.168.x.x:3001/…). Without them Next serves the
+// page but not its dev internals to any host but localhost: the HTML arrives,
+// the live-reload socket is refused, and React never hydrates — the form
+// shows and nothing on it works. Read at startup, so a new DHCP lease is
+// picked up by the next `next dev`. Dev only; a production build ignores it.
+const lanAddresses = Object.values(os.networkInterfaces())
+  .flatMap((list) => list ?? [])
+  .filter((a) => a.family === "IPv4" && !a.internal)
+  .map((a) => a.address);
 
 // The clipper build has no home page of its own: its root IS the clipper
 // page. Middleware rewrites "/" to /clippers (see src/middleware.ts), so the
@@ -42,6 +54,13 @@ const CLIPPERS = process.env.NEXT_PUBLIC_APP === "clippers";
 
 const nextConfig: NextConfig = {
   ...(CLIPPERS ? { basePath: "/clipping" } : {}),
+  ...(lanAddresses.length ? { allowedDevOrigins: lanAddresses } : {}),
+  // A second dev server beside the Studio's — the clipper build on its own
+  // port, to see pauv.io/clipping locally — needs a build folder of its own:
+  // `next dev` locks its distDir, and two servers on one .next refuse to
+  // start. Set NEXT_DIST_DIR=.next-clippers for that run only; unset (Vercel,
+  // the usual dev server) it is .next as ever.
+  ...(process.env.NEXT_DIST_DIR ? { distDir: process.env.NEXT_DIST_DIR } : {}),
   poweredByHeader: false,
   // The Pricer reads its master list (and, once, its two seed CSVs) from disk at request time. Vercel only ships
   // files the bundler can see, so list them for the three routes that read them (src/lib/pricer/pipeline.js).

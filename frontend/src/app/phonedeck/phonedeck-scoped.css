@@ -28,8 +28,10 @@
   align-items: start;
 }
 
+/* Scoped like everything else here: bare, this collapsed every Tailwind
+   .grid in the Studio and on the clipper page to one column on a phone. */
 @media (max-width: 800px) {
-  .grid { grid-template-columns: 1fr; }
+  .phonedeck-root .grid { grid-template-columns: 1fr; }
 }.phonedeck-root .card{
   background: #09090b;
   border: 1px solid #27272a;

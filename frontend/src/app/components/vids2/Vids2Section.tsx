@@ -11,14 +11,17 @@
 //             to do: who on Pauv (by name, or off the trending list — a
 //             story answers who and the intro both), the intro — nothing,
 //             ChatGPT and a question, or a news story about them — which
-//             way, the mode (Serious, Middle or Degen — not about the video
-//             so much as how it talks; Degen turns the hook into a cry for
-//             help and lays BOOMs over the recordings) and the persona.
-//             Pressing an answer moves the form on. See Vids2Form.
+//             way, the look (light, dark, or rolled), the mode (Serious,
+//             Middle or Degen — not about the video so much as how it talks;
+//             Degen turns the hook into a cry for help and lays BOOMs over
+//             the recordings) and the persona. Pressing an answer moves the
+//             form on. See Vids2Form. The look and the mode are the Studio's
+//             questions alone: the clipper page rolls the one and is always
+//             Serious for the other (LOOK_ASKED, MODE_ASKED in lib/vids2).
 //   Generate  the screen recordings, all at once: the intro (Bottom A) —
 //             ChatGPT looking them up, or the news story opened and read, or
-//             nothing at all — and the Pauv trade (Bottom B), light or dark at
-//             random (rollTheme). Neither needs
+//             nothing at all — and the Pauv trade (Bottom B), light or dark
+//             as the Look card says, or rolled (themeFor). Neither needs
 //             anything from the other, so neither waits for it. Both are
 //             rendered in this tab, by the files that own them, and neither
 //             goes to the library. Then the persona's three clips and an End
@@ -35,13 +38,15 @@
 //             clear every answer (the saved ones too), let the recordings
 //             go, and mount the form fresh — the clipper page (app/clippers)
 //             is this same section, so it has them as well.
-//   Code      top left of the form only: the box a downloaded video's code
-//             goes in (Vids2Recall). The record it names fills the form
-//             again and Generate runs on it — the recordings made afresh
-//             from the same answers, the words, the look and the sound off
-//             the record (loadCode, and `restore` on the build). A record
-//             short of an answer waits on the form instead, and says what
-//             for.
+//   Code      top left of the form only, and in the Studio only: the box a
+//             downloaded video's code goes in (Vids2Recall). The record it
+//             names fills the form again and Generate runs on it — the
+//             recordings made afresh from the same answers, the words, the
+//             look and the sound off the record (loadCode, and `restore` on
+//             the build). A record short of an answer waits on the form
+//             instead, and says what for. The clipper page has no box: a
+//             clipper's video still gets its code, on the file name and the
+//             caption, but bringing one back is the Studio's.
 //
 // This section owns the recordings' bytes: it made them, it lets them go
 // when a second Generate replaces them, and again when the page is left.
@@ -78,8 +83,8 @@ import { isOutletId, outletById } from '@/lib/news/outlets';
 import { getRecipe, writeHook, writePostCaptions } from '@/lib/vids-client';
 import {
   EMPTY_SETUP, answersFromRecord, answersOf, bottomANewsName, loadSetup, makeNewsClip, makeTradeClip,
-  readStoryAgain, rollTheme, sameVideo, saveSetup, setupFromAnswers, setupReady,
-  storyFor, type Direction, type Theme, type Vids2Build, type Vids2Setup, type Vids2Story,
+  readStoryAgain, sameVideo, saveSetup, setupFromAnswers, setupReady, storyFor, themeFor,
+  type Direction, type Theme, type Vids2Build, type Vids2Setup, type Vids2Story,
 } from '@/lib/vids2/vids2Build';
 import {
   VIDS2_BARS, VIDS2_PACE, draftLines, personaContextOf, useEmojiPalette, type Vids2Early,
@@ -195,8 +200,10 @@ type IntroRun = Run<IntroClip, VidRow> & {
 };
 type TradeOut = Awaited<ReturnType<typeof makeTradeClip>>;
 type TradeRun = Run<TradeOut, { row: VidRow; person: string }> & {
-  /** Rolled where the render starts rather than where Generate does, since by
-   *  then the frames have already been drawn one way or the other (rollTheme). */
+  /** Settled where the render starts rather than where Generate does, since
+   *  by then the frames have already been drawn one way or the other: the
+   *  Look card's answer, or — the card on Random, or not on the form at all
+   *  — a roll made for this run (themeFor). */
   theme: Theme;
 };
 
@@ -205,7 +212,10 @@ type TradeRun = Run<TradeOut, { row: VidRow; person: string }> & {
 function warmKey(kind: 'intro' | 'trade', s: Vids2Setup): string | null {
   const person = s.person.trim().toLowerCase();
   if (!person) return null;
-  if (kind === 'trade') return `trade|${person}|${s.direction}`;
+  // The look is in the trade's key: Light after Dark is a different
+  // recording, and Random after either is a fresh roll. Random after Random
+  // is the same key, so the run — and the roll it made — is kept.
+  if (kind === 'trade') return `trade|${person}|${s.direction}|${s.look}`;
   if (s.intro === 'none') return null;
   if (s.intro === 'chatgpt') {
     const question = s.question.trim();
@@ -540,7 +550,7 @@ export function Vids2Section({ active }: { active: boolean }) {
       warmRef.current.intro = run;
       setWarm((w) => ({ ...w, intro: run.leg }));
     } else {
-      const run = startTradeRun(key, { person: s.person, direction: s.direction, theme: rollTheme() });
+      const run = startTradeRun(key, { person: s.person, direction: s.direction, theme: themeFor(s) });
       run.sink = (leg) => setWarm((w) => ({ ...w, trade: leg }));
       warmRef.current.trade = run;
       setWarm((w) => ({ ...w, trade: run.leg }));
@@ -755,18 +765,21 @@ export function Vids2Section({ active }: { active: boolean }) {
 
     // Each recording as it stands: the one already running for these answers,
     // taken over, or a new one started here the way it always was. Light or
-    // dark is not asked — whichever run draws the trade rolled it (rollTheme),
+    // dark is whatever the Look card says — and where it says Random, or
+    // isn't on the form, whichever run draws the trade rolled it (themeFor),
     // here or a minute ago.
     const introRun = intro === 'none' ? null
       : (takeWarm('intro', from) as IntroRun | null) ?? startIntroRun(warmKey('intro', from) ?? '', {
         person: from.person, direction, question, story,
       });
-    // A brought-back video has Pauv the way it came up the first time, not
-    // the way a head start rolled it — so that run is let go rather than
-    // taken. The intro's frames are the same either way, and it is taken.
-    if (restore) dropWarm('trade');
+    // A brought-back video has Pauv the way it came up the first time. In the
+    // Studio the Look card was set to that way with the rest of the record's
+    // answers, so the head start already drew it so; on the clipper page the
+    // head start rolled, and is let go unless the roll happened to land on
+    // it. The intro's frames are the same either way, and it is taken.
+    if (restore && warmRef.current.trade && warmRef.current.trade.theme !== restore.answers.theme) dropWarm('trade');
     const tradeRun = (takeWarm('trade', from) as TradeRun | null) ?? startTradeRun(tradeKey, {
-      person: from.person, direction, theme: restore?.answers.theme ?? rollTheme(),
+      person: from.person, direction, theme: restore?.answers.theme ?? themeFor(from),
     });
     const theme = tradeRun.theme;
     /** A news head start begun before Which way was asked carries the other
@@ -950,8 +963,10 @@ export function Vids2Section({ active }: { active: boolean }) {
 
       {/* The code box, top left, while the form is up: a downloaded video's
           code brings it back (loadCode). The tuning page has no use for it —
-          it has a video on it — and Start over is the way back to here. */}
-      {showForm && (
+          it has a video on it — and Start over is the way back to here. Not
+          on the clipper page: the box is the Studio's, and a build-time flag
+          rather than a prop so the clipper bundle doesn't carry it. */}
+      {showForm && !CLIPPERS && (
         <Vids2Recall
           disabled={!loaded}
           busy={recall.busy}

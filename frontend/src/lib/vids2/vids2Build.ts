@@ -24,7 +24,7 @@
 import {
   loadNewsAssets, renderNewsVideo, type NewsBeats, type NewsPlan,
 } from '@/app/components/news/news-video';
-import { withBase } from '@/lib/clipping';
+import { CLIPPERS, withBase } from '@/lib/clipping';
 import {
   AMOUNT_USD, createTradeClip, loadTradeAssets, renderTradeVideo, VIDEO_H, VIDEO_W,
   type Direction, type Theme, type TradeBeats, type TradeTalent, type ZoomLevel,
@@ -59,6 +59,26 @@ export const VIDS2_MODES: readonly Vids2Mode[] = ['serious', 'middle', 'degen'];
 export const isVids2Mode = (v: unknown): v is Vids2Mode =>
   typeof v === 'string' && (VIDS2_MODES as readonly string[]).includes(v);
 
+/** Whether Mode is a question at all. Only in the Studio: the clipper page
+ *  (pauv.io/clipping, this same code built with NEXT_PUBLIC_APP=clippers)
+ *  makes Serious videos and nothing else. Its form has no Mode card
+ *  (Vids2Form), a saved answer is not read back (loadSetup), and a code made
+ *  in another mode comes back as Serious and says so (answersFromRecord). */
+export const MODE_ASKED = !CLIPPERS;
+
+/** Which way Pauv comes up in the trade recording, as the form asks it: light,
+ *  dark, or rolled at even odds (rollTheme) — the default, so builds spread
+ *  across the two the way they spread across songs and caption looks unless
+ *  somebody wants one in particular. */
+export type Vids2Look = 'roll' | Theme;
+export const VIDS2_LOOKS: readonly Vids2Look[] = ['roll', 'light', 'dark'];
+export const isVids2Look = (v: unknown): v is Vids2Look =>
+  typeof v === 'string' && (VIDS2_LOOKS as readonly string[]).includes(v);
+
+/** Whether Look is a question. Only in the Studio, like Mode: the clipper page
+ *  rolls it every time, the way every build did before it was asked. */
+export const LOOK_ASKED = !CLIPPERS;
+
 /** What opens the video — the first screen recording, Bottom A. None: there
  *  isn't one, and the video goes straight to trading on them on Pauv.
  *  ChatGPT: the question typed in and them picked off the answer. News: a
@@ -70,11 +90,11 @@ export const isVids2Intro = (v: unknown): v is Vids2Intro =>
   typeof v === 'string' && (VIDS2_INTROS as readonly string[]).includes(v);
 
 /** Which end the form starts from. Who: the person, then what opens the video,
- *  then which way, the mode and the persona — five questions. News: the other
- *  way round — it opens on the stories going out right now that name somebody
- *  on Pauv (lib/news/trending), and picking one answers Who and the intro
- *  both, so what is left is which way, the mode and the persona. A news-flow
- *  setup always has a news intro. */
+ *  then which way, the look, the mode and the persona. News: the other way
+ *  round — it opens on the stories going out right now that name somebody on
+ *  Pauv (lib/news/trending), and picking one answers Who and the intro both,
+ *  so what is left is which way, the look, the mode and the persona. A
+ *  news-flow setup always has a news intro. */
 export type Vids2Flow = 'who' | 'news';
 export const isVids2Flow = (v: unknown): v is Vids2Flow => v === 'who' || v === 'news';
 
@@ -108,7 +128,11 @@ export interface Vids2Setup {
   newsRange: NewsRange;
   /** The story chosen for a news intro, or null. Only read for one. */
   story: Vids2Story | null;
-  /** Serious, Middle or Degen — see Vids2Mode. */
+  /** Light, dark, or rolled — see Vids2Look. Always 'roll' on the clipper
+   *  page, where it is not asked (LOOK_ASKED). */
+  look: Vids2Look;
+  /** Serious, Middle or Degen — see Vids2Mode. Always 'serious' on the clipper
+   *  page, where it is not asked (MODE_ASKED). */
   mode: Vids2Mode;
   /** Which end the form starts from — see Vids2Flow. Null until it has been
    *  chosen: the form opens on the two buttons and asks nothing until one of
@@ -132,15 +156,20 @@ export interface Vids2Setup {
 
 export const EMPTY_SETUP: Vids2Setup = {
   personaId: null, person: '', direction: 'up',
-  intro: 'chatgpt', question: '', newsRange: '7d', story: null, mode: 'serious',
+  intro: 'chatgpt', question: '', newsRange: '7d', story: null, look: 'roll', mode: 'serious',
   flow: null, trendWindow: '24h', hidePolitics: false, trendSort: 'hot', trendCategory: '',
 };
 
-/** Which way Pauv is in the trade recording: not asked, rolled at even odds on
- *  every Generate, so builds spread across the two the way they spread across
- *  songs and caption looks. The ChatGPT recording is dark whatever comes up —
- *  that page has no light mode in the renderer. */
+/** Which way Pauv is in the trade recording when the Look card says roll (or
+ *  is not there to say): even odds, every time. The ChatGPT recording is dark
+ *  whatever comes up — that page has no light mode in the renderer. */
 export const rollTheme = (): Theme => (Math.random() < 0.5 ? 'light' : 'dark');
+
+/** The theme the trade recording is drawn in for these answers: the one the
+ *  Look card names, or a fresh roll. Rolled where the render starts rather
+ *  than where Generate does, since by then the frames are already drawn —
+ *  so this is called once per run, not once per Generate (Vids2Section). */
+export const themeFor = (s: Pick<Vids2Setup, 'look'>): Theme => (s.look === 'roll' ? rollTheme() : s.look);
 
 const SETUP_KEY = 'vids2-setup-v1';
 
@@ -176,7 +205,8 @@ export function loadSetup(): Vids2Setup {
   try {
     const raw = localStorage.getItem(SETUP_KEY);
     if (!raw) return EMPTY_SETUP;
-    // A saved `theme` is from when Look was a question; it is simply not read.
+    // A saved `theme` is from an older form that asked Look under that name; it
+    // is simply not read. Look is `look` now, and can say roll.
     const j = JSON.parse(raw) as Partial<Record<keyof Vids2Setup | 'degen', unknown>>;
     // Which end to start from is asked every time and never restored: the two
     // ways in are the first thing the form puts up, and which one somebody
@@ -195,8 +225,11 @@ export function loadSetup(): Vids2Setup {
       question: typeof j.question === 'string' ? j.question : '',
       newsRange: isNewsRange(j.newsRange) ? j.newsRange : EMPTY_SETUP.newsRange,
       story: isStory(j.story) ? j.story : null,
+      // Neither is asked on the clipper page, so neither is read back there:
+      // a saved answer would be one nothing on that form can change.
+      look: LOOK_ASKED && isVids2Look(j.look) ? j.look : 'roll',
       // Answers saved before there were three modes had a degen switch.
-      mode: isVids2Mode(j.mode) ? j.mode : j.degen === true ? 'degen' : 'serious',
+      mode: !MODE_ASKED ? 'serious' : isVids2Mode(j.mode) ? j.mode : j.degen === true ? 'degen' : 'serious',
       flow: null,
       trendWindow: isTrendWindow(j.trendWindow) ? j.trendWindow : EMPTY_SETUP.trendWindow,
       hidePolitics: j.hidePolitics === true,
@@ -315,7 +348,12 @@ export function answersOf(
  *  stand, so the trending list's settings and the like are kept), with the
  *  persona the record names if the library still has it, and the story read
  *  again (readStoryAgain) — or null for one that couldn't be, which leaves
- *  the Intro card to answer. */
+ *  the Intro card to answer. The Look card is set to the way Pauv came up the
+ *  first time, since that is the way it is coming up again: the card says
+ *  what the video is, and the next video starts from it like every other
+ *  answer. Not on the clipper page, where Look is not a card: the record's
+ *  theme still goes on the recording there (`restore` in generate), it just
+ *  isn't an answer anybody could see or change. */
 export function setupFromAnswers(
   base: Vids2Setup, a: Vids2Answers, personaId: string | null, story: Vids2Story | null,
 ): Vids2Setup {
@@ -327,6 +365,7 @@ export function setupFromAnswers(
     intro: a.intro,
     question: a.intro === 'chatgpt' ? a.question : '',
     story,
+    look: LOOK_ASKED ? a.theme : 'roll',
     mode: a.mode,
     flow: a.intro === 'news' && story ? 'news' : 'who',
   };
@@ -352,8 +391,24 @@ export const sameVideo = (s: Vids2Setup, a: Vids2Answers): boolean =>
  *  do say who, which way, which way Pauv was and what kind of intro it had,
  *  and that is most of the form. The question or the story and the mode were
  *  never written down: the mode is set to Serious and the Intro card is left
- *  to answer, and both are said. */
+ *  to answer, and both are said.
+ *
+ *  On the clipper page, where Mode is not asked (MODE_ASKED), a record made
+ *  in Middle or Degen comes back as Serious, and that is said too. The
+ *  record's words, look, sound and BOOMs still come back off it — the BOOMs
+ *  at the seconds the record has, as hand-laid ones do, rather than laid
+ *  afresh on the new recordings' beats the way a Degen build's are. */
 export function answersFromRecord(build: VidBuildSpec): { answers: Vids2Answers; problems: string[] } | null {
+  const read = readAnswers(build);
+  if (!read || MODE_ASKED || read.answers.mode === 'serious') return read;
+  const was = read.answers.mode === 'degen' ? 'Degen' : 'Middle';
+  return {
+    answers: { ...read.answers, mode: 'serious' },
+    problems: [...read.problems, `This code was made in ${was} mode; every video here is Serious, so it comes back as one.`],
+  };
+}
+
+function readAnswers(build: VidBuildSpec): { answers: Vids2Answers; problems: string[] } | null {
   if (build.vids2) return { answers: build.vids2, problems: [] };
   const trade = build.picks.bottomB?.videoName.match(/^(.+) (up|down) B · Pauv (light|dark)$/);
   if (!trade) return null;

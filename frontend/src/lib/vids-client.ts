@@ -224,11 +224,10 @@ export const writePostCaption = (input: PostCaptionRequest) =>
   api<PostCaptionDraft>('/post-caption', { method: 'POST', body: JSON.stringify(input) });
 
 /** Vids 2's pair: an Instagram caption and a TikTok one, written from the
- *  person's news this week, and why to hold the post when the news says to. */
+ *  person's news this week. */
 export interface PostCaptionsDraft {
   ig: string;
   tiktok: string;
-  hold: string | null;
   person: string;
   position: TradePosition;
 }

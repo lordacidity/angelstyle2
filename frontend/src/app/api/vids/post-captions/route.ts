@@ -2,19 +2,21 @@
 // one for TikTok, written from the person's news this week rather than from
 // what a model remembers of them. (Simpler keeps its single caption at
 // api/vids/post-caption.) The rules are an editor's, sent in as how Pauv posts
-// should read: research first, check the trade still holds, the Pauv voice,
-// then a long searchable Instagram caption and a short punchy TikTok one.
+// should read: research first, the Pauv voice, then a long searchable
+// Instagram caption and a short punchy TikTok one.
 //
 // Three steps, each kept as cheap as it can be:
 // 1. Who and which way, read off the screen recordings (lib/vids-read-trade)
 //    unless the caller already knows.
 // 2. Research: one Google-grounded Gemini call for their last few weeks, what
-//    is coming up, and anything that makes trading on them now look like
-//    profiting off misfortune. The search results are not billed as prompt
+//    is coming up, and anything live and sensitive about them — so the writer
+//    knows what not to joke about. The search results are not billed as prompt
 //    tokens, and the brief is kept for the day per person, so an up and a down
 //    on the same person, or a second video, search once.
-// 3. Writing: one Claude call writes both captions and a HOLD line from that
-//    brief alone. The rules sit in the system prompt; lowercase, dashes
+// 3. Writing: one Claude call writes both captions from that brief alone.
+//    (It used to write a "hold the post" line too, shown under the captions
+//    on the tuning page; that was taken out on 2026-09-22 — the captions are
+//    the whole answer.) The rules sit in the system prompt; lowercase, dashes
 //    and hashtag counts are fixed in code rather than by asking again — the
 //    tiktok caption ends on exactly five, topped up here when the model writes
 //    fewer — and the only redraw is for a banned word or a reply that lost its
@@ -59,8 +61,6 @@ const Schema = z.object({
 interface Captions {
   ig: string;
   tiktok: string;
-  /** Why to hold the post, or null when nothing says to. */
-  hold: string | null;
   person: string;
   position: Position;
 }
@@ -151,11 +151,7 @@ TIKTOK: 2 to 4 short sentences, then the 5 hashtags.
 3. "trade the trajectory on pauv."
 4. the last line: exactly 5 hashtags, on one line, and nothing after them. 3 of them are the person and what is happening to them right now: their name, their team, label or project, the event or run in the brief. the other 2 are the trade: #pauv, and one of #trading, #crypto, #memecoins.
 
-HOLD
-If the brief's SENSITIVE line names something live (a criminal case or trial, a lawsuit, health, a loss, stepping back from public life) and this trade could read as pauv profiting off misfortune, or as a place to bet on an outcome like a verdict, recommend holding the post. Then keep the instagram caption to 600 to 900 characters, gentle, with no jokes about them. Otherwise HOLD is no.
-
 OUTPUT exactly this and nothing else:
-HOLD: no (or one sentence on why to hold)
 ===INSTAGRAM===
 the instagram caption
 ===TIKTOK===
@@ -185,15 +181,15 @@ async function draft(ask: string): Promise<string> {
     .join('\n');
 }
 
-/** The two captions and the HOLD line out of a reply, or null when the markers
- *  are missing. */
-function split(raw: string): { ig: string; tiktok: string; hold: string | null } | null {
-  const [head, rest] = raw.split(/===\s*instagram\s*===/i);
+/** The two captions out of a reply, or null when the markers are missing.
+ *  Anything before the first marker is dropped, so a model that still writes
+ *  a line ahead of it loses nothing but that line. */
+function split(raw: string): { ig: string; tiktok: string } | null {
+  const [, rest] = raw.split(/===\s*instagram\s*===/i);
   if (rest === undefined) return null;
   const [ig, tiktok] = rest.split(/===\s*tiktok\s*===/i);
   if (!ig?.trim() || !tiktok?.trim()) return null;
-  const hold = head.match(/hold:\s*(.+)/i)?.[1].trim() ?? '';
-  return { ig, tiktok, hold: !hold || /^no\b/i.test(hold) ? null : hold };
+  return { ig, tiktok };
 }
 
 /** At most `max` hashtags; any past that come off, from the end, where the
@@ -301,7 +297,7 @@ export async function POST(req: NextRequest) {
     if (!out) return NextResponse.json({ error: 'The reply came back without the two captions in it.' }, { status: 502 });
 
     const captions: Captions = {
-      ig: tidy(out.ig, 5), tiktok: fiveTags(tidy(out.tiktok, 5)), hold: out.hold, person, position,
+      ig: tidy(out.ig, 5), tiktok: fiveTags(tidy(out.tiktok, 5)), person, position,
     };
     if (written.size >= KEEP_MAX) written.clear();
     written.set(key, captions);

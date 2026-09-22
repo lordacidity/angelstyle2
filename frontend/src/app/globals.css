@@ -165,6 +165,16 @@ input[type='range']::-moz-range-progress {
   height: 14px;
 }
 
+/* The clipper page (app/clippers) fills the window. On a phone 100vh is the
+   window with the browser's bars folded away, which is taller than what is on
+   screen while they are showing, so the foot of the page — and Generate on it
+   — sat under Safari's toolbar. dvh is the height actually on view; vh stands
+   in where dvh is not understood. */
+.vids2-screen {
+  height: 100vh;
+  height: 100dvh;
+}
+
 /* Scrolls, but draws no bar. The left sidebar uses it: there are more tools
    than fit a short window now, and a 72px rail has no room for a scrollbar —
    on Windows the browser's own is a wide white slab against an all-black

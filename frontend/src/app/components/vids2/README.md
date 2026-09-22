@@ -6,18 +6,28 @@ itself is the library its footage is filed in, and the Simpler section — whose
 build logic this one runs on, still under `lib/simpler/` — is gone.
 
 Vids and Simpler both used to open on a builder: an empty stage and cards to
-fill it from. Vids 2 opens on **five cards, top to bottom** — Who, Intro,
-Which way, Mode, Persona — and one Generate button at the foot of the page.
-One card is open at a time and it is always the next thing to do: the cards
-above it are folded to their answer (press one to change it), the cards below
-are dim until the form gets there. **Pressing an answer is the answer** — a
-name, a story, Up, Degen, a persona tile each moves the form on by itself.
-Only the two things that are typed (a ChatGPT question, a story searched for
-somebody already chosen) wait for **Continue**. Which way and Mode have a
-default but are still asked once each. On a return visit every answer is
-already there, every card is folded, and Generate is lit.
+fill it from. Vids 2 opens on **six cards, top to bottom** — Who, Intro,
+Which way, Look, Mode, Persona — and one Generate button at the foot of the
+page. One card is open at a time and it is always the next thing to do: the
+cards above it are folded to their answer (press one to change it), the cards
+below are dim until the form gets there. **Pressing an answer is the answer**
+— a name, a story, Up, Dark, Degen, a persona tile each moves the form on by
+itself. Only the two things that are typed (a ChatGPT question, a story
+searched for somebody already chosen) wait for **Continue**. Which way, Look
+and Mode have a default but are still asked once each. On a return visit
+every answer is already there, every card is folded, and Generate is lit.
 
-The five cards —
+**The clipper page asks four of the six.** pauv.io/clipping is this same
+section built with `NEXT_PUBLIC_APP=clippers` (`lib/clipping.ts`), and there
+Look and Mode are not cards: every clipper video is Serious, and light or
+dark is rolled the way every build's used to be. `LOOK_ASKED` and
+`MODE_ASKED` in `lib/vids2/vids2Build.ts` say so, and the form, the saved
+answers (`loadSetup`) and a code brought back (`answersFromRecord`, which
+says when a record was made in another mode) all read them. The setup still
+carries both answers there — `'roll'` and `'serious'` — so nothing
+downstream has a second shape to handle.
+
+The six cards —
 
 1. **Who** — two tabs. **👤 By name**: anybody on Pauv, from the roster itself
    (`/api/ai/talents`), not from what has been filmed. The box opens its list
@@ -46,8 +56,14 @@ The five cards —
      for — any article page on an approved outlet, read and checked the same
      way (`pastedLinkProblem`, `hitFromStory` in `lib/news/client`).
 3. **Which way** — up or down.
-4. **Mode** — 👔 Serious, 😐 Middle or 💀 Degen (`Vids2Mode`). Each is below.
-5. **Persona** — every persona in the library as a tile (its Top A still and
+4. **Look** — 🎲 Random, ☀️ Light or 🌙 Dark (`Vids2Look`): which way Pauv
+   comes up in the trade recording. Random is the default and is what it
+   always was — even odds on every build (`rollTheme`), so builds spread
+   across the two the way they spread across songs and caption looks — and
+   Light or Dark pins it. Studio only.
+5. **Mode** — 👔 Serious, 😐 Middle or 💀 Degen (`Vids2Mode`). Each is below.
+   Studio only; the clipper page is Serious throughout.
+6. **Persona** — every persona in the library as a tile (its Top A still and
    its name), with a **🎲 Random** tile first that picks one of the personas
    with all three clips. A tile pressed is the last answer, and Generate lights.
 
@@ -57,14 +73,18 @@ The order is what each recording waits on, soonest first — because each one
 ## The head start
 
 `makeNewsClip` wants the story, `makeChatGptClip` the question, `makeTradeClip`
-the name and the direction. Nothing any of them reads is asked after question
-3, so each is started the moment the question it was waiting on is left behind
-(`headStart` in `Vids2Section`, `onHeadStart` in `Vids2Form`), and **Generate
-takes what is already running** rather than starting it. Answer Mode and
-Persona at a normal pace and both recordings are usually done before Generate
-is pressed; a small pill on the Intro card and the Which way card says so
-(✓ Ready, or the percentage), and Generate's own progress picks their lines up
-where the head start left them.
+the name, the direction and the theme. Nothing any of them reads is asked
+after the Look card, so each is started the moment the question it was
+waiting on is left behind (`headStart` in `Vids2Section`, `onHeadStart` in
+`Vids2Form`), and **Generate takes what is already running** rather than
+starting it. The trade sets off at Which way with the Look as it stands
+(Random, on a first pass, so a roll) and starts again only if the Look card
+then says otherwise; pressing Random there changes nothing, so it costs
+nothing. Answer Mode and Persona at a normal pace and both recordings are
+usually done before Generate is pressed; a small pill on the Intro card and
+the Look card (the Which way card, on the clipper page) says so (✓ Ready, or
+the percentage), and Generate's own progress picks their lines up where the
+head start left them.
 
 It is a render and nothing else: no stage, no words, no video until Generate.
 
@@ -78,8 +98,11 @@ a question being retyped does not start a render on every letter. Two details:
   intro again. It is *not* in a news intro's key: those frames are the same
   either way and only the filed name carries it, so the run is kept and the
   name re-stamped (`stamp` in `generate`).
-- **Light or dark** is rolled where the render starts rather than where
-  Generate does (`rollTheme`), since by then the frames are already drawn.
+- **Light or dark** is in the trade's key (`look`), so Light after Dark is a
+  new run and Random after either is a fresh roll. The roll itself is made
+  where the render starts rather than where Generate does (`themeFor`), since
+  by then the frames are already drawn — and Random after Random is the same
+  key, so the run and the roll it made are kept.
 
 A head start that fails is not taken: Generate makes that recording itself and
 fails the way it would have anyway. Reset, leaving the page, and a Generate
@@ -109,7 +132,7 @@ story. It is one tab, not a second form —
    **Who is the video about?** with a button each before moving on (the same
    names sit under "Trading on" on the Intro card, to swap later).
 2. The form skips Intro, since the story is the intro, and opens **Which way**;
-   then **Mode** and **Persona** as above. Open Intro from its folded card to
+   then **Look**, **Mode** and **Persona** as above. Open Intro from its folded card to
    see the story's page, pick another story, or switch to ChatGPT or no intro.
 
 It is one set of answers whichever tab answered Who, and `flow` only records
@@ -164,7 +187,7 @@ often the story says them. It has no AI check, so those ordinary one-word
 names are left out of it: a pasted story about Future has to be made from
 Who. Studio > News uses the same `people` for its own paste box.
 
-**Generate**, at the foot of the page, is lit once all five cards are answered
+**Generate**, at the foot of the page, is lit once every card is answered
 and makes the whole video from the answers before showing you anything; while
 it runs it is the progress bar. Then it lands on the tuning page — a fork of
 what was Simpler's builder, with the deciding taken out: the sound, the
@@ -220,9 +243,12 @@ Type a code — or paste the whole file name; the code is picked out of it — a
 
 The recordings are rendered anew, so a ChatGPT answer, the trade's prices and
 the story's photos are today's; the words over them are the ones that were
-exported. Reset clears a waiting record with the answers. The clipper page has
-the box too, and the recipes route is already in the clipper allowlist
-(`CLIPPER_API_UNDER` in `middleware.ts`).
+exported. Reset clears a waiting record with the answers. The box is the
+Studio's alone: the clipper page does not draw it (`CLIPPERS` in
+`Vids2Section`), though a clipper's export still writes its record and puts
+the code on the file name and the caption, so the Studio can bring that video
+back. The recipes route stays in the clipper allowlist (`CLIPPER_API_UNDER`
+in `middleware.ts`) for the export's own writing and taking back of a record.
 
 ## One video, every recording rendered here
 
@@ -488,15 +514,17 @@ both sets).
   pair rather than the one the route kept. The rest of the captions go the
   moment both recordings have been laid out (`onPlanned`), off the plan they
   are about to make. The tuning page takes what comes back (`Vids2Early`)
-  instead of asking again, so the words are usually there when the stage is,
-  "Consider holding" included. Rewrite still asks afresh from the stage. A
+  instead of asking again, so the words are usually there when the stage is.
+  Rewrite still asks afresh from the stage. A
   build with a library clip whose length isn't known waits for the browser to
   measure it, then writes, as it used to.
 
-- **Light / dark is rolled, not asked** — even odds on every Generate
-  (`rollTheme`), and the tuning page's summary says which came up. It is the
+- **Light / dark is the Look card's** — Random (even odds on every build,
+  `rollTheme`), Light or Dark — and the tuning page's summary says which came
+  up. On the clipper page there is no card and it is always rolled. It is the
   Pauv page only: the ChatGPT renderer has no light mode, so that recording is
-  always dark.
+  always dark. A code brought back sets the card to the way Pauv came up the
+  first time (`setupFromAnswers`), since that is the way it comes up again.
 - **The news search knows short names.** `lib/news/name-forms` asks Gemini
   once per name (cached for the server's life) which short forms the press
   uses: ones safe to search alone ("Putin", "LeBron", "AOC") get a Google

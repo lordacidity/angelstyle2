@@ -42,6 +42,15 @@
 // BOOM_LENGTH long, whatever the clip's own length is. See BoomInsert in
 // lib/simpler/vidsPlan.
 //
+// On a phone (under md) the page is one column to scroll: the video, the
+// transport under it, then everything the sidebar holds, with Download at the
+// foot of the screen throughout. The stage is a fixed share of the screen
+// rather than whatever is left, since on a phone nothing is left. And a phone
+// has no Downloads folder anybody looks in, so there the file is not dropped
+// on the browser but kept, and handed to the share sheet — Save to Photos —
+// which is the one way a web page gets a video into the camera roll (see
+// canShareVideo). The Studio, and any window wide enough, is unchanged.
+//
 // Every export is written down under a short code (lib/simpler/vidsRecipe →
 // the recipes API): a three-word title from the model, plus the persona, every
 // slot's clip and settings, sound and captions — and the form's answers
@@ -201,7 +210,34 @@ function downloadBlob(blob: Blob, name: string) {
   setTimeout(() => URL.revokeObjectURL(url), 10_000);
 }
 
+/** Whether this is a phone (or a tablet) that can hand a video to the share
+ *  sheet. No web page can write to Photos; the share sheet can — Save Video
+ *  on an iPhone, Photos on Android — and navigator.share with a file is what
+ *  opens it. It has to be opened from a press, and the render takes a minute,
+ *  so on such a device Download keeps the file and puts up a second button
+ *  rather than dropping it on the browser (see runExport). A desktop browser
+ *  can share files too, and has no Photos to save to, so this also asks for a
+ *  touch screen — the primary pointer being a finger is what a phone is. */
+function canShareVideo(): boolean {
+  if (typeof navigator === 'undefined' || typeof navigator.canShare !== 'function') return false;
+  if (!window.matchMedia?.('(pointer: coarse)').matches) return false;
+  try {
+    return navigator.canShare({ files: [new File([new Uint8Array(1)], 'probe.mp4', { type: 'video/mp4' })] });
+  } catch {
+    return false;
+  }
+}
+
 // ── The song ─────────────────────────────────────────────────────────────────
+
+/** The share sheet's own glyph — a box with an arrow out of the top. */
+function ShareIcon() {
+  return (
+    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+      <path d="M12 3v13M7 8l5-5 5 5M5 13v7h14v-7" />
+    </svg>
+  );
+}
 
 function PlayGlyph({ stop }: { stop?: boolean }) {
   return (
@@ -501,6 +537,14 @@ export function Vids2Builder({
   const [avail, setAvail] = useState({ w: 0, h: 0 });
   const [exporting, setExporting] = useState<{ frac: number; label: string } | null>(null);
   const [exportError, setExportError] = useState<string | null>(null);
+  /** A phone: the file is kept for the share sheet rather than dropped on
+   *  the browser — see canShareVideo. Asked once; a device does not change. */
+  const [phone] = useState(canShareVideo);
+  /** The MP4 as last rendered, on a phone, waiting to be handed to Photos or
+   *  saved as a file. Null until a render lands, and again the moment the
+   *  video is changed under it — a caption retyped, the song swapped — since
+   *  what was rendered is no longer what is on the stage. */
+  const [made, setMade] = useState<File | null>(null);
   /** The code of the export under way or just done, minted the moment
    *  Download is pressed (runExport): it goes on the end of both post
    *  captions in that same press, then in the file name and on the line
@@ -1479,6 +1523,7 @@ export function Vids2Builder({
     setExportError(null);
     setRecipeError(null);
     setLastRecipe(null);
+    setMade(null);
     const ctrl = new AbortController();
     abortRef.current = ctrl;
     setExporting({ frac: 0, label: 'Starting…' });
@@ -1532,7 +1577,12 @@ export function Vids2Builder({
         setRecipeError(`Exported, but no code could be saved for it: ${e instanceof Error ? e.message : String(e)}`);
       }
       const name = recipe ? `${recipe.name}.mp4` : exportName();
-      downloadBlob(blob, name);
+      // A phone gets the Save to Photos button instead of a download — the
+      // share sheet wants a press of its own, and this is a minute after the
+      // last one (see canShareVideo). A File rather than the Blob: the sheet
+      // names what it is handed by the file's name and type.
+      if (phone) setMade(new File([blob], name, { type: blob.type || 'video/mp4' }));
+      else downloadBlob(blob, name);
       // Already up since the record was written — set again only for the run
       // where it arrived after this point.
       if (recipe) setLastRecipe(recipe);
@@ -1551,6 +1601,25 @@ export function Vids2Builder({
     } finally {
       setExporting(null);
       abortRef.current = null;
+    }
+  };
+
+  // What was rendered is the video as it was: change anything the export
+  // reads — the clips, the words, the look, the sound — and the file waiting
+  // for Photos is of a video that is gone, so it goes, and the button to make
+  // it comes back.
+  useEffect(() => { setMade(null); }, [plan, captions, capStyle, music, clipLevel, boomLevel]);
+
+  /** Save to Photos: the rendered file handed to the share sheet, where Save
+   *  Video (an iPhone) or Photos (Android) is a press away. Dismissing the
+   *  sheet is not a failure. */
+  const saveToPhotos = async () => {
+    if (!made) return;
+    try {
+      await navigator.share({ files: [made] });
+    } catch (e) {
+      if (e instanceof DOMException && e.name === 'AbortError') return;
+      setExportError(`Couldn\u2019t open the share sheet (${e instanceof Error ? e.message : String(e)}) — Save as a file instead.`);
     }
   };
 
@@ -1846,7 +1915,9 @@ export function Vids2Builder({
   })();
 
   return (
-    <div className="flex min-h-0 min-w-0 flex-1">
+    // A row — the stage and the sidebar — from md up; under that, one column
+    // that scrolls: the stage, the transport, then the sidebar's sections.
+    <div className="flex min-h-0 min-w-0 flex-1 max-md:flex-col max-md:overflow-y-auto">
       {/* Hidden decode elements — one per filled slot; the canvas samples from them. */}
       {SLOTS.map((s) => {
         const p = picks[s.id];
@@ -1954,9 +2025,17 @@ export function Vids2Builder({
         />
       )}
 
-      {/* Stage + transport — over the whole window in full screen. */}
-      <div className={full ? 'fixed inset-0 z-[60] flex flex-col bg-black' : 'flex min-w-0 flex-1 flex-col'}>
-        <div ref={stageWrapRef} className="relative flex min-h-0 flex-1 items-center justify-center overflow-hidden">
+      {/* Stage + transport — over the whole window in full screen. On a phone
+          the stage is a set share of the screen rather than whatever the
+          sidebar leaves, because the sidebar is under it and leaves nothing;
+          the rest of the page scrolls up past it. */}
+      <div className={full ? 'fixed inset-0 z-[60] flex flex-col bg-black' : 'flex min-w-0 flex-1 flex-col max-md:flex-none'}>
+        <div
+          ref={stageWrapRef}
+          className={`relative flex items-center justify-center overflow-hidden ${
+            full ? 'min-h-0 flex-1' : 'max-md:h-[58svh] max-md:shrink-0 md:min-h-0 md:flex-1'
+          }`}
+        >
           {/* Before anything has been chosen the stage would be showing the
               End clip — the payout — which is nobody's decision and says
               nothing about the vid. A black screen instead. */}
@@ -1981,7 +2060,7 @@ export function Vids2Builder({
               ref={stageRef}
               data-vids-stage
               tabIndex={0}
-              className="relative select-none touch-none bg-black outline-none ring-1 ring-zinc-800"
+              className="relative select-none bg-black outline-none ring-1 ring-zinc-800"
               style={{ width: dispW, height: dispH }}
               onPointerMove={onStagePointerMove}
               onPointerUp={onStagePointerUp}
@@ -1997,7 +2076,9 @@ export function Vids2Builder({
                 <div
                   onPointerDown={startCaptionDrag}
                   title="Drag to move this caption — it stays where you put it"
-                  className="group absolute z-10 cursor-move rounded ring-1 ring-transparent hover:bg-white/5 hover:ring-white/50"
+                  // touch-none here rather than on the stage: a finger on the
+                  // caption drags it, a finger anywhere else scrolls the page.
+                  className="group absolute z-10 cursor-move touch-none rounded ring-1 ring-transparent hover:bg-white/5 hover:ring-white/50"
                   style={{
                     left: capHandle.box.x * k,
                     top: capHandle.box.y * k,
@@ -2020,13 +2101,15 @@ export function Vids2Builder({
           )}
         </div>
 
-        {/* Transport */}
-        <div className="flex items-center gap-3 border-t border-zinc-800 px-4 py-2.5">
+        {/* Transport. One row from md up. On a phone it wraps into two: the
+            bar across the top, on its own, wide enough to scrub with a thumb,
+            and the buttons under it. */}
+        <div className="flex flex-wrap items-center gap-x-3 gap-y-2 border-t border-zinc-800 px-3 py-2.5 md:flex-nowrap md:px-4">
           <button
             data-vids-play
             onClick={playing ? pause : play}
             disabled={!plan.items.length}
-            className="flex h-9 w-[4.5rem] shrink-0 items-center justify-center rounded-lg border border-zinc-700 bg-zinc-900 text-[13px] font-semibold text-zinc-200 transition-colors hover:border-zinc-500 disabled:cursor-not-allowed disabled:opacity-30"
+            className="flex h-9 w-14 shrink-0 items-center justify-center rounded-lg border border-zinc-700 bg-zinc-900 text-[13px] font-semibold text-zinc-200 transition-colors hover:border-zinc-500 disabled:cursor-not-allowed disabled:opacity-30 md:w-[4.5rem]"
           >
             {playing ? 'Pause' : 'Play'}
           </button>
@@ -2056,6 +2139,8 @@ export function Vids2Builder({
               </svg>
             )}
           </button>
+          {/* The readouts and the bar, as one piece: the first row on a phone. */}
+          <div className="flex min-w-0 flex-1 items-center gap-3 max-md:order-first max-md:basis-full">
           <span data-vids-time className="w-10 text-right font-mono text-[11px] text-zinc-400">{fmtTime(time)}</span>
           {/* The bar, with the BOOM marked on it — the bar places one, shows
               where it went and takes it off again, so the whole of it is here
@@ -2115,6 +2200,7 @@ export function Vids2Builder({
             ))}
           </div>
           <span className="w-10 font-mono text-[11px] text-zinc-500">{fmtTime(total)}</span>
+          </div>
 
           {/* The BOOM: press it, then press the bar on the moment it should
               land, and the clip plays there over the top of everything —
@@ -2137,7 +2223,8 @@ export function Vids2Builder({
                   : 'border-zinc-700 bg-zinc-900 text-zinc-200 hover:border-zinc-500'
               }`}
             >
-              Insert boom
+              <span className="md:hidden">+ BOOM</span>
+              <span className="max-md:hidden">Insert boom</span>
             </button>
             {/* What the next BOOM will sound like. Beside the button rather
                 than in the sidebar because it is part of laying one down: you
@@ -2151,25 +2238,30 @@ export function Vids2Builder({
               title={boomSounds.length
                 ? 'The sound the next BOOM makes — drop more into public/audio/booms'
                 : 'Nothing in public/audio/booms yet'}
-              className="h-9 max-w-[7.5rem] cursor-pointer appearance-none truncate rounded-lg border border-zinc-700 bg-zinc-900 px-2 text-[13px] text-zinc-300 transition-colors hover:border-zinc-500 disabled:cursor-not-allowed disabled:opacity-30"
+              className="h-9 max-w-[6rem] cursor-pointer appearance-none truncate rounded-lg border border-zinc-700 bg-zinc-900 px-2 text-[13px] text-zinc-300 transition-colors hover:border-zinc-500 disabled:cursor-not-allowed disabled:opacity-30 md:max-w-[7.5rem]"
             >
               <option value="">Silent</option>
               {boomSounds.map((snd) => (
                 <option key={snd.url} value={snd.url}>{snd.label}</option>
               ))}
             </select>
-            {/* Where it went and how to be rid of it are both the mark on the
-                bar, so nothing stands here saying so a second time. */}
-            {boomArming && (
-              <span className="whitespace-nowrap text-xs text-amber-400/90">Press the bar</span>
-            )}
           </div>
+          {/* Where it went and how to be rid of it are both the mark on the
+              bar, so nothing stands here saying so a second time. A row of
+              its own on a phone, where the buttons' row is full. */}
+          {boomArming && (
+            <span className="whitespace-nowrap text-xs text-amber-400/90 max-md:basis-full md:-ml-1.5">Press the bar</span>
+          )}
         </div>
       </div>
 
       {/* The one sidebar: the two clip choices, the sound, the captions, the
           post caption and the way out. */}
-      <aside className={`flex w-[320px] shrink-0 flex-col overflow-y-auto border-l border-zinc-800 ${full ? 'hidden' : ''}`}>
+      <aside
+        className={`flex shrink-0 flex-col border-zinc-800 max-md:border-t md:w-[320px] md:overflow-y-auto md:border-l ${
+          full ? 'hidden' : ''
+        }`}
+      >
         <div className="border-b border-zinc-800 px-3 py-4">
           <div className="mb-3 flex items-center gap-2">
             <p className="min-w-0 flex-1 truncate text-sm font-semibold text-white">Tune it up</p>
@@ -2398,11 +2490,12 @@ export function Vids2Builder({
         />
 
         {/* mt-auto puts it at the foot of a short sidebar; sticky keeps it
-            there once the captions run past the bottom of the screen. The
-            background is the page's own, because the sidebar doesn't paint one
-            and a transparent sticky footer would have the rest scroll through
-            it. */}
-        <div className="sticky bottom-0 mt-auto border-t border-zinc-800 bg-[var(--background)] px-3 py-3">
+            there once the captions run past the bottom of the screen — and on
+            a phone, where the whole page is the scroll, at the foot of the
+            screen from the moment the page opens. Painted black because the
+            sidebar paints nothing, and a transparent sticky footer would have
+            the rest scroll through it. Padded clear of a phone's home bar. */}
+        <div className="sticky bottom-0 mt-auto border-t border-zinc-800 bg-black px-3 py-3 max-md:pb-[max(0.75rem,env(safe-area-inset-bottom))]">
           {exporting ? (
             <div>
               <div className="flex items-center gap-2 text-sm text-zinc-300">
@@ -2417,16 +2510,40 @@ export function Vids2Builder({
                 Cancel
               </button>
             </div>
+          ) : made ? (
+            /* A phone, with the file rendered: into Photos by way of the
+               share sheet, or on to the browser's downloads as a file. */
+            <>
+              <button
+                data-vids-export="share"
+                onClick={() => void saveToPhotos()}
+                title="Opens the share sheet with the video — tap Save Video there"
+                className="flex h-14 w-full items-center justify-center gap-2 rounded-xl bg-white text-base font-semibold text-black transition-colors hover:bg-zinc-200"
+              >
+                <ShareIcon /> Save to Photos
+              </button>
+              <div className="mt-2 flex items-center gap-3 text-xs text-zinc-500">
+                <span className="min-w-0 flex-1 truncate">Then tap Save Video in the sheet</span>
+                <button
+                  type="button"
+                  onClick={() => downloadBlob(made, made.name)}
+                  title="Save the MP4 to the browser's downloads instead"
+                  className="shrink-0 font-semibold text-zinc-300 underline decoration-zinc-600 underline-offset-2 hover:text-white"
+                >
+                  Save as a file
+                </button>
+              </div>
+            </>
           ) : (
             <>
               <button
                 data-vids-export="download"
                 onClick={() => void runExport()}
                 disabled={!plan.items.length || broken.length > 0}
-                title="Render the MP4 and save it to this PC"
-                className="flex h-11 w-full items-center justify-center gap-2 rounded-xl bg-white text-sm font-semibold text-black transition-colors hover:bg-zinc-200 disabled:cursor-not-allowed disabled:opacity-30"
+                title={phone ? 'Render the MP4 — then Save to Photos' : 'Render the MP4 and save it to this PC'}
+                className="flex h-14 w-full items-center justify-center gap-2 rounded-xl bg-white text-base font-semibold text-black transition-colors hover:bg-zinc-200 disabled:cursor-not-allowed disabled:opacity-30 md:h-11 md:text-sm"
               >
-                <DownloadIcon size={15} /> Download MP4
+                <DownloadIcon size={15} /> {phone ? 'Make the MP4' : 'Download MP4'}
               </button>
               <p className="mt-2 text-xs text-zinc-500">
                 {outW}×{outH} · H.264 + AAC · {OUT_FPS} fps{total ? ` · ${fmtTime(total)}` : ''}

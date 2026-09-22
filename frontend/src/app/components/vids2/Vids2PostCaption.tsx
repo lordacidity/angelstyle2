@@ -7,16 +7,14 @@
 //
 // Which is why Generate asks for them the moment it is pressed (Vids2Section),
 // and the whole render is theirs to land in: the tuning page takes that draft
-// rather than asking again, so they are usually ready when the build lands —
-// "Consider holding" included, which is worth knowing before the export rather
-// than after it. One pair per build: nobody picks clips one at a time here, and
-// each draft is a news search and a model call. A draft that failed has a Try
-// again, and exporting tries it again too. Every ask is for a fresh pair, so a
-// second video on the same person the same day doesn't go out under the first
-// one's words.
+// rather than asking again, so they are usually ready when the build lands.
+// One pair per build: nobody picks clips one at a time here, and each draft is
+// a news search and a model call. A draft that failed has a Try again, and
+// exporting tries it again too. Every ask is for a fresh pair, so a second
+// video on the same person the same day doesn't go out under the first one's
+// words.
 //
-// Under the buttons, one line: who and which way it was written for, or why to
-// hold the post when the news says trading on them now would read badly.
+// Under the buttons, one line: who and which way it was written for.
 //
 // The build's code goes on the end of both, on a line of its own, as it does
 // on Simpler's one caption: the same code that ends the file name, taken back
@@ -41,7 +39,6 @@ interface CaptionState {
   position: TradePosition;
   ig: string;
   tiktok: string;
-  hold: string | null;
   /** The build code currently on the end of both, or null. Kept beside them so
    *  it comes off again by the exact string it went on as. */
   code: string | null;
@@ -67,7 +64,7 @@ const swapCode = (c: CaptionState, next: string | null): CaptionState => ({
 });
 
 const blank = (build: number): CaptionState => ({
-  build, person: '', position: 'up', ig: '', tiktok: '', hold: null, code: null,
+  build, person: '', position: 'up', ig: '', tiktok: '', code: null,
   loading: false, error: null, copied: null,
 });
 
@@ -130,7 +127,7 @@ export function Vids2PostCaption({ buildId, person, position, early, code, expor
       const forCode = codeBuild.current === forBuild ? codeRef.current : null;
       setCaption({
         build: forBuild, person: d.person, position: d.position,
-        ig: withCode(d.ig, forCode), tiktok: withCode(d.tiktok, forCode), hold: d.hold,
+        ig: withCode(d.ig, forCode), tiktok: withCode(d.tiktok, forCode),
         code: forCode, loading: false, error: null, copied: null,
       });
     } catch (e) {
@@ -226,12 +223,7 @@ export function Vids2PostCaption({ buildId, person, position, early, code, expor
       ) : cur?.loading ? (
         <p className="mt-2 text-xs text-zinc-500">Reading this week&apos;s news, then writing…</p>
       ) : ready && cur ? (
-        <>
-          <p className="mt-2 truncate text-xs text-zinc-500">{cur.person} · {cur.position === 'up' ? '📈 Up' : '📉 Down'}</p>
-          {cur.hold && (
-            <p className="mt-1 break-words text-xs leading-relaxed text-amber-400">Consider holding: {cur.hold}</p>
-          )}
-        </>
+        <p className="mt-2 truncate text-xs text-zinc-500">{cur.person} · {cur.position === 'up' ? '📈 Up' : '📉 Down'}</p>
       ) : null}
     </div>
   );

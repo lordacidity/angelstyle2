@@ -1,10 +1,10 @@
 'use client';
 
-// Vids2Form — five cards, top to bottom, and one Generate button.
+// Vids2Form — the cards, top to bottom, and one Generate button.
 //
 // The whole of the first page. Nothing is on the stage yet, so the page is
-// the five answers a video is made from, laid out as five cards in the order
-// they are asked:
+// the answers a video is made from, laid out as cards in the order they are
+// asked:
 //
 //   1. Who        somebody on Pauv. Two ways in, as tabs on the card: a name
 //                 (a search of the whole roster, opened on who is moving on
@@ -16,28 +16,41 @@
 //                 a news story about them (searched for the moment News is
 //                 pressed, or a pasted link).
 //   3. Which way  up or down.
-//   4. Mode       Serious, Middle or Degen — how the video talks.
-//   5. Persona    the three clips around the trade, as tiles.
+//   4. Look       Random, Light or Dark — which way Pauv comes up in the
+//                 trade recording. Studio only (LOOK_ASKED).
+//   5. Mode       Serious, Middle or Degen — how the video talks. Studio
+//                 only (MODE_ASKED): the clipper page makes Serious videos.
+//   6. Persona    the three clips around the trade, as tiles.
+//
+// So the Studio's form is six cards and the clipper page's is four. The two
+// that are not asked there are not blank answers: they are 'roll' and
+// 'serious' in the setup (lib/vids2/vids2Build), which is what the card
+// would have said on its own.
 //
 // One card is open at a time and it is always the next thing to do. Cards
 // above it are folded to their answer (press one to change it); cards below
 // are dim until the form gets there. Pressing an answer IS the answer: a
-// name, a story, Up, Degen, a persona tile — each moves the form on by
+// name, a story, Up, Dark, Degen, a persona tile — each moves the form on by
 // itself. Only the two things that are typed (the ChatGPT question, a story
 // found for somebody already chosen) wait for Continue, and a story picked
-// off a list does not. Which way and Mode have a default, but they are still
-// asked once each; on a return visit every answer is already there, every
-// card is folded, and Generate is lit.
+// off a list does not. Which way, Look and Mode have a default, but they are
+// still asked once each; on a return visit every answer is already there,
+// every card is folded, and Generate is lit.
 //
-// Generate is at the foot of the page, always in view, and lit only when all
-// five are answered. While it runs it is the progress bar.
+// Generate is at the foot of the page, always in view — a row of its own
+// under the cards rather than the end of them, so however far down the cards
+// are scrolled, and whatever a phone's browser bars are doing, it is on the
+// screen. Lit only when every card is answered. While it runs it is the
+// progress bar.
 //
 // The order is what each recording waits on, soonest first: the intro
-// recording needs Who and Intro, the trade recording Who and Which way. Each
-// is started the moment its last answer lands (onHeadStart — the head start in
-// Vids2Section), while the rest of the cards are still being answered, and a
-// small pill on the card says how it is getting on. Light or dark is not
-// asked: it is rolled (rollTheme in lib/vids2).
+// recording needs Who and Intro, the trade recording Who, Which way and the
+// Look. Each is started the moment its last answer lands (onHeadStart — the
+// head start in Vids2Section), while the rest of the cards are still being
+// answered, and a small pill on that card says how it is getting on. The
+// trade sets off at Which way with the Look as it stands (rolled, to begin
+// with) and only starts again if the Look card then says otherwise, so
+// pressing Random costs nothing.
 //
 // Everything a card does with the network — the roster, the trending list,
 // a story searched for or read off its outlet, a question written by the
@@ -47,9 +60,9 @@ import { useEffect, useMemo, useRef, useState, type KeyboardEvent, type ReactNod
 import { PERSONA_PARTS, type VidPersona, type VidRow } from '@/lib/vids-types';
 import { writeQuestion, type QuestionKind } from '@/lib/vids-client';
 import {
-  VIDS2_INTROS, VIDS2_MODES, introReady, loadRoster, lower, setupReady, storyFor,
-  type Direction, type NewsRange, type TradeTalent, type TrendWindow, type Vids2Intro,
-  type Vids2Mode, type Vids2Setup,
+  LOOK_ASKED, MODE_ASKED, VIDS2_INTROS, VIDS2_LOOKS, VIDS2_MODES, introReady, loadRoster, lower, setupReady,
+  storyFor, type Direction, type NewsRange, type TradeTalent, type TrendWindow, type Vids2Intro,
+  type Vids2Look, type Vids2Mode, type Vids2Setup,
 } from '@/lib/vids2/vids2Build';
 import {
   ago, drawNewsPage, errorText, hitFromStory, loadNewsCategories, loadTrending, matchesCategory,
@@ -67,6 +80,12 @@ const DIRECTION_LABEL: Record<Direction, string> = { up: '📈 Up', down: '📉 
 const DIRECTION_ON: Record<Direction, string> = {
   up: 'border-emerald-500 bg-emerald-500/15 text-emerald-300',
   down: 'border-red-500 bg-red-500/15 text-red-300',
+};
+const LOOK_LABEL: Record<Vids2Look, string> = { roll: '🎲 Random', light: '☀️ Light', dark: '🌙 Dark' };
+const LOOK_ON: Record<Vids2Look, string> = {
+  roll: 'border-zinc-300 bg-white/10 text-white',
+  light: 'border-amber-200 bg-amber-100/15 text-amber-100',
+  dark: 'border-indigo-400 bg-indigo-500/15 text-indigo-200',
 };
 const MODE_LABEL: Record<Vids2Mode, string> = { serious: '👔 Serious', middle: '😐 Middle', degen: '💀 Degen' };
 const MODE_ON: Record<Vids2Mode, string> = {
@@ -119,23 +138,35 @@ const WIDEN_UNDER = 5;
 
 // ── The steps ────────────────────────────────────────────────────────────────
 
-type StepId = 'who' | 'intro' | 'direction' | 'mode' | 'persona';
+type StepId = 'who' | 'intro' | 'direction' | 'look' | 'mode' | 'persona';
 interface Step {
   id: StepId;
   label: string;
   /** Has an answer from the start (a default), but is still asked once: the
    *  card opens on the way down and one press answers it. */
   askOnce: boolean;
+  /** Whether this build's form has the card at all. Look and Mode are the
+   *  Studio's alone — see LOOK_ASKED and MODE_ASKED in lib/vids2. */
+  asked: boolean;
 }
-const STEPS: readonly Step[] = [
-  { id: 'who', label: 'Who', askOnce: false },
-  { id: 'intro', label: 'Intro', askOnce: false },
-  { id: 'direction', label: 'Which way', askOnce: true },
-  { id: 'mode', label: 'Mode', askOnce: true },
-  { id: 'persona', label: 'Persona', askOnce: false },
+const EVERY_STEP: readonly Step[] = [
+  { id: 'who', label: 'Who', askOnce: false, asked: true },
+  { id: 'intro', label: 'Intro', askOnce: false, asked: true },
+  { id: 'direction', label: 'Which way', askOnce: true, asked: true },
+  { id: 'look', label: 'Look', askOnce: true, asked: LOOK_ASKED },
+  { id: 'mode', label: 'Mode', askOnce: true, asked: MODE_ASKED },
+  { id: 'persona', label: 'Persona', askOnce: false, asked: true },
 ];
+/** This build's cards, in order: six in the Studio, four on the clipper page. */
+const STEPS: readonly Step[] = EVERY_STEP.filter((s) => s.asked);
 const LAST = STEPS.length - 1;
-const WHO = 0, INTRO = 1, DIRECTION = 2, MODE = 3, PERSONA = 4;
+/** Where a card sits on this build's form; -1 for one it hasn't got, which
+ *  nothing then asks for. */
+const at = (id: StepId) => STEPS.findIndex((s) => s.id === id);
+const WHO = at('who'), INTRO = at('intro'), DIRECTION = at('direction'), LOOK = at('look'), MODE = at('mode'), PERSONA = at('persona');
+/** The card the trade recording's head start shows its line on — the last
+ *  of the answers it waits on. */
+const TRADE_CARD: StepId = LOOK_ASKED ? 'look' : 'direction';
 
 /** Somebody a chosen story names, and whether its headline is where. */
 type StoryChoice = NamedPerson & { inHeadline: boolean };
@@ -188,9 +219,11 @@ interface Props {
    *  Vids2Section. Null where nothing is going. */
   warm: { intro: Vids2Leg | null; trade: Vids2Leg | null };
   /** An answer has landed, so what it was the last of can start rendering:
-   *  the intro once the intro is answered, the trade once which way is. The
-   *  answers go with it as they are at that moment — the section's own copy
-   *  is a render behind whatever has just been pressed. */
+   *  the intro once the intro is answered, the trade once which way is (and
+   *  again if the Look card then changes the theme — the section keys each
+   *  run on its answers, so the same answers twice is one run). The answers
+   *  go with it as they are at that moment — the section's own copy is a
+   *  render behind whatever has just been pressed. */
   onHeadStart: (what: 'intro' | 'trade', from: Vids2Setup) => void;
   onGenerate: () => void;
   onCancel: () => void;
@@ -758,9 +791,19 @@ export function Vids2Form({
   const pickDirection = (direction: Direction) => {
     const next: Vids2Setup = { ...setupRef.current, direction };
     commit(next);
-    // The trade recording was waiting on this and nothing else.
+    // The trade recording was waiting on this: it sets off now, with the Look
+    // as it stands — rolled, on a first pass — and starts again only if the
+    // Look card then says otherwise.
     onHeadStart('trade', next);
     advance(DIRECTION, next, touch('direction'));
+  };
+  const pickLook = (look: Vids2Look) => {
+    const next: Vids2Setup = { ...setupRef.current, look };
+    commit(next);
+    // The same answers as the run already going is that run; a different
+    // theme is a different recording, and it starts over.
+    onHeadStart('trade', next);
+    advance(LOOK, next, touch('look'));
   };
   const pickMode = (mode: Vids2Mode) => {
     const next: Vids2Setup = { ...setupRef.current, mode };
@@ -798,6 +841,7 @@ export function Vids2Form({
           : setup.intro === 'chatgpt' ? `💬 “${setup.question.trim()}”`
           : story ? `📰 ${outletById(story.article.outlet).name} · ${story.article.headline}` : '📰 News';
       case 'direction': return DIRECTION_LABEL[setup.direction];
+      case 'look': return LOOK_LABEL[setup.look];
       case 'mode': return MODE_LABEL[setup.mode];
       case 'persona': {
         const thumb = resolveVideo(persona?.topAId ?? '')?.thumbUrl;
@@ -1300,7 +1344,7 @@ export function Vids2Form({
       No personas in the library yet.
     </p>
   ) : (
-    <div className="vids-scroll grid max-h-[420px] grid-cols-5 gap-2 overflow-y-auto pr-1">
+    <div className="vids-scroll grid max-h-[420px] grid-cols-3 gap-2 overflow-y-auto pr-1 sm:grid-cols-5">
       <button
         type="button"
         onClick={randomPersona}
@@ -1361,6 +1405,16 @@ export function Vids2Form({
             onPick={pickDirection}
           />
         );
+      case 'look':
+        return (
+          <Choice
+            tall
+            options={VIDS2_LOOKS.map((l) => ({ value: l, label: LOOK_LABEL[l], on: LOOK_ON[l] }))}
+            value={touched.has('look') ? setup.look : null}
+            disabled={false}
+            onPick={pickLook}
+          />
+        );
       case 'mode':
         return (
           <Choice
@@ -1375,9 +1429,10 @@ export function Vids2Form({
     }
   };
 
-  /** The head start's line, on the card whose answer set it going. */
+  /** The head start's line, on the card whose answer set it going — for the
+   *  trade, the last of the cards it waits on (TRADE_CARD). */
   const legOn = (id: StepId): Vids2Leg | null =>
-    id === 'intro' ? warm.intro : id === 'direction' ? warm.trade : null;
+    id === 'intro' ? warm.intro : id === TRADE_CARD ? warm.trade : null;
 
   const card = (i: number) => {
     const s = STEPS[i];
@@ -1390,7 +1445,9 @@ export function Vids2Form({
       <section
         key={s.id}
         ref={(el) => { cardRefs.current[i] = el; }}
-        className={`scroll-mt-6 rounded-2xl border transition-colors ${
+        // Opened, a card lands under the header strip on a phone rather
+        // than behind it.
+        className={`scroll-mt-16 rounded-2xl border transition-colors md:scroll-mt-6 ${
           isOpen ? 'border-zinc-500 bg-[#111]'
             : done ? 'border-zinc-800 bg-[#0c0c0c] hover:border-zinc-600'
             : pending ? 'border-amber-900/60 bg-[#0c0c0c] hover:border-amber-700'
@@ -1428,24 +1485,40 @@ export function Vids2Form({
   const pct = job ? Math.round(jobProgress(job) * 100) : 0;
 
   return (
-    <div className="vids-scroll flex min-h-0 flex-1 flex-col overflow-y-auto">
-      {/* Room at the top for the two corner boxes the section floats over the
-          form — the code box at the left, Reset at the right — so the title
-          starts under them at any width. */}
-      <div className="mx-auto w-full max-w-2xl px-6 pt-14">
-        <h1 className="text-2xl font-semibold text-white">Make a video</h1>
-        <div className={`mt-5 flex flex-col gap-2.5 ${busy ? 'pointer-events-none opacity-50' : ''}`}>
-          {STEPS.map((_, i) => card(i))}
+    // min-w-0: this is a flex item, and a flex item's least width is its
+    // content's unless told otherwise — so a folded card's one-line answer,
+    // which never wraps, was the least width of the whole form, and a long
+    // ChatGPT question pushed the page out wide on a phone. Held to the
+    // window, the line truncates the way it was meant to.
+    <div className="relative flex min-h-0 min-w-0 flex-1 flex-col">
+      {/* On a phone the two corner boxes the section floats over the form —
+          the code box and Reset — sit on a solid strip, so the cards scroll
+          under a header rather than through it. Wide, they are off in the
+          corners with nothing under them. */}
+      <div aria-hidden className="pointer-events-none absolute inset-x-0 top-0 z-20 h-14 bg-black md:hidden" />
+      {/* The cards, in a scroll of their own: Generate is under the scroll,
+          not at the end of it. */}
+      <div className="vids-scroll min-h-0 flex-1 overflow-y-auto">
+        {/* Room at the top for the two corner boxes the section floats over
+            the form — the code box at the left, Reset at the right — so the
+            title starts under them at any width. */}
+        <div className="mx-auto w-full max-w-2xl px-4 pb-6 pt-14 sm:px-6">
+          <h1 className="text-2xl font-semibold text-white">Make a video</h1>
+          <div className={`mt-5 flex flex-col gap-2.5 ${busy ? 'pointer-events-none opacity-50' : ''}`}>
+            {STEPS.map((_, i) => card(i))}
+          </div>
         </div>
       </div>
 
-      {/* Generate — at the foot of the page and never out of view. Lit when
-          every card is answered; the progress bar while it runs. */}
-      <div className="sticky bottom-0 mt-auto bg-gradient-to-t from-black via-black/95 to-transparent pt-6">
-        <div className="mx-auto w-full max-w-2xl px-6 pb-5">
+      {/* Generate — the foot of the page, whatever is scrolled above it. Lit
+          when every card is answered; the progress bar while it runs. Bigger
+          on a phone, where it is pressed with a thumb, and padded clear of
+          the home bar on one with a notch. */}
+      <div className="shrink-0 border-t border-zinc-900 bg-black pb-[env(safe-area-inset-bottom)]">
+        <div className="mx-auto w-full max-w-2xl px-4 py-3 sm:px-6 sm:py-4">
           {job ? (
             <div className="rounded-2xl border border-zinc-800 bg-[#111] p-4">
-              <div className="relative h-12 overflow-hidden rounded-xl bg-zinc-900">
+              <div className="relative h-14 overflow-hidden rounded-xl bg-zinc-900 sm:h-12">
                 <span className="absolute inset-y-0 left-0 bg-white/20 transition-[width]" style={{ width: `${pct}%` }} />
                 <span className="relative flex h-full items-center justify-center gap-2 text-base font-semibold text-white">
                   <SpinnerIcon size={16} className="animate-spin" />
@@ -1469,7 +1542,7 @@ export function Vids2Form({
               onClick={onGenerate}
               disabled={!ready}
               title={ready ? 'Make the video' : missing ? `${missing.label} first` : undefined}
-              className={`${PRIMARY} h-12 w-full text-base`}
+              className={`${PRIMARY} h-14 w-full text-lg sm:h-12 sm:text-base`}
             >
               Generate
             </button>
