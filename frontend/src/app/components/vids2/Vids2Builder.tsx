@@ -101,6 +101,10 @@ import {
 } from '@/lib/simpler/vidsAudio';
 import { fmtTime, safeExportName } from '@/lib/utils';
 import { DownloadIcon, SpinnerIcon, VideoIcon } from '@/lib/icons';
+import { CLIPPERS } from '@/lib/clipping';
+import { usePhonedeck } from '../../hooks/usePhonedeck';
+import { VidsPhonedeck } from '../vids/VidsPhonedeck';
+import { Vids2PublishPanel } from './Vids2PublishPanel';
 
 // The one size a vid is made at. There is no picker for it: every build goes
 // out 9:16, and `PRESET_ID` is what the record is written down with.
@@ -565,6 +569,22 @@ export function Vids2Builder({
   // be able to disown a record still on its way back.
   const exportRun = useRef(0);
   const [recipeError, setRecipeError] = useState<string | null>(null);
+
+  // ── Publish (Studio only) ────────────────────────────────────────────────
+  /** The last render's bytes, kept — on every device, not just phones —
+   *  so Send to Phonedeck / Publish to accounts have something to act on
+   *  after Download's instant downloadBlob() already ran. Cleared by the
+   *  same invalidation as `made` (below): a rendered blob for a stage that
+   *  has since changed is nobody's to push anywhere. */
+  const [pushable, setPushable] = useState<{ blob: Blob; name: string } | null>(null);
+  const [publishOpen, setPublishOpen] = useState(false);
+  const [phonedeckRevealed, setPhonedeckRevealed] = useState(false);
+  const [phonedeckSentName, setPhonedeckSentName] = useState<string | null>(null);
+  const [phonedeckError, setPhonedeckError] = useState<string | null>(null);
+  // Vids2PostCaption's current IG/TikTok draft, mirrored up here so the
+  // Publish panel can default its caption to it without asking again.
+  const [captionDraft, setCaptionDraft] = useState({ ig: '', tiktok: '' });
+  const phonedeck = usePhonedeck();
   // The picks as they are now, for a job that lands its clips after the
   // stage has moved on (a persona chosen while the render ran).
   const picksRef = useRef(picks);
@@ -1583,6 +1603,10 @@ export function Vids2Builder({
       // names what it is handed by the file's name and type.
       if (phone) setMade(new File([blob], name, { type: blob.type || 'video/mp4' }));
       else downloadBlob(blob, name);
+      // Kept regardless of device (and only in the Studio) so Send to
+      // Phonedeck / Publish to accounts have this render's bytes even after
+      // desktop's instant download above.
+      if (!CLIPPERS) setPushable({ blob, name });
       // Already up since the record was written — set again only for the run
       // where it arrived after this point.
       if (recipe) setLastRecipe(recipe);
@@ -1608,11 +1632,30 @@ export function Vids2Builder({
   // reads — the clips, the words, the look, the sound — and the file waiting
   // for Photos is of a video that is gone, so it goes, and the button to make
   // it comes back.
-  useEffect(() => { setMade(null); }, [plan, captions, capStyle, music, clipLevel, boomLevel]);
+  useEffect(() => {
+    setMade(null);
+    setPushable(null);
+    setPublishOpen(false);
+    setPhonedeckRevealed(false);
+    setPhonedeckSentName(null);
+    setPhonedeckError(null);
+  }, [plan, captions, capStyle, music, clipLevel, boomLevel]);
 
   /** Save to Photos: the rendered file handed to the share sheet, where Save
    *  Video (an iPhone) or Photos (Android) is a press away. Dismissing the
    *  sheet is not a failure. */
+  /** Upload the current render straight into Phonedeck's watched Incoming
+   *  folder, then reveal the phone-picker list under the buttons (same one
+   *  Media uses) so it can be pushed on to a phone without leaving this page. */
+  const sendToPhonedeck = async () => {
+    if (!pushable) return;
+    setPhonedeckError(null);
+    const ok = await phonedeck.uploadToIncoming(pushable.blob, pushable.name);
+    if (!ok) { setPhonedeckError('Phonedeck is offline, or the upload failed — start it with Launch server on Media.'); return; }
+    setPhonedeckSentName(pushable.name);
+    setPhonedeckRevealed(true);
+  };
+
   const saveToPhotos = async () => {
     if (!made) return;
     try {
@@ -2506,6 +2549,8 @@ export function Vids2Builder({
           code={exportCode}
           // Starting an export tries again a draft that failed.
           exporting={!!exporting}
+          // Mirrored up so the Publish panel can default to it.
+          onDraftChange={(ig, tiktok) => setCaptionDraft({ ig, tiktok })}
         />
 
         {/* mt-auto puts it at the foot of a short sidebar; sticky keeps it
@@ -2571,6 +2616,38 @@ export function Vids2Builder({
           )}
           {exportError && <p className="mt-2 text-sm text-red-400">{exportError}</p>}
           {recipeError && <p className="mt-2 text-sm text-amber-300">{recipeError}</p>}
+
+          {/* Send to Phonedeck / Publish to accounts — Studio only (never in
+              the clipper bundle: !CLIPPERS), and only once a render exists to
+              act on. Sits under Download rather than replacing it, in either
+              the phone-share branch above or the idle Download branch. */}
+          {!CLIPPERS && !exporting && pushable && (
+            <div className="mt-2 flex gap-2">
+              <button
+                type="button"
+                onClick={() => void sendToPhonedeck()}
+                disabled={phonedeck.uploading}
+                title="Drop this render into Phonedeck's Incoming, ready to push to a phone"
+                className="h-9 flex-1 rounded-lg border border-zinc-700 text-xs font-semibold text-zinc-200 transition-colors hover:border-zinc-500 disabled:cursor-not-allowed disabled:opacity-40"
+              >
+                {phonedeck.uploading ? 'Sending…' : 'Send to Phonedeck'}
+              </button>
+              <button
+                type="button"
+                onClick={() => setPublishOpen(true)}
+                title="Queue this render onto one or more Hyper Attention accounts"
+                className="h-9 flex-1 rounded-lg border border-zinc-700 text-xs font-semibold text-zinc-200 transition-colors hover:border-zinc-500"
+              >
+                Publish to accounts…
+              </button>
+            </div>
+          )}
+          {phonedeckError && <p className="mt-2 text-xs text-red-400">{phonedeckError}</p>}
+          {phonedeckRevealed && (
+            <div className="mt-2">
+              <VidsPhonedeck recent={phonedeckSentName} />
+            </div>
+          )}
         </div>
       </aside>
 
@@ -2580,6 +2657,16 @@ export function Vids2Builder({
           direction={build.direction}
           hasContext={!!(appliedPersona?.context || picks.start?.video.context)}
           onClose={closeHookGuide}
+        />
+      )}
+
+      {!CLIPPERS && publishOpen && pushable && (
+        <Vids2PublishPanel
+          blob={pushable.blob}
+          videoName={pushable.name}
+          defaultCaption={captionDraft.ig}
+          theme={build.theme}
+          onClose={() => setPublishOpen(false)}
         />
       )}
     </div>

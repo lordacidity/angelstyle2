@@ -81,9 +81,14 @@ interface Props {
   code: string | null;
   /** An export is running. Its start tries again a draft that failed. */
   exporting: boolean;
+  /** Fires with the current IG/TikTok text every time a ready draft changes
+   *  (a fresh one lands, the code goes on or off it) — so the Publish panel
+   *  can default its caption to whatever this card is showing, without
+   *  asking for its own draft. Not fired while loading or on a failed draft. */
+  onDraftChange?: (ig: string, tiktok: string) => void;
 }
 
-export function Vids2PostCaption({ buildId, person, position, early, code, exporting }: Props) {
+export function Vids2PostCaption({ buildId, person, position, early, code, exporting, onDraftChange }: Props) {
   const [caption, setCaption] = useState<CaptionState | null>(null);
   const captionRef = useRef(caption);
   captionRef.current = caption;
@@ -178,6 +183,12 @@ export function Vids2PostCaption({ buildId, person, position, early, code, expor
 
   const cur = caption && caption.build === buildId ? caption : null;
   const ready = !!cur && !cur.loading && !cur.error && !!cur.ig;
+
+  const onDraftChangeRef = useRef(onDraftChange);
+  onDraftChangeRef.current = onDraftChange;
+  useEffect(() => {
+    if (ready && cur) onDraftChangeRef.current?.(cur.ig, cur.tiktok);
+  }, [ready, cur]);
 
   const copy = async (which: Which) => {
     if (!ready || !cur) return;

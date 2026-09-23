@@ -144,6 +144,27 @@ export function usePhonedeck({ onPushed }: { onPushed?: (fileName: string) => vo
     setTimeout(() => setStatus((s) => { const n = { ...s }; delete n[fileName]; return n; }), ms);
   };
 
+  // Upload a freshly-rendered blob straight into Phonedeck's watched Incoming
+  // folder — a direct browser → local-server call, same as /api/push and
+  // /api/devices above (Phonedeck already accepts this multipart upload for
+  // files dropped elsewhere; nothing in the Studio called it until Vids 2's
+  // "Send to Phonedeck" button). The SSE stream (above) picks the new file up
+  // on its own — no local state to update here.
+  const [uploading, setUploading] = useState(false);
+  const uploadToIncoming = async (file: Blob, name: string): Promise<boolean> => {
+    setUploading(true);
+    try {
+      const form = new FormData();
+      form.append('files', file, name);
+      const r = await fetch(`${PHONEDECK_URL}/api/upload`, { method: 'POST', body: form });
+      return r.ok;
+    } catch {
+      return false;
+    } finally {
+      setUploading(false);
+    }
+  };
+
   const pushSelected = async (fileName: string) => {
     if (selectedSerials.size === 0) {
       flash(fileName, 'No phones selected', 3000);
@@ -170,5 +191,6 @@ export function usePhonedeck({ onPushed }: { onPushed?: (fileName: string) => vo
     connected, incoming, ready,
     selectedSerials, togglePhone, selectAll, clearSelection,
     pushing, status, pushSelected, clearAllIncoming,
+    uploading, uploadToIncoming,
   };
 }
