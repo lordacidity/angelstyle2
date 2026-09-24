@@ -11,9 +11,9 @@
 // at the end. The hook always says he is making money and names the weird thing
 // he is doing on camera ("making bank shorting trump in the woods" — see HOOK);
 // the winnings carry one line and only one, the same call to action on every
-// build, comment "<word>" for the link, where the model only picks the word, so
-// the line matches the video without ever drifting from the form — nothing is
-// written about the money itself. And somewhere in every set a line spells out
+// build, link in bio to trade, fixed here (END_LINE) with nothing asked of the
+// model for it — nothing is written about the money itself. And somewhere in
+// every set a line spells out
 // pauv.com as a place to go (SEND), since that is the point of the video.
 //
 // The model is told how many lines each clip can hold; the caller works that out
@@ -61,7 +61,7 @@
 // steps come from. Now and then it is a "how to", addressed to the viewer,
 // or ends on how fast it was ("in 69 secs"). The winnings get no line of their
 // own: the closing clip shows the money, and the one caption over it is the
-// comment line, so the call to action has the whole of the ending to itself.
+// link line, so the call to action has the whole of the ending to itself.
 // Every build is written the same way; there is no choice of voice.
 //
 // Emoji come from the app's own set: the ones pinned in the Emojis drawer are
@@ -332,28 +332,10 @@ const asPlaced = (v: unknown, n: number, length: number): { text: string; at: nu
     .slice(0, n)
     .sort((a, b) => a.at - b.at);
 
-/** The comment line is the same on every build; only the word changes, and it
- *  goes in quotes so the viewer sees exactly what to type. */
-const END_LINE = (word: string) => `comment "${word}" for the link`;
-/** Used when the model hands back nothing usable for the word, so the build is
- *  never missing its call to action. Generic — worth swapping by hand. */
-const END_FALLBACK_WORD = 'pauv';
-
-/** The model is asked for just the word, but it sometimes hands back the whole
- *  line, quotes it, or tacks an emoji on. All of that is peeled off; what is
- *  left is at most two words. */
-function endWord(v: unknown): string {
-  const clean = (typeof v === 'string' ? v : '')
-    .toLowerCase()
-    .replace(/[\p{Extended_Pictographic}"'“”‘’`.,:;!?]/gu, '')
-    .trim();
-  const inner = clean.match(/^comment\s+(.+?)\s+for the link$/)?.[1] ?? clean;
-  return inner.split(/\s+/).filter(Boolean).slice(0, 2).join(' ') || END_FALLBACK_WORD;
-}
-
-/** The one line over the closing clip, built here from the word the model
- *  picked and never taken as written — the form is fixed. */
-const closing = (word: unknown): string => END_LINE(endWord(word));
+/** The one line over the closing clip, the same on every build: the link is
+ *  in the bio, and that is the whole of the ending. Fixed here, so the model
+ *  writes nothing for it. */
+const END_LINE = 'link in bio to trade';
 
 /** The address, as the fallback writes it. The prompt offers a few phrasings
  *  and the model picks one; this is only what goes in when it picked none. */
@@ -432,7 +414,6 @@ function buildPrompt(input: z.infer<typeof Schema>): string {
   if (shapeA) wanted.push(shapeA);
   const shapeB = shape('bottomB', bottomB);
   if (shapeB) wanted.push(shapeB);
-  if (wantEnd) wanted.push('"end": the word for the comment line (a single string holding JUST the word)');
   /** An emoji for the worked example: from the palette when there is one, so
    *  the example is made of the same set the real lines are picked from. */
   const ex = (i: number, fallback: string) => (emojis ? ` ${emojiPalette[i] ?? fallback}` : '');
@@ -508,15 +489,15 @@ ${PAUV_BRIEF}
 THE VIDEO
 Part 1 — START: the persona on camera doing something odd or funny.
 Part 2 — the screen recording: the same guy's screen while he does something online, in two clips that play back to back, BOTTOM A then BOTTOM B. Bottom A is wherever he starts — often somewhere else online; BOTTOM B IS ALWAYS PAUV.COM.
-Part 3 — END: the pay-off. He is back on camera showing off the money the trade made him, and over the whole of it ONE caption: the line that sends the viewer to the comments for the link. Nothing is written about the money — the clip already shows it.
+Part 3 — END: the pay-off. He is back on camera showing off the money the trade made him, and over the whole of it ONE caption, already written: link in bio to trade. Nothing is asked of you for it, and nothing is written about the money — the clip already shows it.
 
 WHAT EACH CAPTION DOES
 ${HOOK}
 BOTTOM A and BOTTOM B — tell the viewer what to do, step by step, so someone learns how Pauv works by following along. Assume they CANNOT see the screen: the recording is small and quick, and most people read the caption and never make out what is on it. So every line has to stand on its own — name the site or app and the exact thing being done there, in the words the viewer would need to go and do it themselves. Not "type in most hated person in the world" but "search on chatgpt most hated ppl rn". Not "click the button" but "hit trade up on pauv.com". Not "look him up" but "search ronaldo on pauv". Each caption still describes ITS OWN clip: a Bottom A caption is what the viewer does in the Bottom A recording, a Bottom B caption in Bottom B — which is on pauv.com every time, whatever its context happens to mention. Do not describe a step that is not on that clip's screen.
 When a clip is given as a numbered list of moments, a caption goes on screen at exactly its moment and stays up until the next one — so caption 1 describes moment 1 and nothing else, caption 2 moment 2, and so on. Every moment gets its own caption: keep them in order, never skip one, never merge two into one line${mergeSeam ? ' — except at the seam, below' : ''}. Each line says what is on screen RIGHT THEN, not what came before or what comes next.
 A moment that is really two things — go to the site, then do the thing there — or that will not fit in one short line, gets TWO captions: put both in that moment's one entry with " / " between them, like "go to chatgpt / see who the most hated person is rn". The first goes up where the moment starts, the second halfway through it. Two at most for a moment, and the entry still counts as one, so the array stays one entry per moment. Split rather than write one long line. The same " / " works inside any line of an unmarked clip.
-${bottomA?.placed ? `${FAST_A(bottomA.count, bottomA.placed.length)}\n` : ''}END — ONE caption, up over the whole of him showing the money: THE COMMENT LINE, one fixed line, always exactly: comment "<word>" for the link. The line is already written, quotes and all; the ONLY thing you choose is <word>, what a viewer types in the comments to get the link. Reply with JUST the word as "end", not the whole line. It must match THIS video — the name of the person he traded on ("ronaldo"), or the stupid thing he did on camera ("velo") — taken from the contexts below, never made up. One word, two at the very most. Lower case, no quotes, no emoji. Not "pauv", not "link".
-Do NOT write a line about the money he made. There is no caption for it: the ending is the comment line and nothing else, so whatever he made is left to the picture.
+${bottomA?.placed ? `${FAST_A(bottomA.count, bottomA.placed.length)}\n` : ''}END — ONE caption, up over the whole of him showing the money, and it is already written: link in bio to trade, the same on every build. You write nothing for it and reply with nothing for it.
+Do NOT write a line about the money he made. There is no caption for it: the ending is the link line and nothing else, so whatever he made is left to the picture.
 
 ONE STORY, NOT FOUR SEPARATE CAPTIONS
 Read everything under THIS VIDEO before you write a word — the persona bit, both screen recordings, the ending — and keep the whole of it in mind for every line. The captions are one story told in order: the hook sets up what he is about to do online, each screen-recording line carries that same thread on (the same person he is trading on, the same reason he picked them, the same site), and the closing word ties it back. A line written from its own clip alone reads like a stranger wrote it. When a Bottom B line says "trade up on him", "him" is the person named in the hook and Bottom A; when the hook names who he made money on, it is the person the screen recording actually shows; the reason he picked them (trending, most hated, just got signed) can be carried from the clip that gives it into the lines that don't. Every line still says what is on screen RIGHT THEN — the whole video is what you write each line WITH, not what you write it ABOUT.
@@ -543,14 +524,13 @@ bottom b — 2 moments (the clip overall: finding ronaldo on pauv and trading up
 ->
 start: velo in my mouth making bands on ronaldo${hookEx()}
 ${exLines}
-end: ronaldo
-(${exShape}"end" closes it on its own: over the whole of the money he shows off, the one fixed line, which reads comment "ronaldo" for the link — and nothing is written about the money, since the clip is already showing it. Every screen line says where he is and what he does there — chatgpt, pauv.com, ronaldo — so it reads without seeing the screen; "him" in the last bottom b line is the ronaldo from the hook and bottom a, one story across all of it. The hook says he is making bands, names ronaldo and the velo in his mouth — the weird thing from the persona context — and never mentions the typing; ${exSite}; "rn" and "bc" are the text-speak)
+(${exShape}the ending closes on its own fixed line, link in bio to trade, over the whole of the money he shows off — nothing is written about the money, since the clip is already showing it. Every screen line says where he is and what he does there — chatgpt, pauv.com, ronaldo — so it reads without seeing the screen; "him" in the last bottom b line is the ronaldo from the hook and bottom a, one story across all of it. The hook says he is making bands, names ronaldo and the velo in his mouth — the weird thing from the persona context — and never mentions the typing; ${exSite}; "rn" and "bc" are the text-speak)
 ${emojis ? `(the three emoji there are just where they happened to land for that video — choose your own${emojiPalette.length ? ', from the saved set above,' : ''} for this one)` : ''}
 THIS VIDEO
 persona${personaName ? ` (${personaName})` : ''} context: ${personaContext || '(not given — no weird thing to name, so the hook is just the money and who he is trading on)'}
 ${describe('bottom a', bottomA)}
 ${describe('bottom b', bottomB, true)}
-${wantEnd ? `end context: ${endContext || '(not given — pick the closing word from the rest of the video)'}` : 'end: (no clip)'}
+${wantEnd ? `end context: ${endContext || '(not given)'} — its one line is fixed, nothing to write for it` : 'end: (no clip)'}
 
 ${notes.trim() ? `
 WHAT THE EDITOR ASKED FOR THIS TIME
@@ -566,6 +546,12 @@ export async function POST(req: NextRequest) {
     const { wantStart, bottomA, bottomB, wantEnd } = input;
     if (!wantStart && !bottomA?.count && !bottomB?.count && !wantEnd) {
       return NextResponse.json({ error: 'Nothing to caption — fill Start, a bottom clip or End first.' }, { status: 400 });
+    }
+    // The End line is fixed, so a build that wants nothing else has nothing to
+    // ask the model for.
+    if (!wantStart && !bottomA?.count && !bottomB?.count) {
+      const only: Drafted = { start: '', bottomA: [], bottomB: [], end: END_LINE };
+      return NextResponse.json(only);
     }
 
     const raw = await geminiGenerate([{ text: buildPrompt(input) }], {
@@ -594,7 +580,7 @@ export async function POST(req: NextRequest) {
         ? placedA.map((l) => l.text)
         : asLines(parsed.bottomA, bottomA?.count ?? 0, !!bottomA?.marks.length),
       bottomB: asLines(parsed.bottomB, bottomB?.count ?? 0, !!bottomB?.marks.length),
-      end: wantEnd ? closing(parsed.end) : '',
+      end: wantEnd ? END_LINE : '',
     };
     const done = ensureSite(drafted, input.mergeSeam && !bottomA?.placed);
     return NextResponse.json(placedA ? { ...done, bottomAAt: placedA.map((l) => l.at) } : done);

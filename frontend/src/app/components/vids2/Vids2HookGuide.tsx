@@ -13,11 +13,11 @@
 
 import { useEffect, type ReactNode } from 'react';
 import {
-  CLOCK_BRANCH_ODDS, CLOCK_BRANCHES, CLOCK_EXAMPLES, CLOCK_NUMBERS, CLOCK_TASKS, COMBOS, DEGEN_EMOJI,
-  DEGEN_EXAMPLES, DEGEN_VERBS, DESCRIPTORS, HOOK_ATTEMPTS, HYPE_NAMED, HYPE_NICKNAMED, LOVE_MAX, LOVE_ODDS,
-  ME_IF_NAMED, ME_IF_NICKNAMED, MIDDLE_EXAMPLES, MYSTERY_EXAMPLES, NICKNAME_EXAMPLES, NO_CONTEXT_CLOCK_BRANCH,
-  NO_CONTEXT_COMBOS, NO_CONTEXT_TWISTS, SELF_OWNS, SERIOUS_EXAMPLES, TWIST_ODDS, TWISTS, VERBS,
-  type ClockBranch, type HookDirection, type HookMode, type Twist,
+  DEGEN_EMOJI, DEGEN_EXAMPLES, DEGEN_VERBS, DESCRIPTORS, HOOK_ATTEMPTS, HYPE_NAMED, HYPE_NICKNAMED, LOVE_MAX,
+  LOVE_ODDS, ME_IF_NAMED, ME_IF_NICKNAMED, MIDDLE_ACTIVITY_ODDS, MIDDLE_ANALOGIES, MIDDLE_EXAMPLES,
+  MIDDLE_MYSTERY_VERBS, MIDDLE_SECONDS, MIDDLE_SHAPE_ODDS, MIDDLE_SHAPES, MIDDLE_TASKS, MYSTERY_EXAMPLES,
+  NICKNAME_EXAMPLES, NO_CONTEXT_TWISTS, SELF_OWNS, SERIOUS_EXAMPLES, TWIST_ODDS, TWISTS, VERBS,
+  type HookDirection, type HookMode, type MiddleShape, type Twist,
 } from '@/lib/vids2/hookRules';
 
 /** A share as the page prints it: 40%, 6.7%, 33.3%. */
@@ -38,20 +38,27 @@ const DIRECTIONS: readonly HookDirection[] = ['up', 'down'];
 const DIRECTION_LABEL: Record<HookDirection, string> = { up: '📈 Up', down: '📉 Down' };
 const MODE_LABEL: Record<HookMode, string> = { serious: '👔 Serious', middle: '😐 Middle', degen: '💀 Degen' };
 const TWIST_LABEL: Record<Twist, string> = { mystery: 'Mystery', hype: 'Hype', meIf: 'Me if' };
-const CLOCK_BRANCH_LABEL: Record<ClockBranch, string> = {
-  pool: 'task · off the pool', context: 'task · what he is doing', number: 'number + while',
+/** Each Middle shape, the way the frame would say it. */
+const MIDDLE_SHAPE_LINE: Record<MiddleShape, string> = {
+  while: 'making <analogy> while <what he is doing | the mystery>',
+  'seconds + parenthetical': 'making <analogy> in <seconds> seconds <parenthetical>',
+  'time + parenthetical': 'making <analogy> in the time it takes to <task> <parenthetical>',
+  seconds: 'making <analogy> in <seconds> seconds',
+  time: 'making <analogy> in the time it takes to <task>',
 };
-
-/** How often a Middle hook is the clock, twists included: one combo of the
- *  four with a context, one of the two without. */
-const clockWith = OWN / COMBOS.length;
-const clockWithout = OWN / NO_CONTEXT_COMBOS.length;
+/** How often a Middle hook draws a number of seconds, and how often a task. */
+const secondsShare = MIDDLE_SHAPE_ODDS.seconds + MIDDLE_SHAPE_ODDS['seconds + parenthetical'];
+const timeShare = MIDDLE_SHAPE_ODDS.time + MIDDLE_SHAPE_ODDS['time + parenthetical'];
+/** How often a Middle hook says what he is doing, and how often the mystery. */
+const activityShare = MIDDLE_SHAPE_ODDS.while * MIDDLE_ACTIVITY_ODDS;
+const mysteryShare = MIDDLE_SHAPE_ODDS.while * (1 - MIDDLE_ACTIVITY_ODDS);
 
 interface Props {
   /** The video on the page — marked wherever the guide talks about it. */
   mode: HookMode;
   direction: HookDirection;
-  /** Whether the persona has a context for Middle's activity to come from. */
+  /** Whether the persona has a context for Middle to say what he is doing
+   *  from, and a parenthetical to put on the end. */
   hasContext: boolean;
   onClose: () => void;
 }
@@ -164,14 +171,16 @@ export function Vids2HookGuide({ mode, direction, hasContext, onClose }: Props) 
             (<span className="font-mono text-[11px]">api/vids/hook</span>), beside the one that writes the rest of the
             captions. It is handed four things and nothing else: the <b className="text-zinc-100">mode</b>,{' '}
             <b className="text-zinc-100">who</b>, <b className="text-zinc-100">which way</b>, and — for Middle only —
-            what the persona is doing (the persona&rsquo;s context). Nothing off the screen recordings.
+            the persona&rsquo;s context: what he is doing, and what it says in parentheses. Nothing off the screen
+            recordings.
           </p>
           <p>
             Every choice between fixed options is <b className="text-zinc-100">drawn by the code at random</b>, not
-            left to the model: twist or not, the trading verb, Middle&rsquo;s combo and its clock&rsquo;s branch, task
-            and time, and all of Degen but the nickname.
+            left to the model: twist or not, the trading verb, Middle&rsquo;s shape and its analogy, seconds and
+            task, and all of Degen but the nickname.
             So every percentage on this page is an exact odd, not a tendency. The model writes only the words in
-            between — the name, the reason, the money, the nickname.
+            between — the name, the reason, what he is doing, the mystery, the nickname — and three Middle shapes
+            in five never call it at all.
           </p>
           <p className="text-[11px] text-zinc-500">
             Green is the share of the lines that draw it. Where there is a grey one beside it, that is the share of
@@ -179,9 +188,13 @@ export function Vids2HookGuide({ mode, direction, hasContext, onClose }: Props) 
           </p>
         </Block>
 
-        <Block title="Step 1 · its mode's own line, or a twist">
+        <Block title="Step 1 · its mode's own line, or a twist (Serious and Degen)">
           <p>
-            Whatever the mode, {pct(TWIST_ODDS)} of hooks are a twist instead of the mode&rsquo;s own line, the twist
+            Middle skips this step: it never takes a twist, and its mystery is one of the two things its while shape
+            can hold, below{mode === 'middle' && <span className="text-zinc-200"> — as on this video</span>}.
+          </p>
+          <p>
+            In Serious and Degen, {pct(TWIST_ODDS)} of hooks are a twist instead of the mode&rsquo;s own line, the twist
             drawn at even odds from those the trade can take. Hype only goes up, so a down trade&rsquo;s twist is a
             mystery or a me if. Me if is written off what the video shows, so a persona with no context leaves the
             other twists to split its share — the numbers below are for{' '}
@@ -244,165 +257,70 @@ export function Vids2HookGuide({ mode, direction, hasContext, onClose }: Props) 
           <Examples lines={SERIOUS_EXAMPLES} />
         </Block>
 
-        <Block title={`${MODE_LABEL.middle} · two of three parts, or the clock`} here={mode === 'middle'}>
+        <Block title={`${MODE_LABEL.middle} · the money, against what he is doing or the clock`} here={mode === 'middle'}>
           <p>
-            Exactly two of <Q>money analogy</Q> <Q>what he is doing</Q> <Q>the trade</Q>. The funnier the gap
-            between the money and the activity, the better. Or the fourth combo, the clock: the money against how
-            little time it took — its own section, below.
+            Every line opens <Q>making &lt;analogy&gt;</Q> and then takes one of five shapes. No twist step: the
+            mystery is one of the two things the first shape can hold. The analogy, the seconds and the task are all
+            off a list, and the parenthetical is the persona&rsquo;s own words, so only the while shape ever calls
+            the model.
           </p>
-          <Label>Drawn · which combo</Label>
-          <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-            <div>
-              <p className="mb-1 text-[11px] text-zinc-400">
-                Persona has a context
-                {hasContext && <span className="ml-1.5 text-[9px] text-zinc-500">(this video)</span>}
-              </p>
-              <Draw items={COMBOS} of={OWN} />
-            </div>
-            <div>
-              <p className="mb-1 text-[11px] text-zinc-400">
-                Persona has no context
-                {!hasContext && <span className="ml-1.5 text-[9px] text-zinc-500">(this video)</span>}
-              </p>
-              <Draw items={NO_CONTEXT_COMBOS} of={OWN} />
-              <p className="mt-1 text-[10px] text-zinc-500">Nothing to say he is doing, so never an activity.</p>
-            </div>
-          </div>
-          <Label>Drawn · the trading verb, only when the combo has the trade</Label>
-          <Verbs verbs={VERBS} direction={direction} />
-          <p className="text-[10px] text-zinc-500">
-            With a context, {COMBOS.filter((c) => c.includes('trade')).length} combos in {COMBOS.length} carry the
-            trade; without one, {NO_CONTEXT_COMBOS.filter((c) => c.includes('trade')).length} in{' '}
-            {NO_CONTEXT_COMBOS.length}.
-          </p>
-          <Label>Written by the model</Label>
+          <Label>Drawn · the shape</Label>
+          <ul className="space-y-0.5">
+            {MIDDLE_SHAPES.map((sh) => (
+              <li key={sh} className="flex items-baseline gap-2">
+                <Q>{MIDDLE_SHAPE_LINE[sh]}</Q>
+                <span className="flex-1" />
+                <Pct of={MIDDLE_SHAPE_ODDS[sh]} />
+              </li>
+            ))}
+          </ul>
+          <Label>The while shape · what he is doing, or the mystery</Label>
           <Rules>
-            <li><b className="text-zinc-200">Money analogy</b> — the payout next to something relatable: a surgeon&rsquo;s salary, a year of rent, lebron money. Usually &ldquo;making&rdquo; or &ldquo;out-earning&rdquo;.</li>
-            <li><b className="text-zinc-200">Activity</b> — taken from the persona&rsquo;s context and said casually (mid haircut, in the hot tub). Never made up.</li>
-            <li><b className="text-zinc-200">&ldquo;how to&rdquo;</b> — it may open on it (&ldquo;how to make&rdquo;), best with analogy + trade. Its call; no fixed odds.</li>
+            <li>
+              <b className="text-zinc-200">What he is doing</b> <Pct of={MIDDLE_ACTIVITY_ODDS} /> of while lines,{' '}
+              <Pct of={activityShare} dim /> of every Middle hook — the persona&rsquo;s context with its parentheses
+              taken out, said by the model so it reads straight after &ldquo;while&rdquo;: wearing a knight helmet,
+              on the toilet, holding a hammer in my mouth. Never made up.
+            </li>
+            <li>
+              <b className="text-zinc-200">The mystery</b> <Pct of={1 - MIDDLE_ACTIVITY_ODDS} /> of while lines,{' '}
+              <Pct of={mysteryShare} dim /> of every Middle hook — the trade on someone described but never named,
+              written to the mystery guide below, on a verb fixed by which way: up <Q>{MIDDLE_MYSTERY_VERBS.up}</Q>,
+              down <Q>{MIDDLE_MYSTERY_VERBS.down}</Q>.
+            </li>
+            <li>
+              A persona with no context has nothing he is doing, so its while shape is always the mystery
+              {!hasContext && <span className="text-zinc-200"> — as on this video</span>}.
+            </li>
           </Rules>
+          <Label>Drawn · the money analogy, at even odds</Label>
+          <Draw items={MIDDLE_ANALOGIES} />
+          <p className="text-[10px] text-zinc-500">
+            Less the one that names the person the video trades on: a Drake build never makes drake&rsquo;s salary.
+          </p>
+          <Label>Drawn · the seconds</Label>
+          <Draw items={MIDDLE_SECONDS} of={secondsShare} />
+          <Label>Drawn · the task</Label>
+          <Draw items={MIDDLE_TASKS} of={timeShare} />
+          <Label>The parenthetical</Label>
+          <p>
+            What the persona&rsquo;s context says in parentheses, word for word and without the brackets, on the end
+            of the line: <Q>wearing a knight helmet (in a fresh fit)</Q> gives{' '}
+            <Q>making drake&rsquo;s salary in 67 seconds in a fresh fit</Q>. A context with several has one drawn at
+            even odds. One with none leaves the line at its time, so for that persona the two parenthetical shapes
+            read like the two plain ones{!hasContext && <span className="text-zinc-200"> — as on this video</span>}.
+          </p>
           <Label>Held to</Label>
           <Rules>
-            <li>Never the word &ldquo;man&rdquo; (unless it is in their name).</li>
-            <li>No emoji, hashtags, quote marks or full stop. All lower case.</li>
+            <li>
+              What he is doing: never &ldquo;man&rdquo; (unless it is in their name), no trading verb, no name, no
+              time or number. Empty, or breaking one of those, and the line is thrown out.
+            </li>
+            <li>The mystery: thrown out when any word of their name is in it, or it doesn&rsquo;t open on the verb.</li>
+            <li>No emoji, hashtags, quote marks or full stop. All lower case. The parenthetical is never touched.</li>
           </Rules>
           <Label>Examples it is shown ({MIDDLE_EXAMPLES.length})</Label>
           <Examples lines={MIDDLE_EXAMPLES} />
-        </Block>
-
-        <Block title="⏱ Middle · the clock combo" here={mode === 'middle'}>
-          <p>
-            Middle&rsquo;s fourth combo: the money analogy, and time where the trade or the activity would have gone.
-            No trading verb, no name, no person — just the payout against how little time it took. The code puts
-            the line together from the model&rsquo;s parts, the way Degen&rsquo;s is, so it always opens right and
-            always carries exactly one time. Never inside a twist; Serious and Degen don&rsquo;t take it.
-          </p>
-          <div className="flex flex-col items-start gap-1">
-            <Q>making &lt;analogy&gt; in the time it takes to &lt;task&gt;</Q>
-            <Q>making &lt;analogy&gt; in &lt;number&gt; while &lt;what he is doing&gt;</Q>
-          </div>
-          <Label>How often</Label>
-          <Rules>
-            <li>
-              Persona has a context: <Pct of={1 / COMBOS.length} /> of Middle&rsquo;s own lines, <Pct of={clockWith} dim /> of
-              every Middle hook.
-            </li>
-            <li>
-              No context: <Pct of={1 / NO_CONTEXT_COMBOS.length} /> of Middle&rsquo;s own lines, <Pct of={clockWithout} dim /> of
-              every Middle hook — only on the pool.
-            </li>
-          </Rules>
-          <Label>Drawn · which branch</Label>
-          <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-            <div>
-              <p className="mb-1 text-[11px] text-zinc-400">
-                Persona has a context
-                {hasContext && <span className="ml-1.5 text-[9px] text-zinc-500">(this video)</span>}
-              </p>
-              <ul className="space-y-0.5">
-                {CLOCK_BRANCHES.map((b) => (
-                  <li key={b} className="flex items-baseline gap-2">
-                    <Q>{CLOCK_BRANCH_LABEL[b]}</Q>
-                    <span className="flex-1" />
-                    <Pct of={CLOCK_BRANCH_ODDS[b]} />
-                    <span className="w-12 text-right"><Pct of={CLOCK_BRANCH_ODDS[b] * clockWith} dim /></span>
-                  </li>
-                ))}
-              </ul>
-            </div>
-            <div>
-              <p className="mb-1 text-[11px] text-zinc-400">
-                Persona has no context
-                {!hasContext && <span className="ml-1.5 text-[9px] text-zinc-500">(this video)</span>}
-              </p>
-              <ul className="space-y-0.5">
-                <li className="flex items-baseline gap-2">
-                  <Q>{CLOCK_BRANCH_LABEL[NO_CONTEXT_CLOCK_BRANCH]}</Q>
-                  <span className="flex-1" />
-                  <Pct of={1} />
-                  <span className="w-12 text-right"><Pct of={clockWithout} dim /></span>
-                </li>
-              </ul>
-              <p className="mt-1 text-[10px] text-zinc-500">Nothing to say he is doing, so never an activity and never a number.</p>
-            </div>
-          </div>
-
-          <Label>Branch 1 · the task</Label>
-          <p>
-            No &ldquo;while&rdquo; — the task is already the whole picture. Off the pool, at even odds:
-          </p>
-          <Draw items={CLOCK_TASKS} />
-          <p>
-            Or off the persona&rsquo;s context: what he is doing on camera, said as a task with a clear start and end,
-            in his own words — put a hammer in my mouth, tape my mouth shut, crack open a beer. Wearing or being in
-            something he could put on becomes putting it on (a suit of armor). Never made up, and never a place or a
-            state he is just in: sit in a chair, lie in the road, be in a grocery store are not tasks.{' '}
-            <b className="text-zinc-200">A context with no task in it takes one off the pool instead</b>, so a
-            persona that is only somewhere always lands on the pool.
-          </p>
-
-          <Label>Branch 2 · the number</Label>
-          <Draw items={CLOCK_NUMBERS} of={CLOCK_BRANCH_ODDS.number * clockWith} />
-          <p>
-            What he is doing comes off the context, said casually so it reads straight after &ldquo;while&rdquo;:
-            in the hot tub, half asleep, eating cereal, getting a haircut.
-          </p>
-
-          <Label>Written by the model</Label>
-          <Rules>
-            <li><b className="text-zinc-200">Opener</b> — &ldquo;making&rdquo; most of the time, or &ldquo;out-earning&rdquo;, and then the analogy is who gets out-earned (my landlord).</li>
-            <li>
-              <b className="text-zinc-200">Money analogy</b> — small and everyday beats big: a week of groceries, a month
-              of gas, a year of netflix, rent, a bartender&rsquo;s night. A salary-sized one now and then, never the default.
-            </li>
-            <li><b className="text-zinc-200">The task</b> — on branch 1&rsquo;s context half only.</li>
-            <li><b className="text-zinc-200">What he is doing</b> — on branch 2 only.</li>
-          </Rules>
-          <Label>Held to</Label>
-          <Rules>
-            <li>Never the word &ldquo;man&rdquo; (unless it is in their name).</li>
-            <li>No trading verb, no &ldquo;how to&rdquo;, no name outside the analogy itself (lebron money).</li>
-            <li>No emoji, hashtags, quote marks or full stop. All lower case.</li>
-          </Rules>
-          <Label>Thrown out when</Label>
-          <Rules>
-            <li>there is a trading verb in it, or &ldquo;man&rdquo;</li>
-            <li>the task has a &ldquo;while&rdquo; in it, or the task or what he is doing brings a time of its own</li>
-            <li>branch 2 comes back with nothing for what he is doing</li>
-          </Rules>
-          <p className="text-[11px] text-zinc-500">
-            A line that opens on anything but making or out-earning, a branch 2 with no &ldquo;while&rdquo;, or a number
-            and a task together can&rsquo;t happen: the code puts the line together.
-          </p>
-          <Label>Examples it is shown ({CLOCK_BRANCHES.reduce((n, b) => n + CLOCK_EXAMPLES[b].length, 0)})</Label>
-          <div className="grid grid-cols-1 gap-3">
-            {CLOCK_BRANCHES.map((b) => (
-              <div key={b}>
-                <p className="mb-1 text-[11px] text-zinc-400">{CLOCK_BRANCH_LABEL[b]}</p>
-                <Examples lines={CLOCK_EXAMPLES[b]} max={CLOCK_EXAMPLES[b].length} />
-              </div>
-            ))}
-          </div>
         </Block>
 
         <Block title={`${MODE_LABEL.degen} · a self-own with a nickname`} here={mode === 'degen'}>
@@ -454,10 +372,12 @@ export function Vids2HookGuide({ mode, direction, hasContext, onClose }: Props) 
           </p>
         </Block>
 
-        <Block title={`The twists · ${pct(TWIST_ODDS)} of every hook`}>
+        <Block title={`The twists · ${pct(TWIST_ODDS)} of every Serious and Degen hook`}>
           <p>
-            The same in every mode — Serious and Middle&rsquo;s trading verbs included, even in Degen — except that
-            Degen&rsquo;s hype and me if say the nickname instead of the name.
+            The same in both — Serious&rsquo;s trading verbs, even in Degen — except that Degen&rsquo;s hype and me
+            if say the nickname instead of the name. Middle never takes a twist, but its while shape writes the
+            mystery to this same guide, on a fixed verb (up {MIDDLE_MYSTERY_VERBS.up}, down{' '}
+            {MIDDLE_MYSTERY_VERBS.down}), after &ldquo;making &lt;analogy&gt; while&rdquo;.
           </p>
 
           <div className="space-y-2 rounded-md border border-zinc-800 p-3">
@@ -484,7 +404,7 @@ export function Vids2HookGuide({ mode, direction, hasContext, onClose }: Props) 
             <Label>Thrown out when</Label>
             <Rules><li>it opens on a trade.</li></Rules>
             <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-              <div><p className="mb-1 text-[11px] text-zinc-400">Serious, Middle</p><Examples lines={HYPE_NAMED} /></div>
+              <div><p className="mb-1 text-[11px] text-zinc-400">Serious</p><Examples lines={HYPE_NAMED} /></div>
               <div><p className="mb-1 text-[11px] text-zinc-400">Degen</p><Examples lines={HYPE_NICKNAMED} /></div>
             </div>
           </div>
@@ -510,7 +430,7 @@ export function Vids2HookGuide({ mode, direction, hasContext, onClose }: Props) 
             <Label>Thrown out when</Label>
             <Rules><li>it doesn&rsquo;t open &ldquo;me if&rdquo;, end &ldquo;was legal&rdquo;, and have the trade straight after &ldquo;me if&rdquo;.</li></Rules>
             <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-              <div><p className="mb-1 text-[11px] text-zinc-400">Serious, Middle</p><Examples lines={ME_IF_NAMED} /></div>
+              <div><p className="mb-1 text-[11px] text-zinc-400">Serious</p><Examples lines={ME_IF_NAMED} /></div>
               <div><p className="mb-1 text-[11px] text-zinc-400">Degen</p><Examples lines={ME_IF_NICKNAMED} /></div>
             </div>
           </div>
@@ -520,10 +440,10 @@ export function Vids2HookGuide({ mode, direction, hasContext, onClose }: Props) 
           <Rules>
             <li>Every reply: the first line only, lower-cased, with any emoji, hashtags, quote marks, full stop or &ldquo;caption:&rdquo; label taken off.</li>
             <li>A trade said on the wrong verb has it swapped for the one that was drawn, rather than thrown out.</li>
-            <li>Serious and Middle: a line with no trade where one was asked for, or with &ldquo;man&rdquo; in it, is thrown out.</li>
+            <li>Serious: a line with no trade, or with &ldquo;man&rdquo; in it, is thrown out. Middle: what he is doing with a trading verb, their name, a time or &ldquo;man&rdquo; in it.</li>
             <li>A mystery that names them, a hype that opens on a trade, or a me if out of its frame is thrown out.</li>
             <li>
-              {HOOK_ATTEMPTS} goes, each drawn afresh from Step 1 — twist and all. When both fail, the Captions box
+              {HOOK_ATTEMPTS} goes, each drawn afresh from Step 1 — twist, shape and all. When both fail, the Captions box
               says why, and Rewrite has another go.
             </li>
             <li>A hook typed by hand is yours: Rewrite writes everything else again and leaves it alone. Empty the box to hand it back.</li>

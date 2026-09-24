@@ -18,8 +18,7 @@
 //                                       Every build finishes on him showing
 //                                       what he made, and over all of that the
 //                                       same call to action every time —
-//                                       comment "<word>" for the link, the word
-//                                       matched to the video. It is up from the
+//                                       link in bio to trade. It is up from the
 //                                       first frame of End to the last: the one
 //                                       thing the viewer has to leave holding
 //                                       gets the whole closing phase, and never

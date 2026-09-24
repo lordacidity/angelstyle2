@@ -1,6 +1,6 @@
 // The Start caption's fixed parts: everything api/vids/hook draws itself
-// rather than leaving to the model — the trading verbs, Middle's combos and
-// its clock's tasks and times, all of Degen but the nickname, how often a
+// rather than leaving to the model — the trading verbs, Middle's shapes,
+// analogies, seconds and tasks, all of Degen but the nickname, how often a
 // twist comes up — and the example
 // lines each guide is written around. Kept apart from the route so the guide
 // on the tuning page (components/vids2/Vids2HookGuide) is read off the same
@@ -12,84 +12,78 @@
 export type HookMode = 'serious' | 'middle' | 'degen';
 export type HookDirection = 'up' | 'down';
 
-/** How a trade is said in Serious, Middle and the twists, by the way it goes.
- *  One of them at even odds. */
+/** How a trade is said in Serious and the twists, by the way it goes. One of
+ *  them at even odds. Middle's mystery is on MIDDLE_MYSTERY_VERBS instead. */
 export const VERBS: Record<HookDirection, readonly string[]> = {
   up: ['going long on', 'trading on'],
   down: ['shorting'],
 };
 
 // ── Middle ───────────────────────────────────────────────────────────────────
-
-/** Middle's combos, at even odds when the persona has a context to take the
- *  activity from. The last is the clock: the money against how little time it
- *  took, with no trade and no name in it. */
-export const COMBOS = ['analogy + activity', 'trade + activity', 'analogy + trade', 'analogy + clock'] as const;
-export type Combo = (typeof COMBOS)[number];
-/** Without a context there is nothing to say he is doing, so never an
- *  activity: these two, at even odds. */
-export const NO_CONTEXT_COMBOS: readonly Combo[] = ['analogy + trade', 'analogy + clock'];
-
-// ── Middle's clock ───────────────────────────────────────────────────────────
 //
-//   making <analogy> in the time it takes to <task>        pool, context
-//   making <analogy> in <number> while <activity>          number
+// Every Middle line opens "making <analogy>", and then takes one of five
+// shapes, drawn here by MIDDLE_SHAPE_ODDS:
+//
+//   making <analogy> while <what he is doing | the mystery>       while
+//   making <analogy> in <seconds> seconds <parenthetical>          seconds + parenthetical
+//   making <analogy> in the time it takes to <task> <parenthetical> time + parenthetical
+//   making <analogy> in <seconds> seconds                          seconds
+//   making <analogy> in the time it takes to <task>                time
+//
+// The analogy, the seconds and the task are all off the lists below. The
+// parenthetical is what the persona's context says in parentheses — "wearing
+// a knight helmet (in a fresh fit)" puts "in a fresh fit" on the end of the
+// line, word for word and without the brackets; a context with several has one
+// drawn, and one with none leaves the line at its time. So three shapes in
+// five never call the model. The while shape does: what he is doing is the
+// rest of the context, said by the model so it reads after "while", and the
+// mystery is the trade on someone described but never named, on a verb fixed
+// by which way (MIDDLE_MYSTERY_VERBS).
 
-/** Where a clock line's time comes from: a task off the pool, a task off what
- *  he is doing on camera, or a number with what he is doing after "while". */
-export type ClockBranch = 'pool' | 'context' | 'number';
-export const CLOCK_BRANCHES: readonly ClockBranch[] = ['pool', 'context', 'number'];
+export type MiddleShape = 'while' | 'seconds + parenthetical' | 'time + parenthetical' | 'seconds' | 'time';
+export const MIDDLE_SHAPES: readonly MiddleShape[] = ['while', 'seconds + parenthetical', 'time + parenthetical', 'seconds', 'time'];
+export const MIDDLE_SHAPE_ODDS: Record<MiddleShape, number> = {
+  while: 0.4, 'seconds + parenthetical': 0.15, 'time + parenthetical': 0.15, seconds: 0.15, time: 0.15,
+};
 
-/** How often each branch comes up when the persona has a context. Without one
- *  there is no task or activity to take from it, so it is always the pool. */
-export const CLOCK_BRANCH_ODDS: Record<ClockBranch, number> = { pool: 0.25, context: 0.25, number: 0.5 };
-export const NO_CONTEXT_CLOCK_BRANCH: ClockBranch = 'pool';
+/** In the while shape, how often the slot is what he is doing on camera; the
+ *  rest of the time it is the mystery. A persona with no context has nothing
+ *  he is doing, so its while shape is always the mystery. */
+export const MIDDLE_ACTIVITY_ODDS = 0.6;
 
-/** The pool's tasks, at even odds. Also what the context branch falls back
- *  on when the context is only a place or a state, with no task in it. */
-export const CLOCK_TASKS = [
-  'lose an argument',
-  'reheat cold pizza',
-  'lie to my dentist about flossing',
-  'microwave water',
-  'ignore a phone call',
-  'give up on a book',
-  'text back after four days',
-  'get rejected',
-  'unwrap a gas station sandwich',
-  'fake a laugh',
-  'lose a game of chess',
-  'skip an ad',
-  'brush my teeth',
+/** The money analogies, at even odds — less the one that names the person the
+ *  video trades on, so a Drake build never makes drake's salary. */
+export const MIDDLE_ANALOGIES = [
+  "a surgeon's salary",
+  'a year of rent',
+  "lebron's salary",
+  "messi's salary",
+  "ronaldo's salary",
+  "sam altman's salary",
+  "drake's salary",
+  "a ceo's bonus",
+  "a lawyer's salary",
+  "an nba player's salary",
+  'a month of groceries',
+  'a year of gas',
 ] as const;
 
-/** The number branch's times, at even odds. */
-export const CLOCK_NUMBERS = ['41 seconds', '67 seconds', '69 seconds', '12 minutes'] as const;
+/** The seconds shapes' times, at even odds. */
+export const MIDDLE_SECONDS = ['67', '69', '420'] as const;
 
-/** Whole clock lines, by branch, the way the guide shows them to the model. */
-export const CLOCK_EXAMPLES: Record<ClockBranch, readonly string[]> = {
-  pool: [
-    'making rent in the time it takes to lose an argument',
-    'making a week of groceries in the time it takes to microwave water',
-    'making a month of gas in the time it takes to get rejected',
-    "making a surgeon's salary in the time it takes to reheat cold pizza",
-    'making a year of netflix in the time it takes to skip an ad',
-    "making a bartender's night in the time it takes to fake a laugh",
-  ],
-  context: [
-    'making rent in the time it takes to put a hammer in my mouth',
-    'making a car payment in the time it takes to put on a suit of armor',
-    'making tuition money in the time it takes to shave my head',
-    'making a week of groceries in the time it takes to assemble an ikea chair',
-    "making a lawyer's salary in the time it takes to parallel park",
-  ],
-  number: [
-    'making rent in 67 seconds while half asleep',
-    "making a surgeon's salary in 69 seconds while in the hot tub",
-    'making a car payment in 41 seconds while eating cereal',
-    'making lebron money in 12 minutes while pretending to listen in a meeting',
-  ],
-};
+/** The time shapes' tasks, at even odds. */
+export const MIDDLE_TASKS = [
+  'skip an ad',
+  'brush my teeth',
+  'take a shower',
+  'get a hug',
+  'leave a voicemail',
+  'drink a coffee',
+] as const;
+
+/** The mystery's verb in Middle, by the way the trade goes — fixed, where the
+ *  twists' mystery draws from VERBS. */
+export const MIDDLE_MYSTERY_VERBS: Record<HookDirection, string> = { up: 'trading on', down: 'shorting' };
 
 // ── Degen ────────────────────────────────────────────────────────────────────
 
@@ -137,8 +131,8 @@ export const TWISTS: Record<HookDirection, readonly Twist[]> = {
 };
 
 /** Me if catches him in the middle of what the video shows, so without a
- *  context there is nothing to catch him at — the same reason Middle drops its
- *  activity combos (NO_CONTEXT_COMBOS). It would otherwise have to invent the
+ *  context there is nothing to catch him at — the same reason Middle's while
+ *  shape is always the mystery without one. It would otherwise have to invent the
  *  moment, which is how a line came to put the guy in a wedding toast he was
  *  never in. Mystery and hype say nothing about him, so they stand either way. */
 export const NO_CONTEXT_TWISTS: Record<HookDirection, readonly Twist[]> = {
@@ -169,22 +163,19 @@ export const SERIOUS_EXAMPLES: readonly string[] = [
   'trading on ronaldo through the world cup to quit the 9 to 5',
 ];
 
+/** Middle's while shape on what he is doing, whole lines the way the guide
+ *  shows them to the model. The mystery half shows MYSTERY_EXAMPLES. */
 export const MIDDLE_EXAMPLES: readonly string[] = [
-  "making a surgeon's salary from the hot tub",
-  'shorting drake mid haircut',
-  'how to make lebron money trading on bronny',
-  'going long on taylor swift in the grocery line',
-  'making a year of rent before my coffee gets cold',
-  "how to make a lawyer's salary shorting kanye",
-  "trading on elon at my cousin's wedding",
-  'going long on messi with a mouth full of cereal',
-  'out-earning my landlord shorting zuckerberg',
-  "making a ceo's bonus from a lawn chair",
-  'how to make mrbeast money trading on mrbeast',
-  'shorting jake paul on the treadmill',
-  'making tuition money going long on sabrina carpenter',
-  'trading on trump in a bubble bath',
-  'how to make an nba salary from the toilet',
+  "making a lawyer's salary while wearing a knight helmet",
+  'making a month of groceries while holding a phone in my mouth',
+  "making ronaldo's salary while laying in the middle of the road",
+  'making a year of rent while on the toilet',
+  "making sam altman's salary while sitting in the woods",
+  "making a ceo's bonus while drinking a beer",
+  "making a surgeon's salary while wearing a blindfold",
+  'making a year of gas while in a grocery store',
+  "making messi's salary while sitting in a park",
+  'making a year of rent while in a chipotle',
 ];
 
 /** Degen's whole line, the way its guide shows it to the model. */

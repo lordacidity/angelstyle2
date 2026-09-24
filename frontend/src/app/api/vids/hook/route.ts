@@ -13,26 +13,24 @@
 //   going long on taylor swift before the tour announcement to cover a year of rent
 //   shorting drake before the album drops to pay off the car
 //
-// MIDDLE (the form's name for normal) uses exactly two of three parts — a
-// money analogy, what he is doing on camera, the trade — in one of three
-// combos. The funnier the gap between the money and the activity, the better.
+// MIDDLE (the form's name for normal) always opens "making <analogy>" and
+// then takes one of five shapes, drawn here by MIDDLE_SHAPE_ODDS: what he is
+// doing after "while", or the money against how little time it took — a drawn
+// number of seconds, or "in the time it takes to" a drawn task — and, in two of
+// those four, the persona's parenthetical on the end. The analogy, the seconds
+// and the task are all off lists in lib/vids2/hookRules, and the parenthetical
+// is what the persona's context says in parentheses ("wearing a knight helmet
+// (in a fresh fit)"), word for word and without the brackets, so three shapes
+// in five are put together here with no model call at all. The while shape's
+// slot is what he is doing on camera (MIDDLE_ACTIVITY_ODDS of the time), said
+// by the model off the rest of the context, or else the MYSTERY: the trade on
+// someone described but never named, on a verb fixed by which way — "trading
+// on" up, "shorting" down. Middle takes no twist; its mystery is that slot.
 //
-//   making a surgeon's salary from the hot tub          analogy + activity
-//   shorting drake mid haircut                          trade + activity
-//   how to make a lawyer's salary shorting kanye        analogy + trade
-//
-// Middle's fourth combo is the CLOCK: the money against how little time it
-// took, with no trade and no name. Its time is a task — one off a fixed pool,
-// or what he is doing on camera said as a task — or a drawn number with what
-// he is doing after "while". Like Degen, the line is put together here: the
-// model gives the parts (the money, and the task or the activity when the
-// branch needs one), so it can't open wrong, lose its "while" or carry a
-// number and a task at once. A context that is only a place or a state has no
-// task in it, and the task comes off the pool instead.
-//
-//   making rent in the time it takes to lose an argument            pool
-//   making rent in the time it takes to put a hammer in my mouth    context
-//   making a car payment in 41 seconds while eating cereal          number
+//   making a lawyer's salary while wearing a knight helmet          while · what he is doing
+//   making a year of gas while shorting the greatest rapper alive   while · the mystery
+//   making drake's salary in 67 seconds in a fresh fit              seconds + parenthetical
+//   making a year of rent in the time it takes to skip an ad        time
 //
 // DEGEN is descriptor + trade + nickname + (bracket) + emoji, every part but
 // the nickname from a fixed list. So the model is asked for the nickname and
@@ -43,7 +41,7 @@
 //   chopped kid shorts musky (i need serious help) 🔥
 //   tweaker goes long on swifty (i love you swifty)
 //
-// Whatever the mode, one hook in five is a TWIST instead, one of three at even
+// In Serious and Degen, one hook in five is a TWIST instead, one of three at even
 // odds: a MYSTERY, the trade on someone described but never named; HYPE, the
 // name and how high they are going; or ME IF, the trade caught in the middle of
 // what he is doing on camera, "was legal". Hype only goes up, so a down trade's
@@ -60,24 +58,24 @@
 // build with no context draws from the other twists instead (NO_CONTEXT_TWISTS).
 //
 // Everything that is a choice between fixed options is drawn here rather than
-// left to the model — the verb, Middle's combo, and all of Degen but the
-// nickname — so builds spread across them instead of resting on whichever one
-// the model favours. Down is always "shorting" / "shorts"; up is "going long
-// on" or "trading on" / "goes long on" or "trades on", even odds. A Middle
-// build with no persona context has no activity to name, so it is analogy +
-// trade or the clock off the pool. The lists, the odds and every guide's examples live in
-// lib/vids2/hookRules, which the tuning page's guide to all of this
-// (components/vids2/Vids2HookGuide) reads too.
+// left to the model — the verb, Middle's shape and every part of it but the
+// two the model writes, and all of Degen but the nickname — so builds spread
+// across them instead of resting on whichever one the model favours. Down is
+// always "shorting" / "shorts"; up is "going long on" or "trading on" / "goes
+// long on" or "trades on", even odds. A Middle build with no persona context
+// has nothing he is doing, so its while shape is the mystery and its
+// parenthetical shapes stop at their time. The lists, the odds and every
+// guide's examples live in lib/vids2/hookRules, which the tuning page's guide
+// to all of this (components/vids2/Vids2HookGuide) reads too.
 //
 // What the model writes is held to the rules rather than trusted with them:
 // lower-cased, stripped of emoji, quotes and a full stop, and a trade said on
-// the wrong verb has it swapped for the drawn one. A Serious or Middle line
-// with no trade where one was asked for, or with "man" in it, is written again.
-// So is a clock line with a trading verb in it, a "while" or a time of its own
-// in its task, or no activity where the number branch needs one.
-// A Degen nickname that comes back as nothing is the plain name. A mystery that
-// names them, a hype line that opens on a trade, or a me if out of its frame
-// is written again.
+// the wrong verb has it swapped for the drawn one. A Serious line with no
+// trade where one was asked for, or with "man" in it, is written again. So is
+// Middle's what-he-is-doing with a trading verb, their name, a time or "man"
+// in it. A Degen nickname that comes back as nothing is the plain name. A
+// mystery that names them, a hype line that opens on a trade, or a me if out
+// of its frame is written again.
 //
 // Written by Claude Sonnet 5 at low effort rather than the Gemini Flash-Lite the
 // rest of the words use. The job is tone plus knowing the person well enough to
@@ -92,11 +90,11 @@ import Anthropic from '@anthropic-ai/sdk';
 import { NextRequest, NextResponse } from 'next/server';
 import { z } from 'zod';
 import {
-  CLOCK_BRANCH_ODDS, CLOCK_BRANCHES, CLOCK_EXAMPLES, CLOCK_NUMBERS, CLOCK_TASKS, COMBOS, DEGEN_EMOJI,
-  DEGEN_EXAMPLES, DEGEN_VERBS, DESCRIPTORS, HOOK_ATTEMPTS, HYPE_NAMED, HYPE_NICKNAMED, LOVE_MAX, LOVE_ODDS,
-  ME_IF_NAMED, ME_IF_NICKNAMED, MIDDLE_EXAMPLES, MYSTERY_EXAMPLES, NICKNAME_EXAMPLES, NO_CONTEXT_CLOCK_BRANCH,
-  NO_CONTEXT_COMBOS, NO_CONTEXT_TWISTS, SELF_OWNS, SERIOUS_EXAMPLES, TWIST_ODDS, TWISTS, VERBS,
-  type ClockBranch, type Combo, type Twist,
+  DEGEN_EMOJI, DEGEN_EXAMPLES, DEGEN_VERBS, DESCRIPTORS, HOOK_ATTEMPTS, HYPE_NAMED, HYPE_NICKNAMED, LOVE_MAX,
+  LOVE_ODDS, ME_IF_NAMED, ME_IF_NICKNAMED, MIDDLE_ACTIVITY_ODDS, MIDDLE_ANALOGIES, MIDDLE_EXAMPLES,
+  MIDDLE_MYSTERY_VERBS, MIDDLE_SECONDS, MIDDLE_SHAPE_ODDS, MIDDLE_SHAPES, MIDDLE_TASKS, MYSTERY_EXAMPLES,
+  NICKNAME_EXAMPLES, NO_CONTEXT_TWISTS, SELF_OWNS, SERIOUS_EXAMPLES, TWIST_ODDS, TWISTS, VERBS,
+  type MiddleShape, type Twist,
 } from '@/lib/vids2/hookRules';
 
 export const runtime = 'nodejs';
@@ -109,7 +107,8 @@ const Body = z.object({
   /** Who the video trades on, as the Pauv roster spells them. */
   person: z.string().trim().min(1).max(80),
   direction: z.enum(['up', 'down']),
-  /** What the persona is doing on camera — Middle's activity. The other two
+  /** The persona's context: what he is doing on camera, with what it says in
+   *  parentheses — Middle's activity and its parenthetical. Serious and Degen
    *  never mention it. */
   personaContext: z.string().trim().max(600).default(''),
 });
@@ -127,12 +126,16 @@ const examples = (lines: readonly string[]) => lines.map((e) => `  ${e}`).join('
 
 /** What one call asks for, and how its reply becomes the line — null when the
  *  reply is not usable and a fresh go is better than a patched one. */
-interface Plan {
+interface Ask {
   system: string;
   ask: string;
   format?: Anthropic.Beta.BetaJSONOutputFormat;
   finish: (reply: string) => string | null;
 }
+
+/** A hook is asked of the model, or — Middle's shapes off the lists — put
+ *  together here with no call at all. */
+type Plan = Ask | { line: string };
 
 const which = (direction: Direction) =>
   `which way: ${direction === 'up' ? 'up, backing them' : 'down, betting against them'}`;
@@ -163,151 +166,103 @@ They show the order and the tone. Write a new line for this person; never hand o
 ${REPLY}`;
 
 // ── Middle ───────────────────────────────────────────────────────────────────
+//
+// Put together here from the drawn parts. The model is asked for what he is
+// doing, or the mystery, on the while shape, and for nothing on the others.
 
-const hasTrade = (c: Combo) => c.includes('trade');
-const hasActivity = (c: Combo) => c.includes('activity');
+/** Every way a trade is said, Degen's included, which what he is doing never
+ *  has. */
+const ANY_TRADE = /\b(trading on|going long on|shorting|shorts|goes long on|trades on)\b/;
+/** A time of its own, which what he is doing must not bring: a Middle line's
+ *  time, when it has one, is drawn. */
+const A_TIME = /\bin the time it takes\b|\b\d+\s*(seconds?|secs?|minutes?|mins?|hours?)\b/;
 
-const MIDDLE = `${PAUV}
+/** The persona's context split for Middle: what he is doing, and each "(...)"
+ *  it says — word for word, lower-cased, one of them drawn when there are
+ *  several. */
+function splitContext(context: string): { doing: string; parentheticals: string[] } {
+  const parentheticals: string[] = [];
+  const doing = context
+    .replace(/\(([^)]*)\)/g, (_, inner: string) => {
+      const p = inner.replace(/\s+/g, ' ').trim().toLowerCase();
+      if (p) parentheticals.push(p);
+      return ' ';
+    })
+    .replace(/\s+/g, ' ')
+    .trim();
+  return { doing, parentheticals };
+}
 
-THE THREE PARTS. Every caption uses exactly TWO of them, and which two is given below.
-MONEY ANALOGY: the payout compared to something relatable, like "a surgeon's salary", "a year of rent", "lebron money", "a ceo's bonus". The money part usually starts with "making" or "out-earning".
-ACTIVITY: what the guy in the video is doing, like "in the hot tub", "mid haircut", "with a mouth full of cereal", "on the treadmill". Take it from what the video shows, given below, and say it casually; never make one up. Casual, mundane or absurd: the funnier the contrast with the money, the better.
-TRADE: the trading verb plus the person's full, normal name, like "shorting drake" or "going long on taylor swift". The verb is one of "trading on", "going long on" or "shorting", and the one to use is given below. Use exactly that one.
+/** The shape a Middle line takes, by MIDDLE_SHAPE_ODDS. */
+function middleShape(): MiddleShape {
+  let r = Math.random();
+  for (const shape of MIDDLE_SHAPES) {
+    r -= MIDDLE_SHAPE_ODDS[shape];
+    if (r < 0) return shape;
+  }
+  return MIDDLE_SHAPES[MIDDLE_SHAPES.length - 1];
+}
 
-THE THREE COMBOS
-  analogy + activity: making a surgeon's salary from the hot tub
-  trade + activity: shorting drake mid haircut
-  analogy + trade: how to make a lawyer's salary shorting kanye
+/** An analogy off the list — never the one that names the person the video
+ *  trades on, so a Drake build never makes drake's salary. */
+function analogyFor(person: string): string {
+  const pool = MIDDLE_ANALOGIES.filter((a) => !namesPerson(a, person));
+  return pick(pool.length ? pool : MIDDLE_ANALOGIES);
+}
 
-You may open with "how to", and the money part then reads "how to make". It works best with analogy + trade.
+const ACTIVITY = `${PAUV}
+
+THE LINE reads:
+  making <money analogy> while <what he is doing>
+
+The money analogy is already chosen and the line is put together from your part, so you write only WHAT HE IS DOING: what the guy in the video is doing, given below, said casually and briefly so it reads straight after "while": "wearing a knight helmet", "on the toilet", "holding a hammer in my mouth", "laying in the middle of the road", "sitting in the woods", "drinking a beer". Take it only from what the video shows and never make one up. Say it your own way rather than copying the words given, and give it without the "while".
 
 RULES
 - Never the word "man".
-- No emoji, no hashtags, no quote marks, no full stop.
-- All lower case, names and acronyms included.
-
-EXAMPLES
-${examples(MIDDLE_EXAMPLES)}
-
-They show the combos and the tone. Write a new line for this video; never hand one of these back.
-
-${REPLY}`;
-
-// ── Middle's clock ───────────────────────────────────────────────────────────
-
-const CLOCK = `${PAUV}
-
-THIS CAPTION IS THE MONEY AGAINST THE CLOCK: what the payout is worth, next to how little time it took. No trade, no trading verb, no one's name. The line is put together from the parts you give, so you write only the parts asked for.
-
-THE LINE comes out one of two ways:
-  <opener> <money analogy> in the time it takes to <task>
-  <opener> <money analogy> in <how long> while <what he is doing>
-
-OPENER: "making" or "out-earning", yours to choose, "making" most of the time. With "out-earning" the analogy is who or what gets out-earned, like "my landlord".
-MONEY ANALOGY: the payout next to something relatable. Small and everyday beats big: a week of groceries, a month of gas, a year of netflix, rent, a bartender's night, a car payment. A salary-sized one ("a surgeon's salary", "lebron money") is fine now and then, never the default. Pick one that plays against the task or the time given.
-TASK (only when asked for): what the guy in the video is doing, given below, said as a task with a clear start and end, first person: "put a hammer in my mouth", "tape my mouth shut", "put on a suit of armor", "crack open a beer". Wearing or being in something he could put on becomes putting it on. Take it only from what the video shows and never make one up. A place he is at or a state he is just in is not a task: "sit in a chair", "lie in the road", "be in a grocery store" are not tasks, and when that is all the video gives you, the task is "" and the line takes one of its own. Say it your own way rather than copying the words given.
-WHAT HE IS DOING (only when asked for): what the guy in the video is doing, said casually so it reads straight after "while": "in the hot tub", "half asleep", "eating cereal", "getting a haircut", "on the toilet". Give it without the "while". Take it from what the video shows and never make one up.
-
-RULES
-- Never the word "man".
-- No trading verb, no "how to", no one's name except inside a money analogy like "lebron money".
-- No "while" in a task, and no time or number in a task or what he is doing: the line already has its time.
+- No trading verb, no one's name, no time or number: the line is the money against what he is doing, nothing else.
 - No emoji, no hashtags, no quote marks, no full stop. All lower case.
 
 EXAMPLES, whole lines as they come out
-${examples([...CLOCK_EXAMPLES.pool, ...CLOCK_EXAMPLES.context, ...CLOCK_EXAMPLES.number])}
+${examples(MIDDLE_EXAMPLES)}
 
-They show the shape and the tone. Write new parts for this video; never hand one of these back.
+They show the shape and the tone. Write what he is doing for this video; never hand one of these back.
 
-Reply as JSON: {"opener": "...", "analogy": "...", "task": "...", "activity": "..."}, with "" for any part not asked for.`;
+Reply with what he is doing and nothing else.`;
 
-const CLOCK_FORMAT: Anthropic.Beta.BetaJSONOutputFormat = {
-  type: 'json_schema',
-  schema: {
-    type: 'object',
-    properties: {
-      opener: { type: 'string', enum: ['making', 'out-earning'] },
-      analogy: { type: 'string' },
-      task: { type: 'string' },
-      activity: { type: 'string' },
-    },
-    required: ['opener', 'analogy', 'task', 'activity'],
-    additionalProperties: false,
-  },
-};
-
-/** The branch a clock line takes: by CLOCK_BRANCH_ODDS with a context to take
- *  a task or an activity from, the pool without one. */
-function clockBranch(hasContext: boolean): ClockBranch {
-  if (!hasContext) return NO_CONTEXT_CLOCK_BRANCH;
-  let r = Math.random();
-  for (const b of CLOCK_BRANCHES) {
-    r -= CLOCK_BRANCH_ODDS[b];
-    if (r < 0) return b;
+function middlePlan({ person, direction, personaContext }: Input): Plan {
+  const { doing, parentheticals } = splitContext(personaContext);
+  const opening = `making ${analogyFor(person)}`;
+  const shape = middleShape();
+  if (shape !== 'while') {
+    const time = shape.startsWith('seconds')
+      ? `in ${pick(MIDDLE_SECONDS)} seconds`
+      : `in the time it takes to ${pick(MIDDLE_TASKS)}`;
+    // The parenthetical shapes take one of the context's "(...)"s, no brackets;
+    // a context with none leaves the line at its time.
+    const parenthetical = shape.endsWith('parenthetical') && parentheticals.length ? ` ${pick(parentheticals)}` : '';
+    return { line: `${opening} ${time}${parenthetical}` };
   }
-  return CLOCK_BRANCHES[CLOCK_BRANCHES.length - 1];
-}
-
-/** Every way a trade is said, Degen's included, which a clock line never has. */
-const ANY_TRADE = /\b(trading on|going long on|shorting|shorts|goes long on|trades on)\b/;
-/** A time of its own, which a task or an activity must not bring: the line's
- *  time is already drawn. */
-const A_TIME = /\bin the time it takes\b|\b\d+\s*(seconds?|secs?|minutes?|mins?|hours?)\b/;
-
-/** One part of the model's reply as the line takes it: no emoji, hashtags,
- *  quotes or trailing stop, lower case, one line — and anything it repeated
- *  from the frame around it (`frame`, at the start) taken off. */
-const clockPart = (v: unknown, frame: RegExp): string => (typeof v === 'string' ? v : '')
-  .replace(EMOJI, '')
-  .replace(/#\S+/g, '')
-  .replace(/["“”`]/g, '')
-  .replace(/^['‘’]+|['‘’]+$/g, '')
-  .toLowerCase()
-  .replace(/\s+/g, ' ')
-  .replace(/[\s.!,;:]+$/, '')
-  .trim()
-  .replace(frame, '')
-  .trim();
-
-function clockPlan(personaContext: string): Plan {
-  const branch = clockBranch(!!personaContext);
-  // Drawn for the pool, and for the context branch to fall back on when the
-  // context has no task in it.
-  const task = pick(CLOCK_TASKS);
-  const number = pick(CLOCK_NUMBERS);
-  const ask = branch === 'pool'
-    ? ['write: the opener and the money analogy', `task (already chosen): ${task}`]
-    : branch === 'context'
-      ? ['write: the opener, the money analogy and the task', `what the guy in the video is doing: ${personaContext}`]
-      : [
-        'write: the opener, the money analogy and what he is doing',
-        `how long (already chosen): ${number}`,
-        `what the guy in the video is doing: ${personaContext}`,
-      ];
+  // The while shape: what he is doing on camera, or the mystery. With no
+  // context there is nothing he is doing, so it is the mystery.
+  if (doing && Math.random() < MIDDLE_ACTIVITY_ODDS) {
+    return {
+      system: ACTIVITY,
+      ask: [`the line so far: ${opening} while`, `what the guy in the video is doing: ${doing}`].join('\n'),
+      finish: (reply) => {
+        const activity = clean(reply).replace(/^while\s+/, '');
+        if (!activity || ANY_TRADE.test(activity) || A_TIME.test(activity) || /\d/.test(activity)) return null;
+        if (namesPerson(activity, person)) return null;
+        return noMan(`${opening} while ${activity}`, person);
+      },
+    };
+  }
+  const verb = MIDDLE_MYSTERY_VERBS[direction];
   return {
-    system: CLOCK,
-    ask: ask.join('\n'),
-    format: CLOCK_FORMAT,
+    system: MYSTERY,
+    ask: [`person: ${person}`, which(direction), `open with: ${verb}`].join('\n'),
     finish: (reply) => {
-      let j: { opener?: unknown; analogy?: unknown; task?: unknown; activity?: unknown } = {};
-      try { j = JSON.parse(reply) as typeof j; } catch { return null; }
-      const opener = j.opener === 'out-earning' ? 'out-earning' : 'making';
-      const analogy = clockPart(j.analogy, /^(how to make|how to|making|make|out-earning)\s+/);
-      if (!analogy || A_TIME.test(analogy) || /\bwhile\b/.test(analogy)) return null;
-      let time: string;
-      if (branch === 'number') {
-        const activity = clockPart(j.activity, /^while\s+/);
-        if (!activity || A_TIME.test(activity)) return null;
-        time = `in ${number} while ${activity}`;
-      } else {
-        const written = branch === 'context' ? clockPart(j.task, /^(in the time it takes\s+)?(to\s+)?/) : '';
-        // The context branch's task has no "while" and no time of its own; an
-        // empty one is a context with no task in it, and the pool stands in.
-        if (written && (/\bwhile\b/.test(written) || A_TIME.test(written))) return null;
-        time = `in the time it takes to ${written || task}`;
-      }
-      const line = `${opener} ${analogy} ${time}`;
-      return ANY_TRADE.test(line) ? null : line;
+      const mystery = holdVerb(clean(reply), verb, true);
+      return mystery && !namesPerson(mystery, person) ? `${opening} while ${mystery}` : null;
     },
   };
 }
@@ -553,14 +508,16 @@ const TWIST_PLAN: Record<Twist, (input: Input) => Plan> = {
 
 /** What this call writes: now and then a twist, otherwise the mode's own. Me if
  *  is written off what the video shows, so a build with no context draws from
- *  the twists that need none. */
+ *  the twists that need none. Middle takes no twist: its mystery is a slot in
+ *  its own while shape. */
 function planFor(input: Input): Plan {
-  if (Math.random() >= TWIST_ODDS) return modePlan(input);
+  if (input.mode === 'middle' || Math.random() >= TWIST_ODDS) return modePlan(input);
   const twists = input.personaContext ? TWISTS : NO_CONTEXT_TWISTS;
   return TWIST_PLAN[pick(twists[input.direction])](input);
 }
 
-function modePlan({ mode, person, direction, personaContext }: Input): Plan {
+function modePlan(input: Input): Plan {
+  const { mode, person, direction } = input;
   if (mode === 'degen') {
     const descriptor = pick(DESCRIPTORS);
     const verb = pick(DEGEN_VERBS[direction]);
@@ -579,27 +536,7 @@ function modePlan({ mode, person, direction, personaContext }: Input): Plan {
       finish: (reply) => noMan(holdVerb(clean(reply), verb, true), person),
     };
   }
-  const combo: Combo = pick(personaContext ? COMBOS : NO_CONTEXT_COMBOS);
-  // The clock has a guide and a shape of its own; "man" is held off it too.
-  if (combo === 'analogy + clock') {
-    const clock = clockPlan(personaContext);
-    return { ...clock, finish: (reply) => noMan(clock.finish(reply), person) };
-  }
-  const verb = hasTrade(combo) ? pick(VERBS[direction]) : null;
-  return {
-    system: MIDDLE,
-    ask: [
-      `write: ${combo}`,
-      `person: ${person}`,
-      which(direction),
-      ...(verb ? [`trading verb: ${verb}`] : []),
-      ...(hasActivity(combo) ? [`what the guy in the video is doing: ${personaContext}`] : []),
-    ].join('\n'),
-    finish: (reply) => {
-      const line = clean(reply);
-      return noMan(verb ? holdVerb(line, verb, false) : line || null, person);
-    },
-  };
+  return middlePlan(input);
 }
 
 // ── The call ─────────────────────────────────────────────────────────────────
@@ -609,7 +546,7 @@ function modePlan({ mode, person, direction, personaContext }: Input): Plan {
 let client: Anthropic | null = null;
 const anthropic = () => (client ??= new Anthropic({ timeout: 60_000, maxRetries: 2 }));
 
-async function draft(plan: Plan): Promise<string> {
+async function draft(plan: Ask): Promise<string> {
   const res = await anthropic().beta.messages.create({
     model: MODEL,
     max_tokens: 8000,
@@ -636,13 +573,14 @@ export async function POST(req: NextRequest) {
   if (!parsed.success) return NextResponse.json({ error: 'invalid body' }, { status: 400 });
 
   let lastErr = '';
-  // Two goes, each drawing afresh — twist and all: the realistic failures are
-  // a line with no trade where one was asked for, one with "man" in it, or a
-  // mystery that names them, and a fresh draw fixes those more often than not.
+  // Two goes, each drawing afresh — twist, shape and all: the realistic
+  // failures are a line with no trade where one was asked for, one with "man"
+  // in it, or a mystery that names them, and a fresh draw fixes those more
+  // often than not.
   for (let attempt = 0; attempt < HOOK_ATTEMPTS; attempt++) {
     try {
       const plan = planFor(parsed.data);
-      const line = plan.finish(await draft(plan));
+      const line = 'line' in plan ? plan.line : plan.finish(await draft(plan));
       if (!line) throw new Error('the line broke its rules');
       return NextResponse.json({ start: line });
     } catch (err) {
