@@ -61,10 +61,14 @@ export const isVids2Mode = (v: unknown): v is Vids2Mode =>
 
 /** Whether Mode is a question at all. Only in the Studio: the clipper page
  *  (pauv.io/clipping, this same code built with NEXT_PUBLIC_APP=clippers)
- *  makes Serious videos and nothing else. Its form has no Mode card
+ *  makes CLIPPER_MODE videos and nothing else. Its form has no Mode card
  *  (Vids2Form), a saved answer is not read back (loadSetup), and a code made
- *  in another mode comes back as Serious and says so (answersFromRecord). */
+ *  in another mode comes back in CLIPPER_MODE and says so (answersFromRecord). */
 export const MODE_ASKED = !CLIPPERS;
+/** The mode every clipper video is made in, Mode not being asked there.
+ *  Middle since 2026-09-24, Serious before. */
+export const CLIPPER_MODE: Vids2Mode = 'middle';
+const MODE_NAME: Record<Vids2Mode, string> = { serious: 'Serious', middle: 'Middle', degen: 'Degen' };
 
 /** Which way Pauv comes up in the trade recording, as the form asks it: light,
  *  dark, or rolled at even odds (rollTheme) — the default, so builds spread
@@ -131,8 +135,8 @@ export interface Vids2Setup {
   /** Light, dark, or rolled — see Vids2Look. Always 'roll' on the clipper
    *  page, where it is not asked (LOOK_ASKED). */
   look: Vids2Look;
-  /** Serious, Middle or Degen — see Vids2Mode. Always 'serious' on the clipper
-   *  page, where it is not asked (MODE_ASKED). */
+  /** Serious, Middle or Degen — see Vids2Mode. Always CLIPPER_MODE on the
+   *  clipper page, where it is not asked (MODE_ASKED). */
   mode: Vids2Mode;
   /** Which end the form starts from — see Vids2Flow. Null until it has been
    *  chosen: the form opens on the two buttons and asks nothing until one of
@@ -156,7 +160,7 @@ export interface Vids2Setup {
 
 export const EMPTY_SETUP: Vids2Setup = {
   personaId: null, person: '', direction: 'up',
-  intro: 'chatgpt', question: '', newsRange: '7d', story: null, look: 'roll', mode: 'serious',
+  intro: 'chatgpt', question: '', newsRange: '7d', story: null, look: 'roll', mode: MODE_ASKED ? 'serious' : CLIPPER_MODE,
   flow: null, trendWindow: '24h', hidePolitics: false, trendSort: 'hot', trendCategory: '',
 };
 
@@ -229,7 +233,7 @@ export function loadSetup(): Vids2Setup {
       // a saved answer would be one nothing on that form can change.
       look: LOOK_ASKED && isVids2Look(j.look) ? j.look : 'roll',
       // Answers saved before there were three modes had a degen switch.
-      mode: !MODE_ASKED ? 'serious' : isVids2Mode(j.mode) ? j.mode : j.degen === true ? 'degen' : 'serious',
+      mode: !MODE_ASKED ? CLIPPER_MODE : isVids2Mode(j.mode) ? j.mode : j.degen === true ? 'degen' : 'serious',
       flow: null,
       trendWindow: isTrendWindow(j.trendWindow) ? j.trendWindow : EMPTY_SETUP.trendWindow,
       hidePolitics: j.hidePolitics === true,
@@ -394,17 +398,16 @@ export const sameVideo = (s: Vids2Setup, a: Vids2Answers): boolean =>
  *  to answer, and both are said.
  *
  *  On the clipper page, where Mode is not asked (MODE_ASKED), a record made
- *  in Middle or Degen comes back as Serious, and that is said too. The
+ *  in any other mode comes back in CLIPPER_MODE, and that is said too. The
  *  record's words, look, sound and BOOMs still come back off it — the BOOMs
  *  at the seconds the record has, as hand-laid ones do, rather than laid
  *  afresh on the new recordings' beats the way a Degen build's are. */
 export function answersFromRecord(build: VidBuildSpec): { answers: Vids2Answers; problems: string[] } | null {
   const read = readAnswers(build);
-  if (!read || MODE_ASKED || read.answers.mode === 'serious') return read;
-  const was = read.answers.mode === 'degen' ? 'Degen' : 'Middle';
+  if (!read || MODE_ASKED || read.answers.mode === CLIPPER_MODE) return read;
   return {
-    answers: { ...read.answers, mode: 'serious' },
-    problems: [...read.problems, `This code was made in ${was} mode; every video here is Serious, so it comes back as one.`],
+    answers: { ...read.answers, mode: CLIPPER_MODE },
+    problems: [...read.problems, `This code was made in ${MODE_NAME[read.answers.mode]} mode; every video here is ${MODE_NAME[CLIPPER_MODE]}, so it comes back as one.`],
   };
 }
 
@@ -416,13 +419,14 @@ function readAnswers(build: VidBuildSpec): { answers: Vids2Answers; problems: st
   const a = build.picks.bottomA;
   const intro = a?.videoName.match(/^.+ (?:up|down) A · (ChatGPT|News (.+))$/);
   const kind: Vids2Intro = !a ? 'none' : intro?.[1] === 'ChatGPT' ? 'chatgpt' : intro ? 'news' : 'none';
+  const mode: Vids2Mode = MODE_ASKED ? 'serious' : CLIPPER_MODE;
   const problems = [
-    'This code was written down before Vids 2 kept its answers, so the mode is set to Serious — change it if it was not.',
+    `This code was written down before Vids 2 kept its answers, so the mode is set to ${MODE_NAME[mode]}${MODE_ASKED ? ' — change it if it was not' : ''}.`,
   ];
   if (kind === 'chatgpt') problems.push('The question was not written down either: type it again, then press Generate.');
   if (kind === 'news') problems.push(`Nor was the ${intro?.[2] ?? ''} story: find it again, then press Generate.`);
   return {
-    answers: { person, direction, intro: kind, question: '', story: null, mode: 'serious', theme },
+    answers: { person, direction, intro: kind, question: '', story: null, mode, theme },
     problems,
   };
 }

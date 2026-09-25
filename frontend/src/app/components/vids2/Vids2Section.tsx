@@ -17,7 +17,8 @@
 //             the recordings) and the persona. Pressing an answer moves the
 //             form on. See Vids2Form. The look and the mode are the Studio's
 //             questions alone: the clipper page rolls the one and is always
-//             Serious for the other (LOOK_ASKED, MODE_ASKED in lib/vids2).
+//             Middle for the other (LOOK_ASKED, MODE_ASKED and CLIPPER_MODE
+//             in lib/vids2).
 //   Generate  the screen recordings, all at once: the intro (Bottom A) —
 //             ChatGPT looking them up, or the news story opened and read, or
 //             nothing at all — and the Pauv trade (Bottom B), light or dark

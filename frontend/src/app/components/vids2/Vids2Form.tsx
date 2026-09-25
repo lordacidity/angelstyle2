@@ -19,12 +19,13 @@
 //   4. Look       Random, Light or Dark — which way Pauv comes up in the
 //                 trade recording. Studio only (LOOK_ASKED).
 //   5. Mode       Serious, Middle or Degen — how the video talks. Studio
-//                 only (MODE_ASKED): the clipper page makes Serious videos.
+//                 only (MODE_ASKED): the clipper page makes Middle videos
+//                 (CLIPPER_MODE).
 //   6. Persona    the three clips around the trade, as tiles.
 //
 // So the Studio's form is six cards and the clipper page's is four. The two
 // that are not asked there are not blank answers: they are 'roll' and
-// 'serious' in the setup (lib/vids2/vids2Build), which is what the card
+// CLIPPER_MODE in the setup (lib/vids2/vids2Build), which is what the card
 // would have said on its own.
 //
 // One card is open at a time and it is always the next thing to do. Cards
