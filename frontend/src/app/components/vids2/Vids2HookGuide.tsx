@@ -169,9 +169,10 @@ export function Vids2HookGuide({ mode, direction, hasContext, onClose }: Props) 
           <p>
             One line per video, written by <b className="text-zinc-100">Claude Sonnet 5</b> (low effort) on its own call
             (<span className="font-mono text-[11px]">api/vids/hook</span>), beside the one that writes the rest of the
-            captions. It is handed four things and nothing else: the <b className="text-zinc-100">mode</b>,{' '}
-            <b className="text-zinc-100">who</b>, <b className="text-zinc-100">which way</b>, and — for Middle only —
-            the persona&rsquo;s context: what he is doing, and what it says in parentheses. Nothing off the screen
+            captions. It is handed the <b className="text-zinc-100">mode</b>, <b className="text-zinc-100">who</b>{' '}
+            — with who they are, their industry and bio off the Pauv roster, so it takes their world from that
+            rather than guessing one — <b className="text-zinc-100">which way</b>, and, for Middle only, the
+            persona&rsquo;s context: what he is doing, and what it says in parentheses. Nothing off the screen
             recordings.
           </p>
           <p>

@@ -77,6 +77,14 @@
 // mystery that names them, a hype line that opens on a trade, or a me if out
 // of its frame is written again.
 //
+// Every ask that names the person also says who they are — their industry and
+// bio off the Pauv roster (lib/vids2/whoIs) — and the guides that reason about
+// the person's world (Serious's catalyst, the mystery) are told to take it from
+// there and never guess one. A name alone had the model guessing: Clavicular,
+// a looksmaxxing streamer, came back as "the most overhyped rookie in the
+// game". A name the roster doesn't have goes without, and the guides then keep
+// to what they know.
+//
 // Written by Claude Sonnet 5 at low effort rather than the Gemini Flash-Lite the
 // rest of the words use. The job is tone plus knowing the person well enough to
 // name a real moment in their year or a nickname that lands, which Flash-Lite
@@ -96,6 +104,7 @@ import {
   NICKNAME_EXAMPLES, NO_CONTEXT_TWISTS, SELF_OWNS, SERIOUS_EXAMPLES, TWIST_ODDS, TWISTS, VERBS,
   type MiddleShape, type Twist,
 } from '@/lib/vids2/hookRules';
+import { whoIs, type Who } from '@/lib/vids2/whoIs';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -113,7 +122,9 @@ const Body = z.object({
   personaContext: z.string().trim().max(600).default(''),
 });
 
-type Input = z.infer<typeof Body>;
+/** The body, with who the person is off the roster — null when it has no
+ *  such name. */
+type Input = z.infer<typeof Body> & { who: Who | null };
 type Direction = Input['direction'];
 
 const pick = <T,>(xs: readonly T[]): T => xs[Math.floor(Math.random() * xs.length)];
@@ -140,6 +151,9 @@ type Plan = Ask | { line: string };
 const which = (direction: Direction) =>
   `which way: ${direction === 'up' ? 'up, backing them' : 'down, betting against them'}`;
 
+/** Who they are, for the ask — nothing when the roster didn't know them. */
+const whoLine = (who: Who | null): string[] => (who ? [`who they are: ${who.summary}`] : []);
+
 // ── Serious ──────────────────────────────────────────────────────────────────
 
 const SERIOUS = `${PAUV}
@@ -149,7 +163,7 @@ THE ORDER, every time:
 
 TRADING VERB: the first words of the line, always. It is one of "trading on", "going long on" or "shorting", and the one to use is given with the person. Use exactly that one.
 PERSON: their full, normal name, the name everyone actually calls them, the way the examples write it. No nicknames.
-CATALYST (optional): between the person and the money, a real-world moment that gives the trade a reason, like "ahead of midterms", "before the album drops", "after the trade deadline". It has to belong to this person's actual world: a tour or an album for a musician, the playoffs for a player, earnings or a launch for a founder. When you are not sure what their world is, leave it out rather than guess.
+CATALYST (optional): between the person and the money, a real-world moment that gives the trade a reason, like "ahead of midterms", "before the album drops", "after the trade deadline". It has to belong to this person's actual world, which is given below as who they are, off Pauv's own listing: a tour or an album for a musician, the playoffs for a player, earnings or a launch for a founder, a stream or a stunt for a streamer. Never a moment from a world they are not in. When who they are is not given and you are not sure, leave it out rather than guess.
 MONEY OUTCOME: the end of the line, what the money does, like "to cover rent", "for a six figure year", "to retire early".
 
 RULES
@@ -229,7 +243,7 @@ They show the shape and the tone. Write what he is doing for this video; never h
 
 Reply with what he is doing and nothing else.`;
 
-function middlePlan({ person, direction, personaContext }: Input): Plan {
+function middlePlan({ person, direction, personaContext, who }: Input): Plan {
   const { doing, parentheticals } = splitContext(personaContext);
   const opening = `making ${analogyFor(person)}`;
   const shape = middleShape();
@@ -259,7 +273,7 @@ function middlePlan({ person, direction, personaContext }: Input): Plan {
   const verb = MIDDLE_MYSTERY_VERBS[direction];
   return {
     system: MYSTERY,
-    ask: [`person: ${person}`, which(direction), `open with: ${verb}`].join('\n'),
+    ask: [`person: ${person}`, ...whoLine(who), which(direction), `open with: ${verb}`].join('\n'),
     finish: (reply) => {
       const mystery = holdVerb(clean(reply), verb, true);
       return mystery && !namesPerson(mystery, person) ? `${opening} while ${mystery}` : null;
@@ -332,6 +346,7 @@ THE ORDER:
 
 TRADING VERB: the first words of the line, always. It is one of "trading on", "going long on" or "shorting", and the one to use is given below. Use exactly that one.
 WHO THEY ARE: the way the culture already talks about them, as a superlative or a line anyone would place, like "the greatest musician of our generation", "the most hated man in america", "every girl's celebrity crush", "the guy your dad won't stop talking about", "the goat". Praise, a knock or how the internet sees them all work, as long as it fits this person well enough that the reveal lands.
+Who they are is given below, off Pauv's own listing. Take their world from it — a streamer is a streamer, a rapper a rapper, a politician a politician — and never put them in a sport, a job or a field it does not say. When nothing is given and you are not sure who they are, say how the internet talks about someone like them rather than guess a career: never a rookie, an athlete or a musician unless that is what they are.
 
 RULES
 - Never their name, any part of it, or a nickname.
@@ -415,11 +430,11 @@ function namesPerson(line: string, person: string): boolean {
     .some((w) => new RegExp(`(^|[^\\p{L}\\p{N}])${w}($|[^\\p{L}\\p{N}])`, 'u').test(line));
 }
 
-function mysteryPlan({ person, direction }: Input): Plan {
+function mysteryPlan({ person, direction, who }: Input): Plan {
   const verb = pick(VERBS[direction]);
   return {
     system: MYSTERY,
-    ask: [`person: ${person}`, which(direction), `open with: ${verb}`].join('\n'),
+    ask: [`person: ${person}`, ...whoLine(who), which(direction), `open with: ${verb}`].join('\n'),
     finish: (reply) => {
       const line = holdVerb(clean(reply), verb, true);
       return line && !namesPerson(line, person) ? line : null;
@@ -427,10 +442,10 @@ function mysteryPlan({ person, direction }: Input): Plan {
   };
 }
 
-function hypePlan({ mode, person }: Input): Plan {
+function hypePlan({ mode, person, who }: Input): Plan {
   return {
     system: hype(mode === 'degen'),
-    ask: `person: ${person}`,
+    ask: [`person: ${person}`, ...whoLine(who)].join('\n'),
     finish: (reply) => {
       const line = clean(reply);
       return line && !/^(trading on|going long on|shorting|shorts|goes long on|trades on)\b/.test(line) ? line : null;
@@ -438,12 +453,13 @@ function hypePlan({ mode, person }: Input): Plan {
   };
 }
 
-function meIfPlan({ mode, person, direction, personaContext }: Input): Plan {
+function meIfPlan({ mode, person, direction, personaContext, who }: Input): Plan {
   const verb = pick(VERBS[direction]);
   return {
     system: meIf(mode === 'degen'),
     ask: [
       `person: ${person}`,
+      ...whoLine(who),
       which(direction),
       `trading verb: ${verb}`,
       `what the guy in the video is doing: ${personaContext}`,
@@ -517,13 +533,13 @@ function planFor(input: Input): Plan {
 }
 
 function modePlan(input: Input): Plan {
-  const { mode, person, direction } = input;
+  const { mode, person, direction, who } = input;
   if (mode === 'degen') {
     const descriptor = pick(DESCRIPTORS);
     const verb = pick(DEGEN_VERBS[direction]);
     return {
       system: DEGEN,
-      ask: `person: ${person}`,
+      ask: [`person: ${person}`, ...whoLine(who)].join('\n'),
       format: NICKNAME_FORMAT,
       finish: (reply) => degenLine(reply, person, descriptor, verb),
     };
@@ -532,7 +548,7 @@ function modePlan(input: Input): Plan {
     const verb = pick(VERBS[direction]);
     return {
       system: SERIOUS,
-      ask: [`person: ${person}`, which(direction), `open with: ${verb}`].join('\n'),
+      ask: [`person: ${person}`, ...whoLine(who), which(direction), `open with: ${verb}`].join('\n'),
       finish: (reply) => noMan(holdVerb(clean(reply), verb, true), person),
     };
   }
@@ -571,6 +587,7 @@ async function draft(plan: Ask): Promise<string> {
 export async function POST(req: NextRequest) {
   const parsed = Body.safeParse(await req.json().catch(() => null));
   if (!parsed.success) return NextResponse.json({ error: 'invalid body' }, { status: 400 });
+  const input: Input = { ...parsed.data, who: await whoIs(parsed.data.person) };
 
   let lastErr = '';
   // Two goes, each drawing afresh — twist, shape and all: the realistic
@@ -579,7 +596,7 @@ export async function POST(req: NextRequest) {
   // often than not.
   for (let attempt = 0; attempt < HOOK_ATTEMPTS; attempt++) {
     try {
-      const plan = planFor(parsed.data);
+      const plan = planFor(input);
       const line = 'line' in plan ? plan.line : plan.finish(await draft(plan));
       if (!line) throw new Error('the line broke its rules');
       return NextResponse.json({ start: line });
