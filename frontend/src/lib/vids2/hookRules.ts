@@ -6,8 +6,9 @@
 // on the tuning page (components/vids2/Vids2HookGuide) is read off the same
 // lists and odds the route draws with, and can't drift from it.
 //
-// No prompts in here and nothing that calls anything: the route owns how each
-// guide is worded and how a reply is held to it.
+// No prompts in here and nothing that calls anything — the one function reads
+// a context's parentheticals, which Middle and the tuning page both need: the
+// route owns how each guide is worded and how a reply is held to it.
 
 export type HookMode = 'serious' | 'middle' | 'degen';
 export type HookDirection = 'up' | 'down';
@@ -21,35 +22,51 @@ export const VERBS: Record<HookDirection, readonly string[]> = {
 
 // ── Middle ───────────────────────────────────────────────────────────────────
 //
-// Every Middle line opens "making <analogy>", and then takes one of five
+// Every Middle line opens "making <analogy>", and then takes one of four
 // shapes, drawn here by MIDDLE_SHAPE_ODDS:
 //
-//   making <analogy> while <what he is doing | the mystery>       while
+//   making <analogy> <parenthetical>                               while · the parenthetical
+//   making <analogy> <the mystery>                                 while · the mystery
 //   making <analogy> in <seconds> seconds <parenthetical>          seconds + parenthetical
-//   making <analogy> in the time it takes to <task> <parenthetical> time + parenthetical
 //   making <analogy> in <seconds> seconds                          seconds
 //   making <analogy> in the time it takes to <task>                time
 //
 // The analogy, the seconds and the task are all off the lists below. The
 // parenthetical is what the persona's context says in parentheses — "wearing
-// a knight helmet (in a fresh fit)" puts "in a fresh fit" on the end of the
-// line, word for word and without the brackets; a context with several has one
-// drawn, and one with none leaves the line at its time. So three shapes in
-// five never call the model. The while shape does: what he is doing is the
-// rest of the context, said by the model so it reads after "while", and the
-// mystery is the trade on someone described but never named, on a verb fixed
-// by which way (MIDDLE_MYSTERY_VERBS).
+// a knight helmet (with a fresh fit)" puts "with a fresh fit" on the end of
+// the line, word for word and without the brackets (parentheticalsOf); a
+// context with several has one drawn, and one with none leaves the seconds
+// line at its time and sends the while shape to the mystery. So the model is
+// only ever asked for the mystery: the trade on someone described but never
+// named, on a verb fixed by which way (MIDDLE_MYSTERY_VERBS), set straight
+// after the analogy — "making lebron's salary shorting the goat". Nothing in
+// a line says "while" unless the parenthetical does ("while daydrinking");
+// the shape keeps its name from when the model wrote what he was doing after
+// the word.
 
-export type MiddleShape = 'while' | 'seconds + parenthetical' | 'time + parenthetical' | 'seconds' | 'time';
-export const MIDDLE_SHAPES: readonly MiddleShape[] = ['while', 'seconds + parenthetical', 'time + parenthetical', 'seconds', 'time'];
+export type MiddleShape = 'while' | 'seconds + parenthetical' | 'seconds' | 'time';
+export const MIDDLE_SHAPES: readonly MiddleShape[] = ['while', 'seconds + parenthetical', 'seconds', 'time'];
 export const MIDDLE_SHAPE_ODDS: Record<MiddleShape, number> = {
-  while: 0.4, 'seconds + parenthetical': 0.15, 'time + parenthetical': 0.15, seconds: 0.15, time: 0.15,
+  while: 0.4, 'seconds + parenthetical': 0.2, seconds: 0.2, time: 0.2,
 };
 
-/** In the while shape, how often the slot is what he is doing on camera; the
- *  rest of the time it is the mystery. A persona with no context has nothing
- *  he is doing, so its while shape is always the mystery. */
-export const MIDDLE_ACTIVITY_ODDS = 0.6;
+/** In the while shape, how often the slot is the parenthetical; the rest of
+ *  the time it is the mystery. A context with no "(...)" has no parenthetical,
+ *  so its while shape is always the mystery. */
+export const MIDDLE_PARENTHETICAL_ODDS = 0.6;
+
+/** Each "(...)" a persona's context says, word for word, lower-cased and
+ *  without the brackets — what Middle puts on the end of a line. "wearing a
+ *  knight helmet (with a fresh fit)" gives ["with a fresh fit"]; "sitting in a
+ *  park (in da park) (with just a computer)" gives both. */
+export function parentheticalsOf(context: string): string[] {
+  const out: string[] = [];
+  for (const m of context.matchAll(/\(([^)]*)\)/g)) {
+    const p = m[1].replace(/\s+/g, ' ').trim().toLowerCase();
+    if (p) out.push(p);
+  }
+  return out;
+}
 
 /** The money analogies, at even odds — less the one that names the person the
  *  video trades on, so a Drake build never makes drake's salary. */
@@ -71,7 +88,7 @@ export const MIDDLE_ANALOGIES = [
 /** The seconds shapes' times, at even odds. */
 export const MIDDLE_SECONDS = ['67', '69', '420'] as const;
 
-/** The time shapes' tasks, at even odds. */
+/** The time shape's tasks, at even odds. */
 export const MIDDLE_TASKS = [
   'skip an ad',
   'brush my teeth',
@@ -131,8 +148,8 @@ export const TWISTS: Record<HookDirection, readonly Twist[]> = {
 };
 
 /** Me if catches him in the middle of what the video shows, so without a
- *  context there is nothing to catch him at — the same reason Middle's while
- *  shape is always the mystery without one. It would otherwise have to invent the
+ *  context there is nothing to catch him at — as Middle's while shape is always
+ *  the mystery without a parenthetical. It would otherwise have to invent the
  *  moment, which is how a line came to put the guy in a wedding toast he was
  *  never in. Mystery and hype say nothing about him, so they stand either way. */
 export const NO_CONTEXT_TWISTS: Record<HookDirection, readonly Twist[]> = {
@@ -163,19 +180,20 @@ export const SERIOUS_EXAMPLES: readonly string[] = [
   'trading on ronaldo through the world cup to quit the 9 to 5',
 ];
 
-/** Middle's while shape on what he is doing, whole lines the way the guide
- *  shows them to the model. The mystery half shows MYSTERY_EXAMPLES. */
+/** Middle lines the way they come out, for the guide. No Middle guide shows
+ *  them to the model: the only part it writes is the mystery, which has
+ *  MYSTERY_EXAMPLES. */
 export const MIDDLE_EXAMPLES: readonly string[] = [
-  "making a lawyer's salary while wearing a knight helmet",
-  'making a month of groceries while holding a phone in my mouth',
-  "making ronaldo's salary while laying in the middle of the road",
-  'making a year of rent while on the toilet',
-  "making sam altman's salary while sitting in the woods",
-  "making a ceo's bonus while drinking a beer",
-  "making a surgeon's salary while wearing a blindfold",
-  'making a year of gas while in a grocery store',
-  "making messi's salary while sitting in a park",
-  'making a year of rent while in a chipotle',
+  "making a lawyer's salary with a fresh fit",
+  'making a year of rent takin a dump',
+  "making ronaldo's salary in da streets",
+  "making a surgeon's salary without even looking",
+  'making a month of groceries while daydrinking',
+  "making sam altman's salary shorting the greatest rapper alive",
+  "making drake's salary in 67 seconds with a fresh fit",
+  'making a year of gas in 420 seconds',
+  "making messi's salary in the time it takes to skip an ad",
+  "making a ceo's bonus in the time it takes to get a hug",
 ];
 
 /** Degen's whole line, the way its guide shows it to the model. */
@@ -208,21 +226,29 @@ export const NICKNAME_EXAMPLES: readonly string[] = [
   'timothée chalamet: timmy chalamet',
 ];
 
+/** Takes, never facts, in the shape that lands: a superlative on what they
+ *  are with where it holds on the end, or a short epithet. Each is something a
+ *  fan or a hater would say and the other would argue with, so the viewer
+ *  wonders who. "the richest man in the world" is a fact they would nod at,
+ *  and "the woman who owns the music industry" a clause that walks around her;
+ *  the route throws both out. */
 export const MYSTERY_EXAMPLES: readonly string[] = [
-  'shorting the greatest musician of our generation',
+  'shorting the most overhyped athlete on the planet',
+  'shorting the softest rapper alive',
+  'shorting the most emotional rapper alive',
+  'shorting the most erratic billionaire alive',
+  'going long on the greatest musician of our generation',
   'going long on the most hated man in america',
+  'going long on the antichrist',
   'shorting the most overrated athlete of all time',
-  'going long on the most famous woman on earth',
+  'going long on the most overexposed woman on earth',
   "shorting every girl's celebrity crush",
-  "trading on the guy your dad won't stop talking about",
   'shorting the goat',
   'going long on the most annoying streamer alive',
-  'shorting the best rapper alive',
+  'trading on the best rapper alive',
   'going long on the most divisive man in the nfl',
-  "shorting your mom's favorite actor",
-  'going long on the most unhinged billionaire',
-  "shorting the internet's favorite boyfriend",
-  'going long on the most washed athlete in sports',
+  'trading on the most unhinged billionaire on earth',
+  'shorting the most washed athlete in sports',
   'shorting the man everyone pretends to like',
 ];
 

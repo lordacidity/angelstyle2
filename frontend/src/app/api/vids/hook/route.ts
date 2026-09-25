@@ -2,8 +2,8 @@
 // the mode Vids 2's form was set to. None of these hooks is written off the
 // screen recordings, so none of them is written alongside the step-by-step
 // lines (api/vids/captions): each is written here, from who the video trades
-// on, which way, and — for the two that say what he is doing, Middle and the
-// me if twist — the persona's context.
+// on, which way, and — for Middle's parenthetical and the me if twist — the
+// persona's context.
 //
 // SERIOUS is one flat line in a fixed order: the trading verb, the person, now
 // and then a real-world moment that gives the trade a reason, and what the
@@ -14,22 +14,23 @@
 //   shorting drake before the album drops to pay off the car
 //
 // MIDDLE (the form's name for normal) always opens "making <analogy>" and
-// then takes one of five shapes, drawn here by MIDDLE_SHAPE_ODDS: what he is
-// doing after "while", or the money against how little time it took — a drawn
-// number of seconds, or "in the time it takes to" a drawn task — and, in two of
-// those four, the persona's parenthetical on the end. The analogy, the seconds
-// and the task are all off lists in lib/vids2/hookRules, and the parenthetical
-// is what the persona's context says in parentheses ("wearing a knight helmet
-// (in a fresh fit)"), word for word and without the brackets, so three shapes
-// in five are put together here with no model call at all. The while shape's
-// slot is what he is doing on camera (MIDDLE_ACTIVITY_ODDS of the time), said
-// by the model off the rest of the context, or else the MYSTERY: the trade on
-// someone described but never named, on a verb fixed by which way — "trading
-// on" up, "shorting" down. Middle takes no twist; its mystery is that slot.
+// then takes one of four shapes, drawn here by MIDDLE_SHAPE_ODDS: the
+// persona's parenthetical straight after the analogy, or the money against
+// how little time it took — a drawn number of seconds, with or without the
+// parenthetical on the end, or "in the time it takes to" a drawn task. The
+// analogy, the seconds and the task are all off lists in lib/vids2/hookRules,
+// and the parenthetical is what the persona's context says in parentheses
+// ("wearing a knight helmet (with a fresh fit)"), word for word and without
+// the brackets, so every shape is put together here with no model call — save
+// the while shape's other half, the MYSTERY (1 - MIDDLE_PARENTHETICAL_ODDS of
+// its lines, and all of them when the context has no parenthetical): the
+// trade on someone described but never named, on a verb fixed by which way —
+// "trading on" up, "shorting" down — set straight after the analogy. Middle
+// takes no twist; its mystery is that slot.
 //
-//   making a lawyer's salary while wearing a knight helmet          while · what he is doing
-//   making a year of gas while shorting the greatest rapper alive   while · the mystery
-//   making drake's salary in 67 seconds in a fresh fit              seconds + parenthetical
+//   making a lawyer's salary with a fresh fit                       while · the parenthetical
+//   making a year of gas shorting the greatest rapper alive         while · the mystery
+//   making drake's salary in 67 seconds with a fresh fit            seconds + parenthetical
 //   making a year of rent in the time it takes to skip an ad        time
 //
 // DEGEN is descriptor + trade + nickname + (bracket) + emoji, every part but
@@ -42,7 +43,9 @@
 //   tweaker goes long on swifty (i love you swifty)
 //
 // In Serious and Degen, one hook in five is a TWIST instead, one of three at even
-// odds: a MYSTERY, the trade on someone described but never named; HYPE, the
+// odds: a MYSTERY, the trade on someone described but never named — in a take
+// ("the most erratic billionaire alive"), never a fact ("the richest man in
+// the world"), so the viewer wonders who; HYPE, the
 // name and how high they are going; or ME IF, the trade caught in the middle of
 // what he is doing on camera, "was legal". Hype only goes up, so a down trade's
 // twist is a mystery or a me if. Degen's hype and me if say the nickname;
@@ -53,29 +56,29 @@
 //   messi to the stratosphere                            hype
 //   me if shorting drake mid haircut was legal           me if
 //
-// Me if is the one twist written off the video: like Middle's activity, where
-// it catches him comes from the persona's context and is never invented, so a
-// build with no context draws from the other twists instead (NO_CONTEXT_TWISTS).
+// Me if is the one twist written off the video: where it catches him comes from
+// the persona's context, what he is doing on camera, and is never invented, so
+// a build with no context draws from the other twists instead (NO_CONTEXT_TWISTS).
 //
 // Everything that is a choice between fixed options is drawn here rather than
 // left to the model — the verb, Middle's shape and every part of it but the
-// two the model writes, and all of Degen but the nickname — so builds spread
-// across them instead of resting on whichever one the model favours. Down is
-// always "shorting" / "shorts"; up is "going long on" or "trading on" / "goes
-// long on" or "trades on", even odds. A Middle build with no persona context
-// has nothing he is doing, so its while shape is the mystery and its
-// parenthetical shapes stop at their time. The lists, the odds and every
+// mystery, and all of Degen but the nickname — so builds spread across them
+// instead of resting on whichever one the model favours. Down is always
+// "shorting" / "shorts"; up is "going long on" or "trading on" / "goes long
+// on" or "trades on", even odds. A Middle build whose context has no "(...)"
+// has no parenthetical, so its while shape is the mystery and its seconds +
+// parenthetical shape stops at its time. The lists, the odds and every
 // guide's examples live in lib/vids2/hookRules, which the tuning page's guide
 // to all of this (components/vids2/Vids2HookGuide) reads too.
 //
 // What the model writes is held to the rules rather than trusted with them:
 // lower-cased, stripped of emoji, quotes and a full stop, and a trade said on
 // the wrong verb has it swapped for the drawn one. A Serious line with no
-// trade where one was asked for, or with "man" in it, is written again. So is
-// Middle's what-he-is-doing with a trading verb, their name, a time or "man"
-// in it. A Degen nickname that comes back as nothing is the plain name. A
-// mystery that names them, a hype line that opens on a trade, or a me if out
-// of its frame is written again.
+// trade where one was asked for, or with "man" in it, is written again. A
+// Degen nickname that comes back as nothing is the plain name. A mystery that
+// names them, states a fact about them (FACTUAL: richest, most streamed, a
+// title, a count) or describes them in a clause (CLAUSE: who, that), a hype
+// line that opens on a trade, or a me if out of its frame is written again.
 //
 // Every ask that names the person also says who they are — their industry and
 // bio off the Pauv roster (lib/vids2/whoIs) — and the guides that reason about
@@ -85,23 +88,23 @@
 // game". A name the roster doesn't have goes without, and the guides then keep
 // to what they know.
 //
-// Written by Claude Sonnet 5 at low effort rather than the Gemini Flash-Lite the
-// rest of the words use. The job is tone plus knowing the person well enough to
-// name a real moment in their year or a nickname that lands, which Flash-Lite
-// wrote flat. It was Claude Opus 5 at medium effort until 2026-09-18; Sonnet 5
-// is $2 / $10 per million tokens against Opus's $5 / $25, low effort spends
-// fewer of them, and since the code draws most of
-// every line (verbs, combos, Degen's parts, the clock's frame), what is left
-// for the model is short enough that the bigger one wasn't earning its price.
+// Written by DeepSeek (lib/deepseek: deepseek-v4-flash unless DEEPSEEK_MODEL
+// says otherwise) rather than the Gemini Flash-Lite the rest of the words use.
+// The job is tone plus knowing the person well enough to name a real moment in
+// their year or a nickname that lands, which Flash-Lite wrote flat. It was
+// Claude Opus 5 at medium effort until 2026-09-18 and Claude Sonnet 5 at low
+// effort until 2026-09-25, each swapped for cost: the code draws most of every
+// line (verbs, Middle's shapes, Degen's parts), so what is left for the model
+// is short enough that the bigger ones weren't earning their price.
 
-import Anthropic from '@anthropic-ai/sdk';
 import { NextRequest, NextResponse } from 'next/server';
 import { z } from 'zod';
+import { deepseekChat, parseJson } from '@/lib/deepseek';
 import {
   DEGEN_EMOJI, DEGEN_EXAMPLES, DEGEN_VERBS, DESCRIPTORS, HOOK_ATTEMPTS, HYPE_NAMED, HYPE_NICKNAMED, LOVE_MAX,
-  LOVE_ODDS, ME_IF_NAMED, ME_IF_NICKNAMED, MIDDLE_ACTIVITY_ODDS, MIDDLE_ANALOGIES, MIDDLE_EXAMPLES,
-  MIDDLE_MYSTERY_VERBS, MIDDLE_SECONDS, MIDDLE_SHAPE_ODDS, MIDDLE_SHAPES, MIDDLE_TASKS, MYSTERY_EXAMPLES,
-  NICKNAME_EXAMPLES, NO_CONTEXT_TWISTS, SELF_OWNS, SERIOUS_EXAMPLES, TWIST_ODDS, TWISTS, VERBS,
+  LOVE_ODDS, ME_IF_NAMED, ME_IF_NICKNAMED, MIDDLE_ANALOGIES, MIDDLE_MYSTERY_VERBS, MIDDLE_PARENTHETICAL_ODDS,
+  MIDDLE_SECONDS, MIDDLE_SHAPE_ODDS, MIDDLE_SHAPES, MIDDLE_TASKS, MYSTERY_EXAMPLES, NICKNAME_EXAMPLES,
+  NO_CONTEXT_TWISTS, SELF_OWNS, SERIOUS_EXAMPLES, TWIST_ODDS, TWISTS, VERBS, parentheticalsOf,
   type MiddleShape, type Twist,
 } from '@/lib/vids2/hookRules';
 import { whoIs, type Who } from '@/lib/vids2/whoIs';
@@ -109,16 +112,14 @@ import { whoIs, type Who } from '@/lib/vids2/whoIs';
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
 
-const MODEL = 'claude-sonnet-5';
-
 const Body = z.object({
   mode: z.enum(['serious', 'middle', 'degen']),
   /** Who the video trades on, as the Pauv roster spells them. */
   person: z.string().trim().min(1).max(80),
   direction: z.enum(['up', 'down']),
   /** The persona's context: what he is doing on camera, with what it says in
-   *  parentheses — Middle's activity and its parenthetical. Serious and Degen
-   *  never mention it. */
+   *  parentheses. Middle takes only the parentheses, word for word; the me if
+   *  twist reads what he is doing; Serious and Degen never mention it. */
   personaContext: z.string().trim().max(600).default(''),
 });
 
@@ -140,7 +141,8 @@ const examples = (lines: readonly string[]) => lines.map((e) => `  ${e}`).join('
 interface Ask {
   system: string;
   ask: string;
-  format?: Anthropic.Beta.BetaJSONOutputFormat;
+  /** Asked for a JSON object rather than a line (Degen's nickname). */
+  json?: boolean;
   finish: (reply: string) => string | null;
 }
 
@@ -181,31 +183,8 @@ ${REPLY}`;
 
 // ── Middle ───────────────────────────────────────────────────────────────────
 //
-// Put together here from the drawn parts. The model is asked for what he is
-// doing, or the mystery, on the while shape, and for nothing on the others.
-
-/** Every way a trade is said, Degen's included, which what he is doing never
- *  has. */
-const ANY_TRADE = /\b(trading on|going long on|shorting|shorts|goes long on|trades on)\b/;
-/** A time of its own, which what he is doing must not bring: a Middle line's
- *  time, when it has one, is drawn. */
-const A_TIME = /\bin the time it takes\b|\b\d+\s*(seconds?|secs?|minutes?|mins?|hours?)\b/;
-
-/** The persona's context split for Middle: what he is doing, and each "(...)"
- *  it says — word for word, lower-cased, one of them drawn when there are
- *  several. */
-function splitContext(context: string): { doing: string; parentheticals: string[] } {
-  const parentheticals: string[] = [];
-  const doing = context
-    .replace(/\(([^)]*)\)/g, (_, inner: string) => {
-      const p = inner.replace(/\s+/g, ' ').trim().toLowerCase();
-      if (p) parentheticals.push(p);
-      return ' ';
-    })
-    .replace(/\s+/g, ' ')
-    .trim();
-  return { doing, parentheticals };
-}
+// Put together here from the drawn parts. The model is asked for the mystery
+// on the while shape's other half, and for nothing else.
 
 /** The shape a Middle line takes, by MIDDLE_SHAPE_ODDS. */
 function middleShape(): MiddleShape {
@@ -224,59 +203,32 @@ function analogyFor(person: string): string {
   return pick(pool.length ? pool : MIDDLE_ANALOGIES);
 }
 
-const ACTIVITY = `${PAUV}
-
-THE LINE reads:
-  making <money analogy> while <what he is doing>
-
-The money analogy is already chosen and the line is put together from your part, so you write only WHAT HE IS DOING: what the guy in the video is doing, given below, said casually and briefly so it reads straight after "while": "wearing a knight helmet", "on the toilet", "holding a hammer in my mouth", "laying in the middle of the road", "sitting in the woods", "drinking a beer". Take it only from what the video shows and never make one up. Say it your own way rather than copying the words given, and give it without the "while".
-
-RULES
-- Never the word "man".
-- No trading verb, no one's name, no time or number: the line is the money against what he is doing, nothing else.
-- No emoji, no hashtags, no quote marks, no full stop. All lower case.
-
-EXAMPLES, whole lines as they come out
-${examples(MIDDLE_EXAMPLES)}
-
-They show the shape and the tone. Write what he is doing for this video; never hand one of these back.
-
-Reply with what he is doing and nothing else.`;
-
 function middlePlan({ person, direction, personaContext, who }: Input): Plan {
-  const { doing, parentheticals } = splitContext(personaContext);
+  // One of the context's "(...)"s, word for word and without the brackets, with
+  // the space that sets it on the end of a line — or nothing, when it has none.
+  const parentheticals = parentheticalsOf(personaContext);
+  const parenthetical = parentheticals.length ? ` ${pick(parentheticals)}` : '';
   const opening = `making ${analogyFor(person)}`;
   const shape = middleShape();
   if (shape !== 'while') {
     const time = shape.startsWith('seconds')
       ? `in ${pick(MIDDLE_SECONDS)} seconds`
       : `in the time it takes to ${pick(MIDDLE_TASKS)}`;
-    // The parenthetical shapes take one of the context's "(...)"s, no brackets;
-    // a context with none leaves the line at its time.
-    const parenthetical = shape.endsWith('parenthetical') && parentheticals.length ? ` ${pick(parentheticals)}` : '';
-    return { line: `${opening} ${time}${parenthetical}` };
+    // A context with no parenthetical leaves the parenthetical shape at its time.
+    return { line: `${opening} ${time}${shape.endsWith('parenthetical') ? parenthetical : ''}` };
   }
-  // The while shape: what he is doing on camera, or the mystery. With no
-  // context there is nothing he is doing, so it is the mystery.
-  if (doing && Math.random() < MIDDLE_ACTIVITY_ODDS) {
-    return {
-      system: ACTIVITY,
-      ask: [`the line so far: ${opening} while`, `what the guy in the video is doing: ${doing}`].join('\n'),
-      finish: (reply) => {
-        const activity = clean(reply).replace(/^while\s+/, '');
-        if (!activity || ANY_TRADE.test(activity) || A_TIME.test(activity) || /\d/.test(activity)) return null;
-        if (namesPerson(activity, person)) return null;
-        return noMan(`${opening} while ${activity}`, person);
-      },
-    };
-  }
+  // The while shape: the parenthetical straight after the analogy, or the
+  // mystery. With no parenthetical it is the mystery.
+  if (parenthetical && Math.random() < MIDDLE_PARENTHETICAL_ODDS) return { line: `${opening}${parenthetical}` };
+  // The mystery sits straight after the analogy too: "making lebron's salary
+  // shorting the goat".
   const verb = MIDDLE_MYSTERY_VERBS[direction];
   return {
     system: MYSTERY,
     ask: [`person: ${person}`, ...whoLine(who), which(direction), `open with: ${verb}`].join('\n'),
     finish: (reply) => {
-      const mystery = holdVerb(clean(reply), verb, true);
-      return mystery && !namesPerson(mystery, person) ? `${opening} while ${mystery}` : null;
+      const mystery = holdMystery(reply, verb, person);
+      return mystery ? `${opening} ${mystery}` : null;
     },
   };
 }
@@ -303,16 +255,6 @@ ${NICKNAMES}
 
 Reply as JSON: {"nickname": "...", "short": "..."}.`;
 
-const NICKNAME_FORMAT: Anthropic.Beta.BetaJSONOutputFormat = {
-  type: 'json_schema',
-  schema: {
-    type: 'object',
-    properties: { nickname: { type: 'string' }, short: { type: 'string' } },
-    required: ['nickname', 'short'],
-    additionalProperties: false,
-  },
-};
-
 /** A name as the line says it: lower case, letters, numbers and the odd
  *  apostrophe, dot or hyphen, three words at most. */
 const asName = (v: unknown): string => (typeof v === 'string' ? v : '')
@@ -326,7 +268,7 @@ const asName = (v: unknown): string => (typeof v === 'string' ? v : '')
 
 function degenLine(reply: string, person: string, descriptor: string, verb: string): string {
   let j: { nickname?: unknown; short?: unknown } = {};
-  try { j = JSON.parse(reply) as typeof j; } catch { /* the plain name, below */ }
+  try { j = parseJson<typeof j>(reply); } catch { /* the plain name, below */ }
   const nickname = asName(j.nickname) || asName(person);
   const short = asName(j.short).split(' ')[0];
   const tail = short && short.length <= LOVE_MAX && Math.random() < LOVE_ODDS
@@ -339,17 +281,21 @@ function degenLine(reply: string, person: string, descriptor: string, verb: stri
 
 const MYSTERY = `${PAUV}
 
-THIS CAPTION NEVER SAYS WHO. It is the trade on someone the viewer has to recognise without their name, and the video that follows shows who it is.
+THIS CAPTION NEVER SAYS WHO. It is the trade on someone the viewer has to recognise without their name, and the video that follows shows who it is. The line has to make them go "ooo, who is that" — a take they could argue with, never a fact they would nod at.
 
 THE ORDER:
   <trading verb> <who they are, never by name>
 
 TRADING VERB: the first words of the line, always. It is one of "trading on", "going long on" or "shorting", and the one to use is given below. Use exactly that one.
-WHO THEY ARE: the way the culture already talks about them, as a superlative or a line anyone would place, like "the greatest musician of our generation", "the most hated man in america", "every girl's celebrity crush", "the guy your dad won't stop talking about", "the goat". Praise, a knock or how the internet sees them all work, as long as it fits this person well enough that the reveal lands.
-Who they are is given below, off Pauv's own listing. Take their world from it — a streamer is a streamer, a rapper a rapper, a politician a politician — and never put them in a sport, a job or a field it does not say. When nothing is given and you are not sure who they are, say how the internet talks about someone like them rather than guess a career: never a rookie, an athlete or a musician unless that is what they are.
+WHO THEY ARE: a take, never a fact, in the shape that lands — a superlative on what they are, with where it holds on the end: "the most overhyped athlete on the planet", "the softest rapper alive", "the most emotional rapper alive", "the most erratic billionaire alive", "the most hated man in america". Or a short epithet the internet already uses: "the antichrist", "the goat". It is the strongest thing a fan or a hater would say about them, the kind the other would argue with, and it has to fit this person well enough that the reveal lands. Praise and a knock both work; the knock usually lands harder.
+NEVER A DESCRIPTION: no clause that walks around them — not "the woman who owns the music industry", not "the guy who runs the biggest company on earth", not "the man behind the biggest album of the year". A "who" or a "that" turns the line into a fact dressed up as a flex, and it reads flat. Say what they are and how much, in six or seven words. And always a person, never a thing standing in for one: not "the music industry", but "the most untouchable woman in music".
+NEVER A FACT: nothing anyone could look up. Not their job or title, not their team, not a record, a count or a ranking, not what they are the richest, most streamed, most followed or highest paid at. "the richest man in the world" is a fact and is wrong here; "the most erratic billionaire alive" is the line. A word like billionaire, rapper or streamer may sit inside the take, but the take is the point of the line, not the word.
+Who they are is given below, off Pauv's own listing, so you know who you are writing about. Take their world from it — a streamer is a streamer, a rapper a rapper, a politician a politician — and never put them in a sport, a job or a field it does not say. Never quote the listing back: its facts are exactly what the line must not say. When nothing is given and you are not sure who they are, say how the internet talks about someone like them rather than guess a career: never a rookie, an athlete or a musician unless that is what they are.
 
 RULES
 - Never their name, any part of it, or a nickname.
+- Never a fact: no title, team, record, count, ranking or "richest / most streamed / highest paid".
+- Never a clause: no "who", "whose", "which" or "that".
 - No emoji, no hashtags, no quote marks, no full stop.
 - All lower case.
 
@@ -387,8 +333,8 @@ ${REPLY}`;
 /** Me if says the name everyone calls them — or, in Degen, the nickname — so
  *  its examples come both ways too (ME_IF_NAMED, ME_IF_NICKNAMED).
  *
- *  Where it catches him is Middle's activity in another frame: taken off what
- *  the video shows, never invented. It asked for "somewhere it would be out of
+ *  Where it catches him is what the persona's context says he is doing: taken
+ *  off what the video shows, never invented. It asked for "somewhere it would be out of
  *  line" and was told nothing about the footage until 2026-09-18, so the model
  *  had to make the moment up, and the line landed on the stage claiming
  *  something the video never showed. A build with no context has nothing to
@@ -430,15 +376,39 @@ function namesPerson(line: string, person: string): boolean {
     .some((w) => new RegExp(`(^|[^\\p{L}\\p{N}])${w}($|[^\\p{L}\\p{N}])`, 'u').test(line));
 }
 
+/** A fact about them, which a mystery must never be: what they are richest,
+ *  most streamed or highest paid at, a title, a team's kind of word, a count.
+ *  The line is a take — "the most erratic billionaire alive", "the antichrist"
+ *  — so the viewer wonders who, where a fact has them nod. A line that says
+ *  one is thrown out and the second go draws afresh. */
+const FACTUAL = new RegExp([
+  String.raw`\b(richest|wealthiest|best[- ]selling|top[- ]selling|record[- ]holder|champion|mvp|grammy|oscar)\b`,
+  String.raw`\bmost[- ](streamed|followed|watched|viewed|subscribed|decorated|awarded|capped|paid)\b`,
+  String.raw`\bhighest[- ](paid|earning|grossing|scoring)\b`,
+  String.raw`\b(ceo|founder|co-founder|owner|president|prime minister|senator|governor|quarterback|striker)\b`,
+  String.raw`\b(number|no\.?)\s*(one|1)\b`,
+  String.raw`\b(one|two|three|four|five|six|seven|eight|nine|ten|\d+)[- ]time\b`,
+  String.raw`\d`,
+].join('|'));
+
+/** A clause that walks around them — "the woman who owns the music industry"
+ *  — which reads as a fact dressed up as a flex, where "the softest rapper
+ *  alive" lands. Thrown out like a fact. */
+const CLAUSE = /\b(who|whose|whom|which|that)\b/;
+
+/** A mystery held to its frame: on the drawn verb, with no part of their name,
+ *  no fact about them and no clause. */
+function holdMystery(reply: string, verb: string, person: string): string | null {
+  const line = holdVerb(clean(reply), verb, true);
+  return line && !namesPerson(line, person) && !FACTUAL.test(line) && !CLAUSE.test(line) ? line : null;
+}
+
 function mysteryPlan({ person, direction, who }: Input): Plan {
   const verb = pick(VERBS[direction]);
   return {
     system: MYSTERY,
     ask: [`person: ${person}`, ...whoLine(who), which(direction), `open with: ${verb}`].join('\n'),
-    finish: (reply) => {
-      const line = holdVerb(clean(reply), verb, true);
-      return line && !namesPerson(line, person) ? line : null;
-    },
+    finish: (reply) => holdMystery(reply, verb, person),
   };
 }
 
@@ -540,7 +510,7 @@ function modePlan(input: Input): Plan {
     return {
       system: DEGEN,
       ask: [`person: ${person}`, ...whoLine(who)].join('\n'),
-      format: NICKNAME_FORMAT,
+      json: true,
       finish: (reply) => degenLine(reply, person, descriptor, verb),
     };
   }
@@ -557,31 +527,21 @@ function modePlan(input: Input): Plan {
 
 // ── The call ─────────────────────────────────────────────────────────────────
 
-/** Built on first use, so a missing key is an answer from the route rather
- *  than a crash when the module loads. */
-let client: Anthropic | null = null;
-const anthropic = () => (client ??= new Anthropic({ timeout: 60_000, maxRetries: 2 }));
-
+/** The guide as the system message, the ask as the user's, one short reply. A
+ *  missing key is an error from lib/deepseek on the call, so an answer from the
+ *  route rather than a crash when the module loads. */
 async function draft(plan: Ask): Promise<string> {
-  const res = await anthropic().beta.messages.create({
-    model: MODEL,
-    max_tokens: 8000,
-    thinking: { type: 'adaptive' },
-    // One short line: low effort thinks a little, where medium spent tokens
-    // the line didn't need.
-    output_config: { effort: 'low', ...(plan.format ? { format: plan.format } : {}) },
-    // No server-side fallback: Sonnet 5 has no allowed fallback models (the
-    // Models API lists none), so a decline comes back as a refusal and the
-    // second go below draws afresh.
-    system: plan.system,
-    messages: [{ role: 'user', content: plan.ask }],
-  });
-  if (res.stop_reason === 'refusal') throw new Error('the model declined to write it');
-  if (res.stop_reason === 'max_tokens') throw new Error('the model ran out of room before the line');
-  return res.content
-    .filter((b): b is Anthropic.Beta.BetaTextBlock => b.type === 'text')
-    .map((b) => b.text)
-    .join('\n');
+  const reply = await deepseekChat(
+    [{ role: 'system', content: plan.system }, { role: 'user', content: plan.ask }],
+    // Warmer than the helper's 0.2: the line is a joke, and everything that has
+    // to be fixed about it is drawn by the code and checked in finish(). No
+    // max_tokens: on the v4 reasoning models it counts the thinking too, and
+    // one line thinks for 1,400–3,100 tokens, so a cap of 300 came back as an
+    // empty reply every time. The helper's timeout bounds a runaway instead.
+    { temperature: 1, ...(plan.json ? { json: true } : {}) },
+  );
+  if (!reply.trim()) throw new Error('the model came back with nothing');
+  return reply;
 }
 
 export async function POST(req: NextRequest) {
@@ -601,12 +561,12 @@ export async function POST(req: NextRequest) {
       if (!line) throw new Error('the line broke its rules');
       return NextResponse.json({ start: line });
     } catch (err) {
-      lastErr = err instanceof Anthropic.APIError
-        ? `Claude ${err.status ?? ''}: ${err.message}`.trim()
-        : err instanceof Error ? err.message : String(err);
+      lastErr = err instanceof Error ? err.message : String(err);
       console.error('[vids hook] attempt', attempt + 1, 'failed:', lastErr);
-      // A key or request problem is not going to fix itself on a second go.
-      if (err instanceof Anthropic.AuthenticationError || err instanceof Anthropic.BadRequestError) break;
+      // A key, balance or request problem is not going to fix itself on a
+      // second go. lib/deepseek says those as "deepseek <status>: ..." or
+      // "DEEPSEEK_API_KEY not set"; a timeout, a 429 or a 5xx gets the retry.
+      if (/^deepseek 40[0-3]\b/.test(lastErr) || lastErr.startsWith('DEEPSEEK_API_KEY')) break;
     }
   }
   return NextResponse.json({ error: `Hook: ${lastErr || 'empty response'}` }, { status: 502 });

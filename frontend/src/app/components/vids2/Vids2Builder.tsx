@@ -78,6 +78,7 @@ import {
   CAPTION_EMOJIS, CAPTION_NOTES, VIDS2_BARS, VIDS2_PACE,
   draftLines, personaContextOf, useEmojiPalette, type Vids2Early,
 } from '@/lib/vids2/vids2Words';
+import { parentheticalsOf } from '@/lib/vids2/hookRules';
 import { composeSequence } from '@/lib/simpler/vidsCompose';
 import {
   CAPTION_STYLES, DEFAULT_CAPTION_SCALE, DEFAULT_CAPTION_STYLE, EMPTY_LINES, ONE_LINE_DEFAULT,
@@ -2752,7 +2753,8 @@ export function Vids2Builder({
         <Vids2HookGuide
           mode={build.mode}
           direction={build.direction}
-          hasContext={!!(appliedPersona?.context || picks.start?.video.context)}
+          hasContext={!!personaContextOf(appliedPersona, picks)}
+          hasParenthetical={parentheticalsOf(personaContextOf(appliedPersona, picks)).length > 0}
           onClose={closeHookGuide}
         />
       )}

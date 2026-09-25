@@ -290,8 +290,9 @@ The other questions say what the video *is*. The mode says how it talks.
 Serious and Middle each change one line — the hook — and nothing else. Degen
 changes the hook and two more things.
 
-Every hook is written in `api/vids/hook`, by Claude Sonnet 5 at low effort
-(Opus 5 at medium until 2026-09-18, swapped for cost), on its own call
+Every hook is written in `api/vids/hook`, by DeepSeek (`lib/deepseek`, v4
+flash; Claude Opus 5 until 2026-09-18 and Claude Sonnet 5 until 2026-09-25,
+each swapped for cost), on its own call
 beside the one that writes the rest of the words (`api/vids/captions`, which
 Vids 2 never asks for a hook). None is written off the screen recordings, so
 none waits on them: the hook lands as it comes back. The trading verb is drawn
@@ -306,31 +307,28 @@ does. Nothing about what the persona is doing, no "man", no emoji, lower case.
 > going long on taylor swift before the tour announcement to cover a year of rent
 > shorting drake before the album drops to pay off the car
 
-**Middle** uses exactly two of three parts — a money analogy, what the persona
-is doing (off the persona's context), the trade — or the **clock**, and the
-route draws which, a quarter each. A build with no persona context has no
-activity to name, so it is analogy + trade or the clock, half each.
+**Middle** always opens "making <analogy>" and then takes one of four shapes,
+the route drawing which at the odds in `hookRules` (40 / 20 / 20 / 20): the
+persona's parenthetical straight after the analogy; the money against a drawn
+number of seconds, with the parenthetical on the end; the seconds alone; or
+"in the time it takes to" a drawn task. The analogy, the seconds and the task
+are off fixed lists, and the parenthetical is whatever the persona's context
+says in brackets, word for word (`parentheticalsOf`), so the model is only
+ever called for the other half of the first shape — at
+`1 - MIDDLE_PARENTHETICAL_ODDS`, and always when the context has no brackets
+— the **mystery**: the trade on someone described but never named, on a verb
+fixed by which way, set straight after the analogy. Nothing in a Middle line
+says "while" unless the parenthetical does. Middle takes no twist.
 
-> making a surgeon's salary from the hot tub
-> shorting drake mid haircut
-> how to make a lawyer's salary shorting kanye
+> making a lawyer's salary with a fresh fit
+> making a year of gas shorting the greatest rapper alive
+> making drake's salary in 67 seconds with a fresh fit
+> making a year of rent in the time it takes to skip an ad
 
-**The clock** is the money against how little time it took — no trade, no
-name. Its time is a task off a fixed pool of thirteen (a quarter of clock
-lines), what the persona is doing said as a task (a quarter), or one of four
-drawn numbers with what they are doing after "while" (half). Without a
-context it is always the pool. A context that is only a place or a state
-("in a grocery store") has no task in it, and the pool stands in. The route
-puts the line together from the model's parts — opener, analogy, and the task
-or activity when the branch needs one — so it can't open wrong, lose its
-"while" or carry a number and a task together.
-
-> making rent in the time it takes to lose an argument
-> making a car payment in the time it takes to put on a suit of armor
-> making rent in 67 seconds while half asleep
-
-**One hook in five is a twist**, whatever the mode, one of three at even odds:
-a **mystery** — the trade on someone described but never named — **hype** —
+**One Serious or Degen hook in five is a twist**, one of three at even odds:
+a **mystery** — the trade on someone described but never named, in a take
+("the most erratic billionaire alive") and never a fact ("the richest man in
+the world"), which the route throws out — **hype** —
 the name and how high it is going — or **me if** — the trade caught in the
 middle of what he is doing on camera, "was legal". Hype only goes up, so a down
 trade's twist is a mystery or a me if. Degen's hype and me if say the nickname;
@@ -338,7 +336,7 @@ everything else about the three is the same in every mode. A mystery that names
 them, or a me if that breaks its frame, is written again.
 
 Me if is the one twist written off the video: where it catches him is the
-persona's context, the same place Middle's activity comes from, and is never
+persona's context, what he is doing on camera, and is never
 invented. A build with no context has nothing to catch him at, so it draws from
 the twists that need none (`NO_CONTEXT_TWISTS`).
 
