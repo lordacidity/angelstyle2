@@ -172,7 +172,8 @@ export interface HookRequest {
   /** Who the video trades on, as the Pauv roster spells them. */
   person: string;
   direction: TradePosition;
-  /** What the persona is doing on camera — Middle's activity. */
+  /** The persona's context: Middle takes what it says in parentheses, word for
+   *  word; the me if twist reads what he is doing. */
   personaContext: string;
 }
 
@@ -346,11 +347,16 @@ function putWithProgress(url: string, body: Blob, contentType: string, onProgres
     xhr.onload = () => {
       if (xhr.status >= 200 && xhr.status < 300) { resolve(); return; }
       let msg = `Upload failed (${xhr.status})`;
+      let tooLarge = xhr.status === 413;
       try {
-        const j = JSON.parse(xhr.responseText) as { message?: string; error?: string };
+        const j = JSON.parse(xhr.responseText) as { message?: string; error?: string; statusCode?: string; code?: string };
         msg = j.message || j.error || msg;
+        // Supabase Storage answers 400 and keeps the real status in the body:
+        // {"statusCode":"413","code":"EntityTooLarge","message":"The object
+        // exceeded the maximum allowed size"}.
+        if (j.statusCode === '413' || j.code === 'EntityTooLarge') tooLarge = true;
       } catch { /* not JSON */ }
-      if (xhr.status === 413) msg = 'File is over the Supabase project\'s upload size limit (Storage → Settings).';
+      if (tooLarge) msg = 'File is over the Supabase project\'s upload size limit (Storage → Settings).';
       reject(new Error(msg));
     };
     xhr.onerror = () => reject(new Error('Network error during upload'));

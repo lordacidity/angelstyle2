@@ -9,18 +9,20 @@
 //
 // Flow: pick accounts (multi-select) + post types (Reel/Story, multi-select)
 // + a schedule mode, Preview to see the resolved times without touching
-// Hyper Attention yet, then Confirm & Queue — which uploads the render to
-// the shared Vids library first (so it also becomes a normal permanent
-// library row, per how this was scoped) and only then imports + queues it.
+// Hyper Attention yet, then Confirm & Queue — which fits the render under
+// Hyper Attention's import cap if it has to (vids-publish-fit), uploads it
+// to the shared Vids library (so it also becomes a normal permanent library
+// row, per how this was scoped) and only then imports + queues it.
 //
 // Shell copied from BoardWidget's useFloatingPanel usage; anchored bottom-4
 // right-4 like PhonedeckMiniPanel, the established corner for an
 // export-adjacent floating panel, so the two don't stack on top of each other.
 
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { useFloatingPanel } from '../../hooks/useFloatingPanel';
 import { withBase } from '@/lib/clipping';
 import { uploadVideo } from '@/lib/vids-client';
+import { PUBLISH_BUDGET_BYTES, PUBLISH_CEILING_BYTES, fitForPublish, fmtMB } from '@/lib/vids-publish-fit';
 import type { VidTheme } from '@/lib/vids-types';
 import type { HAAccount, HAAccountStatus, HAPostType } from '@/lib/hyperattention';
 import type { ResolvedSlot } from '@/lib/hyperattention-schedule';
@@ -80,6 +82,13 @@ export function Vids2PublishPanel({
   const [slots, setSlots] = useState<ResolvedSlot[] | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [publishedCount, setPublishedCount] = useState<number | null>(null);
+  // What Confirm is doing right now, for its button: compressing, uploading,
+  // queuing — with a percentage where there is one.
+  const [step, setStep] = useState<string | null>(null);
+  // The library save outlives a failed import, so a retry goes straight to
+  // Hyper Attention instead of filing the render a second time.
+  const uploaded = useRef<{ blob: Blob; url: string; size: number; compressed: boolean } | null>(null);
+  const overBudget = blob.size > PUBLISH_BUDGET_BYTES;
 
   useEffect(() => {
     let cancelled = false;
@@ -158,16 +167,32 @@ export function Vids2PublishPanel({
     setPhase('publishing');
     setError(null);
     try {
-      // Save to the shared library exactly like a manual save would — this
-      // is also where the public URL Hyper Attention needs comes from.
-      const row = await uploadVideo(blob, { name: videoName, folderId: null, theme: theme ?? null });
-      const j = await runPush(false, row.url);
+      let saved = uploaded.current;
+      if (!saved || saved.blob !== blob) {
+        // Under Hyper Attention's import cap first — see vids-publish-fit.
+        setStep(overBudget ? 'Compressing…' : 'Uploading…');
+        const fit = await fitForPublish(blob, {
+          onProgress: (p) => setStep(`Compressing… ${Math.round(p * 100)}%`),
+        });
+        // Save to the shared library exactly like a manual save would — this
+        // is also where the public URL Hyper Attention needs comes from.
+        const row = await uploadVideo(fit.blob, {
+          name: videoName, folderId: null, theme: theme ?? null,
+          onProgress: (p) => setStep(`Uploading… ${Math.round(p * 100)}%`),
+        });
+        saved = { blob, url: row.url, size: fit.blob.size, compressed: fit.compressed };
+        uploaded.current = saved;
+      }
+      setStep('Queuing…');
+      const j = await runPush(false, saved.url);
       setPublishedCount((j.posts ?? []).length);
       setSlots(j.slots ?? slots);
       setPhase('done');
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
       setPhase('previewed');
+    } finally {
+      setStep(null);
     }
   };
 
@@ -287,6 +312,11 @@ export function Vids2PublishPanel({
             />
           </div>
 
+          <p className="mt-2 text-[10px] text-zinc-500">
+            Render {fmtMB(blob.size)}
+            {overBudget && ` — over Hyper Attention's ${fmtMB(PUBLISH_CEILING_BYTES)} import cap, so a copy under ${fmtMB(PUBLISH_BUDGET_BYTES)} is what goes up.`}
+          </p>
+
           {slots && (
             <div className="mt-3 rounded-md border border-zinc-800 bg-zinc-900/50 px-2 py-1.5">
               <p className="mb-1 text-[10px] font-semibold uppercase tracking-wider text-zinc-500">
@@ -316,7 +346,8 @@ export function Vids2PublishPanel({
           {error && <p className="mt-2 text-[11px] text-red-400">{error}</p>}
           {phase === 'done' && !error && (
             <p className="mt-2 text-[11px] text-emerald-400">
-              Queued {publishedCount ?? slots?.length ?? 0} post(s), and saved to the library.
+              Queued {publishedCount ?? slots?.length ?? 0} post(s), and saved to the library
+              {uploaded.current?.compressed ? ` at ${fmtMB(uploaded.current.size)}` : ''}.
             </p>
           )}
 
@@ -337,7 +368,7 @@ export function Vids2PublishPanel({
                 title={phase === 'previewed' ? undefined : 'Preview first'}
                 className="h-9 flex-1 rounded-lg bg-white text-[12px] font-semibold text-black transition-colors hover:bg-zinc-200 disabled:cursor-not-allowed disabled:opacity-40"
               >
-                {phase === 'publishing' ? 'Queuing…' : 'Confirm & Queue'}
+                {phase === 'publishing' ? (step ?? 'Queuing…') : 'Confirm & Queue'}
               </button>
             )}
             {phase === 'done' && (
