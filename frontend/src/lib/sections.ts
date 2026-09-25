@@ -11,6 +11,7 @@ export const SECTION_PATHS: Record<AppSection, string> = {
   media: '/media',
   vids: '/vids',
   vids2: '/vids-2',
+  hyperattention: '/hyper-attention',
   carousel: '/carousel',
   builder: '/builder',
   trending: '/trending',

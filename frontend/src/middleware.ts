@@ -49,6 +49,8 @@ const CLIPPER_API = [
   '/api/news/search',
   '/api/news/article',
   '/api/news/trending',
+  // The categories the In the news filter suggests from, and widens by.
+  '/api/news/categories',
   '/api/news/photos/person',
   '/api/news/photos/thumbs',
   '/api/charts/list-audio',

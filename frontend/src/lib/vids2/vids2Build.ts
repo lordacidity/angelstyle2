@@ -48,8 +48,9 @@ export type { Direction, NewsRange, Theme, TradeTalent, TrendSort, TrendWindow }
 
 /** How the video talks: Serious, Middle or Degen. Each writes the hook to its
  *  own guide in api/vids/hook: Serious a flat trade, reason and what the money
- *  is for; Middle two of a money analogy, what the persona is doing and the
- *  trade; Degen a descriptor, the trade, a nickname and a bracket. Degen also
+ *  is for; Middle a money analogy against what the persona is doing, a
+ *  mystery trade or how little time it took; Degen a descriptor, the trade, a
+ *  nickname and a bracket. Degen also
  *  lays three BOOMs over the recordings (degenBooms), and the song rolled for
  *  it may be one marked degen on the Music page, which no other build ever
  *  rolls (rollableMusic in Vids2Builder). The video underneath is exactly the
@@ -92,6 +93,14 @@ export type Vids2Intro = 'none' | 'chatgpt' | 'news';
 export const VIDS2_INTROS: readonly Vids2Intro[] = ['none', 'chatgpt', 'news'];
 export const isVids2Intro = (v: unknown): v is Vids2Intro =>
   typeof v === 'string' && (VIDS2_INTROS as readonly string[]).includes(v);
+
+/** Whether "No intro" is on offer. Only in the Studio, like Mode and Look:
+ *  every clipper video opens on ChatGPT or a story. The clipper form does
+ *  not show it (INTROS_OFFERED), a saved answer of it is not read back
+ *  (loadSetup), and one that somehow stands is not an answer (introReady). */
+export const NONE_OFFERED = !CLIPPERS;
+/** The intros the form puts up, in order. */
+export const INTROS_OFFERED: readonly Vids2Intro[] = NONE_OFFERED ? VIDS2_INTROS : VIDS2_INTROS.filter((i) => i !== 'none');
 
 /** Which end the form starts from. Who: the person, then what opens the video,
  *  then which way, the look, the mode and the persona. News: the other way
@@ -225,7 +234,9 @@ export function loadSetup(): Vids2Setup {
       direction: j.direction === 'down' ? 'down' : 'up',
       // Answers saved before there was a choice of intro were ChatGPT ones.
       // The news flow has no intro question: its intro is the story.
-      intro: saved === 'news' ? 'news' : isVids2Intro(j.intro) ? j.intro : 'chatgpt',
+      // "No intro" is not on offer on the clipper page (NONE_OFFERED), so a
+      // saved one comes back as ChatGPT there.
+      intro: saved === 'news' ? 'news' : isVids2Intro(j.intro) && (NONE_OFFERED || j.intro !== 'none') ? j.intro : 'chatgpt',
       question: typeof j.question === 'string' ? j.question : '',
       newsRange: isNewsRange(j.newsRange) ? j.newsRange : EMPTY_SETUP.newsRange,
       story: isStory(j.story) ? j.story : null,
@@ -309,7 +320,7 @@ export interface Vids2Beats {
 /** Whether the intro has what it needs: nothing, for none; the question, for
  *  ChatGPT; a story found for this person, for news. */
 export const introReady = (s: Vids2Setup): boolean =>
-  s.intro === 'none' ? true
+  s.intro === 'none' ? NONE_OFFERED
     : s.intro === 'chatgpt' ? !!s.question.trim()
     : !!storyFor(s);
 
@@ -501,13 +512,22 @@ export const degenBooms = (b: Vids2Beats): DegenBoom[] => [
  *  trade recording needs a price and says so itself if there is none, and a
  *  list that quietly left people out would be the harder thing to explain.
  *  Over a thousand of them, so the dropdown searches rather than scrolls. */
-let rosterP: Promise<TradeTalent[]> | null = null;
+/** One person as the search box needs them: a name to match, a ticker to
+ *  file under, and the three figures the list opens sorted on. The route's
+ *  slim answer (api/ai/talents?slim=1, lib/talents slimTalent) — the whole
+ *  roster is two megabytes of bios nobody here reads. */
+export type RosterRow = Pick<TradeTalent, 'id' | 'name' | 'ticker'> & {
+  price: Pick<TradeTalent['price'], 'change1dPct' | 'change1wPct' | 'holders'>;
+};
 
-export function loadRoster(signal?: AbortSignal): Promise<TradeTalent[]> {
+let rosterP: Promise<RosterRow[]> | null = null;
+
+export function loadRoster(signal?: AbortSignal): Promise<RosterRow[]> {
   if (!rosterP) {
     rosterP = (async () => {
-      const r = await fetch(withBase('/api/ai/talents'));
-      const data = await r.json().catch(() => null) as TradeTalent[] | { error?: string } | null;
+      // Kept on the server and shared, so this is usually back at once.
+      const r = await fetch(withBase('/api/ai/talents?slim=1'));
+      const data = await r.json().catch(() => null) as RosterRow[] | { error?: string } | null;
       if (!r.ok || !Array.isArray(data)) {
         throw new Error((data && !Array.isArray(data) && data.error) || `Pauv roster: HTTP ${r.status}`);
       }
@@ -518,7 +538,7 @@ export function loadRoster(signal?: AbortSignal): Promise<TradeTalent[]> {
   }
   const p = rosterP;
   if (!signal) return p;
-  return new Promise<TradeTalent[]>((resolve, reject) => {
+  return new Promise<RosterRow[]>((resolve, reject) => {
     const abort = () => reject(new DOMException('Cancelled', 'AbortError'));
     if (signal.aborted) { abort(); return; }
     signal.addEventListener('abort', abort, { once: true });

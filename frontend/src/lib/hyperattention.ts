@@ -90,6 +90,8 @@ export interface HAMedia {
   thumbnail: string | null;
   sourceUrl: string;
   fileSize: number | null;
+  /** Seconds, when the upload said. */
+  duration?: number | null;
   createdAt: string;
 }
 
@@ -105,6 +107,9 @@ export async function importMediaFromUrl(url: string, name?: string): Promise<HA
 export interface HAQueueItem {
   id: string;
   accountId: string;
+  /** The account's handle as the queue list gives it. The accounts list is
+   *  the surer source; this covers a post on an account since unlinked. */
+  accountUsername?: string | null;
   scheduledFor: string;
   status: 'queued' | 'posted' | 'failed';
   platform: HAPlatform;
@@ -112,6 +117,8 @@ export interface HAQueueItem {
   slideshowId: string | null;
   videoId: string | null;
   audioUrl: string | null;
+  caption?: string | null;
+  createdAt?: string;
 }
 
 /** List existing queue entries for one account — the data an "auto-pick the
@@ -124,6 +131,84 @@ export async function listQueue(params: { accountId?: string; status?: string } 
   const suffix = qs.toString() ? `?${qs}` : '';
   const r = await haFetch<{ posts: HAQueueItem[] }>(`/queue${suffix}`);
   return r.posts;
+}
+
+export interface QueueListParams {
+  accountId?: string;
+  /** Comma-separated: 'queued,posted'. Every status when left out. */
+  status?: string;
+  limit?: number;
+  cursor?: string;
+}
+
+/** One page of the queue, and the cursor for the page after it. */
+export async function listQueuePage(params: QueueListParams = {}): Promise<{ posts: HAQueueItem[]; nextCursor: string | null }> {
+  const qs = new URLSearchParams();
+  if (params.accountId) qs.set('accountId', params.accountId);
+  if (params.status) qs.set('status', params.status);
+  if (params.limit) qs.set('limit', String(params.limit));
+  if (params.cursor) qs.set('cursor', params.cursor);
+  const suffix = qs.toString() ? `?${qs}` : '';
+  const r = await haFetch<{ posts: HAQueueItem[]; nextCursor?: string | null }>(`/queue${suffix}`);
+  return { posts: r.posts ?? [], nextCursor: r.nextCursor ?? null };
+}
+
+/** The whole queue — every status unless narrowed — a hundred a page (the
+ *  API's most), up to `maxPages` of them. What the Hyper Attention section
+ *  watches. */
+export async function listQueueAll(params: Omit<QueueListParams, 'limit' | 'cursor'> = {}, maxPages = 5): Promise<HAQueueItem[]> {
+  const out: HAQueueItem[] = [];
+  let cursor: string | undefined;
+  for (let i = 0; i < maxPages; i++) {
+    const page = await listQueuePage({ ...params, limit: 100, cursor });
+    out.push(...page.posts);
+    if (!page.nextCursor) break;
+    cursor = page.nextCursor;
+  }
+  return out;
+}
+
+/** Cancel a queued post. Hyper Attention refuses one already posted or
+ *  failed, and says so. */
+export async function cancelQueued(id: string): Promise<void> {
+  await haFetch<unknown>(`/queue/${encodeURIComponent(id)}`, { method: 'DELETE' });
+}
+
+/** The media library on their side — every video imported for a post — a
+ *  hundred a page, newest first, up to `maxPages`. */
+export async function listMedia(maxPages = 2): Promise<HAMedia[]> {
+  const out: HAMedia[] = [];
+  let cursor: string | undefined;
+  for (let i = 0; i < maxPages; i++) {
+    const qs = new URLSearchParams({ limit: '100' });
+    if (cursor) qs.set('cursor', cursor);
+    const r = await haFetch<{ media: HAMedia[]; nextCursor?: string | null }>(`/media?${qs}`);
+    out.push(...(r.media ?? []));
+    if (!r.nextCursor) break;
+    cursor = r.nextCursor;
+  }
+  return out;
+}
+
+/** One tracked account's counts, from the Stats add-on. */
+export interface HAStatsAccount {
+  id: string;
+  platform: HAPlatform;
+  handle: string;
+  nickname: string | null;
+  followers: number;
+  likes: number;
+  totalViews: number;
+  videoCount: number;
+  lastRefreshedAt: string | null;
+}
+
+/** Followers, likes and views per tracked account. Needs the Stats API
+ *  add-on on the plan: without it the call is a 403, which a caller should
+ *  show in place rather than fail on. */
+export async function listStatsAccounts(): Promise<HAStatsAccount[]> {
+  const r = await haFetch<{ accounts: HAStatsAccount[] }>('/stats/accounts');
+  return r.accounts ?? [];
 }
 
 export interface QueuePostInput {

@@ -1,9 +1,12 @@
 import type { NewsArticle, RailItem } from '../types';
-import { esc, partsIn, photoBox, PHOTO_SLOTS, PLACEHOLDER_CSS, type PagePhotos, type RenderedPage } from './shared';
+import { bodyHtml, esc, partsIn, photoBox, PHOTO_SLOTS, PLACEHOLDER_CSS, type PagePhotos, type RenderedPage } from './shared';
 
 // New York Times article page. Layout from the approved mockup, reduced to
 // what the Times' own feed gives: headline, summary, byline and date. The
-// LIVE tag shows only on the Times' live pages; there is no article text.
+// LIVE tag shows only on the Times' live pages; there is no article text —
+// except the one paragraph written in under the photo when the page would
+// otherwise never say the name (lib/news/written-in), set as the Times sets
+// its first paragraph.
 
 const AP_MONTHS = ['Jan.', 'Feb.', 'March', 'April', 'May', 'June', 'July', 'Aug.', 'Sept.', 'Oct.', 'Nov.', 'Dec.'];
 
@@ -46,6 +49,12 @@ h1 { margin: 0; font: 700 47px/54px Newsreader, Georgia, serif; letter-spacing: 
 .pillb { height: 38px; border: 1px solid #dfdfdf; border-radius: 19px; display: inline-flex; align-items: center; gap: 8px; padding: 0 13px; font-size: 13px; }
 .circ { width: 38px; height: 38px; border: 1px solid #dfdfdf; border-radius: 50%; display: grid; place-items: center; }
 .credit { margin-top: 8px; font-size: 12px; line-height: 16px; color: var(--grey); letter-spacing: .1px; }
+.body { width: 600px; margin: 36px auto 0; font: 20px/30px Georgia, serif; color: var(--ink); }
+.body p { margin: 0 0 24px; }
+.body h2 { margin: 34px 0 14px; font: 700 24px/30px Newsreader, Georgia, serif; letter-spacing: -.2px; }
+.body ul, .body ol { margin: 0 0 24px; padding-left: 26px; }
+.body li { margin: 0 0 8px; }
+.body blockquote { margin: 0 0 24px; padding-left: 18px; border-left: 3px solid var(--line); font-style: italic; }
 ${PLACEHOLDER_CSS}
 `;
 
@@ -83,6 +92,7 @@ export function renderNyt(a: NewsArticle, _rail: RailItem[], _now: Date, photos:
     </div>
     ${photoBox(photos.hero?.src, PHOTO_SLOTS.nyt.hero, 'margin-top:36px')}
     ${photos.hero ? `<div class="credit">Credit...${esc(photos.hero.credit)}</div>` : ''}
+    ${a.body.length ? `<div class="body">${bodyHtml(a)}</div>` : ''}
   </article>
 </div>`;
   return {

@@ -149,7 +149,7 @@ export interface CaptionRequest {
 
 /** The written lines. A marked clip's array lines up with its marks by index;
  *  the only '' is Bottom B's first when the seam was merged into A's last.
- *  `end` is the one line over the closing clip: the comment line. */
+ *  `end` is the one line over the closing clip: the link line. */
 export interface CaptionDraft {
   start: string;
   bottomA: string[];

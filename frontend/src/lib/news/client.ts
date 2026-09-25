@@ -99,7 +99,9 @@ export interface ReadStory {
   article: NewsArticle;
   rail: RailItem[];
   people?: StoryPerson[];
-  /** Only when `name` was given; null when the page never says them. */
+  /** Only when `name` was given. When the page never said them, a paragraph
+   *  naming them was written in (the article's `notes` say so) and this is
+   *  the whole name in the story; null only when that couldn't be done. */
   highlight?: NameHighlight | null;
 }
 
@@ -164,7 +166,7 @@ export async function loadTrending(window: TrendWindow, topic = '', signal?: Abo
   if (!res.ok) throw new Error(j.error ?? `Trending failed (${res.status})`);
   return {
     hits: j.hits ?? [], scanned: j.scanned ?? 0, matched: j.matched ?? 0,
-    ai: j.ai ?? false, topic: j.topic ?? null, asOf: j.asOf ?? null,
+    ai: j.ai ?? false, topic: j.topic ?? null, asOf: j.asOf ?? null, stale: j.stale === true,
   };
 }
 

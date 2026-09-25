@@ -11,7 +11,9 @@
 // `name` is who the page is for, when that is known: `highlight` is the form
 // of their name the page prints — the whole name, or the short form the press
 // uses for them ("Kennedy" for RFK Jr.) — and whether it is in the headline
-// or the story (lib/news/highlight). What the recording drags over.
+// or the story (lib/news/highlight). What the recording drags over. A page
+// that says them no way gets one paragraph written in that does
+// (lib/news/written-in), and the highlight is the whole name in that.
 import { NextRequest, NextResponse } from 'next/server';
 import { z } from 'zod';
 import { latestFromOutlet, resolveGoogleNewsLink } from '@/lib/news/google-news';
@@ -20,6 +22,7 @@ import { imdbIdOf, imdbRail } from '@/lib/news/imdb';
 import { ArticleError, readNewsArticle } from '@/lib/news/read-article';
 import { isOrdinaryName } from '@/lib/news/roster-match';
 import { asNamed, rosterReader } from '@/lib/news/trending';
+import { writeNameIn } from '@/lib/news/written-in';
 import type { NewsArticle, OutletId, RailItem, StoryPerson } from '@/lib/news/types';
 
 export const runtime = 'nodejs';
@@ -69,7 +72,10 @@ export async function POST(req: NextRequest) {
     if (rail.length === 0 && (article.outlet === 'imdb' || HAS_RAIL.includes(article.outlet))) {
       article.notes.push("Couldn't load the outlet's other headlines, so the side column is empty.");
     }
-    const [people, highlight] = await Promise.all([peopleIn(article), highlightFor(article, parsed.data.name).catch(() => null)]);
+    const [people, found] = await Promise.all([peopleIn(article), highlightFor(article, parsed.data.name).catch(() => null)]);
+    // Nowhere on the page: a paragraph that says them goes in, so the clip
+    // has a name to drag over. `people` is the story as the outlet wrote it.
+    const highlight = found ?? (parsed.data.name ? await writeNameIn(article, parsed.data.name) : null);
     return NextResponse.json({ article, rail, people, highlight });
   } catch (err) {
     const status = err instanceof ArticleError ? 422 : 500;

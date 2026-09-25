@@ -61,7 +61,7 @@
 // words, look and sound on (build.restore) rather than rolling and asking.
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import type { CSSProperties, PointerEvent, SyntheticEvent } from 'react';
+import type { CSSProperties, FocusEvent, PointerEvent, SyntheticEvent } from 'react';
 import type { VidBuildSpec, VidPersona, VidRecipe, VidRow } from '@/lib/vids-types';
 import { isPhoto, mintRecipeCode, recipeName } from '@/lib/vids-types';
 import {
@@ -87,6 +87,7 @@ import {
   type CaptionLines, type CaptionPos, type CaptionRef, type CaptionStyle,
 } from '@/lib/simpler/vidsCaptions';
 import { VidsCaptionsRail } from '@/app/components/simpler/VidsCaptionsRail';
+import { isTextBox } from './Vids2Form';
 import { Vids2HookGuide } from './Vids2HookGuide';
 import { Vids2PostCaption } from './Vids2PostCaption';
 import { withBase } from '@/lib/clipping';
@@ -103,6 +104,7 @@ import { fmtTime, safeExportName } from '@/lib/utils';
 import { DownloadIcon, SpinnerIcon, VideoIcon } from '@/lib/icons';
 import { CLIPPERS } from '@/lib/clipping';
 import { usePhonedeck } from '../../hooks/usePhonedeck';
+import { useCachedClipSrcs } from '../../hooks/useCachedClipSrcs';
 import { VidsPhonedeck } from '../vids/VidsPhonedeck';
 import { Vids2PublishPanel } from './Vids2PublishPanel';
 
@@ -549,6 +551,10 @@ export function Vids2Builder({
    *  video is changed under it — a caption retyped, the song swapped — since
    *  what was rendered is no longer what is on the stage. */
   const [made, setMade] = useState<File | null>(null);
+  /** The clipper page, on a phone, with the file rendered and the share
+   *  sheet refused to open by itself (autoSave): the whole screen is the
+   *  press it wants, until it is tapped or waved away. */
+  const [savePrompt, setSavePrompt] = useState(false);
   /** The code of the export under way or just done, minted the moment
    *  Download is pressed (runExport): it goes on the end of both post
    *  captions in that same press, then in the file name and on the line
@@ -571,11 +577,14 @@ export function Vids2Builder({
   const [recipeError, setRecipeError] = useState<string | null>(null);
 
   // ── Publish (Studio only) ────────────────────────────────────────────────
-  /** The last render's bytes, kept — on every device, not just phones —
-   *  so Send to Phonedeck / Publish to accounts have something to act on
-   *  after Download's instant downloadBlob() already ran. Cleared by the
-   *  same invalidation as `made` (below): a rendered blob for a stage that
-   *  has since changed is nobody's to push anywhere. */
+  /** The last render's bytes, kept — on every device, not just phones. In
+   *  the Studio a render is not dropped on the browser the moment it lands:
+   *  it waits here, and the foot of the sidebar offers Download, Send to
+   *  Phonedeck and Publish to accounts for it (a phone has Save to Photos
+   *  above those). Cleared by the same invalidation as `made` (below): a
+   *  rendered blob for a stage that has since changed is nobody's to push
+   *  anywhere. Never set on the clipper build, which downloads as it always
+   *  has. */
   const [pushable, setPushable] = useState<{ blob: Blob; name: string } | null>(null);
   const [publishOpen, setPublishOpen] = useState(false);
   const [phonedeckRevealed, setPhonedeckRevealed] = useState(false);
@@ -1537,6 +1546,22 @@ export function Vids2Builder({
     endContext: picks.end?.video.context ?? '',
   });
 
+  /** Render + Save, the clipper page's one press: the file goes to the share
+   *  sheet the moment it is rendered. A browser that still counts the press
+   *  that started the render lets it straight through, and the sheet is up
+   *  with no second press. Most do not — that press is a minute old — and
+   *  refuse; then the whole screen is the second press (savePrompt): the
+   *  next tap anywhere opens the sheet. A sheet that did open and was
+   *  dismissed is not a refusal, and asks nothing more. */
+  const autoSave = async (file: File) => {
+    try {
+      await navigator.share({ files: [file] });
+    } catch (e) {
+      if (e instanceof DOMException && e.name === 'AbortError') return;
+      setSavePrompt(true);
+    }
+  };
+
   const runExport = async () => {
     if (!plan.items.length || broken.length || exporting) return;
     pause();
@@ -1544,6 +1569,10 @@ export function Vids2Builder({
     setRecipeError(null);
     setLastRecipe(null);
     setMade(null);
+    setSavePrompt(false);
+    // The kept render goes with it: a run that fails leaves the button to
+    // make one, not last time's file under a code that is no longer on show.
+    setPushable(null);
     const ctrl = new AbortController();
     abortRef.current = ctrl;
     setExporting({ frac: 0, label: 'Starting…' });
@@ -1601,11 +1630,19 @@ export function Vids2Builder({
       // share sheet wants a press of its own, and this is a minute after the
       // last one (see canShareVideo). A File rather than the Blob: the sheet
       // names what it is handed by the file's name and type.
-      if (phone) setMade(new File([blob], name, { type: blob.type || 'video/mp4' }));
-      else downloadBlob(blob, name);
-      // Kept regardless of device (and only in the Studio) so Send to
-      // Phonedeck / Publish to accounts have this render's bytes even after
-      // desktop's instant download above.
+      if (phone) {
+        const file = new File([blob], name, { type: blob.type || 'video/mp4' });
+        setMade(file);
+        // The clipper page: Render + Save is one press, or as near as the
+        // browser allows (autoSave).
+        if (CLIPPERS) void autoSave(file);
+      } else if (CLIPPERS) {
+        // Only the clipper build drops the file on the browser by itself. In
+        // the Studio nothing lands on this PC unasked: the render is kept
+        // (pushable) and the footer offers Download, Send to Phonedeck and
+        // Publish to accounts for it.
+        downloadBlob(blob, name);
+      }
       if (!CLIPPERS) setPushable({ blob, name });
       // Already up since the record was written — set again only for the run
       // where it arrived after this point.
@@ -1634,6 +1671,7 @@ export function Vids2Builder({
   // it comes back.
   useEffect(() => {
     setMade(null);
+    setSavePrompt(false);
     setPushable(null);
     setPublishOpen(false);
     setPhonedeckRevealed(false);
@@ -1954,8 +1992,24 @@ export function Vids2Builder({
     if (working) return 'Putting it together — the sound and the captions.';
     if (broken.length) return 'One of these clips would not load — press Reset and make it again.';
     if (!appliedPersonaId) return 'The persona\u2019s clips aren\u2019t on the stage — press Reset and pick one that has all three.';
-    return `Ready${total ? ` · ${fmtTime(total)}` : ''} — play it, then download it.`;
+    return `Ready${total ? ` · ${fmtTime(total)}` : ''} — play it, then ${CLIPPERS ? 'download it' : 'make the MP4'}.`;
   })();
+
+  // ── Typing on a phone ──
+  // The keyboard takes the bottom half of the screen, and the Download row
+  // pinned to the foot of the page then sits right over the caption being
+  // typed. So while a box has the focus the row steps aside on a phone, and
+  // comes back the moment it is left. Focus bubbles, so the root hears every
+  // box. (The same thing the form does for Generate.)
+  const [typing, setTyping] = useState(false);
+  const onFocus = (e: FocusEvent) => { if (isTextBox(e.target)) setTyping(true); };
+  const onBlur = (e: FocusEvent) => setTyping(isTextBox(e.relatedTarget));
+  // A box taken off the page while it has the focus blurs without a word
+  // (the form has the same line): looked at again after every render.
+  // After every render on purpose — a box can go on any of them — and it
+  // settles: it only ever sets false, and only while true.
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  useEffect(() => { if (typing && !isTextBox(document.activeElement)) setTyping(false); });
 
   /** Start over — the way back to the form. Throws away a video that took a
    *  minute to render, and every bit of tuning on it, so it asks first. On the
@@ -1963,6 +2017,15 @@ export function Vids2Builder({
    *  on a phone the sidebar is under the video, so it is drawn a second time
    *  in the top right corner of the page itself — the corner the form's Reset
    *  is in — over the stage's own black margin. */
+  /** Each library clip on the stage, played off this machine once its bytes
+   *  have been fetched once — see lib/vids-clip-cache. Null while they are on
+   *  the way; a local clip's blob: URL passes straight through. Built here
+   *  rather than in the loop below because it is one hook for all six. */
+  const slotSrcs = useCachedClipSrcs(SLOTS.map((s) => {
+    const p = picks[s.id];
+    return p && !isPhoto(p.video) ? withBase(p.video.url) : null;
+  }));
+
   const startOver = (cls: string) => (
     <button
       onClick={() => {
@@ -1979,14 +2042,14 @@ export function Vids2Builder({
   return (
     // A row — the stage and the sidebar — from md up; under that, one column
     // that scrolls: the stage, the transport, then the sidebar's sections.
-    <div className="flex min-h-0 min-w-0 flex-1 max-md:flex-col max-md:overflow-y-auto">
+    <div className="flex min-h-0 min-w-0 flex-1 max-md:flex-col max-md:overflow-y-auto" onFocus={onFocus} onBlur={onBlur}>
       {/* Start over, top right of the page on a phone. Positioned against
           the section's root rather than this scroll, so it stays put while
           the page scrolls under it; gone in full screen with the rest. */}
       {!full && startOver('absolute right-3 top-3 z-30 bg-zinc-950/90 backdrop-blur md:hidden')}
 
       {/* Hidden decode elements — one per filled slot; the canvas samples from them. */}
-      {SLOTS.map((s) => {
+      {SLOTS.map((s, i) => {
         const p = picks[s.id];
         if (!p) return null;
         // A photo is held rather than played: no seeking, no sound, no metadata
@@ -2011,7 +2074,9 @@ export function Vids2Builder({
           <video
             key={`${s.id}:${p.video.id}`}
             ref={layerRefs.video(s.id)}
-            src={withBase(p.video.url)}
+            // Off this machine once fetched (slotSrcs); nothing to load until
+            // the bytes are here, and the element carries on from there.
+            src={slotSrcs[i] ?? undefined}
             crossOrigin="anonymous"
             playsInline
             preload="auto"
@@ -2559,7 +2624,7 @@ export function Vids2Builder({
             screen from the moment the page opens. Painted black because the
             sidebar paints nothing, and a transparent sticky footer would have
             the rest scroll through it. Padded clear of a phone's home bar. */}
-        <div className="sticky bottom-0 mt-auto border-t border-zinc-800 bg-black px-3 py-3 max-md:pb-[max(0.75rem,env(safe-area-inset-bottom))]">
+        <div className={`sticky bottom-0 mt-auto border-t border-zinc-800 bg-black px-3 py-3 max-md:pb-[max(0.75rem,env(safe-area-inset-bottom))] ${typing ? 'max-md:hidden' : ''}`}>
           {exporting ? (
             <div>
               <div className="flex items-center gap-2 text-sm text-zinc-300">
@@ -2598,16 +2663,48 @@ export function Vids2Builder({
                 </button>
               </div>
             </>
+          ) : !CLIPPERS && pushable ? (
+            /* The Studio on a PC, with the file rendered and kept: nothing
+               has landed on this computer yet. Download is one of three ways
+               out — the other two (Send to Phonedeck, Publish to accounts)
+               are the row under this, shared with the phone branch above. */
+            <>
+              <button
+                data-vids-export="save"
+                onClick={() => downloadBlob(pushable.blob, pushable.name)}
+                title="Save the MP4 to this PC"
+                className="flex h-14 w-full items-center justify-center gap-2 rounded-xl bg-white text-base font-semibold text-black transition-colors hover:bg-zinc-200 md:h-11 md:text-sm"
+              >
+                <DownloadIcon size={15} /> Download MP4
+              </button>
+              <div className="mt-2 flex items-center gap-3 text-xs text-zinc-500">
+                <span className="min-w-0 flex-1 truncate" title={pushable.name}>{pushable.name}</span>
+                <button
+                  type="button"
+                  onClick={() => void runExport()}
+                  title="Render it again"
+                  className="shrink-0 font-semibold text-zinc-300 underline decoration-zinc-600 underline-offset-2 hover:text-white"
+                >
+                  Render again
+                </button>
+              </div>
+            </>
           ) : (
             <>
               <button
                 data-vids-export="download"
                 onClick={() => void runExport()}
                 disabled={!plan.items.length || broken.length > 0}
-                title={phone ? 'Render the MP4 — then Save to Photos' : 'Render the MP4 and save it to this PC'}
+                title={
+                  phone && CLIPPERS ? 'Renders the MP4, then opens the share sheet to save it'
+                    : phone ? 'Render the MP4 — then Save to Photos'
+                      : CLIPPERS ? 'Render the MP4 and save it to this PC'
+                        : 'Render the MP4 — then download it, send it to Phonedeck, or publish it'
+                }
                 className="flex h-14 w-full items-center justify-center gap-2 rounded-xl bg-white text-base font-semibold text-black transition-colors hover:bg-zinc-200 disabled:cursor-not-allowed disabled:opacity-30 md:h-11 md:text-sm"
               >
-                <DownloadIcon size={15} /> {phone ? 'Make the MP4' : 'Download MP4'}
+                {phone && CLIPPERS ? <><ShareIcon /> Render + Save to Photos</>
+                  : <><DownloadIcon size={15} /> {phone || !CLIPPERS ? 'Make the MP4' : 'Download MP4'}</>}
               </button>
               <p className="mt-2 text-xs text-zinc-500">
                 {outW}×{outH} · H.264 + AAC · {OUT_FPS} fps{total ? ` · ${fmtTime(total)}` : ''}
@@ -2619,8 +2716,8 @@ export function Vids2Builder({
 
           {/* Send to Phonedeck / Publish to accounts — Studio only (never in
               the clipper bundle: !CLIPPERS), and only once a render exists to
-              act on. Sits under Download rather than replacing it, in either
-              the phone-share branch above or the idle Download branch. */}
+              act on. Under Save to Photos on a phone, under Download on a PC:
+              with those, the three ways a kept render leaves the page. */}
           {!CLIPPERS && !exporting && pushable && (
             <div className="mt-2 flex gap-2">
               <button
@@ -2668,6 +2765,33 @@ export function Vids2Builder({
           theme={build.theme}
           onClose={() => setPublishOpen(false)}
         />
+      )}
+
+      {/* Render + Save's second press, when the browser insists on one: the
+          whole screen, so the next tap anywhere opens the share sheet. Not
+          now leaves the file on the Save to Photos button below. */}
+      {CLIPPERS && savePrompt && made && (
+        <div
+          role="button"
+          tabIndex={0}
+          onClick={() => { setSavePrompt(false); void saveToPhotos(); }}
+          onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { setSavePrompt(false); void saveToPhotos(); } }}
+          className="fixed inset-0 z-50 flex cursor-pointer flex-col items-center justify-center gap-4 bg-black/95 px-8 text-center"
+        >
+          <span className="flex h-20 w-20 items-center justify-center rounded-full bg-white text-black [&_svg]:h-9 [&_svg]:w-9">
+            <ShareIcon />
+          </span>
+          <p className="text-2xl font-semibold text-white">Rendered</p>
+          <p className="text-base text-zinc-300">Tap anywhere to save it to Photos</p>
+          <p className="text-sm text-zinc-500">Then tap Save Video in the sheet</p>
+          <button
+            type="button"
+            onClick={(e) => { e.stopPropagation(); setSavePrompt(false); }}
+            className="mt-6 text-sm text-zinc-500 underline decoration-zinc-700 underline-offset-4 hover:text-white"
+          >
+            Not now
+          </button>
+        </div>
       )}
     </div>
   );

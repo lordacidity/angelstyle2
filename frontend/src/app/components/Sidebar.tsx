@@ -76,6 +76,18 @@ const NAV: { id: AppSection; label: string; icon: React.ReactNode }[] = [
     ),
   },
   {
+    id: 'hyperattention',
+    label: 'Hyper Attention',
+    // A beacon — the accounts Vids 2 publishes to, and every post queued onto
+    // them, watched from here. Under Vids 2 because that is where a post starts.
+    icon: (
+      <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+        <circle cx="12" cy="12" r="2"/>
+        <path d="M16.24 7.76a6 6 0 0 1 0 8.49M7.76 16.24a6 6 0 0 1 0-8.49M19.07 4.93a10 10 0 0 1 0 14.14M4.93 19.07a10 10 0 0 1 0-14.14"/>
+      </svg>
+    ),
+  },
+  {
     id: 'carousel',
     label: 'Carousel',
     // Stacked cards — a multi-page swipe post.
@@ -241,7 +253,7 @@ export function Sidebar({
               }`}
             >
               {icon}
-              <span className="text-[9px] font-medium leading-none text-center">{label}</span>
+              <span className="text-[9px] font-medium leading-tight text-center">{label}</span>
             </Link>
           );
         })}

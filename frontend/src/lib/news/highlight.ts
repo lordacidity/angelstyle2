@@ -9,8 +9,10 @@
 // forms the press uses for them (lib/news/name-forms) — "Trump" in a headline
 // is the name in the headline, whatever the story says further down — and
 // only then the story, the same way. The whole name in the headline settles
-// it without asking for forms at all. Null when the page says them no way,
-// and the recording falls back to the start of the headline.
+// it without asking for forms at all. Null when the page says them no way —
+// the article route then writes a paragraph in that does (lib/news/written-in),
+// and only failing that does the recording fall back to the start of the
+// headline.
 
 import { headlineNames } from './google-news';
 import { nameForms } from './name-forms';

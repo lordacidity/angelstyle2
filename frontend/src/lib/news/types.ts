@@ -4,6 +4,9 @@
 // made up. Every headline, byline, date and paragraph in a NewsArticle was read
 // from the outlet itself (its page, or its own public feed for that article),
 // and anything the outlet didn't give us is left null/empty, never guessed.
+// The one exception is a page that never says the name the clip is for: one
+// paragraph that does is written in by AI, and `notes` says so
+// (lib/news/written-in).
 
 export type OutletId = 'espn' | 'cnn' | 'fox' | 'nyt' | 'tmz' | 'bbc' | 'people' | 'imdb';
 
@@ -77,6 +80,9 @@ export interface TrendingResponse {
    *  between readers (lib/news/trending-cache), so it can be minutes old —
    *  the form says how many. Null from a route that didn't say. */
   asOf?: string | null;
+  /** True when the list went out past its freshness and is being read again
+   *  behind the reply — the form asks again shortly (Vids2Form). */
+  stale?: boolean;
   /** How many fresh headlines were read to find them, and how many of those
    *  named somebody. */
   scanned: number;

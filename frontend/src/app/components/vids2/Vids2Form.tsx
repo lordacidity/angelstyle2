@@ -57,12 +57,12 @@
 // a story searched for or read off its outlet, a question written by the
 // model — is unchanged from before this page was redrawn; only the page is.
 
-import { useEffect, useMemo, useRef, useState, type KeyboardEvent, type ReactNode } from 'react';
+import { useEffect, useMemo, useRef, useState, type FocusEvent, type KeyboardEvent, type ReactNode } from 'react';
 import { PERSONA_PARTS, type VidPersona, type VidRow } from '@/lib/vids-types';
 import { writeQuestion, type QuestionKind } from '@/lib/vids-client';
 import {
-  LOOK_ASKED, MODE_ASKED, VIDS2_INTROS, VIDS2_LOOKS, VIDS2_MODES, introReady, loadRoster, lower, setupReady,
-  storyFor, type Direction, type NewsRange, type TradeTalent, type TrendWindow, type Vids2Intro,
+  INTROS_OFFERED, LOOK_ASKED, MODE_ASKED, VIDS2_LOOKS, VIDS2_MODES, introReady, loadRoster, lower, setupReady,
+  storyFor, type Direction, type NewsRange, type RosterRow, type TrendWindow, type Vids2Intro,
   type Vids2Look, type Vids2Mode, type Vids2Setup,
 } from '@/lib/vids2/vids2Build';
 import {
@@ -116,7 +116,7 @@ const mag = (v: number | null | undefined) => Math.abs(v ?? 0);
 /** Who is moving on Pauv: today's change first, then the week's, then how
  *  many hold them — so the search opens on who is trending rather than on
  *  the As. */
-function byTrending(a: TradeTalent, b: TradeTalent): number {
+function byTrending(a: RosterRow, b: RosterRow): number {
   return mag(b.price.change1dPct) - mag(a.price.change1dPct)
     || mag(b.price.change1wPct) - mag(a.price.change1wPct)
     || (b.price.holders ?? 0) - (a.price.holders ?? 0)
@@ -232,6 +232,17 @@ interface Props {
 
 // ── Bits of page ─────────────────────────────────────────────────────────────
 
+/** Something a keyboard comes up for: a box you type in. A slider, a button
+ *  or a select is not one. */
+export function isTextBox(target: EventTarget | null): boolean {
+  const el = target as HTMLElement | null;
+  if (!el || typeof el.tagName !== 'string') return false;
+  if (el.isContentEditable) return true;
+  const tag = el.tagName.toLowerCase();
+  if (tag === 'textarea') return true;
+  return tag === 'input' && !['range', 'checkbox', 'radio', 'button', 'submit', 'file', 'color'].includes((el as HTMLInputElement).type);
+}
+
 const PRIMARY = 'rounded-xl bg-white font-semibold text-black transition-colors hover:bg-zinc-200 disabled:cursor-not-allowed disabled:opacity-30 disabled:hover:bg-white';
 const INPUT = 'w-full rounded-xl border border-zinc-800 bg-black text-zinc-100 outline-none placeholder:text-zinc-600 focus:border-zinc-500 disabled:opacity-50';
 const pill = (on: boolean) =>
@@ -271,7 +282,7 @@ function OutletTag({ id }: { id: OutletId }) {
   const o = outletById(id);
   return (
     <span className="mt-0.5 shrink-0 rounded px-1.5 py-px text-[10px] font-bold text-white" style={{ background: o.color }}>
-      {o.name}
+      {o.short ?? o.name}
     </span>
   );
 }
@@ -438,7 +449,7 @@ export function Vids2Form({
   }, [open]);
 
   // ── The roster ──────────────────────────────────────────────────────────────
-  const [roster, setRoster] = useState<TradeTalent[]>([]);
+  const [roster, setRoster] = useState<RosterRow[]>([]);
   const [rosterError, setRosterError] = useState<string | null>(null);
   useEffect(() => {
     let alive = true;
@@ -702,7 +713,7 @@ export function Vids2Form({
   // changes. The route sends more rows than are shown — the hottest, the
   // hottest politics, the newest — so the order and Hide politics are both
   // worked out here, and either way the list is full.
-  const [trend, setTrend] = useState<{ window: TrendWindow; hits: TrendingHit[]; scanned: number; matched: number; ai: boolean; topic: string | null; asOf?: string | null } | null>(null);
+  const [trend, setTrend] = useState<{ window: TrendWindow; hits: TrendingHit[]; scanned: number; matched: number; ai: boolean; topic: string | null; asOf?: string | null; stale?: boolean } | null>(null);
   const [trendLoading, setTrendLoading] = useState(false);
   const [trendError, setTrendError] = useState<string | null>(null);
   const trendRef = useRef<AbortController | null>(null);
@@ -736,6 +747,28 @@ export function Vids2Form({
     void refreshTrending(setup.trendWindow);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [onTrending]);
+
+  // A list handed over stale is being read again behind it (the server says
+  // so: lib/news/trending-cache). Ask again every so often and put the new
+  // one up when it lands — not while a story is being read off the list,
+  // which would move under the press. Gives up after a couple of minutes:
+  // the read failed, or somebody else's is taking its time.
+  useEffect(() => {
+    if (!onTrending || !trend?.stale) return;
+    const { window: w, topic, asOf } = trend;
+    const ctrl = new AbortController();
+    let tries = 0;
+    const timer = window.setInterval(() => {
+      if (++tries > 8) { window.clearInterval(timer); return; }
+      void loadTrending(w, topic ?? '', ctrl.signal).then((r) => {
+        if (ctrl.signal.aborted || !r.asOf || r.asOf === asOf) return;
+        if (readRef.current) return; // a story is being read — next time
+        window.clearInterval(timer);
+        setTrend({ window: w, ...r });
+      }).catch(() => { /* next time */ });
+    }, 15_000);
+    return () => { window.clearInterval(timer); ctrl.abort(); };
+  }, [onTrending, trend]);
 
   // The typed category filters here rather than at the route: every row
   // already carries the people it names with what each is known for, so
@@ -843,7 +876,7 @@ export function Vids2Form({
       case 'intro':
         return setup.intro === 'none' ? INTRO_LABEL.none
           : setup.intro === 'chatgpt' ? `💬 “${setup.question.trim()}”`
-          : story ? `📰 ${outletById(story.article.outlet).name} · ${story.article.headline}` : '📰 News';
+          : story ? `📰 ${outletById(story.article.outlet).short ?? outletById(story.article.outlet).name} · ${story.article.headline}` : '📰 News';
       case 'direction': return DIRECTION_LABEL[setup.direction];
       case 'look': return LOOK_LABEL[setup.look];
       case 'mode': return MODE_LABEL[setup.mode];
@@ -1216,7 +1249,8 @@ export function Vids2Form({
   const introCard = (
     <>
       <Choice
-        options={VIDS2_INTROS.map((i) => ({ value: i, label: INTRO_LABEL[i], on: INTRO_ON[i] }))}
+        // Two on the clipper page, three in the Studio — see INTROS_OFFERED.
+        options={INTROS_OFFERED.map((i) => ({ value: i, label: INTRO_LABEL[i], on: INTRO_ON[i] }))}
         value={setup.intro}
         disabled={false}
         onPick={pickIntro}
@@ -1236,7 +1270,7 @@ export function Vids2Form({
             placeholder="The question typed into ChatGPT — or have one written ↓"
             className={`${INPUT} resize-none px-3.5 py-2.5 text-sm`}
           />
-          <div className="mt-3 flex items-center gap-2">
+          <div className="mt-3 flex flex-wrap items-center gap-2">
             {QUESTION_KINDS.map((k) => (
               <button
                 key={k}
@@ -1244,7 +1278,7 @@ export function Vids2Form({
                 onClick={() => void suggest(k)}
                 disabled={!who || writingKind !== null}
                 title={QUESTION_HINT[k]}
-                className={`h-9 rounded-lg border px-3 text-[13px] font-semibold transition-colors disabled:opacity-40 ${
+                className={`h-9 shrink-0 whitespace-nowrap rounded-lg border px-3 text-[13px] font-semibold transition-colors disabled:opacity-40 ${
                   chosenKind === k
                     ? k === 'ragebait' ? 'border-amber-500 bg-amber-500/15 text-amber-200' : 'border-zinc-300 bg-white/10 text-white'
                     : 'border-zinc-700 text-zinc-300 hover:border-zinc-500 hover:text-white'
@@ -1253,8 +1287,7 @@ export function Vids2Form({
                 {writingKind === k ? 'Writing…' : QUESTION_LABEL[k]}
               </button>
             ))}
-            <span className="flex-1" />
-            <button type="button" onClick={continueIntro} disabled={!setup.question.trim()} className={`${PRIMARY} h-9 px-4 text-[13px]`}>
+            <button type="button" onClick={continueIntro} disabled={!setup.question.trim()} className={`${PRIMARY} ml-auto h-9 shrink-0 whitespace-nowrap px-4 text-[13px]`}>
               Continue →
             </button>
           </div>
@@ -1264,7 +1297,9 @@ export function Vids2Form({
 
       {setup.intro === 'news' && (
         <div className="mt-4">
-          <div className="flex items-center gap-1">
+          {/* Wraps rather than running off the card on a phone; the headline
+              toggle is a desktop nicety and stays off phones altogether. */}
+          <div className="flex flex-wrap items-center gap-1">
             {NEWS_RANGES.map((r) => (
               <button key={r} type="button" onClick={() => patch({ newsRange: r })} disabled={searching} className={pill(setup.newsRange === r)}>
                 {RANGE_LABEL[r]}
@@ -1272,7 +1307,7 @@ export function Vids2Form({
             ))}
             <span className="flex-1" />
             {hitsShown && found && found.hits.length > 0 && (
-              <button type="button" onClick={() => setNameInTitle((v) => !v)} className={pill(nameInTitle)}>
+              <button type="button" onClick={() => setNameInTitle((v) => !v)} className={`${pill(nameInTitle)} max-sm:hidden`}>
                 {nameInTitle ? '✓ ' : ''}Name in headline
               </button>
             )}
@@ -1495,13 +1530,30 @@ export function Vids2Form({
 
   const pct = job ? Math.round(jobProgress(job) * 100) : 0;
 
+  // ── Typing on a phone ───────────────────────────────────────────────────
+  // The keyboard takes the bottom half of the screen, and a row pinned to the
+  // foot of the page then sits right over whatever is being typed. So while
+  // a box has the focus the Generate row steps aside on a phone, and comes
+  // back the moment it is left. Focus bubbles, so the root hears every box.
+  const [typing, setTyping] = useState(false);
+  const onFocus = (e: FocusEvent) => { if (isTextBox(e.target)) setTyping(true); };
+  const onBlur = (e: FocusEvent) => setTyping(isTextBox(e.relatedTarget));
+  // A box taken off the page while it has the focus — the question box when
+  // News is pressed, the search box when a name is picked and the card
+  // folds — blurs without a word, so what has the focus is looked at again
+  // after every render, and the row comes back when it is not a box.
+  // After every render on purpose — a box can go on any of them — and it
+  // settles: it only ever sets false, and only while true.
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  useEffect(() => { if (typing && !isTextBox(document.activeElement)) setTyping(false); });
+
   return (
     // min-w-0: this is a flex item, and a flex item's least width is its
     // content's unless told otherwise — so a folded card's one-line answer,
     // which never wraps, was the least width of the whole form, and a long
     // ChatGPT question pushed the page out wide on a phone. Held to the
     // window, the line truncates the way it was meant to.
-    <div className="relative flex min-h-0 min-w-0 flex-1 flex-col">
+    <div className="relative flex min-h-0 min-w-0 flex-1 flex-col" onFocus={onFocus} onBlur={onBlur}>
       {/* On a phone the two corner boxes the section floats over the form —
           the code box and Reset — sit on a solid strip, so the cards scroll
           under a header rather than through it. Wide, they are off in the
@@ -1525,7 +1577,7 @@ export function Vids2Form({
           when every card is answered; the progress bar while it runs. Bigger
           on a phone, where it is pressed with a thumb, and padded clear of
           the home bar on one with a notch. */}
-      <div className="shrink-0 border-t border-zinc-900 bg-black pb-[env(safe-area-inset-bottom)]">
+      <div className={`shrink-0 border-t border-zinc-900 bg-black pb-[env(safe-area-inset-bottom)] ${typing ? 'max-md:hidden' : ''}`}>
         <div className="mx-auto w-full max-w-2xl px-4 py-3 sm:px-6 sm:py-4">
           {job ? (
             <div className="rounded-2xl border border-zinc-800 bg-[#111] p-4">

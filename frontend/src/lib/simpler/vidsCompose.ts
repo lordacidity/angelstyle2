@@ -21,6 +21,7 @@ import type * as MB from 'mediabunny';
 import { isPhoto } from '@/lib/vids-types';
 import { withBase } from '@/lib/clipping';
 import { localClipBlob } from '@/lib/simpler/vidsLocal';
+import { cachedClipBlob, isCacheableClipUrl } from '@/lib/vids-clip-cache';
 import {
   drawPlanItem, isBoomItem, smoothScaling, videoBitrate,
   type Plan, type PlanItem,
@@ -133,10 +134,15 @@ export async function composeSequence(opts: ComposeOptions): Promise<Blob> {
       // rather than off what got opened here. See BoomInsert.picture.
       if (item.picture === false) continue;
       // A clip that lives in this tab (the Bottom card's recording) is read
-      // from its bytes; everything else is fetched from the bucket in ranges.
-      const local = localClipBlob(item.video);
+      // from its bytes. A library clip's bytes come off this machine once they
+      // have been fetched once (lib/vids-clip-cache) — the same bytes the
+      // bucket would serve, so the same file comes out — and only a clip the
+      // cache can't take is fetched from the bucket in ranges.
+      const url = withBase(item.video.url);
+      const local = localClipBlob(item.video)
+        ?? (isCacheableClipUrl(url) ? await cachedClipBlob(url).catch(() => null) : null);
       const input = new Input({
-        source: local ? new BlobSource(local) : new UrlSource(withBase(item.video.url)),
+        source: local ? new BlobSource(local) : new UrlSource(url),
         formats: ALL_FORMATS,
       });
       inputs.push(input);

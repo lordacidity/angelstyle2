@@ -15,6 +15,8 @@
 
 import { useCallback, useEffect, useRef, useState } from 'react';
 import * as client from '@/lib/vids-client';
+import { withBase } from '@/lib/clipping';
+import { trimClipCache } from '@/lib/vids-clip-cache';
 import type { PersonaParts, PersonaUpdate } from '@/lib/vids-client';
 import { PERSONA_PARTS, PERSONA_PART_LABEL } from '@/lib/vids-types';
 import type {
@@ -106,6 +108,9 @@ export function useVidsLibrary(active: boolean) {
         if (settledRef.current !== settledAt) continue;
         setFolders(lib.folders);
         setVideos(lib.videos);
+        // Bytes kept on this machine for clips the library no longer has
+        // can go — see lib/vids-clip-cache.
+        void trimClipCache(lib.videos.map((v) => withBase(v.url)));
         setPersonas(lib.personas ?? []);
         setLinkRows(lib.links ?? []);
         setClipableRows(lib.clipable ?? []);

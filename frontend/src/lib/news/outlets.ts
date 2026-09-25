@@ -6,6 +6,9 @@ import type { OutletId } from './types';
 export interface Outlet {
   id: OutletId;
   name: string;
+  /** What a tag in the Studio says when the name is a mouthful — 'NYT'. The
+   *  rendered page keeps the full name. */
+  short?: string;
   /** Hostnames that belong to the outlet (subdomains included). */
   hosts: string[];
   /** Brand colour for the Studio UI (not the rendered page). */
@@ -16,7 +19,7 @@ export const OUTLETS: Outlet[] = [
   { id: 'espn', name: 'ESPN', hosts: ['espn.com'], color: '#d00' },
   { id: 'cnn', name: 'CNN', hosts: ['cnn.com'], color: '#cc0000' },
   { id: 'fox', name: 'Fox News', hosts: ['foxnews.com'], color: '#003366' },
-  { id: 'nyt', name: 'The New York Times', hosts: ['nytimes.com'], color: '#121212' },
+  { id: 'nyt', name: 'The New York Times', short: 'NYT', hosts: ['nytimes.com'], color: '#121212' },
   { id: 'tmz', name: 'TMZ', hosts: ['tmz.com'], color: '#d8000f' },
   { id: 'bbc', name: 'BBC', hosts: ['bbc.com', 'bbc.co.uk'], color: '#141414' },
   { id: 'people', name: 'People', hosts: ['people.com'], color: '#29abe2' },

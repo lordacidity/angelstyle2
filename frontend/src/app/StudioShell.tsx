@@ -93,6 +93,12 @@ const MusicSection = lazy(() =>
   import('./components/music/MusicSection').then(m => ({ default: m.MusicSection }))
 );
 
+// Hyper Attention — the accounts Vids 2 publishes to, and every post queued
+// onto them: which account, when, and whether it went.
+const HyperAttentionSection = lazy(() =>
+  import('./components/hyperattention/HyperAttentionSection').then(m => ({ default: m.HyperAttentionSection }))
+);
+
 function SectionLoader() {
   return (
     <div className="flex items-center justify-center h-full min-h-[200px]">
@@ -319,6 +325,10 @@ export function StudioShell() {
   // finishes while you look elsewhere. Playback pauses on the way out.
   const [musicEverVisited, setMusicEverVisited] = useState(false);
   useEffect(() => { if (activeSection === 'music') setMusicEverVisited(true); }, [activeSection]);
+  // Hyper Attention keeps its last read while you look elsewhere, so coming
+  // back is the page as it was, with the minute's refresh on its way.
+  const [hyperattentionEverVisited, setHyperattentionEverVisited] = useState(false);
+  useEffect(() => { if (activeSection === 'hyperattention') setHyperattentionEverVisited(true); }, [activeSection]);
 
   // Board widget → generator. Replace the current rows with a single fresh entry
   // carrying this row's link/caption/context, then hand its id to CanvasGrid via
@@ -605,6 +615,16 @@ export function StudioShell() {
             <ErrorBoundary>
               <Suspense fallback={<SectionLoader />}>
                 <MusicSection active={activeSection === 'music'} />
+              </Suspense>
+            </ErrorBoundary>
+          </div>
+        )}
+
+        {hyperattentionEverVisited && (
+          <div style={{ display: activeSection === 'hyperattention' ? undefined : 'none' }}>
+            <ErrorBoundary>
+              <Suspense fallback={<SectionLoader />}>
+                <HyperAttentionSection active={activeSection === 'hyperattention'} />
               </Suspense>
             </ErrorBoundary>
           </div>

@@ -27,7 +27,7 @@ import { articleUrlProblem, athleticId, outletForHost, outletById } from './outl
 import type { BodyBlock, NewsArticle, OutletId } from './types';
 
 // As much of the article as the outlet gives, up to a length the PNG can hold.
-const MAX_BLOCKS = 80;
+export const MAX_BLOCKS = 80;
 
 export class ArticleError extends Error {}
 
