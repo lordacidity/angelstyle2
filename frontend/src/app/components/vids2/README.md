@@ -377,7 +377,7 @@ hand from the builder's Music list stays on any build.
 > tweaker goes long on swifty (i love you swifty)
 
 Every part but the nickname comes off a fixed list, so the route draws those
-itself and asks Claude for the nickname alone — a funny shorthand when one
+itself and asks DeepSeek for the nickname alone — a funny shorthand when one
 lands, the plain name when not — plus its one-word short form. The descriptor
 is one of chopped kid, homeless man, tweaker, dude, kid. The
 bracket is one of nine self-owns followed by 💯 🔥 😎 or 🥀; or, a third of the

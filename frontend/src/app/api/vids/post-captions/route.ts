@@ -13,7 +13,9 @@
 //    knows what not to joke about. The search results are not billed as prompt
 //    tokens, and the brief is kept for the day per person, so an up and a down
 //    on the same person, or a second video, search once.
-// 3. Writing: one Claude call writes both captions from that brief alone.
+// 3. Writing: one DeepSeek call writes both captions from that brief alone.
+//    (Claude Sonnet 5 until 2026-09-28, swapped to save Anthropic credits, the
+//    way the hook was.)
 //    (It used to write a "hold the post" line too, shown under the captions
 //    on the tuning page; that was taken out on 2026-09-22 — the captions are
 //    the whole answer.) The rules sit in the system prompt; lowercase, dashes
@@ -29,9 +31,9 @@
 // request, and each should still get a pair of its own. The research is the
 // day's either way.
 
-import Anthropic from '@anthropic-ai/sdk';
 import { NextRequest, NextResponse } from 'next/server';
 import { z } from 'zod';
+import { deepseekChat } from '@/lib/deepseek';
 import { geminiWithSearch } from '@/lib/gemini';
 import { cleanText } from '@/lib/long-caption';
 import { BANNED_WORDS } from '@/lib/vids-brief';
@@ -40,11 +42,6 @@ import { readTrade } from '@/lib/vids-read-trade';
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
 
-/** The model the Start hook is written on, at low effort: the rules and the
- *  facts do the work, and the reply is two captions, not a problem to reason
- *  through. Opus cost about 2.5 times as much for the same job; Haiku was
- *  cheaper still but weaker at the jokes and the voice rules. */
-const MODEL = 'claude-sonnet-5';
 
 type Position = 'up' | 'down';
 
@@ -114,9 +111,8 @@ function researchFor(person: string): Promise<string> {
 
 // ── Writing ──────────────────────────────────────────────────────────────────
 
-// Never changes, and nothing dated or per-request goes in it, so it can be
-// cached. It sits near Sonnet's 1,024-token caching floor and may fall under
-// it; below the floor the marker simply does nothing and costs nothing.
+// Never changes, and nothing dated or per-request goes in it, so DeepSeek's
+// automatic prefix cache can reuse it from one call to the next.
 const SYSTEM = `You write the two captions posted under a short vertical video. In the video someone looks a person up, then trades UP or DOWN on them on pauv. pauv is a platform where you trade a person's trajectory: up if they are rising, down if they have peaked. The captions are about that person and that trade.
 
 You get today's date, the person, the direction, and a research brief of their recent news. The brief is your only source of facts.
@@ -157,28 +153,20 @@ the instagram caption
 ===TIKTOK===
 the tiktok caption`;
 
-/** Built on first use, so a missing key is an answer from the route rather
+/** The rules as the system message, the brief as the user's. A missing key is
+ *  an error from lib/deepseek on the call, so an answer from the route rather
  *  than a crash when the module loads. */
-let client: Anthropic | null = null;
-const anthropic = () => (client ??= new Anthropic({ timeout: 90_000, maxRetries: 2 }));
-
 async function draft(ask: string): Promise<string> {
-  const res = await anthropic().beta.messages.create({
-    model: MODEL,
-    max_tokens: 8000,
-    thinking: { type: 'adaptive' },
-    output_config: { effort: 'low' },
-    // No server-side fallback: Sonnet 5 has no allowed fallback models, so a
-    // decline comes back as a refusal and Try again draws afresh.
-    system: [{ type: 'text', text: SYSTEM, cache_control: { type: 'ephemeral' } }],
-    messages: [{ role: 'user', content: ask }],
-  });
-  if (res.stop_reason === 'refusal') throw new Error('the model declined to write it');
-  if (res.stop_reason === 'max_tokens') throw new Error('the model ran out of room before the captions');
-  return res.content
-    .filter((b): b is Anthropic.Beta.BetaTextBlock => b.type === 'text')
-    .map((b) => b.text)
-    .join('\n');
+  const reply = await deepseekChat(
+    [{ role: 'system', content: SYSTEM }, { role: 'user', content: ask }],
+    // No max_tokens: on the v4 reasoning models it counts the thinking too,
+    // and an empty reply is worse than a slow one. The timeout is the old
+    // Claude call's 90 s rather than the helper's 45: the Instagram caption
+    // alone is 2,000 characters on top of the thinking.
+    { temperature: 0.7, timeoutMs: 90_000 },
+  );
+  if (!reply.trim()) throw new Error('the model came back with nothing');
+  return reply;
 }
 
 /** The two captions out of a reply, or null when the markers are missing.
