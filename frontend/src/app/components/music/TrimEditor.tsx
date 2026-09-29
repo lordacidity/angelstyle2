@@ -8,8 +8,10 @@
 // A press on the waveform takes the nearer handle there and drags it. The
 // waveform is drawn from the song decoded at 8 kHz: plenty to see where the
 // loud parts are, and a sliver of the memory a full decode takes. The preview
-// plays the file through its own <audio>, and stops when the page's player
-// starts, so the two are never heard at once.
+// plays those same bytes through its own <audio>, so what it plays, what the
+// waveform shows and what the server cuts are one file (see /audio/[file] for
+// how a song trimmed in place used to reach here as it was before). It stops
+// when the page's player starts, so the two are never heard at once.
 
 import { useEffect, useRef, useState, type PointerEvent } from 'react';
 
@@ -22,6 +24,8 @@ interface Wave {
   peaks: Float32Array;
   top: number;
   duration: number;
+  /** The bytes the waveform was drawn from, for the preview. */
+  blobUrl: string;
 }
 
 /** 62.36 → "1:02.4" */
@@ -44,9 +48,10 @@ async function readWave(src: string, signal: AbortSignal): Promise<Wave> {
   const res = await fetch(src, { signal });
   if (!res.ok) throw new Error(`Couldn't load the song (${res.status}).`);
   const bytes = await res.arrayBuffer();
+  const blob = new Blob([bytes], { type: res.headers.get('content-type') || 'audio/mpeg' });
   // decodeAudioData resamples to the context's rate, so 8 kHz keeps a
   // four-minute song to a few MB.
-  const buf = await new OfflineAudioContext(1, 1, 8000).decodeAudioData(bytes);
+  const buf = await new OfflineAudioContext(1, 1, 8000).decodeAudioData(bytes.slice(0));
   const peaks = new Float32Array(BUCKETS);
   const per = Math.max(1, Math.floor(buf.length / BUCKETS));
   for (let c = 0; c < buf.numberOfChannels; c++) {
@@ -64,7 +69,7 @@ async function readWave(src: string, signal: AbortSignal): Promise<Wave> {
   }
   let top = 0;
   for (const p of peaks) if (p > top) top = p;
-  return { peaks, top: top || 1, duration: buf.duration };
+  return { peaks, top: top || 1, duration: buf.duration, blobUrl: URL.createObjectURL(blob) };
 }
 
 function StampInput({ label, value, onCommit }: { label: string; value: number; onCommit: (seconds: number) => void }) {
@@ -117,11 +122,16 @@ export function TrimEditor({
 
   useEffect(() => {
     const ac = new AbortController();
+    let made = '';
     readWave(src, ac.signal).then(
-      (w) => { setWave(w); setStart(0); setEnd(w.duration); },
+      (w) => {
+        made = w.blobUrl;
+        if (ac.signal.aborted) { URL.revokeObjectURL(made); return; }
+        setWave(w); setStart(0); setEnd(w.duration);
+      },
       (e) => { if (!ac.signal.aborted) setLoadError(e instanceof Error ? e.message : "Couldn't read the song."); },
     );
-    return () => ac.abort();
+    return () => { ac.abort(); if (made) URL.revokeObjectURL(made); };
   }, [src]);
 
   const duration = wave?.duration ?? 0;
@@ -241,7 +251,7 @@ export function TrimEditor({
     <div className="mt-2 rounded-lg border border-zinc-800 bg-black p-3">
       <audio
         ref={audioRef}
-        src={src}
+        src={wave?.blobUrl}
         preload="auto"
         onPause={() => { cancelAnimationFrame(frame.current); setPreviewing(false); setPlayhead(null); }}
         className="hidden"

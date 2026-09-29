@@ -94,6 +94,17 @@ export function publicUrl(path: string): string {
   return getSb().storage.from(VIDS_BUCKET).getPublicUrl(path).data.publicUrl;
 }
 
+/** A short-lived URL that reads the object as it is now. The public URL goes
+ *  through the bucket's CDN, which keys on the path alone (a query string
+ *  doesn't change it) and keeps an object for its cache-control, so after an
+ *  upsert it serves the old bytes for minutes; a signed URL is checked with
+ *  storage on every read. */
+export async function freshUrl(path: string, seconds = 3600): Promise<string> {
+  const { data, error } = await getSb().storage.from(VIDS_BUCKET).createSignedUrl(path, seconds);
+  if (error || !data) throw new Error(`Could not sign ${path}: ${error?.message ?? 'no url'}`);
+  return data.signedUrl;
+}
+
 export async function signUpload(path: string): Promise<{ path: string; url: string }> {
   await ensureBucket();
   const { data, error } = await getSb().storage.from(VIDS_BUCKET).createSignedUploadUrl(path);
