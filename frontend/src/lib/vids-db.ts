@@ -39,7 +39,7 @@ export const errMessage = (e: unknown) => (e instanceof Error ? e.message : 'une
 // reload in dev, or a long-lived server between deploys. Comparing the version
 // makes such a process re-run the (idempotent) DDL instead of trusting a
 // promise that was resolved against the older schema.
-const SCHEMA_VERSION = 14;
+const SCHEMA_VERSION = 15;
 
 const g = globalThis as unknown as {
   __vidsPool?: pg.Pool;
@@ -275,6 +275,17 @@ function ensureSchema(): Promise<void> {
         marked_at TIMESTAMPTZ NOT NULL DEFAULT now()
       );
     `);
+    // The songs added on the Music page since it moved off the disk: the mp3
+    // is music/<file> in the bucket and plays from /audio/<file> like every
+    // track (app/audio/[file]). A row is only written once its file is up.
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS vids_tracks (
+        file        TEXT        PRIMARY KEY,
+        label       TEXT        NULL,
+        duration_ms INTEGER     NULL,
+        created_at  TIMESTAMPTZ NOT NULL DEFAULT now()
+      );
+    `);
     await pool.query('CREATE INDEX IF NOT EXISTS vids_videos_folder_idx ON vids_videos (folder_id)');
     await pool.query('CREATE INDEX IF NOT EXISTS vids_folders_parent_idx ON vids_folders (parent_id)');
   })().catch((e) => {
@@ -441,6 +452,75 @@ export async function setTrackName(url: string, label: string): Promise<void> {
      ON CONFLICT (url) DO UPDATE SET label = EXCLUDED.label, updated_at = now()`,
     [url, label],
   );
+}
+
+// ── Songs in the bucket ────────────────────────────────────────────────────────
+// A deployment can't write to its own public/audio (Vercel's is read-only), so
+// a song added on the Music page — uploaded, saved from a link, or trimmed into
+// a copy — is filed here instead, on localhost too, so both see the same
+// library. The songs that ship in public/audio stay where they are.
+
+/** Where a song's mp3 is in the bucket. */
+export const musicObject = (file: string): string => `music/${file}`;
+
+export interface CloudTrack {
+  file: string;
+  label: string | null;
+  durationMs: number | null;
+}
+
+/** Every song in the bucket. Read by list-audio beside the names. */
+export async function listCloudTracks(): Promise<CloudTrack[]> {
+  await ensureSchema();
+  const r = await getPool().query<{ file: string; label: string | null; duration_ms: number | null }>(
+    'SELECT file, label, duration_ms FROM vids_tracks',
+  );
+  return r.rows.map((row) => ({ file: row.file, label: row.label, durationMs: row.duration_ms }));
+}
+
+export async function cloudTrackExists(file: string): Promise<boolean> {
+  await ensureSchema();
+  const r = await getPool().query('SELECT 1 FROM vids_tracks WHERE file = $1', [file]);
+  return (r.rowCount ?? 0) > 0;
+}
+
+/** Put the mp3 at `localPath` up as `file`, over any song already filed under
+ *  that name, then record it. A label left out keeps the one it had. Cached
+ *  for five minutes at most, so a trim in place reaches everyone soon. */
+export async function saveCloudTrack(
+  file: string,
+  localPath: string,
+  meta: { label?: string | null; durationMs?: number | null },
+): Promise<void> {
+  await ensureBucket();
+  const { readFile } = await import('fs/promises');
+  const { error } = await getSb().storage.from(VIDS_BUCKET)
+    .upload(musicObject(file), await readFile(localPath), { contentType: 'audio/mpeg', upsert: true, cacheControl: '300' });
+  if (error) throw new Error(`Could not store the song: ${error.message}`);
+  await ensureSchema();
+  await getPool().query(
+    `INSERT INTO vids_tracks (file, label, duration_ms) VALUES ($1, $2, $3)
+     ON CONFLICT (file) DO UPDATE SET label = COALESCE(EXCLUDED.label, vids_tracks.label),
+       duration_ms = COALESCE(EXCLUDED.duration_ms, vids_tracks.duration_ms)`,
+    [file, meta.label ?? null, meta.durationMs ?? null],
+  );
+}
+
+/** Take a song out of the bucket. False when it was never there. */
+export async function deleteCloudTrack(file: string): Promise<boolean> {
+  await ensureSchema();
+  const r = await getPool().query('DELETE FROM vids_tracks WHERE file = $1', [file]);
+  if (!r.rowCount) return false;
+  await removeObjects([musicObject(file)]);
+  return true;
+}
+
+/** Copy a bucket object down to `dest`. */
+export async function downloadObject(path: string, dest: string): Promise<void> {
+  const { data, error } = await getSb().storage.from(VIDS_BUCKET).download(path);
+  if (error || !data) throw new Error(`Could not fetch ${path}: ${error?.message ?? 'no data'}`);
+  const { writeFile } = await import('fs/promises');
+  await writeFile(dest, Buffer.from(await data.arrayBuffer()));
 }
 
 // ── Degen songs ───────────────────────────────────────────────────────────────

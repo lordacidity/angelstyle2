@@ -1,8 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { writeFile, unlink, readFile } from 'fs/promises';
-import { existsSync } from 'fs';
 import path from 'path';
 import os from 'os';
+import { openTrack } from '@/lib/audio-library';
 
 export const runtime = 'nodejs';
 
@@ -39,18 +39,23 @@ export async function POST(req: NextRequest) {
     if (!audioUrl) return NextResponse.json({ error: 'audioUrl query param required' }, { status: 400 });
 
     const audioFilename = path.basename(audioUrl);
-    const audioPath     = path.join(process.cwd(), 'public', 'audio', audioFilename);
-    if (!existsSync(audioPath)) {
+    const track = await openTrack(`/audio/${audioFilename}`);
+    if (!track) {
       return NextResponse.json({ error: `Audio file not found: ${audioFilename}` }, { status: 404 });
     }
+    const audioPath = track.path;
 
     const ts      = Date.now();
     const vidPath = path.join(os.tmpdir(), `charts-vid-${ts}.mp4`);
     const outPath = path.join(os.tmpdir(), `charts-mix-${ts}.mp4`);
 
     await writeFile(vidPath, Buffer.from(await req.arrayBuffer()));
-    await mixAudio(vidPath, audioPath, outPath);
-    await unlink(vidPath).catch(() => {});
+    try {
+      await mixAudio(vidPath, audioPath, outPath);
+    } finally {
+      await unlink(vidPath).catch(() => {});
+      await track.done();
+    }
 
     const outBuf = await readFile(outPath);
     await unlink(outPath).catch(() => {});

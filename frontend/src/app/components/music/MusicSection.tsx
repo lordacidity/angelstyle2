@@ -276,30 +276,50 @@ export function MusicSection({ active }: { active: boolean }) {
       return;
     }
     setUploads((u) => [...u, { id, name: f.name, progress: 0, state: 'uploading' }]);
-    const form = new FormData();
-    form.append('file', f);
-    const xhr = new XMLHttpRequest();
-    xhr.open('POST', '/api/charts/upload-audio');
-    xhr.upload.onprogress = (e) => { if (e.lengthComputable) patch({ progress: e.loaded / e.total }); };
-    xhr.upload.onload = () => patch({ state: 'converting', progress: 1 });
-    xhr.onload = () => {
+    const fail = (error: string) => { patch({ state: 'error', error }); resolve(); };
+    // The file goes straight to the bucket (a deployment turns away a request
+    // body over 4.5 MB), and then upload-audio files it as a song.
+    const filed = async (path: string) => {
       let body: { url?: string; label?: string; durationMs?: number | null; error?: string } = {};
-      try { body = JSON.parse(xhr.responseText); } catch { /* not JSON — the status says enough */ }
+      const r = await fetch('/api/charts/upload-audio', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ path, name: f.name }),
+      }).catch(() => null);
+      if (!r) return fail('network error');
+      try { body = await r.json(); } catch { /* not JSON — the status says enough */ }
       const url = body.url;
-      if (xhr.status >= 200 && xhr.status < 300 && url) {
-        setUploads((u) => u.filter((j) => j.id !== id));
-        setTracks((ts) => [
-          { url, label: body.label ?? f.name, durationMs: body.durationMs ?? 0, degen: false },
-          ...ts.filter((t) => t.url !== url),
-        ]);
-        setFresh(url);
-      } else {
-        patch({ state: 'error', error: body.error || `upload failed (${xhr.status})` });
-      }
+      if (!r.ok || !url) return fail(body.error || `upload failed (${r.status})`);
+      setUploads((u) => u.filter((j) => j.id !== id));
+      setTracks((ts) => [
+        { url, label: body.label ?? f.name, durationMs: body.durationMs ?? 0, degen: false },
+        ...ts.filter((t) => t.url !== url),
+      ]);
+      setFresh(url);
       resolve();
     };
-    xhr.onerror = () => { patch({ state: 'error', error: 'network error' }); resolve(); };
-    xhr.send(form);
+    void (async () => {
+      const r = await fetch('/api/charts/upload-audio/sign', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name: f.name }),
+      }).catch(() => null);
+      const body = (await r?.json().catch(() => ({}))) as { path?: string; url?: string; error?: string } | undefined;
+      if (!r?.ok || !body?.path || !body.url) return fail(body?.error || 'upload failed');
+      const { path, url } = body;
+      const xhr = new XMLHttpRequest();
+      xhr.open('PUT', url);
+      xhr.setRequestHeader('Content-Type', f.type || 'application/octet-stream');
+      xhr.upload.onprogress = (e) => { if (e.lengthComputable) patch({ progress: e.loaded / e.total }); };
+      xhr.onload = () => {
+        if (xhr.status < 200 || xhr.status >= 300) {
+          let msg = `upload failed (${xhr.status})`;
+          try { msg = (JSON.parse(xhr.responseText) as { message?: string }).message || msg; } catch { /* not JSON */ }
+          return fail(msg);
+        }
+        patch({ state: 'converting', progress: 1 });
+        void filed(path);
+      };
+      xhr.onerror = () => fail('network error');
+      xhr.send(f);
+    })();
   });
 
   const uploadAll = async (files: File[]) => {

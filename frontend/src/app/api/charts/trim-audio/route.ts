@@ -3,35 +3,43 @@
 // the Music page. The stretch is encoded like every track (encodeTrackMp3).
 //
 // mode "copy" files it as a new song beside the original: track-custom-<ms>.mp3
-// with a .json that names it `label`, degen when the original is.
+// in the Vids bucket, named `label`, degen when the original is.
 //
-// mode "replace" writes it over the song itself, and only for songs that were
-// added (track-custom-*) — the numbered tracks ship with the app. The stretch
-// is encoded to a file beside the song first and renamed over it, so a failed
-// encode leaves the song as it was.
+// mode "replace" writes it over the song itself, and only for songs added on
+// the Music page, which are in the bucket — the ones in public/audio ship with
+// the app, and a deployment can't write to its own files. The stretch is
+// encoded to the temp dir first and only then put up over the song, so a
+// failed encode leaves the song as it was.
 import { NextRequest, NextResponse } from 'next/server';
-import { rename, unlink, writeFile } from 'fs/promises';
+import { unlink } from 'fs/promises';
+import os from 'os';
 import path from 'path';
-import {
-  AUDIO_DIR, encodeTrackMp3, readTrackMeta, trackFileOf, trackMetaPath, trackPathOf, trackUrl, type TrackMeta,
-} from '@/lib/audio-library';
-import { errMessage, listDegenTracks, setTrackDegen } from '@/lib/vids-db';
+import { encodeTrackMp3, newTrackFile, openTrack, trackUrl } from '@/lib/audio-library';
+import { errMessage, listDegenTracks, saveCloudTrack, setTrackDegen } from '@/lib/vids-db';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
+export const maxDuration = 120;
 
 /** Same cap as a rename (/api/vids/music). */
 const MAX_TRACK_LABEL = 120;
 /** Anything shorter is a slip of a handle, not a song. */
 const MIN_SECONDS = 0.5;
 
+
+type Track = NonNullable<Awaited<ReturnType<typeof openTrack>>>;
+
+interface Cut {
+  url: string;
+  start: number;
+  end: number;
+  durationMs: number;
+  label: string;
+}
+
 export async function POST(req: NextRequest) {
   const body = (await req.json().catch(() => ({}))) as Record<string, unknown>;
   const url = typeof body.url === 'string' ? body.url.trim() : '';
-  const file = trackFileOf(url);
-  const source = trackPathOf(url);
-  if (!file || !source) return NextResponse.json({ error: 'no song at that url' }, { status: 404 });
-
   const start = Number(body.start);
   const end = Number(body.end);
   if (!Number.isFinite(start) || !Number.isFinite(end) || start < 0 || end - start < MIN_SECONDS) {
@@ -39,51 +47,57 @@ export async function POST(req: NextRequest) {
   }
   const mode = body.mode === 'copy' || body.mode === 'replace' ? body.mode : null;
   if (!mode) return NextResponse.json({ error: 'mode must be copy or replace' }, { status: 400 });
-  const durationMs = Math.round((end - start) * 1000);
+  const cut: Cut = {
+    url, start, end,
+    durationMs: Math.round((end - start) * 1000),
+    label: (typeof body.label === 'string' ? body.label.trim() : '').slice(0, MAX_TRACK_LABEL) || 'Trimmed song',
+  };
 
-  if (mode === 'copy') {
-    const filename = `track-custom-${Date.now()}.mp3`;
-    const out = path.join(AUDIO_DIR, filename);
-    const label = (typeof body.label === 'string' ? body.label.trim() : '').slice(0, MAX_TRACK_LABEL) || 'Trimmed song';
-    try {
-      await encodeTrackMp3(source, out, { start, end });
-      const meta: TrackMeta = { label, durationMs };
-      await writeFile(trackMetaPath(filename), JSON.stringify(meta, null, 2));
-    } catch (err) {
-      console.error('[trim-audio copy]', err);
-      await unlink(out).catch(() => {});
-      return NextResponse.json({ error: errMessage(err) }, { status: 500 });
-    }
-    const newUrl = trackUrl(filename);
-    // Cut from the same song, so the same kind of song. Best effort: the copy
-    // is filed either way, and degen is one click to set again.
-    let degen = false;
-    try {
-      degen = (await listDegenTracks()).has(url);
-      if (degen) await setTrackDegen(newUrl, true);
-    } catch (err) {
-      console.error('[trim-audio copy] degen not carried over:', errMessage(err));
-      degen = false;
-    }
-    return NextResponse.json({ url: newUrl, label, durationMs, degen });
-  }
-
-  if (!file.startsWith('track-custom-')) {
-    return NextResponse.json({ error: "The built-in tracks can't be replaced. Save the trim as a new song." }, { status: 400 });
-  }
-  // Not a track-* name, so list-audio never offers it while it is being written.
-  const tmp = path.join(AUDIO_DIR, `trimming-${Date.now()}-${file}`);
+  let source: Track | null;
   try {
-    await encodeTrackMp3(source, tmp, { start, end });
-    await rename(tmp, source);
+    source = await openTrack(url);
   } catch (err) {
-    console.error('[trim-audio replace]', err);
-    await unlink(tmp).catch(() => {});
+    console.error('[trim-audio open]', err);
     return NextResponse.json({ error: errMessage(err) }, { status: 500 });
   }
-  // The song is shorter now; its .json says so. A saved-from-link song gets
-  // its first one here, with no name in it (list-audio keeps its own).
-  await writeFile(trackMetaPath(file), JSON.stringify({ ...readTrackMeta(file), durationMs }, null, 2))
-    .catch((err) => console.error('[trim-audio replace] length not recorded:', errMessage(err)));
-  return NextResponse.json({ url, durationMs });
+  if (!source) return NextResponse.json({ error: 'no song at that url' }, { status: 404 });
+  if (mode === 'replace' && !source.cloud) {
+    await source.done();
+    return NextResponse.json({ error: "This song ships with the app and can't be replaced. Save the trim as a new song." }, { status: 400 });
+  }
+
+  const out = path.join(os.tmpdir(), `trimmed-${Date.now()}.mp3`);
+  try {
+    await encodeTrackMp3(source.path, out, { start, end });
+    return mode === 'copy' ? await fileCopy(cut, out) : await replace(source, cut, out);
+  } catch (err) {
+    console.error(`[trim-audio ${mode}]`, err);
+    return NextResponse.json({ error: errMessage(err) }, { status: 500 });
+  } finally {
+    await source.done();
+    await unlink(out).catch(() => {});
+  }
+}
+
+async function fileCopy(cut: Cut, out: string): Promise<NextResponse> {
+  const filename = newTrackFile();
+  await saveCloudTrack(filename, out, { label: cut.label, durationMs: cut.durationMs });
+  const newUrl = trackUrl(filename);
+  // Cut from the same song, so the same kind of song. Best effort: the copy
+  // is filed either way, and degen is one click to set again.
+  let degen = false;
+  try {
+    degen = (await listDegenTracks()).has(cut.url);
+    if (degen) await setTrackDegen(newUrl, true);
+  } catch (err) {
+    console.error('[trim-audio copy] degen not carried over:', errMessage(err));
+    degen = false;
+  }
+  return NextResponse.json({ url: newUrl, label: cut.label, durationMs: cut.durationMs, degen });
+}
+
+async function replace(source: Track, cut: Cut, out: string): Promise<NextResponse> {
+  // The song is shorter now, and its row says so; its name stays.
+  await saveCloudTrack(source.file, out, { durationMs: cut.durationMs });
+  return NextResponse.json({ url: cut.url, durationMs: cut.durationMs });
 }

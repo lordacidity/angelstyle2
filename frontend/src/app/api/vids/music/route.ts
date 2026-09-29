@@ -20,7 +20,7 @@ const MAX_TRACK_LABEL = 120;
 export async function PATCH(req: NextRequest) {
   const body = (await req.json().catch(() => ({}))) as Record<string, unknown>;
   const url = typeof body.url === 'string' ? body.url.trim() : '';
-  if (!url || !trackExists(url)) return NextResponse.json({ error: 'no song at that url' }, { status: 404 });
+  if (!url || !(await trackExists(url).catch(() => false))) return NextResponse.json({ error: 'no song at that url' }, { status: 404 });
   const hasLabel = 'label' in body;
   const hasDegen = 'degen' in body;
   if (!hasLabel && !hasDegen) return NextResponse.json({ error: 'label or degen required' }, { status: 400 });

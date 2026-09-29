@@ -2,7 +2,7 @@ import { NextResponse } from 'next/server';
 import { readdirSync } from 'fs';
 import { existsSync } from 'fs';
 import { AUDIO_DIR, isTrackFile, readTrackMeta, trackUrl } from '@/lib/audio-library';
-import { listClipableKeys, listDegenTracks, listTrackNames } from '@/lib/vids-db';
+import { listClipableKeys, listCloudTracks, listDegenTracks, listTrackNames, type CloudTrack } from '@/lib/vids-db';
 import { CLIPPERS } from '@/lib/clipping';
 
 export const runtime = 'nodejs';
@@ -36,16 +36,14 @@ const PRELOADED: Record<string, { label: string; durationMs: number }> = {
 };
 
 export async function GET() {
-  if (!existsSync(AUDIO_DIR)) return NextResponse.json([]);
-
-  let files: string[];
+  let files: string[] = [];
   try {
     // Tracks only. public/audio also holds the beds the Vids builder lays under
     // a video (room-tone.mp3) — those are part of the app, not songs anyone
     // would pick, and they have no business in a track list.
-    files = readdirSync(AUDIO_DIR).filter(isTrackFile);
+    if (existsSync(AUDIO_DIR)) files = readdirSync(AUDIO_DIR).filter(isTrackFile);
   } catch {
-    return NextResponse.json([]);
+    files = [];
   }
 
   // Names given since, on the Vids Clippers page, which stand in for the ones
@@ -53,7 +51,9 @@ export async function GET() {
   // for a moment — the charts must not lose their songs to a Vids table.
   // Which songs are degen, marked on the Music page, comes along the same way:
   // a listing made while the database is away has every song as just a song.
-  const [names, degen] = await Promise.all([
+  // The songs added on the Music page are in the Vids bucket (lib/audio-library),
+  // and come the same way: while the database is away, only the ones on disk.
+  const [names, degen, cloud] = await Promise.all([
     listTrackNames().catch((err) => {
       console.error('[list-audio] track names unavailable:', err instanceof Error ? err.message : err);
       return new Map<string, string>();
@@ -62,7 +62,13 @@ export async function GET() {
       console.error('[list-audio] degen songs unavailable:', err instanceof Error ? err.message : err);
       return new Set<string>();
     }),
+    listCloudTracks().catch((err) => {
+      console.error('[list-audio] bucket songs unavailable:', err instanceof Error ? err.message : err);
+      return [] as CloudTrack[];
+    }),
   ]);
+  const inCloud = new Map(cloud.map((t) => [t.file, t]));
+  for (const t of cloud) if (!files.includes(t.file)) files.push(t.file);
 
   // Sort: preloaded tracks first (track-1 … track-8), then custom by filename
   files.sort((a, b) => {
@@ -76,11 +82,13 @@ export async function GET() {
     const url = trackUrl(filename);
     const renamed = names.get(url);
     const isDegen = degen.has(url);
-    // An upload from the Music page carries its name and length in a .json
-    // beside it, and a song trimmed in place there gets one with its new
-    // length. A song saved from a link has neither — its length is unknown at
-    // list time, so it gets the placeholder.
-    const meta = readTrackMeta(filename);
+    // A song added on the Music page has its name and length in its bucket
+    // row (older ones, from when they went to disk, in a .json beside them).
+    // One saved from a link may have no name — it gets the date.
+    const inBucket = inCloud.get(filename);
+    const meta = inBucket
+      ? { label: inBucket.label ?? undefined, durationMs: inBucket.durationMs ?? undefined }
+      : readTrackMeta(filename);
     if (PRELOADED[filename]) {
       const row = PRELOADED[filename];
       return { url, label: renamed ?? row.label, durationMs: meta.durationMs ?? row.durationMs, degen: isDegen };

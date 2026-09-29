@@ -17,8 +17,8 @@ export const dynamic = 'force-dynamic';
 
 /** Whether `key` names a real thing of this kind. Only a turn-on is held to
  *  this: a turn-off of something that has since gone (a song deleted from
- *  public/audio, a look retired) is exactly how its stray row gets cleared. */
-function exists(kind: ClipableKind, key: string): boolean {
+ *  the library, a look retired) is exactly how its stray row gets cleared. */
+async function exists(kind: ClipableKind, key: string): Promise<boolean> {
   if (kind === 'captionStyle') return CAPTION_STYLES.some((s) => s.id === key);
   // A suggested person is a name off the Pauv roster, which lives behind
   // another service — checking it here would mean fetching the whole roster on
@@ -36,7 +36,7 @@ export async function PUT(req: NextRequest) {
   const key = typeof body.key === 'string' ? body.key.trim() : '';
   if (!key || key.length > MAX_CLIPABLE_KEY) return NextResponse.json({ error: 'key is required' }, { status: 400 });
   if (typeof body.clipable !== 'boolean') return NextResponse.json({ error: 'clipable must be true or false' }, { status: 400 });
-  if (body.clipable && !exists(kind, key)) {
+  if (body.clipable && !(await exists(kind, key))) {
     return NextResponse.json({ error: `no ${kind === 'music' ? 'song' : 'caption look'} called ${key}` }, { status: 404 });
   }
   // Five suggestions, and the fifth is the last. Counted here rather than left

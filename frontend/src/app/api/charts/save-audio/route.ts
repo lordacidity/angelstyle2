@@ -1,8 +1,11 @@
+// POST /api/charts/save-audio { url } — save the sound off a TikTok link as a
+// song, filed in the Vids bucket like every added song (lib/audio-library).
 import { NextRequest, NextResponse } from 'next/server';
 import { writeFile, unlink } from 'fs/promises';
-import { existsSync, mkdirSync } from 'fs';
 import path from 'path';
 import os from 'os';
+import { newTrackFile, trackUrl } from '@/lib/audio-library';
+import { saveCloudTrack } from '@/lib/vids-db';
 
 export const runtime = 'nodejs';
 
@@ -74,16 +77,19 @@ export async function POST(req: NextRequest) {
 
     const ts = Date.now();
     const tmpMp4 = path.join(os.tmpdir(), `chart-audio-${ts}.mp4`);
-    const audioDir = path.join(process.cwd(), 'public', 'audio');
-    if (!existsSync(audioDir)) mkdirSync(audioDir, { recursive: true });
-    const filename = `track-custom-${ts}.mp3`;
-    const outMp3 = path.join(audioDir, filename);
+    const outMp3 = path.join(os.tmpdir(), `chart-audio-${ts}.mp3`);
+    const filename = newTrackFile();
 
-    await writeFile(tmpMp4, buf);
-    await convertToMp3(tmpMp4, outMp3);
-    await unlink(tmpMp4).catch(() => {});
+    try {
+      await writeFile(tmpMp4, buf);
+      await convertToMp3(tmpMp4, outMp3);
+      await saveCloudTrack(filename, outMp3, { durationMs });
+    } finally {
+      await unlink(tmpMp4).catch(() => {});
+      await unlink(outMp3).catch(() => {});
+    }
 
-    return NextResponse.json({ url: `/audio/${filename}`, durationMs });
+    return NextResponse.json({ url: trackUrl(filename), durationMs });
   } catch (err) {
     console.error('[save-audio]', err);
     return NextResponse.json({ error: String(err) }, { status: 500 });
