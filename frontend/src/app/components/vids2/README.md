@@ -199,8 +199,13 @@ card.
 ## The sound, and the speed
 
 **No song.** Since 2026-09-30 nothing is laid under a build but the room tone
-(`DEFAULT_ROOM_TONE`) and whatever the recordings carry — the typing Prep
-baked in — and the Sound rail has only the Clips and BOOM levels. The Music
+(`DEFAULT_ROOM_TONE`) and whatever the clips carry, and the Sound rail has
+only the Clips and BOOM levels. What the clips carry is, since the same day,
+**the persona's voice**: every persona clip was re-rendered from its
+recording with the sound kept (`scripts/persona-sound.mjs`; Prep's editor has
+a Sound on / off chip for one clip at a time), and a clip whose row says
+`hasSfx` is un-muted on the stage and in the file at the Clips level. The
+Armor and Hammer personas were recorded without sound and stay silent. The Music
 list, the roll and the record's song went with it (`music` is the record's
 "none", so `composeSequence` and `vids_recipes` read as they always have; a
 code brought back that had a song says so under the summary and comes back
