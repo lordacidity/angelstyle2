@@ -29,6 +29,7 @@ import {
 import {
   captionAt, captionStyle, drawCaption, preloadCaptionEmoji, DEFAULT_CAPTION_STYLE, type Caption, type CaptionStyle,
 } from '@/lib/simpler/vidsCaptions';
+import { drawVeil, type Veil } from '@/lib/simpler/vidsVeil';
 import {
   DEFAULT_BOOM_LEVEL, DEFAULT_CLIP_LEVEL, DEFAULT_MUSIC, DEFAULT_ROOM_TONE, MUSIC_FADE, ROOM_TONE_URL,
   boomGain, clampClipLevel, decodeAudio, musicGain, roomToneGain, scheduleLoop, scheduleOnce,
@@ -57,6 +58,9 @@ export interface ComposeOptions {
   clipLevel?: number;
   /** How loud the BOOMs land. Their own level — see boomGain. */
   boomLevel?: number;
+  /** The faint tint and grain over every frame, last of all — the same call
+   *  the stage makes (lib/simpler/vidsVeil). Left out, none. */
+  veil?: Veil | null;
   onProgress?: (frac: number, label: string) => void;
   signal?: AbortSignal;
 }
@@ -428,6 +432,8 @@ export async function composeSequence(opts: ComposeOptions): Promise<Blob> {
         if (cap) drawCaption(ctx, cap, width, height, capStyle, plan.bars);
         // Over the words as well as the pictures — see isBoomItem.
         for (const p of parts) if (isBoomItem(p.item)) paint(p);
+        // And the veil over the lot, as the stage lays it.
+        drawVeil(ctx, width, height, opts.veil ?? null);
         await videoSource.add(f / fps, 1 / fps);
         if (f % 5 === 0 || f === frameCount - 1) {
           report(0.05 + ((f + 1) / frameCount) * 0.9, `Rendering frame ${f + 1} / ${frameCount}`);

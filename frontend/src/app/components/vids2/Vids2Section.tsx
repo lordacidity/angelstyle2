@@ -84,7 +84,7 @@ import { isOutletId, outletById } from '@/lib/news/outlets';
 import { getRecipe, writeHook, writePostCaptions } from '@/lib/vids-client';
 import {
   EMPTY_SETUP, answersFromRecord, answersOf, bottomANewsName, loadSetup, makeNewsClip, makeTradeClip,
-  readStoryAgain, sameVideo, saveSetup, setupFromAnswers, setupReady, storyFor, themeFor,
+  readStoryAgain, rollStartNudge, sameVideo, saveSetup, setupFromAnswers, setupReady, storyFor, themeFor,
   type Direction, type Theme, type Vids2Build, type Vids2Setup, type Vids2Story,
 } from '@/lib/vids2/vids2Build';
 import {
@@ -497,14 +497,22 @@ export function Vids2Section({ active }: { active: boolean }) {
     return videos.filter((v) => v.folderId && ids.has(v.folderId));
   }, [folders, videos]);
 
-  /** The persona's three clips, as far as the library has them. */
+  /** The persona's three clips, as far as the library has them. Start is
+   *  nudged a few pixels up or down, freshly for every build (rollStartNudge),
+   *  so the same opening never goes out on the same pixels twice; the nudge
+   *  is on the pick's transform, which the record writes down, so a code
+   *  brings the video back where it was. */
   const personaPicks = (persona: VidPersona): Picks => {
     const out: Picks = {};
     for (const part of PERSONA_PARTS) {
       const id = persona[part];
       const video = id ? videos.find((v) => v.id === id) : undefined;
       const slot = PERSONA_PART_SLOT[part];
-      if (video) out[slot] = freshPick(slot, video);
+      if (!video) continue;
+      const pick = freshPick(slot, video);
+      out[slot] = slot === 'start'
+        ? { ...pick, transform: { ...pick.transform, dy: pick.transform.dy + rollStartNudge() } }
+        : pick;
     }
     return out;
   };
@@ -815,6 +823,10 @@ export function Vids2Section({ active }: { active: boolean }) {
     // now rather than once the recordings are back: the words are written
     // against the whole video, and these are most of it.
     const base = personaPicks(persona);
+    // A video brought back opens where it went out: its Start was nudged by
+    // a roll of its own, and the record has that nudge on the pick.
+    const recordedStart = restore?.recipe.build.picks.start?.transform;
+    if (base.start && recordedStart) base.start = { ...base.start, transform: { ...recordedStart } };
     const end = pickRandom(clipsForSlot('end'));
     if (end) base.end = freshPick('end', end);
     const personaContext = personaContextOf(persona, base);

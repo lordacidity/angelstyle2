@@ -226,6 +226,30 @@ BOOMs were laid on that timeline. Generate drafts the words against the
 default tempo's windows (`Vids2Section`), and `draftLines` tells Fast's
 speed-up from the tempo's by asking `slotSpeed` at the plan's own tempo.
 
+## No two builds on the same pixels
+
+The persona clips go up in every video made here, so two things are rolled
+per build to keep the frames from reading as a repost of the last one — on
+the Studio and the clipper page alike, since both are this section:
+
+- **The Start nudge.** Start is moved a whole number of pixels up or down,
+  1 to 12 in output px either way and never nothing (`rollStartNudge` in
+  `lib/vids2/vids2Build`, put on the pick's `transform.dy` by `personaPicks`
+  in `Vids2Section`). Start is fitted to the width at 1.25×, so the picture
+  overflows its region by far more than that and nothing shows at an edge.
+- **The veil** (`lib/simpler/vidsVeil`): a wash of a random colour one to
+  two and a half percent strong and a grain tile one and a half to three
+  percent strong, laid over every frame last of all — over the clips, the
+  words and the BOOMs — by the stage's `draw` and the exporter's frame loop
+  through one call (`drawVeil`). Measured on a test frame it moves 99.9% of
+  the pixels by at most 9/255 (4 on average): not something you see, but not
+  the same frame. Everything about a veil follows from its seed, which is
+  all the record keeps (`VidBuildSpec.veil`).
+
+A code brings both back: the nudge is on the Start pick the record holds
+(`generate` takes it over the fresh roll), the veil off its seed. A record
+from before either existed comes back bare, as it went out.
+
 ## Bringing a video back by its code
 
 Every Download writes the build down under a six-letter code

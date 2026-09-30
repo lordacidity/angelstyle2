@@ -51,6 +51,9 @@ export const BuildSpecSchema = z.object({
   // What every rate was multiplied by. Missing from records written before
   // the whole video could be sped — those played as shot, which is 1.
   tempo: num(0.25, 4).optional(),
+  // The seed of the tint and grain over every frame (lib/simpler/vidsVeil).
+  // Missing from records written before there was one — those went out bare.
+  veil: z.number().int().min(0).max(4294967295).optional(),
   roomTone: z.object({ on: z.boolean(), level: num(0, 2) }),
   // A record is read straight back onto the stage and its track fetched, so the
   // url may only ever be a path this app serves — never somewhere else's audio.

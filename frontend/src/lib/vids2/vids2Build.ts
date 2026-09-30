@@ -184,6 +184,19 @@ export const rollTheme = (): Theme => (Math.random() < 0.5 ? 'light' : 'dark');
  *  so this is called once per run, not once per Generate (Vids2Section). */
 export const themeFor = (s: Pick<Vids2Setup, 'look'>): Theme => (s.look === 'roll' ? rollTheme() : s.look);
 
+/** How far the Start clip may be nudged up or down, in output px: every build
+ *  moves it a whole number of pixels either way, never nothing, so the same
+ *  persona's opening never lands on exactly the same pixels twice. Too small
+ *  to see, and the picture overflows its region by far more than this (Start
+ *  is fitted to the width at 1.25×, SLOT_PLACEMENT), so nothing shows at an
+ *  edge. The veil (lib/simpler/vidsVeil) is the other half of the same idea,
+ *  for the whole frame. */
+export const START_NUDGE_PX = 12;
+export const rollStartNudge = (): number => {
+  const n = 1 + Math.floor(Math.random() * START_NUDGE_PX);
+  return Math.random() < 0.5 ? -n : n;
+};
+
 const SETUP_KEY = 'vids2-setup-v1';
 
 /** How a WRITTEN question comes back: lower case throughout, the way a search

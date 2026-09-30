@@ -108,6 +108,7 @@ import {
   boomGain, clampBoomLevel, decodeAudio, listBoomSounds, roomToneGain,
   type BoomSound,
 } from '@/lib/simpler/vidsAudio';
+import { drawVeil, rollVeil, veilFromRecord, type Veil } from '@/lib/simpler/vidsVeil';
 import { fmtTime, safeExportName } from '@/lib/utils';
 import { DownloadIcon, SpinnerIcon, VideoIcon } from '@/lib/icons';
 import { CLIPPERS } from '@/lib/clipping';
@@ -400,6 +401,12 @@ export function Vids2Builder({
   // Studio has a slider for it at the foot of the sidebar; the clipper page
   // runs every video at the house tempo and shows nothing.
   const [tempo, setTempo] = useState(CLIPPERS ? CLIPPER_TEMPO : DEFAULT_TEMPO);
+  // The faint tint and grain over every frame, rolled afresh for every build
+  // (or the record's, brought back) so no two videos share a pixel — see
+  // lib/simpler/vidsVeil. Laid on by the stage and the export alike, last.
+  const [veil, setVeil] = useState<Veil | null>(rollVeil);
+  const veilRef = useRef(veil);
+  veilRef.current = veil;
   // The captions' look: rolled once when the pane first opens, then only by
   // Reset or by picking one.
   const styleChosenRef = useRef(false);
@@ -960,6 +967,8 @@ export function Vids2Builder({
       const item = boomPlanItem({ id: BOOM_PREVIEW_ID, video: armingBoom, at: t, sound: null }, plan.total, durations);
       if (item) paint(item);
     }
+    // The veil over everything, as the export lays it — the same call.
+    drawVeil(ctx, outW, outH, veilRef.current);
   }, [frameSource]);
 
   // Point every slot's <video> at the right local time for `t`: entering slots
@@ -1061,7 +1070,7 @@ export function Vids2Builder({
   useEffect(() => {
     if (playing) return;
     draw(shownRef.current);
-  }, [captions, capStyle, playing, draw]);
+  }, [captions, capStyle, veil, playing, draw]);
 
   // The Apple images for whatever emoji the captions carry, fetched as soon as
   // the words change — and the frame painted again once they are in, so a line
@@ -1392,7 +1401,7 @@ export function Vids2Builder({
   const appliedPersona = personas.find((p) => p.id === appliedPersonaId) ?? null;
   const currentSpec = (): VidBuildSpec => ({
     ...specFromBuild({
-      picks, persona: appliedPersona, bars, bottomAPace, tempo, roomTone, music, clipLevel, boomLevel, preset: PRESET_ID,
+      picks, persona: appliedPersona, bars, bottomAPace, tempo, veil, roomTone, music, clipLevel, boomLevel, preset: PRESET_ID,
       // Where each actually landed, not where it was pressed in — see boomItems.
       // One that found no room on the video is not in the record either.
       booms: booms.flatMap((b) => {
@@ -1480,6 +1489,7 @@ export function Vids2Builder({
         music,
         clipLevel,
         boomLevel,
+        veil,
         onProgress: (frac, label) => setExporting({ frac, label }),
         signal: ctrl.signal,
       });
@@ -1544,7 +1554,7 @@ export function Vids2Builder({
     setPhonedeckRevealed(false);
     setPhonedeckSentName(null);
     setPhonedeckError(null);
-  }, [plan, captions, capStyle, clipLevel, boomLevel]);
+  }, [plan, captions, capStyle, clipLevel, boomLevel, veil]);
 
   /** Save to Photos: the rendered file handed to the share sheet, where Save
    *  Video (an iPhone) or Photos (Android) is a press away. Dismissing the
@@ -1665,6 +1675,8 @@ export function Vids2Builder({
       notes.push(`This one went out with the song “${b.music.label || b.music.url.split('/').pop()}” under it. Builds carry no music any more, so it comes back with the room tone alone.`);
     }
     setTempo(clampTempo(b.tempo ?? 1));
+    // The veil it went out under, or none for a record from before there was one.
+    setVeil(veilFromRecord(b.veil));
     setClipLevel(clampClipLevel(b.clipLevel));
     if (b.boomLevel != null) setBoomLevel(clampBoomLevel(b.boomLevel));
     setRestoreNotes(notes);
@@ -1691,10 +1703,11 @@ export function Vids2Builder({
       return;
     }
     // A look off the shelf for each new video, the way Simpler's Reset rolled
-    // one — nobody's decision until somebody makes it one. The tempo is not
-    // rolled and not reset: it is a setting, and the one you left it on is
-    // the one the next video opens on.
+    // one — nobody's decision until somebody makes it one — and a veil of its
+    // own (lib/simpler/vidsVeil). The tempo is not rolled and not reset: it is
+    // a setting, and the one you left it on is the one the next video opens on.
     rollStyle();
+    setVeil(rollVeil());
     // The words have been on their way since the recordings were laid out —
     // Generate asked for them off the same plan this stage is showing — so
     // they are taken as they land, with nothing to wait for. Only a build

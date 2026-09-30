@@ -11,6 +11,7 @@ import {
 } from '@/lib/simpler/vidsPlan';
 import type { CaptionLines } from '@/lib/simpler/vidsCaptions';
 import type { Music, RoomTone } from '@/lib/simpler/vidsAudio';
+import type { Veil } from '@/lib/simpler/vidsVeil';
 
 /** The builder's state that goes into the record: what is on the stage and
  *  every setting around it. */
@@ -24,6 +25,8 @@ export interface BuildState {
   /** What every rate was multiplied by — the whole video, faster. See
    *  DEFAULT_TEMPO in vidsPlan. */
   tempo: number;
+  /** The veil over every frame, or null for none — see lib/simpler/vidsVeil. */
+  veil: Veil | null;
   roomTone: RoomTone;
   music: Music;
   clipLevel: number;
@@ -72,6 +75,8 @@ export function specFromBuild(s: BuildState): VidBuildSpec {
     bars: { ...s.bars },
     bottomAPace: s.bottomAPace,
     tempo: s.tempo,
+    // The seed alone: the record's veil is worked out from it (veilFromSeed).
+    ...(s.veil ? { veil: s.veil.seed } : {}),
     roomTone: { ...s.roomTone },
     music: { ...s.music },
     clipLevel: s.clipLevel,
