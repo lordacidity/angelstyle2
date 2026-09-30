@@ -105,9 +105,10 @@ export async function fetchText(url: string, timeoutMs = 15000): Promise<Fetched
 /** The same page asked for over a plain HTTPS request instead of fetch().
  *
  *  People sits behind a guard that refuses fetch() whatever headers it is
- *  given — it answers a challenge page with status 403 — but serves the story
- *  to an ordinary request with a browser's header names and order. The first
- *  ask is often refused anyway, so it is repeated. */
+ *  given — it answers a challenge page with status 403, or 402 when the
+ *  guard is asking crawlers to pay (Cloudflare's pay-per-crawl) — but serves
+ *  the story to an ordinary request with a browser's header names and order.
+ *  The first ask is often refused anyway, so it is repeated. */
 export function fetchTextPlain(url: string, timeoutMs = 15000, hops = 4): Promise<Fetched> {
   return new Promise((resolve, reject) => {
     let u: URL;
@@ -147,16 +148,25 @@ export function fetchTextPlain(url: string, timeoutMs = 15000, hops = 4): Promis
   });
 }
 
+/** The answers a guard gives a visitor it takes for a script, as against the
+ *  answers a page gives about itself (a 404 is the story gone, and asking
+ *  again another way won't find it): the challenge (403), pay-per-crawl
+ *  (402), a sign-in wall (401), rate limiting (429), and the "checking your
+ *  browser" interstitial (503). Each is worth the plain way. */
+const REFUSED = new Set([401, 402, 403, 429, 503]);
+export const isRefusal = (status: number) => REFUSED.has(status);
+
 /** A page, however the outlet will part with it: fetch first, and when that is
  *  refused the plain way, a few times — the guard lets most of them through
- *  after the first. */
+ *  after the first. A refusal that never lifts comes back as the last answer,
+ *  and the caller says which. */
 export async function fetchPage(url: string, timeoutMs = 15000): Promise<Fetched> {
   const first = await fetchText(url, timeoutMs).catch((err: unknown) => err instanceof Error ? err : new Error(String(err)));
-  if (!(first instanceof Error) && first.status !== 403) return first;
+  if (!(first instanceof Error) && !isRefusal(first.status)) return first;
   let last: Fetched | Error = first;
   for (let i = 0; i < 3; i++) {
     last = await fetchTextPlain(url, timeoutMs).catch((err: unknown) => err instanceof Error ? err : new Error(String(err)));
-    if (!(last instanceof Error) && last.status !== 403) return last;
+    if (!(last instanceof Error) && !isRefusal(last.status)) return last;
   }
   if (last instanceof Error) throw last;
   return last;

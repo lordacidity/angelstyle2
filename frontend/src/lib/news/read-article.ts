@@ -20,7 +20,8 @@
 // otherwise need something made up to fill the gap.
 
 import {
-  articleLd, BROWSER_HEADERS, elementText, fetchPage, fetchText, firstH1, isShouting, ldAuthors, ldString, textOf, decodeEntities,
+  articleLd, BROWSER_HEADERS, elementText, fetchPage, fetchText, firstH1, isRefusal, isShouting, ldAuthors, ldString, textOf,
+  decodeEntities,
 } from './html';
 import { imdbIdOf, imdbItem, imdbUrl } from './imdb';
 import { articleUrlProblem, athleticId, outletForHost, outletById } from './outlets';
@@ -127,7 +128,12 @@ async function pageHtml(url: string, outlet: OutletId): Promise<string> {
     throw new ArticleError(`Couldn't reach ${outletById(outlet).name}: ${String(err instanceof Error ? err.message : err)}`);
   }
   if (res.status !== 200) {
-    throw new ArticleError(`${outletById(outlet).name} wouldn't serve that page (${res.status}). Try another story.`);
+    const name = outletById(outlet).name;
+    // A guard that stood through every way of asking is the outlet's mood,
+    // not the story's: the same link usually opens a minute later.
+    throw new ArticleError(isRefusal(res.status)
+      ? `${name} is refusing to serve its pages right now (${res.status}). Try again in a minute, or another story.`
+      : `${name} wouldn't serve that page (${res.status}). Try another story.`);
   }
   return res.text;
 }
@@ -157,7 +163,11 @@ async function readEspn(u: URL): Promise<NewsArticle> {
   if (!h) throw new ArticleError('ESPN has no story under that id.');
   const categories = Array.isArray(h.categories) ? (h.categories as Record<string, unknown>[]) : [];
   const byType = (t: string) => categories.filter(c => c.type === t).map(c => ldString(c.description)).filter(Boolean) as string[];
-  const byline = ldString(h.byline) ?? '';
+  // A wire story — AP, Reuters, ESPN's own news services — has no byline in
+  // the API, only its source, which is what ESPN's page prints in the byline's
+  // place ("Associated Press"). It is the credit, and it counts as one.
+  const source = ldString(h.source) ?? '';
+  const byline = ldString(h.byline) ?? (byType('contributor').length ? '' : source);
   const authors = byline ? byline.split(/\s*(?:,|\band\b)\s*/).filter(Boolean) : byType('contributor');
   // The story is HTML: paragraphs, subheadings, lists and quotes, with ESPN's
   // own tags for the videos and "also see" links laid between them.
@@ -327,7 +337,14 @@ async function readCnn(u: URL): Promise<NewsArticle> {
 async function readFox(u: URL): Promise<NewsArticle> {
   const html = await pageHtml(u.toString(), 'fox');
   const ld = articleLd(html) ?? {};
-  const authors = ldAuthors(ld.author);
+  let authors = ldAuthors(ld.author);
+  // A wire story has no author, only its source in the byline's place —
+  // "Associated Press", in the header's article-source span. That is the
+  // credit the page prints, and it counts as one.
+  if (!authors.length) {
+    const source = elementText(html, 'span', 'article-source');
+    if (source) authors = [source];
+  }
   const bodyAt = html.search(/class="article-body"/);
   const body = bodyAt >= 0 ? html.slice(bodyAt, bodyAt + 200_000) : '';
   // Article paragraphs carry data-layout-index; video captions and promos in

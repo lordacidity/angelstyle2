@@ -59,6 +59,9 @@ export function articleUrlProblem(outlet: OutletId, url: URL): string | null {
   const path = url.pathname.toLowerCase();
   switch (outlet) {
     case 'espn':
+      // A clip page has a story id too, but its API record is a video —
+      // a title and nobody credited, and nothing to read off it.
+      if (/^\/video\//.test(path)) return 'That ESPN link is a video page, not an article.';
       return /\/id\/\d+/.test(path) ? null : 'That ESPN link is not a story page.';
     case 'cnn':
       if (/\/(videos?|audio|interactive|gallery)\//.test(path)) return 'That CNN link is a video or interactive page, not an article.';
