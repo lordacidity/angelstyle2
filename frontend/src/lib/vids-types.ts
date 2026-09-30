@@ -496,6 +496,10 @@ export interface VidBuildSpec {
    *  BottomAPace in lib/vidsPlan). Absent on builds written down before there
    *  was a choice — those played it at its own speed, which is Normal. */
   bottomAPace?: 'normal' | 'fast';
+  /** What every slot's rate was multiplied by — the whole video that much
+   *  faster (see DEFAULT_TEMPO in lib/simpler/vidsPlan). Absent on builds
+   *  written down before there was one — those played at 1, as shot. */
+  tempo?: number;
   roomTone: { on: boolean; level: number };
   /** The song under it, and how loud it sat. Absent on builds written down
    *  before music was a layer — those come back with no music, which is what
@@ -571,5 +575,18 @@ export interface VidRecipe {
    *  (and while that row still exists). */
   videoId: string | null;
   build: VidBuildSpec;
+  createdAt: string;
+}
+
+/** An Instagram sound a published video can go out on, kept on the Music page
+ *  (api/vids/ig-audio) and chosen in the Publish panel. `url` is what Hyper
+ *  Attention is told to pick in the app — a link to the audio page, or the
+ *  audio's id — and the name is what it is called here. The sound never goes
+ *  into a file: it is named to the post and picked natively, which is what
+ *  keeps the post in the sound's reach. */
+export interface IgAudio {
+  id: string;
+  name: string;
+  url: string;
   createdAt: string;
 }

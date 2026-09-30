@@ -21,7 +21,7 @@ import {
   RECIPE_CODE_ALPHABET, RECIPE_CODE_LENGTH, cleanEdit, cleanMarks, cleanTheme, isClipableKind, isRecipeCode, recipeName,
 } from '@/lib/vids-types';
 import type {
-  ClipableKind, CreateVideoInput, VidBuildSpec, VidClipableFlag, VidClipablePatch, VidContextPatch, VidEdit,
+  ClipableKind, CreateVideoInput, IgAudio, VidBuildSpec, VidClipableFlag, VidClipablePatch, VidContextPatch, VidEdit,
   VidFolder, VidLink, VidMark, VidPersona, VidRecipe, VidRow, VidThemePatch, VidsLibraryPayload,
 } from '@/lib/vids-types';
 
@@ -39,7 +39,7 @@ export const errMessage = (e: unknown) => (e instanceof Error ? e.message : 'une
 // reload in dev, or a long-lived server between deploys. Comparing the version
 // makes such a process re-run the (idempotent) DDL instead of trusting a
 // promise that was resolved against the older schema.
-const SCHEMA_VERSION = 15;
+const SCHEMA_VERSION = 16;
 
 const g = globalThis as unknown as {
   __vidsPool?: pg.Pool;
@@ -297,6 +297,18 @@ function ensureSchema(): Promise<void> {
         created_at  TIMESTAMPTZ NOT NULL DEFAULT now()
       );
     `);
+    // The Instagram sounds a video can go out on, kept on the Music page: a
+    // name and the link (or audio id) Hyper Attention's operator picks in the
+    // app. Nothing here is a file — the sound is never mixed into a video,
+    // only named to the post (Vids2PublishPanel → api/hyperattention/push).
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS vids_ig_audio (
+        id         UUID        PRIMARY KEY DEFAULT gen_random_uuid(),
+        name       TEXT        NOT NULL,
+        url        TEXT        NOT NULL,
+        created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+      );
+    `);
     await pool.query('CREATE INDEX IF NOT EXISTS vids_videos_folder_idx ON vids_videos (folder_id)');
     await pool.query('CREATE INDEX IF NOT EXISTS vids_folders_parent_idx ON vids_folders (parent_id)');
   })().catch((e) => {
@@ -551,6 +563,53 @@ export async function setTrackDegen(url: string, degen: boolean): Promise<void> 
   } else {
     await getPool().query('DELETE FROM vids_track_degen WHERE url = $1', [url]);
   }
+}
+
+// ── Instagram audio ───────────────────────────────────────────────────────────
+// The sounds a published video can go out on, named on the Music page and
+// chosen in the Publish panel. Newest first, the way the Music page lists
+// what was added.
+
+interface IgAudioDb { id: string; name: string; url: string; created_at: Date }
+
+const IG_AUDIO_COLS = 'id, name, url, created_at';
+
+const toIgAudio = (r: IgAudioDb): IgAudio => ({
+  id: r.id, name: r.name, url: r.url, createdAt: r.created_at.toISOString(),
+});
+
+export async function listIgAudio(): Promise<IgAudio[]> {
+  await ensureSchema();
+  const r = await getPool().query<IgAudioDb>(`SELECT ${IG_AUDIO_COLS} FROM vids_ig_audio ORDER BY created_at DESC`);
+  return r.rows.map(toIgAudio);
+}
+
+export async function createIgAudio(name: string, url: string): Promise<IgAudio> {
+  await ensureSchema();
+  const r = await getPool().query<IgAudioDb>(
+    `INSERT INTO vids_ig_audio (name, url) VALUES ($1, $2) RETURNING ${IG_AUDIO_COLS}`,
+    [name, url],
+  );
+  return toIgAudio(r.rows[0]);
+}
+
+/** Rename one, or point it at another link. A field left out keeps what it
+ *  had. Null when there is no such row. */
+export async function updateIgAudio(id: string, patch: { name?: string; url?: string }): Promise<IgAudio | null> {
+  await ensureSchema();
+  const r = await getPool().query<IgAudioDb>(
+    `UPDATE vids_ig_audio SET name = COALESCE($2, name), url = COALESCE($3, url)
+     WHERE id = $1 RETURNING ${IG_AUDIO_COLS}`,
+    [id, patch.name ?? null, patch.url ?? null],
+  );
+  return r.rows[0] ? toIgAudio(r.rows[0]) : null;
+}
+
+/** False when it was never there. */
+export async function deleteIgAudio(id: string): Promise<boolean> {
+  await ensureSchema();
+  const r = await getPool().query('DELETE FROM vids_ig_audio WHERE id = $1', [id]);
+  return (r.rowCount ?? 0) > 0;
 }
 
 /** Turn one song or caption look on or off for the clippers. Idempotent both

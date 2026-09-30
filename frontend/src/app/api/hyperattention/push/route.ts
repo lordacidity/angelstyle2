@@ -32,6 +32,10 @@ const Schema = z.object({
   mode: z.enum(['auto', 'manual']),
   scheduledFor: z.string().datetime().optional(),
   caption: z.string().optional(),
+  // The Instagram sound the posts go out on — one of the links named on the
+  // Music page (api/vids/ig-audio). Hyper Attention's operator picks it
+  // natively in the app; it is never mixed into the file.
+  audioUrl: z.string().trim().min(1).max(500).optional(),
   dryRun: z.boolean().optional().default(false),
 });
 
@@ -41,7 +45,7 @@ export async function POST(req: NextRequest) {
     if (!parsed.success) {
       return NextResponse.json({ error: parsed.error.issues.map((i) => i.message).join('; ') }, { status: 400 });
     }
-    const { videoUrl, videoName, accountIds, postTypes, mode, scheduledFor, caption, dryRun } = parsed.data;
+    const { videoUrl, videoName, accountIds, postTypes, mode, scheduledFor, caption, audioUrl, dryRun } = parsed.data;
     if (mode === 'manual' && !scheduledFor) {
       return NextResponse.json({ error: 'scheduledFor is required in manual mode' }, { status: 400 });
     }
@@ -79,6 +83,7 @@ export async function POST(req: NextRequest) {
       postType: s.postType,
       videoId: media.id,
       ...(caption ? { caption } : {}),
+      ...(audioUrl ? { audioUrl } : {}),
     }));
     const result = await queuePosts(items);
     return NextResponse.json({ posts: result.posts, requestId: result.requestId, slots });

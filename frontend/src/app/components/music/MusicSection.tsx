@@ -16,9 +16,17 @@
 // straight to the local server the way a Vids export goes (a Next route would
 // run on the host and never reach this PC). The Phonedeck panel beside the list
 // pushes it on to the phones; the song just sent is lit at the top of it.
+//
+// The Instagram audio view (the fourth pill) is a different kind of list: not
+// files but links — the Instagram sounds a Vids 2 video can go out on, each
+// given a name here (api/vids/ig-audio, `vids_ig_audio`). The Publish panel
+// offers them when a render is queued onto Hyper Attention, whose operator
+// picks the sound natively in the app; since 2026-09-30 that is the one place
+// a build gets music, as nothing is laid under the file any more.
 
-import { useCallback, useEffect, useMemo, useRef, useState, type ChangeEvent, type DragEvent } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState, type ChangeEvent, type DragEvent, type FormEvent } from 'react';
 import { PHONEDECK_URL, safeExportName } from '@/lib/canvasVideoExport';
+import type { IgAudio } from '@/lib/vids-types';
 import { VidsPhonedeck } from '../vids/VidsPhonedeck';
 import { TrimEditor } from './TrimEditor';
 
@@ -42,8 +50,9 @@ type DeckState =
   | { state: 'sent'; name: string }
   | { state: 'error'; error: string };
 
-/** Which songs the list shows: all of them, the degen ones, or the rest. */
-type View = 'all' | 'degen' | 'songs';
+/** Which songs the list shows: all of them, the degen ones, or the rest — or
+ *  the Instagram audio links instead of songs at all. */
+type View = 'all' | 'degen' | 'songs' | 'ig';
 
 const clock = (s: number) => `${Math.floor(s / 60)}:${String(Math.floor(s % 60)).padStart(2, '0')}`;
 
@@ -74,6 +83,14 @@ const inView = (t: Track, view: View) => (view === 'all' ? true : view === 'dege
 const ICON_BTN = 'flex h-7 w-7 shrink-0 items-center justify-center rounded-md text-zinc-500 transition-colors hover:bg-zinc-900 disabled:opacity-30 disabled:hover:bg-transparent';
 
 const DEGEN_ON = 'border-fuchsia-500/50 bg-fuchsia-500/15 text-fuchsia-300';
+const IG_ON = 'border-pink-500/50 bg-pink-500/15 text-pink-300';
+
+/** What an Instagram audio link should look like — a warning, not a bar:
+ *  Hyper Attention also takes an audio id or a track name, so anything
+ *  non-empty is allowed through. */
+const looksLikeIgAudio = (s: string) => /instagram\.com\/(reels?\/)?audio\//i.test(s);
+
+const INPUT = 'h-8 rounded-md border border-zinc-800 bg-zinc-950 px-3 text-xs text-white placeholder:text-zinc-600 focus:border-zinc-600 focus:outline-none';
 
 export function MusicSection({ active }: { active: boolean }) {
   const [tracks, setTracks] = useState<Track[]>([]);
@@ -99,6 +116,23 @@ export function MusicSection({ active }: { active: boolean }) {
   // Every visit re-reads it: a song saved or renamed elsewhere shows up here.
   useEffect(() => { if (active) void load(); }, [active, load]);
 
+  // ── Instagram audio ── the links, read beside the library.
+  const [igAudio, setIgAudio] = useState<IgAudio[]>([]);
+  const [igLoaded, setIgLoaded] = useState(false);
+  const loadIg = useCallback(async () => {
+    try {
+      const r = await fetch('/api/vids/ig-audio', { cache: 'no-store' });
+      const body = await r.json().catch(() => null) as IgAudio[] | { error?: string } | null;
+      if (!r.ok || !Array.isArray(body)) throw new Error((body && !Array.isArray(body) && body.error) || `Couldn't load the Instagram audio list (${r.status}).`);
+      setIgAudio(body);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setIgLoaded(true);
+    }
+  }, []);
+  useEffect(() => { if (active) void loadIg(); }, [active, loadIg]);
+
   const shown = useMemo(() => {
     const q = query.trim().toLowerCase();
     return tracks
@@ -106,14 +140,84 @@ export function MusicSection({ active }: { active: boolean }) {
       .sort(byNewest);
   }, [tracks, query, view]);
 
+  const shownIg = useMemo(() => {
+    const q = query.trim().toLowerCase();
+    return igAudio.filter((a) => !q || a.name.toLowerCase().includes(q) || a.url.toLowerCase().includes(q));
+  }, [igAudio, query]);
+
   const views = useMemo(() => {
     const degen = tracks.filter((t) => t.degen).length;
     return [
       { id: 'all' as const, label: 'All', count: tracks.length },
       { id: 'degen' as const, label: 'Degen', count: degen },
       { id: 'songs' as const, label: 'Just songs', count: tracks.length - degen },
+      { id: 'ig' as const, label: 'Instagram audio', count: igAudio.length },
     ];
-  }, [tracks]);
+  }, [tracks, igAudio]);
+
+  // The add form, and the link being renamed or re-pointed.
+  const [igName, setIgName] = useState('');
+  const [igUrl, setIgUrl] = useState('');
+  const [igAdding, setIgAdding] = useState(false);
+  const [igEditing, setIgEditing] = useState<{ id: string; field: 'name' | 'url'; value: string } | null>(null);
+
+  const addIg = async (e: FormEvent) => {
+    e.preventDefault();
+    const name = igName.trim();
+    const url = igUrl.trim();
+    if (!name || !url || igAdding) return;
+    setIgAdding(true);
+    try {
+      const r = await fetch('/api/vids/ig-audio', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name, url }),
+      });
+      const body = await r.json().catch(() => ({})) as Partial<IgAudio> & { error?: string };
+      if (!r.ok || !body.id) throw new Error(body.error || `Couldn't add it (${r.status}).`);
+      setIgAudio((list) => [body as IgAudio, ...list]);
+      setIgName('');
+      setIgUrl('');
+    } catch (err) {
+      setError(`Couldn't add ${name}: ${err instanceof Error ? err.message : String(err)}`);
+    } finally {
+      setIgAdding(false);
+    }
+  };
+
+  const saveIg = async () => {
+    if (!igEditing) return;
+    const { id, field, value } = igEditing;
+    const row = igAudio.find((a) => a.id === id);
+    const next = value.trim();
+    setIgEditing(null);
+    if (!row || !next || next === row[field]) return;
+    const put = (v: string) => setIgAudio((list) => list.map((a) => (a.id === id ? { ...a, [field]: v } : a)));
+    put(next);
+    try {
+      const r = await fetch('/api/vids/ig-audio', {
+        method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ id, [field]: next }),
+      });
+      const body = await r.json().catch(() => ({})) as Partial<IgAudio> & { error?: string };
+      if (!r.ok) throw new Error(body.error || `failed (${r.status})`);
+      if (typeof body[field] === 'string') put(body[field] as string);
+    } catch (err) {
+      put(row[field]);
+      setError(`Couldn't change ${row.name}: ${err instanceof Error ? err.message : String(err)}`);
+    }
+  };
+
+  const removeIg = async (a: IgAudio) => {
+    if (!confirm(`Remove "${a.name}"? It leaves the Publish panel's list of sounds.`)) return;
+    try {
+      const r = await fetch(`/api/vids/ig-audio?id=${encodeURIComponent(a.id)}`, { method: 'DELETE' });
+      if (!r.ok) {
+        const body = await r.json().catch(() => ({})) as { error?: string };
+        throw new Error(body.error || `Delete failed (${r.status}).`);
+      }
+      setIgAudio((list) => list.filter((x) => x.id !== a.id));
+    } catch (err) {
+      setError(`Couldn't remove ${a.name}: ${err instanceof Error ? err.message : String(err)}`);
+    }
+  };
 
   // A song written over by a trim keeps its url, so the browser is sent to
   // the new file by a version on the end of it.
@@ -424,14 +528,16 @@ export function MusicSection({ active }: { active: boolean }) {
         <div className="min-w-0 flex-1">
           <h1 className="text-lg font-semibold">Music</h1>
           <p className="text-xs text-zinc-500">
-            Every song in the library, the same ones Vids, the charts and the carousel pick from. Listen, rename, trim, mark the degen ones, upload, and send any of them to the Phonedeck as an MP3.
+            Every song in the library, the same ones the charts and the carousel pick from. Listen, rename, trim, mark the degen ones, upload, and send any of them to the Phonedeck as an MP3. Under Instagram audio, the sounds a Vids 2 video can be published on.
           </p>
         </div>
         <input
           type="search"
           value={query}
           onChange={(e) => setQuery(e.target.value)}
-          placeholder={`Search ${tracks.length} song${tracks.length === 1 ? '' : 's'}`}
+          placeholder={view === 'ig'
+            ? `Search ${igAudio.length} sound${igAudio.length === 1 ? '' : 's'}`
+            : `Search ${tracks.length} song${tracks.length === 1 ? '' : 's'}`}
           className="h-8 w-56 shrink-0 rounded-md border border-zinc-800 bg-zinc-950 px-3 text-xs text-white placeholder:text-zinc-600 focus:border-zinc-600 focus:outline-none"
         />
         <button
@@ -446,7 +552,7 @@ export function MusicSection({ active }: { active: boolean }) {
       <div className="flex shrink-0 flex-wrap items-center gap-1.5 border-b border-zinc-900 px-6 py-2">
         {views.map((v) => {
           const on = view === v.id;
-          const tint = v.id === 'degen' ? DEGEN_ON : 'border-zinc-600 bg-zinc-800 text-white';
+          const tint = v.id === 'degen' ? DEGEN_ON : v.id === 'ig' ? IG_ON : 'border-zinc-600 bg-zinc-800 text-white';
           return (
             <button
               key={v.id}
@@ -502,7 +608,112 @@ export function MusicSection({ active }: { active: boolean }) {
               </div>
             )}
 
-            {loading && tracks.length === 0 ? (
+            {view === 'ig' ? (
+              /* The Instagram audio links: a form to add one, then the list.
+                 Nothing here plays — a link is what the operator picks in
+                 the app, not a file. */
+              <div>
+                <form onSubmit={(e) => void addIg(e)} className="mb-3 flex flex-wrap items-center gap-2 rounded-lg border border-zinc-900 px-3 py-2">
+                  <input
+                    value={igName}
+                    onChange={(e) => setIgName(e.target.value)}
+                    maxLength={120}
+                    placeholder="Name it — e.g. aesthetic morning"
+                    className={`${INPUT} w-56`}
+                  />
+                  <input
+                    value={igUrl}
+                    onChange={(e) => setIgUrl(e.target.value)}
+                    maxLength={500}
+                    placeholder="instagram.com/reels/audio/… — or the audio id"
+                    className={`${INPUT} min-w-0 flex-1`}
+                  />
+                  <button
+                    type="submit"
+                    disabled={!igName.trim() || !igUrl.trim() || igAdding}
+                    className="h-8 shrink-0 rounded-md bg-white px-3 text-xs font-medium text-black transition-colors hover:bg-zinc-200 disabled:cursor-not-allowed disabled:opacity-40"
+                  >
+                    {igAdding ? 'Adding…' : 'Add'}
+                  </button>
+                  {igUrl.trim() && !looksLikeIgAudio(igUrl) && (
+                    <p className="w-full text-[11px] text-amber-400">
+                      That isn&apos;t an instagram.com/reels/audio link. Hyper Attention also takes an audio id or the track&apos;s name, so it can still be added.
+                    </p>
+                  )}
+                </form>
+
+                {!igLoaded ? (
+                  <p className="text-xs text-zinc-600">Loading the sounds…</p>
+                ) : shownIg.length === 0 ? (
+                  <p className="text-xs text-zinc-600">
+                    {query.trim()
+                      ? `No sound matches "${query.trim()}".`
+                      : 'No Instagram audio yet. Paste a sound’s link above and give it a name — the Publish panel offers these when a video goes to Hyper Attention.'}
+                  </p>
+                ) : (
+                  <div className="flex flex-col gap-1">
+                    {shownIg.map((a) => {
+                      const editing = igEditing?.id === a.id ? igEditing : null;
+                      const editBox = (field: 'name' | 'url', cls: string) => (
+                        <input
+                          autoFocus
+                          value={editing?.value ?? ''}
+                          maxLength={field === 'name' ? 120 : 500}
+                          onChange={(e) => setIgEditing({ id: a.id, field, value: e.target.value })}
+                          onBlur={() => void saveIg()}
+                          onKeyDown={(e) => {
+                            if (e.key === 'Enter') e.currentTarget.blur();
+                            if (e.key === 'Escape') setIgEditing(null);
+                          }}
+                          className={`h-6 w-full rounded border border-zinc-700 bg-black px-1.5 text-white focus:border-zinc-500 focus:outline-none ${cls}`}
+                        />
+                      );
+                      return (
+                        <div key={a.id} className="rounded-lg border border-transparent px-3 py-2 transition-colors hover:bg-zinc-950">
+                          <div className="flex items-center gap-3">
+                            <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-pink-500/15 text-pink-300" aria-hidden>
+                              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><path d="M9 18V5l12-2v13"/><circle cx="6" cy="18" r="3"/><circle cx="18" cy="16" r="3"/></svg>
+                            </span>
+                            <div className="min-w-0 flex-1">
+                              {editing?.field === 'name' ? editBox('name', 'text-sm') : (
+                                <div
+                                  onDoubleClick={() => setIgEditing({ id: a.id, field: 'name', value: a.name })}
+                                  title="Double-click to rename"
+                                  className="truncate text-sm text-zinc-100"
+                                >
+                                  {a.name}
+                                </div>
+                              )}
+                              {editing?.field === 'url' ? editBox('url', 'mt-0.5 text-[11px]') : (
+                                <div
+                                  onDoubleClick={() => setIgEditing({ id: a.id, field: 'url', value: a.url })}
+                                  title="Double-click to change the link"
+                                  className="mt-0.5 truncate text-[11px] text-zinc-500"
+                                >
+                                  {a.url}
+                                  <span className="text-zinc-700"> · Added {new Date(a.createdAt).toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' })}</span>
+                                </div>
+                              )}
+                            </div>
+                            {/^https?:\/\//i.test(a.url) && (
+                              <a href={a.url} target="_blank" rel="noreferrer" className={`${ICON_BTN} hover:text-white`} title="Open on Instagram">
+                                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/><path d="M15 3h6v6"/><path d="M10 14 21 3"/></svg>
+                              </a>
+                            )}
+                            <button type="button" onClick={() => setIgEditing({ id: a.id, field: 'name', value: a.name })} className={`${ICON_BTN} hover:text-white`} title="Rename">
+                              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><path d="M12 20h9"/><path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4z"/></svg>
+                            </button>
+                            <button type="button" onClick={() => void removeIg(a)} className={`${ICON_BTN} hover:text-red-400`} title="Remove">
+                              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><path d="M4 7h16"/><path d="M10 11v6M14 11v6"/><path d="M6 7l1 13h10l1-13"/><path d="M9 7V4h6v3"/></svg>
+                            </button>
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
+              </div>
+            ) : loading && tracks.length === 0 ? (
               <p className="text-xs text-zinc-600">Loading the library…</p>
             ) : shown.length === 0 ? (
               <p className="text-xs text-zinc-600">

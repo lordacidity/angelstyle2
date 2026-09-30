@@ -8,11 +8,19 @@
 // middleware.ts's clipper allowlist either way.
 //
 // Flow: pick accounts (multi-select) + post types (Reel/Story, multi-select)
-// + a schedule mode, Preview to see the resolved times without touching
-// Hyper Attention yet, then Confirm & Queue — which fits the render under
-// Hyper Attention's import cap if it has to (vids-publish-fit), uploads it
-// to the shared Vids library (so it also becomes a normal permanent library
-// row, per how this was scoped) and only then imports + queues it.
+// + a schedule mode + the Instagram sound the posts go out on, Preview to
+// see the resolved times without touching Hyper Attention yet, then Confirm
+// & Queue — which fits the render under Hyper Attention's import cap if it
+// has to (vids-publish-fit), uploads it to the shared Vids library (so it
+// also becomes a normal permanent library row, per how this was scoped) and
+// only then imports + queues it.
+//
+// The sound is the one place a build gets music since 2026-09-30: nothing is
+// laid under the file any more (Vids2Builder). The sounds on offer are the
+// links named on the Music page (api/vids/ig-audio); the one chosen goes to
+// every post as `audioUrl`, which Hyper Attention's operator picks natively
+// in the app — that is what keeps the post in the sound's reach, and why the
+// audio is never mixed into the upload.
 //
 // Shell copied from BoardWidget's useFloatingPanel usage; anchored bottom-4
 // right-4 like PhonedeckMiniPanel, the established corner for an
@@ -23,7 +31,7 @@ import { useFloatingPanel } from '../../hooks/useFloatingPanel';
 import { withBase } from '@/lib/clipping';
 import { uploadVideo } from '@/lib/vids-client';
 import { PUBLISH_BUDGET_BYTES, PUBLISH_CEILING_BYTES, fitForPublish, fmtMB } from '@/lib/vids-publish-fit';
-import type { VidTheme } from '@/lib/vids-types';
+import type { IgAudio, VidTheme } from '@/lib/vids-types';
 import type { HAAccount, HAAccountStatus, HAPostType } from '@/lib/hyperattention';
 import type { ResolvedSlot } from '@/lib/hyperattention-schedule';
 import { SpinnerIcon } from '@/lib/icons';
@@ -77,6 +85,13 @@ export function Vids2PublishPanel({
   // Caption follows the card's draft until the user edits it by hand.
   const [captionTouched, setCaptionTouched] = useState(false);
   useEffect(() => { if (!captionTouched) setCaption(defaultCaption); }, [defaultCaption, captionTouched]);
+  // The Instagram sounds named on the Music page, and the one chosen — by its
+  // id, so a link renamed there is still the same choice. '' is no sound:
+  // the posts go out as the file is, room tone and all.
+  const [sounds, setSounds] = useState<IgAudio[] | null>(null);
+  const [soundsError, setSoundsError] = useState<string | null>(null);
+  const [soundId, setSoundId] = useState('');
+  const sound = sounds?.find((s) => s.id === soundId) ?? null;
 
   const [phase, setPhase] = useState<Phase>('idle');
   const [slots, setSlots] = useState<ResolvedSlot[] | null>(null);
@@ -101,6 +116,24 @@ export function Vids2PublishPanel({
         setAccounts(j.accounts as HAAccount[]);
       } catch (e) {
         if (!cancelled) setAccountsError(e instanceof Error ? e.message : String(e));
+      }
+    })();
+    return () => { cancelled = true; };
+  }, []);
+
+  // The sounds, read as the panel opens. A list that won't load costs the
+  // choice, not the publish: the posts can still go out without one.
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        const r = await fetch(withBase('/api/vids/ig-audio'));
+        const j = await r.json();
+        if (cancelled) return;
+        if (!r.ok) throw new Error(j.error ?? `${r.status}`);
+        setSounds(j as IgAudio[]);
+      } catch (e) {
+        if (!cancelled) setSoundsError(e instanceof Error ? e.message : String(e));
       }
     })();
     return () => { cancelled = true; };
@@ -138,6 +171,7 @@ export function Vids2PublishPanel({
         mode,
         ...(mode === 'manual' ? { scheduledFor: new Date(manualWhen).toISOString() } : {}),
         ...(caption.trim() ? { caption: caption.trim() } : {}),
+        ...(sound ? { audioUrl: sound.url } : {}),
         dryRun,
       }),
     });
@@ -298,6 +332,34 @@ export function Vids2PublishPanel({
                 onChange={(e) => { setManualWhen(e.target.value); setPhase('idle'); setSlots(null); }}
                 className="mt-2 w-full rounded-md border border-zinc-800 bg-zinc-900 px-2 py-1.5 text-[12px] text-zinc-200 outline-none focus:border-zinc-600"
               />
+            )}
+          </div>
+
+          {/* The Instagram sound. Picked natively by the operator, so the
+              build itself carries none; the list is the Music page's. */}
+          <div className="mt-3">
+            <p className="text-[10px] font-semibold uppercase tracking-wider text-zinc-500">Sound</p>
+            {soundsError ? (
+              <p className="mt-1 text-[11px] text-red-400">Couldn&apos;t load the Instagram audio list: {soundsError}</p>
+            ) : !sounds ? (
+              <p className="mt-1 flex items-center gap-2 text-[11px] text-zinc-500"><SpinnerIcon size={11} className="animate-spin" /> Loading sounds…</p>
+            ) : (
+              <>
+                <select
+                  value={soundId}
+                  onChange={(e) => { setSoundId(e.target.value); setPhase('idle'); setSlots(null); }}
+                  title="The Instagram audio the posts go out on — the operator picks it in the app"
+                  className="mt-1 w-full rounded-md border border-zinc-800 bg-zinc-900 px-2 py-1.5 text-[12px] text-zinc-200 outline-none focus:border-zinc-600"
+                >
+                  <option value="">No sound — as rendered</option>
+                  {sounds.map((s) => <option key={s.id} value={s.id}>{s.name}</option>)}
+                </select>
+                <p className="mt-1 truncate text-[10px] text-zinc-500" title={sound?.url}>
+                  {sound ? sound.url : sounds.length
+                    ? 'Picked in the Instagram app at post time, never mixed into the file.'
+                    : 'None named yet — add Instagram audio links under Music.'}
+                </p>
+              </>
             )}
           </div>
 
