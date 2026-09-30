@@ -358,9 +358,11 @@ export function slotPlacement(
 
 export interface SlotPick {
   video: VidRow;
-  /** True for every clip except one saved out of Prep with the keyboard sound
-   *  on it. Prep always drops the footage's own audio, so an un-muted slot can
-   *  only ever contribute typing — the export stays silent apart from that. */
+  /** True for every clip except one saved out of Prep with sound on it — the
+   *  keyboard laid over it, or the footage's own audio kept (the editor's
+   *  Sound toggle; the persona clips carry their voices this way). Prep drops
+   *  the footage's audio otherwise, so an un-muted slot only ever contributes
+   *  what was kept on purpose. */
   muted: boolean;
   fit: Fit;
   align: Align;

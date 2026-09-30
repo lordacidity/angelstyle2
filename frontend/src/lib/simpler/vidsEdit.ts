@@ -12,10 +12,10 @@
 //           played back to back.
 //   speed   playback rate, exactly as the builder means it: 2 plays twice as
 //           fast and lands half as long.
-//   muted   drop the clip's OWN audio. Vids are silent throughout — nothing in
-//           the section offers a way to turn the footage's sound back on — so
-//           this is always set. The mixing path below stays because it is what
-//           honours it.
+//   muted   drop the clip's OWN audio. Set on every clip until 2026-09-30,
+//           when the editor got a Sound toggle for it: off keeps the footage's
+//           sound in the file (the persona clips carry their voices this way),
+//           and the mixing path below is what honours it.
 //   sfx     stretches the keyboard sound plays over, in source seconds. This is
 //           the one thing that can put audio in a Vid: the sample is looped
 //           across each stretch and mixed on its own, so a clip stays silent

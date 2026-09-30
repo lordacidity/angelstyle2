@@ -1155,6 +1155,19 @@ export function VidsClipEditor({
           )}
           {fullKit && (
           <>
+          {/* The footage's own sound, kept or dropped. Off is how every clip
+              has always been saved; on keeps the voice in the file, and the
+              builder then hears that slot (VidRow.hasSfx). What the element
+              plays follows it, so the toggle is heard before it is saved. */}
+          <Chip
+            on={!edit.muted}
+            onClick={() => patch({ muted: !edit.muted })}
+            title={edit.muted
+              ? 'Sound off — the footage’s own audio is dropped from the saved clip. Click to keep it.'
+              : 'Sound on — the footage’s own audio stays in the saved clip, and a build plays it. Click to drop it.'}
+          >
+            {edit.muted ? 'Sound off' : 'Sound on'}
+          </Chip>
           <button
             onClick={keysSelection}
             disabled={!hasRange}

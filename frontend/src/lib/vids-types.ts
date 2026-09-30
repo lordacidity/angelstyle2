@@ -250,9 +250,10 @@ export interface VidRow {
   /** The same thing said stretch by stretch, for captions that land on the beat.
    *  Empty until someone marks the clip up in the editor. */
   marks: VidMark[];
-  /** This clip was saved out of Prep with the keyboard sound on it, so its audio
-   *  track holds typing and nothing else — Prep always drops the footage's own
-   *  sound. It is the one reason the builder lets a slot be heard. */
+  /** This clip was saved out of Prep with sound on it — the keyboard laid over
+   *  it, or, since 2026-09-30, the footage's own audio kept on purpose (the
+   *  Sound toggle in the editor). Prep drops the footage's sound otherwise.
+   *  It is the one reason the builder lets a slot be heard. */
   hasSfx: boolean;
   /** The recording as it was uploaded, kept once the clip has been edited so
    *  every later edit renders from it — see VidEdit. Null while the clip has
@@ -500,6 +501,11 @@ export interface VidBuildSpec {
    *  faster (see DEFAULT_TEMPO in lib/simpler/vidsPlan). Absent on builds
    *  written down before there was one — those played at 1, as shot. */
   tempo?: number;
+  /** The seed of the faint tint and grain laid over every frame (see
+   *  lib/simpler/vidsVeil) — everything about the veil follows from it.
+   *  Absent on builds written down before there was one, which went out
+   *  with none. */
+  veil?: number;
   roomTone: { on: boolean; level: number };
   /** The song under it, and how loud it sat. Absent on builds written down
    *  before music was a layer — those come back with no music, which is what
