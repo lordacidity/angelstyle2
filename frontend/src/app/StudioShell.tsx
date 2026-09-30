@@ -99,6 +99,12 @@ const HyperAttentionSection = lazy(() =>
   import('./components/hyperattention/HyperAttentionSection').then(m => ({ default: m.HyperAttentionSection }))
 );
 
+// Aiden — his private networking log: events, the people they involved, the
+// firms and places those people sit in, and the web of how they all connect.
+const AidenSection = lazy(() =>
+  import('./components/aiden/AidenSection').then(m => ({ default: m.AidenSection }))
+);
+
 function SectionLoader() {
   return (
     <div className="flex items-center justify-center h-full min-h-[200px]">
@@ -329,6 +335,11 @@ export function StudioShell() {
   // back is the page as it was, with the minute's refresh on its way.
   const [hyperattentionEverVisited, setHyperattentionEverVisited] = useState(false);
   useEffect(() => { if (activeSection === 'hyperattention') setHyperattentionEverVisited(true); }, [activeSection]);
+
+  // Aiden too: a form half filled in, or a question DeepSeek is still
+  // answering, is still there after a look at something else.
+  const [aidenEverVisited, setAidenEverVisited] = useState(false);
+  useEffect(() => { if (activeSection === 'aiden') setAidenEverVisited(true); }, [activeSection]);
 
   // Board widget → generator. Replace the current rows with a single fresh entry
   // carrying this row's link/caption/context, then hand its id to CanvasGrid via
@@ -630,6 +641,16 @@ export function StudioShell() {
           </div>
         )}
 
+        {aidenEverVisited && (
+          <div style={{ display: activeSection === 'aiden' ? undefined : 'none' }}>
+            <ErrorBoundary>
+              <Suspense fallback={<SectionLoader />}>
+                <AidenSection active={activeSection === 'aiden'} />
+              </Suspense>
+            </ErrorBoundary>
+          </div>
+        )}
+
         {activeSection === 'xphoto' && (
           <ErrorBoundary>
             <Suspense fallback={<SectionLoader />}>
@@ -696,8 +717,9 @@ export function StudioShell() {
 
       {/* Launch-server split button + first-time setup dropdown (see component).
           Off on Vids, whose own bar runs along that edge, and off on Vids 2 for
-          the same reason. */}
-      <LaunchServerButton hidden={activeSection === 'vids' || activeSection === 'vids2'} />
+          the same reason. Off on Aiden too, which fills the window to that
+          corner and has nothing to send to a phone. */}
+      <LaunchServerButton hidden={activeSection === 'vids' || activeSection === 'vids2' || activeSection === 'aiden'} />
     </div>
   );
 }

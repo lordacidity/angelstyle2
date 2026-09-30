@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { verifyToken, COOKIE_NAME, SITE_SCOPE } from '@/lib/auth';
 import { CLIPPERS } from '@/lib/clipping';
+import { hasAidenToken } from '@/lib/aiden-auth';
 
 // Site-wide password gate. Every route requires a signed `site_auth` cookie except the
 // unlock UI/endpoint (and framework internals, excluded via the matcher). The cookie is
@@ -113,6 +114,17 @@ export async function middleware(req: NextRequest) {
   }
 
   if (PUBLIC_PREFIXES.some((p) => pathname === p || pathname.startsWith(p + '/'))) {
+    return NextResponse.next();
+  }
+
+  // Parvis (the agent in Desktop/jarvis) writes to the Aiden log from a script:
+  // no browser, so no site cookie to show. It shows the Aiden API token instead,
+  // and that alone gets it past this gate, to the Aiden routes and nowhere else.
+  // Those routes check the same token again themselves (lib/aiden-auth).
+  //
+  // Deliberately NOT a public prefix: that would put /api/aiden/unlock, and the
+  // short password behind it, in reach of anyone who cared to guess at it.
+  if (pathname.startsWith('/api/aiden/') && hasAidenToken(req)) {
     return NextResponse.next();
   }
 

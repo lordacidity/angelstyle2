@@ -28,6 +28,7 @@ export const SECTION_PATHS: Record<AppSection, string> = {
   aipersona: '/ai-persona',
   audio: '/audio-editor',
   music: '/music',
+  aiden: '/aiden',
 };
 
 export function pathForSection(s: AppSection): string {

@@ -294,6 +294,25 @@ export function Sidebar({
           <span className="text-[9px] font-medium leading-none text-center">X Photo</span>
         </Link>
 
+        {/* Aiden — his own networking log: events, people, firms, places, the
+            web of how they connect. Behind a password of its own. Sits under
+            X Photo, the last thing in the list. */}
+        <Link
+          href={pathForSection('aiden')}
+          title="Aiden — private networking log"
+          className={`w-full shrink-0 flex flex-col items-center gap-2 py-2.5 px-1 rounded-lg transition-colors ${
+            active === 'aiden' ? 'text-white' : 'text-zinc-700 hover:text-zinc-200'
+          }`}
+        >
+          <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+            <circle cx="12" cy="5" r="2.2"/>
+            <circle cx="5" cy="18" r="2.2"/>
+            <circle cx="19" cy="18" r="2.2"/>
+            <path d="M11 7l-5 9M13 7l5 9M7.2 18h9.6"/>
+          </svg>
+          <span className="text-[9px] font-medium leading-none text-center">Aiden</span>
+        </Link>
+
       </nav>
 
       {/* Bottom */}
