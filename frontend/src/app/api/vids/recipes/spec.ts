@@ -48,6 +48,9 @@ export const BuildSpecSchema = z.object({
   // Missing from records written before Bottom A had a pace — those played it
   // at its own speed, which is what Normal is.
   bottomAPace: z.enum(['normal', 'fast']).default('normal'),
+  // What every rate was multiplied by. Missing from records written before
+  // the whole video could be sped — those played as shot, which is 1.
+  tempo: num(0.25, 4).optional(),
   roomTone: z.object({ on: z.boolean(), level: num(0, 2) }),
   // A record is read straight back onto the stage and its track fetched, so the
   // url may only ever be a path this app serves — never somewhere else's audio.

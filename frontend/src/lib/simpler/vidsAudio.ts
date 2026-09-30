@@ -13,6 +13,10 @@
 //              like joins.
 //   music      a song, chosen per build from the tracks the app already holds,
 //              laid across the finished timeline the same way the room is.
+//              Nothing chooses one since 2026-09-30: Vids 2 lays no song under
+//              a build (the sound goes on natively when it is published — see
+//              Vids2PublishPanel), so every build's is DEFAULT_MUSIC, none.
+//              The layer stays so old records still read and could still play.
 //
 // The first two are files the app serves rather than anything in the clip
 // bucket: they are the same bytes for every clip, so they belong with the code

@@ -285,12 +285,32 @@ export const MAX_FAST_SPEED = 16;
  *  the default a new video starts on. */
 export const cleanBottomAPace = (v: unknown): BottomAPace => (v === 'fast' ? 'fast' : 'normal');
 
+// ── Tempo ─────────────────────────────────────────────────────────────────────
+// The whole video, faster. Every slot's rate is multiplied by it — the persona
+// talking, the recordings, Bottom A on Fast, a still's beat — so the finished
+// file is the same video in less time, and every caption and BOOM stays on its
+// moment because the timeline scales with it. The song and the room tone run
+// under the timeline and are never sped, as with Fast. It is a build's setting
+// rather than a slot's: the tuning page has a slider for it, the clipper page
+// fixes it (see Vids2Builder), and the record writes it down (VidBuildSpec.tempo).
+
+/** What every new video opens on — a touch faster than shot. */
+export const DEFAULT_TEMPO = 1.1;
+export const MIN_TEMPO = 1;
+export const MAX_TEMPO = 2;
+/** The slider's notches. */
+export const TEMPO_STEP = 0.05;
+export const clampTempo = (v: number) =>
+  Number.isFinite(v) ? clamp(v, MIN_TEMPO, MAX_TEMPO) : DEFAULT_TEMPO;
+
 /** The rate a slot actually plays at, with `kept` clip seconds of it: its own
- *  speed, except Bottom A on Fast. */
-export function slotSpeed(slot: SlotId, speed: number, kept: number, pace: BottomAPace): number {
-  const own = clampSpeed(speed);
+ *  speed, except Bottom A on Fast — and the whole thing times `tempo`. Fast's
+ *  ceiling holds after the tempo, so the preview never asks a <video> for
+ *  more than it will play. */
+export function slotSpeed(slot: SlotId, speed: number, kept: number, pace: BottomAPace, tempo = 1): number {
+  const own = clampSpeed(speed) * tempo;
   if (slot !== 'bottomA' || pace !== 'fast' || !(kept > 0)) return own;
-  return Math.max(own, Math.min(MAX_FAST_SPEED, kept / FAST_BOTTOM_A_LENGTH));
+  return Math.max(own, Math.min(MAX_FAST_SPEED, (kept / FAST_BOTTOM_A_LENGTH) * tempo));
 }
 
 // The kept range of a clip, clamped to what the clip actually has.
@@ -412,6 +432,8 @@ export interface Plan {
   items: PlanItem[];
   total: number;
   bars: BarsLayout;
+  /** What every rate above was multiplied by — see DEFAULT_TEMPO. */
+  tempo: number;
 }
 
 // ── The BOOM ──────────────────────────────────────────────────────────────────
@@ -517,13 +539,16 @@ export function boomPlanItem(
 // `durations` (by video id) are the browser-measured lengths, which win over
 // the value stored at upload time (that one can be missing for odd codecs).
 // `bottomAPace` is Normal or Fast — see slotSpeed; left out, every clip plays
-// at its own speed.
+// at its own speed. `tempo` multiplies every rate (a still's beat included),
+// so the whole timeline shortens by it — see DEFAULT_TEMPO; left out, nothing
+// is sped.
 export function buildPlan(
   picks: Picks,
   durations: Record<string, number> = {},
   bars: BarsLayout = DEFAULT_BARS,
   bottomAPace: BottomAPace = 'normal',
   booms: readonly BoomInsert[] = [],
+  tempo = 1,
 ): Plan {
   // A photo has no length of its own, nothing to trim and no rate to play at:
   // it is one frame held for as long as its window is open. Giving it a length
@@ -549,10 +574,12 @@ export function buildPlan(
     const len = Math.max(0, r.end - r.start);
     return id === 'topB' ? Math.min(len, TOP_B_LENGTH) : len;
   };
-  // Bottom A on Fast plays at whatever rate fits it — see slotSpeed.
+  // Bottom A on Fast plays at whatever rate fits it — see slotSpeed. A still
+  // has no rate of its own, but its beat shortens with the tempo like
+  // everything else's, so the timeline scales as one.
   const rate = (id: SlotId) => (photo(id)
-    ? DEFAULT_SPEED
-    : slotSpeed(id, picks[id]?.speed ?? DEFAULT_SPEED, kept(id), bottomAPace));
+    ? DEFAULT_SPEED * tempo
+    : slotSpeed(id, picks[id]?.speed ?? DEFAULT_SPEED, kept(id), bottomAPace, tempo));
   /** The same range on the timeline, which is what every offset below is in. */
   const dur = (id: SlotId): number => kept(id) / rate(id);
   const has = (id: SlotId) => !!picks[id] && dur(id) > 0;
@@ -629,7 +656,7 @@ export function buildPlan(
     const item = boomPlanItem(b, total, durations);
     if (item) items.push(item);
   }
-  return { items, total, bars };
+  return { items, total, bars, tempo };
 }
 
 // The picture area for a region once the bars have taken their share.

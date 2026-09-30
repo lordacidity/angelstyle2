@@ -191,9 +191,40 @@ Who. Studio > News uses the same `people` for its own paste box.
 and makes the whole video from the answers before showing you anything; while
 it runs it is the progress bar. Then it lands on the tuning page — a fork of
 what was Simpler's builder, with the deciding taken out: the sound, the
-captions, the BOOMs, the post caption and Download MP4. **← Start over**, top
-right, starts Vids 2 over after a confirm: the video, its sound and its words
-go, every answer is cleared, and the form opens on its first card.
+captions, the BOOMs, the post caption, the speed and Download MP4. **← Start
+over**, top right, starts Vids 2 over after a confirm: the video, its sound
+and its words go, every answer is cleared, and the form opens on its first
+card.
+
+## The sound, and the speed
+
+**No song.** Since 2026-09-30 nothing is laid under a build but the room tone
+(`DEFAULT_ROOM_TONE`) and whatever the recordings carry — the typing Prep
+baked in — and the Sound rail has only the Clips and BOOM levels. The Music
+list, the roll and the record's song went with it (`music` is the record's
+"none", so `composeSequence` and `vids_recipes` read as they always have; a
+code brought back that had a song says so under the summary and comes back
+without it). The music happens **when the video is published**: the Publish
+panel (Hyper Attention only) has a **Sound** list — the Instagram audio links
+named on **Studio > Music > Instagram audio** (`api/vids/ig-audio`,
+`vids_ig_audio`) — and the one chosen goes to every queued post as
+`audioUrl`, which Hyper Attention's operator picks natively in the app. The
+sound is never mixed into the file; native selection is what keeps the post in
+the sound's reach.
+
+**Speed** is the whole video, faster: every slot's rate times a **tempo**
+(`buildPlan`'s sixth argument, `Plan.tempo`), a still's beat included, so the
+timeline scales as one and every caption and BOOM stays on its moment. Room
+tone is never sped, as with Fast. Every video opens at **`DEFAULT_TEMPO`,
+1.1×**; the Studio has a slider for it at the foot of the sidebar (1× to 2×,
+`changeTempo` carries the BOOMs and the playhead across so nothing moves off
+its frame), and the **clipper page fixes it at 1.1×** (`CLIPPER_TEMPO`) and
+shows nothing. It is a setting, not a roll: the next video opens on what the
+last was left at. The record writes it down (`VidBuildSpec.tempo`) and a
+record from before there was one comes back at 1, as it went out, because its
+BOOMs were laid on that timeline. Generate drafts the words against the
+default tempo's windows (`Vids2Section`), and `draftLines` tells Fast's
+speed-up from the tempo's by asking `slotSpeed` at the plan's own tempo.
 
 ## Bringing a video back by its code
 

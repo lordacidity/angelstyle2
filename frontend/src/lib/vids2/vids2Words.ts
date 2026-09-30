@@ -115,8 +115,10 @@ export async function draftLines(a: LinesAsk): Promise<LinesDraft> {
   // any marked clip: one line each, on the mark.
   const aWin = windows.bottomA;
   const aItem = plan.items.find((i) => i.slot === 'bottomA') ?? null;
+  // Against its Normal rate at the plan's own tempo, so the whole video being
+  // a touch faster (buildPlan's tempo) is not mistaken for Fast speeding it.
   const aSped = !!aItem && !!picks.bottomA
-    && aItem.speed > slotSpeed('bottomA', picks.bottomA.speed, aItem.sourceLength, 'normal') + 1e-6;
+    && aItem.speed > slotSpeed('bottomA', picks.bottomA.speed, aItem.sourceLength, 'normal', plan.tempo) + 1e-6;
   // A news intro is always captioned on its marks: three lines, the first
   // two fixed outright (NEWS_BOTTOM_A_LINES), the pick rolled — never the
   // two placed lines Fast asks the writer for.

@@ -70,7 +70,7 @@ import { Vids2Builder } from './Vids2Builder';
 import { Vids2Form, type Vids2Job, type Vids2Leg } from './Vids2Form';
 import { Vids2Recall } from './Vids2Recall';
 import {
-  DEFAULT_TRIM, INTAKE_SPEED, LIBRARY_FOLDERS, PERSONA_PART_SLOT, SLOT_META,
+  DEFAULT_TEMPO, DEFAULT_TRIM, INTAKE_SPEED, LIBRARY_FOLDERS, PERSONA_PART_SLOT, SLOT_META,
   buildPlan, folderGroupIds, freshPick, type Picks, type SlotId,
 } from '@/lib/simpler/vidsPlan';
 import { PERSONA_PARTS, isPhoto, type VidPersona, type VidRow } from '@/lib/vids-types';
@@ -854,7 +854,9 @@ export function Vids2Section({ active }: { active: boolean }) {
       // A brought-back video's words are on the record: nothing is drafted.
       return {
         lines: known && !restore ? quiet(draftLines({
-          plan: buildPlan(draft, {}, VIDS2_BARS, VIDS2_PACE),
+          // On the tempo every video opens at, so the windows the words are
+          // timed against are the ones the tuning page shows.
+          plan: buildPlan(draft, {}, VIDS2_BARS, VIDS2_PACE, [], DEFAULT_TEMPO),
           picks: draft,
           pace: VIDS2_PACE,
           intro,

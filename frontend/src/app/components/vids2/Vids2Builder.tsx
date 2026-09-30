@@ -9,8 +9,14 @@
 // this page was ever on screen, so there are no choices here, only
 // adjustments:
 //
-//   Sound     the song under the video, how loud the clips sit, how loud the
-//             BOOMs land.
+//   Sound     how loud the clips sit, how loud the BOOMs land. Room tone
+//             rides under every build. No song: the music was switched off
+//             on 2026-09-30 — the sound is the room and what the recordings
+//             carry, and the Instagram audio goes on natively when the video
+//             is published (Vids2PublishPanel), never into the file.
+//   Speed     the whole video a touch faster (DEFAULT_TEMPO, 1.1×) — a slider
+//             at the foot of the sidebar in the Studio; fixed on the clipper
+//             page.
 //   Captions  written by the model off the clips' context — asked for by
 //             Generate while the recordings were still rendering, so they are
 //             usually there when the build lands — editable by hand, and the
@@ -65,8 +71,9 @@ import type { CSSProperties, FocusEvent, PointerEvent, SyntheticEvent } from 're
 import type { VidBuildSpec, VidPersona, VidRecipe, VidRow } from '@/lib/vids-types';
 import { isPhoto, mintRecipeCode, recipeName } from '@/lib/vids-types';
 import {
-  SLOTS,
-  buildPlan, boomIdOf, boomLayer, boomPlanItem, drawPlanItem, freshPick, isBoomItem, smoothScaling,
+  DEFAULT_TEMPO, MAX_TEMPO, MIN_TEMPO, SLOTS, TEMPO_STEP,
+  buildPlan, boomIdOf, boomLayer, boomPlanItem, clampTempo, drawPlanItem, freshPick, fmtSpeed, isBoomItem,
+  smoothScaling,
   type BoomInsert, type LayerId, type Picks, type Plan, type PlanItem, type Rect, type SlotId,
 } from '@/lib/simpler/vidsPlan';
 // The house BOOM and the way a name is squeezed into a key, from Simpler's own
@@ -96,10 +103,10 @@ import { createRecipe, deleteRecipe, writeHook } from '@/lib/vids-client';
 import { specFromBuild } from '@/lib/simpler/vidsRecipe';
 import {
   DEFAULT_BOOM_LEVEL, DEFAULT_CLIP_LEVEL, DEFAULT_MUSIC, DEFAULT_ROOM_TONE,
-  MAX_BOOM_LEVEL, MAX_CLIP_LEVEL, MAX_MUSIC_LEVEL, MIN_BOOM_LEVEL,
-  MIN_CLIP_LEVEL, MIN_MUSIC_LEVEL, ROOM_TONE_URL, clampClipLevel,
-  boomGain, clampBoomLevel, clampMusicLevel, decodeAudio, listBoomSounds, listMusic, musicGain, roomToneGain,
-  type BoomSound, type Music, type MusicTrack,
+  MAX_BOOM_LEVEL, MAX_CLIP_LEVEL, MIN_BOOM_LEVEL,
+  MIN_CLIP_LEVEL, ROOM_TONE_URL, clampClipLevel,
+  boomGain, clampBoomLevel, decodeAudio, listBoomSounds, roomToneGain,
+  type BoomSound,
 } from '@/lib/simpler/vidsAudio';
 import { fmtTime, safeExportName } from '@/lib/utils';
 import { DownloadIcon, SpinnerIcon, VideoIcon } from '@/lib/icons';
@@ -173,12 +180,9 @@ function rollStyleId(): string | null {
   return null;
 }
 
-/** The songs the randomizer may reach for. A degen build can roll any song;
- *  any other build never rolls one marked degen on the Music page. This is the
- *  roll only — picking a degen song from the list by hand is open to every
- *  build. */
-const rollableMusic = (tracks: readonly MusicTrack[], degen: boolean): MusicTrack[] =>
-  (degen ? [...tracks] : tracks.filter((t) => !t.degen));
+/** What the clipper page runs every video at — no slider there, so it is the
+ *  house's own tempo and nothing else. */
+const CLIPPER_TEMPO = DEFAULT_TEMPO;
 
 /** Volume moves in twentieths — five points of the readout per notch, and
  *  never a value off that grid, whatever the level started as. */
@@ -235,8 +239,6 @@ function canShareVideo(): boolean {
   }
 }
 
-// ── The song ─────────────────────────────────────────────────────────────────
-
 /** The share sheet's own glyph — a box with an arrow out of the top. */
 function ShareIcon() {
   return (
@@ -246,124 +248,14 @@ function ShareIcon() {
   );
 }
 
-function PlayGlyph({ stop }: { stop?: boolean }) {
-  return (
-    <svg width="9" height="9" viewBox="0 0 24 24" fill="currentColor" aria-hidden>
-      {stop ? <rect x="6" y="6" width="12" height="12" rx="1.5" /> : <path d="M8 5v14l11-7z" />}
-    </svg>
-  );
-}
+// ── Sound ─────────────────────────────────────────────────────────────────
 
-/** The song, as a list you can listen to. A native <select> has nowhere to put
- *  a play button, and picking a track you have to render a whole video to hear
- *  is picking blind — so this is a button and a list, and every row plays its
- *  track from the top for as long as you leave it going.
- *
- *  The preview is its own <audio>, not the mixer's bed: it plays whether or not
- *  the stage is running, at the level the song is set to, and one preview stops
- *  the one before it. */
-function MusicPicker({ tracks, music, level, onChoose }: {
-  tracks: MusicTrack[];
-  /** The chosen track's url, or null for no song. */
-  music: string | null;
-  /** What to play the preview at — the song's own level. */
-  level: number;
-  onChoose: (track: MusicTrack | null) => void;
-}) {
-  const [open, setOpen] = useState(false);
-  const [previewing, setPreviewing] = useState<string | null>(null);
-  const audioRef = useRef<HTMLAudioElement | null>(null);
-
-  const stop = useCallback(() => {
-    const el = audioRef.current;
-    audioRef.current = null;
-    if (el) { el.pause(); el.removeAttribute('src'); el.load(); }
-    setPreviewing(null);
-  }, []);
-
-  // Nothing should still be playing once this is gone.
-  useEffect(() => stop, [stop]);
-
-  /** Putting the list away stops whatever it was previewing — a preview you
-   *  can't see is a preview you can't stop. Every way out goes through here. */
-  const close = useCallback(() => { setOpen(false); stop(); }, [stop]);
-
-  const preview = useCallback((track: MusicTrack) => {
-    if (previewing === track.url) { stop(); return; }
-    stop();
-    const el = new Audio(withBase(track.url));
-    el.preload = 'auto';
-    el.volume = Math.min(1, Math.max(0, level));
-    audioRef.current = el;
-    setPreviewing(track.url);
-    // From the top, and for as long as it is left playing — the same way the
-    // song goes under the video. It stops when it is pressed again, when
-    // another one is started, when the list is put away, or when the track
-    // runs out.
-    void el.play().catch(() => { if (audioRef.current === el) stop(); });
-    el.onerror = () => { if (audioRef.current === el) stop(); };
-    el.onended = () => { if (audioRef.current === el) stop(); };
-  }, [previewing, level, stop]);
-
-  const current = tracks.find((t) => t.url === music) ?? null;
-  const rowCls = (on: boolean) =>
-    `flex w-full items-center gap-2 px-2 py-1.5 text-left text-[11px] transition-colors ${
-      on ? 'bg-zinc-900 text-white' : 'text-zinc-300 hover:bg-zinc-900/60'
-    }`;
-
-  return (
-    <div className="relative min-w-0 flex-1">
-      <button
-        onClick={() => (open ? close() : setOpen(true))}
-        title="A song under the whole video, from the audio library"
-        className="flex w-full items-center gap-2 rounded-md border border-zinc-700 bg-zinc-950 px-2 py-1 text-left transition-colors hover:border-zinc-500"
-      >
-        <span className={`min-w-0 flex-1 truncate text-[11px] ${current ? 'text-zinc-200' : 'text-zinc-500'}`}>
-          {current?.label ?? 'None'}
-        </span>
-        <span className={`shrink-0 text-[7px] leading-none text-zinc-500 transition-transform ${open ? 'rotate-180' : ''}`}>▼</span>
-      </button>
-      {open && (
-        <>
-          <div className="fixed inset-0 z-40" onPointerDown={close} />
-          <div className="absolute left-0 right-0 top-full z-50 mt-1 max-h-64 overflow-y-auto rounded-md border border-zinc-700 bg-zinc-950 shadow-xl">
-            <button onClick={() => { onChoose(null); close(); }} className={rowCls(!music)}>
-              <span className="w-[18px] shrink-0" />
-              <span className="min-w-0 flex-1 truncate">None</span>
-            </button>
-            {tracks.map((t) => (
-              <div key={t.url} className={rowCls(t.url === music)}>
-                <button
-                  onClick={(e) => { e.stopPropagation(); preview(t); }}
-                  title={previewing === t.url ? 'Stop' : 'Play this one from the start'}
-                  className={`flex h-[18px] w-[18px] shrink-0 items-center justify-center rounded border transition-colors ${
-                    previewing === t.url
-                      ? 'border-emerald-500 bg-emerald-500/20 text-emerald-300'
-                      : 'border-zinc-700 text-zinc-400 hover:border-zinc-500 hover:text-white'
-                  }`}
-                >
-                  <PlayGlyph stop={previewing === t.url} />
-                </button>
-                <button
-                  onClick={() => { onChoose(t); close(); }}
-                  className="min-w-0 flex-1 truncate text-left"
-                >
-                  {t.label}
-                </button>
-              </div>
-            ))}
-          </div>
-        </>
-      )}
-    </div>
-  );
-}
-
-/** One continuous layer under the stage — room tone, or the song. Each is its
- *  own looping source rather than anything to do with the clips: both run the
- *  length of the timeline, so seeking around inside one shouldn't restart it.
- *  Both are the layers lib/simpler/vidsCompose lays into the file, so what you hear
- *  while the stage runs is what the export will carry.
+/** One continuous layer under the stage — the room tone. It is its own
+ *  looping source rather than anything to do with the clips: it runs the
+ *  length of the timeline, so seeking around inside it shouldn't restart it.
+ *  It is the layer lib/simpler/vidsCompose lays into the file, so what you
+ *  hear while the stage runs is what the export will carry. (Written for the
+ *  song as well, which rode under the video the same way until 2026-09-30.)
  *
  *  A null `url` is the layer switched off. `arm` makes it ready to play and is
  *  called from the transport, which is a click — the gesture a browser wants
@@ -496,26 +388,20 @@ export function Vids2Builder({
 
   // Room tone rides under every build, at the level it has always been at —
   // there is nothing here to switch it off or move it. clipLevel is how loud
-  // what the clips carry sits against it, and music is nothing until a track
-  // is chosen, and then a third layer beside the other two.
+  // what the clips carry sits against it. There is no song: the sound of a
+  // build is the room and the recordings, and the music is chosen natively
+  // when it is published (Vids2PublishPanel's Instagram audio). `music` is
+  // kept as the record's "none" so the export and the record read as they
+  // always have.
   const roomTone = DEFAULT_ROOM_TONE;
-  const [music, setMusic] = useState<Music>(DEFAULT_MUSIC);
+  const music = DEFAULT_MUSIC;
   const [clipLevel, setClipLevel] = useState(DEFAULT_CLIP_LEVEL);
-  // The songs there are to pick from — whatever is in the audio library, which
-  // is the same one the charts and carousel pages save into, so a track saved
-  // there shows up here.
-  const [tracks, setTracks] = useState<MusicTrack[]>([]);
-  const [tracksError, setTracksError] = useState<string | null>(null);
-  // Whether the song is anybody's decision yet. A track picked by hand, "None",
-  // a roll, or a build brought back by its code all count — after any of them
-  // the list arriving (or arriving again) leaves the choice alone.
-  const musicChosenRef = useRef(false);
-  // Whether this build is in degen mode, for the roll the list makes when it
-  // lands — which can be after the build it was asked for has changed.
-  const degenRef = useRef(build.mode === 'degen');
-  useEffect(() => { degenRef.current = build.mode === 'degen'; }, [build.mode]);
-  // Likewise the captions' look: rolled once when the pane first opens, then
-  // only by Reset or by picking one.
+  // The whole video, faster — every rate times this (buildPlan's tempo). The
+  // Studio has a slider for it at the foot of the sidebar; the clipper page
+  // runs every video at the house tempo and shows nothing.
+  const [tempo, setTempo] = useState(CLIPPERS ? CLIPPER_TEMPO : DEFAULT_TEMPO);
+  // The captions' look: rolled once when the pane first opens, then only by
+  // Reset or by picking one.
   const styleChosenRef = useRef(false);
   // Browser-measured clip lengths + load failures, keyed by video id so a
   // re-picked slot never carries a stale value.
@@ -697,10 +583,26 @@ export function Vids2Builder({
   const [boomArming, setBoomArming] = useState(false);
 
   const plan = useMemo(
-    () => buildPlan(picks, durations, bars, bottomAPace, booms),
-    [picks, durations, bars, bottomAPace, booms],
+    () => buildPlan(picks, durations, bars, bottomAPace, booms, tempo),
+    [picks, durations, bars, bottomAPace, booms, tempo],
   );
   const total = plan.total;
+
+  /** Move the tempo, keeping every BOOM on the moment it was laid on and the
+   *  playhead on the frame it is showing. The timeline scales as one — every
+   *  rate is multiplied alike — so a timeline second at the old tempo is
+   *  old/new of one at the new, and both are carried across the same way. */
+  const changeTempo = (next: number) => {
+    const to = clampTempo(next);
+    if (Math.abs(to - tempo) < 1e-9) return;
+    const scale = tempo / to;
+    setBooms((prev) => prev.map((b) => ({ ...b, at: b.at * scale })));
+    const t = timeRef.current * scale;
+    timeRef.current = t;
+    setTime(t);
+    if (clockRef.current) clockRef.current = { startedAt: performance.now(), offset: t };
+    setTempo(to);
+  };
   /** The BOOMs as they actually landed — each pulled back from where it was
    *  pressed in if it was too near the end to fit. What the bar marks. */
   const boomItems = useMemo(() => plan.items.filter(isBoomItem), [plan]);
@@ -1199,39 +1101,6 @@ export function Vids2Builder({
     return () => cancelAnimationFrame(raf);
   }, [playing, syncElements, draw]);
 
-  // The songs to choose from. Listed when the pane opens rather than on mount,
-  // so a page that never reaches Vids never asks; a track saved from another
-  // page turns up here the next time it is opened.
-  useEffect(() => {
-    if (!active) return;
-    const ctrl = new AbortController();
-    listMusic(ctrl.signal)
-      .then((ts) => {
-        setTracks(ts);
-        setTracksError(null);
-        // A song renamed since it was chosen (on the Clippers page) is chosen
-        // under its new name — that is the label the record is written with.
-        setMusic((m) => {
-          const t = m.url ? ts.find((x) => x.url === m.url) : undefined;
-          return t && t.label !== m.label ? { ...m, label: t.label } : m;
-        });
-        // Arrive with something under it: a song nobody chose is easier to swap
-        // than one nobody thought to add. Never a degen one outside degen mode.
-        if (!musicChosenRef.current) {
-          const t = pickRandom(rollableMusic(ts, degenRef.current));
-          if (t) {
-            musicChosenRef.current = true;
-            setMusic((m) => ({ ...m, url: t.url, label: t.label }));
-          }
-        }
-      })
-      .catch((e: unknown) => {
-        if (e instanceof DOMException && e.name === 'AbortError') return;
-        setTracksError(e instanceof Error ? e.message : String(e));
-      });
-    return () => ctrl.abort();
-  }, [active]);
-
   // The sounds a BOOM can make. Listed off the folder, so one dropped in is
   // there next time the page opens. The first is chosen to begin with: a BOOM
   // nobody picked a sound for should still land with one.
@@ -1256,10 +1125,9 @@ export function Vids2Builder({
   }, [active]);
 
   // ── Sound preview ──
-  // The same layers the export lays down, running while the stage runs, so what
-  // you hear here is what the file will carry: room tone, and the song. One
-  // AudioContext between them — a page gets few of them, and both beds want the
-  // same click to open it.
+  // The same layer the export lays down, running while the stage runs, so what
+  // you hear here is what the file will carry: the room tone. One AudioContext
+  // for it — a page gets few of them.
   const audioRef = useRef<AudioContext | null>(null);
   const openCtx = useCallback(async (): Promise<AudioContext | null> => {
     // A context that has been closed can't be reopened, so it is replaced.
@@ -1277,11 +1145,11 @@ export function Vids2Builder({
     return ctx;
   }, []);
 
-  /** Bumped when the playhead has been put somewhere by hand: the song and the
-   *  room re-open where the video now is, rather than playing on from where it
-   *  was. A drag is given a moment to settle first — re-opening them on every
-   *  frame of one would be a stutter, and nobody is listening to the song while
-   *  the bar is moving. */
+  /** Bumped when the playhead has been put somewhere by hand: the room
+   *  re-opens where the video now is, rather than playing on from where it
+   *  was. A drag is given a moment to settle first — re-opening it on every
+   *  frame of one would be a stutter, and nobody is listening to the room
+   *  while the bar is moving. */
   const [bedEpoch, setBedEpoch] = useState(0);
   const bedSettle = useRef(0);
   const moveBeds = useCallback((wait = 0) => {
@@ -1291,10 +1159,9 @@ export function Vids2Builder({
   }, []);
   useEffect(() => () => window.clearTimeout(bedSettle.current), []);
 
-  // Both layers open however far into themselves the stage is — see useBed.
+  // The layer opens however far into itself the stage is — see useBed.
   const roomBed = useBed(openCtx, roomTone.on ? ROOM_TONE_URL : null, roomToneGain(roomTone), playing, timeRef, bedEpoch);
-  const musicBed = useBed(openCtx, music.url, musicGain(music), playing, timeRef, bedEpoch);
-  const soundError = roomBed.error ?? musicBed.error;
+  const soundError = roomBed.error;
 
   useEffect(() => () => {
     void audioRef.current?.close().catch(() => { /* already gone */ });
@@ -1316,9 +1183,8 @@ export function Vids2Builder({
     syncElements(t0, true, true);
     setTime(t0);
     // Decoded here, inside the click, so the browser counts it as a gesture.
-    // Each is a no-op when its layer is off.
+    // A no-op when the layer is off.
     void roomBed.arm();
-    void musicBed.arm();
     setPlaying(true);
   };
 
@@ -1526,7 +1392,7 @@ export function Vids2Builder({
   const appliedPersona = personas.find((p) => p.id === appliedPersonaId) ?? null;
   const currentSpec = (): VidBuildSpec => ({
     ...specFromBuild({
-      picks, persona: appliedPersona, bars, bottomAPace, roomTone, music, clipLevel, boomLevel, preset: PRESET_ID,
+      picks, persona: appliedPersona, bars, bottomAPace, tempo, roomTone, music, clipLevel, boomLevel, preset: PRESET_ID,
       // Where each actually landed, not where it was pressed in — see boomItems.
       // One that found no room on the video is not in the record either.
       booms: booms.flatMap((b) => {
@@ -1678,7 +1544,7 @@ export function Vids2Builder({
     setPhonedeckRevealed(false);
     setPhonedeckSentName(null);
     setPhonedeckError(null);
-  }, [plan, captions, capStyle, music, clipLevel, boomLevel]);
+  }, [plan, captions, capStyle, clipLevel, boomLevel]);
 
   /** Save to Photos: the rendered file handed to the share sheet, where Save
    *  Video (an iPhone) or Photos (Android) is a press away. Dismissing the
@@ -1780,13 +1646,13 @@ export function Vids2Builder({
   const buildId = build.id;
 
   /** The record a code brought back, put on: every caption where it was,
-   *  the look it was drawn in and how big, the song and how loud everything
-   *  sat. Through captionStyle(), so a record drawn in a look since retired
-   *  comes back on one that exists (the looks effect narrows it again for a
-   *  clipper). A song since gone from the audio library can't be played or
-   *  exported, so the video comes back without one and says so — the label
-   *  written down with it names what it was. Only once the list has arrived:
-   *  an empty list says nothing about what is in it. */
+   *  the look it was drawn in and how big, how fast it ran and how loud
+   *  everything sat. Through captionStyle(), so a record drawn in a look
+   *  since retired comes back on one that exists (the looks effect narrows it
+   *  again for a clipper). A record written before the whole video could be
+   *  sped comes back at 1, as it went out — its BOOMs were laid on that
+   *  timeline. A song on the record is not put back: there has been no music
+   *  under a build since 2026-09-30, and the video says so. */
   const restoreRecord = (b: VidBuildSpec) => {
     const notes: string[] = [];
     // Over the empty set, so a record from before End had its line comes
@@ -1795,15 +1661,10 @@ export function Vids2Builder({
     styleChosenRef.current = true;
     setStyleId(captionStyle(b.captions.styleId).id);
     setCapScale(clampCaptionScale(b.captions.size ?? DEFAULT_CAPTION_SCALE));
-    musicChosenRef.current = true;
-    let song: Music = b.music
-      ? { url: b.music.url ?? null, label: b.music.label ?? '', level: clampMusicLevel(b.music.level) }
-      : DEFAULT_MUSIC;
-    if (song.url && tracks.length && !tracks.some((t) => t.url === song.url)) {
-      notes.push(`Song “${song.label || song.url.split('/').pop()}” is no longer in the audio library, so this one has no music — pick another under Sound.`);
-      song = { ...song, url: null };
+    if (b.music?.url) {
+      notes.push(`This one went out with the song “${b.music.label || b.music.url.split('/').pop()}” under it. Builds carry no music any more, so it comes back with the room tone alone.`);
     }
-    setMusic(song);
+    setTempo(clampTempo(b.tempo ?? 1));
     setClipLevel(clampClipLevel(b.clipLevel));
     if (b.boomLevel != null) setBoomLevel(clampBoomLevel(b.boomLevel));
     setRestoreNotes(notes);
@@ -1829,12 +1690,10 @@ export function Vids2Builder({
       setBusy(false);
       return;
     }
-    // A song and a look off the shelf for each new video, the way Simpler's
-    // Reset rolls them — neither is anybody's decision until somebody makes it
-    // one, and a video that never rolled would be the same song every time.
-    // With the audio library still on its way this does nothing and the list
-    // picks one when it lands (below).
-    rollMusic();
+    // A look off the shelf for each new video, the way Simpler's Reset rolled
+    // one — nobody's decision until somebody makes it one. The tempo is not
+    // rolled and not reset: it is a setting, and the one you left it on is
+    // the one the next video opens on.
     rollStyle();
     // The words have been on their way since the recordings were laid out —
     // Generate asked for them off the same plan this stage is showing — so
@@ -1938,22 +1797,6 @@ export function Vids2Builder({
     endFilled.current = true;
     onPicksChange((prev) => (prev.end ? prev : { ...prev, end: freshPick('end', video, prev.end) }));
   }, [libraryLoaded, picks.end, clipsForSlot, onPicksChange]);
-
-  /** A song off the shelf, and not the one already on when there is another to
-   *  be had — off the degen shelf too only in degen mode (rollableMusic). Each
-   *  new build uses it; the list rolls its own the first time it arrives. */
-  const rollMusic = () => {
-    // Still on its way: the list rolls one when it lands.
-    if (!tracks.length) return;
-    const rollable = rollableMusic(tracks, build.mode === 'degen');
-    const pool = rollable.filter((t) => t.url !== music.url);
-    const t = pickRandom(pool.length ? pool : rollable);
-    musicChosenRef.current = true;
-    // With every song marked degen and this build not in degen mode there is
-    // nothing it may roll, and no music beats a degen song left over from the
-    // build before.
-    setMusic((m) => ({ ...m, url: t?.url ?? null, label: t?.label ?? '' }));
-  };
 
   /** A look for the captions off the shelf, by STYLE_ODDS — Gold a fifth of
    *  the time. Every new build rolls one; the page rolls one itself the first
@@ -2482,52 +2325,13 @@ export function Vids2Builder({
           )}
         </div>
 
-        {/* Sound: the song and how loud it and the clips sit. Room tone rides
-            under every build (DEFAULT_ROOM_TONE) with nothing to switch it. */}
+        {/* Sound: how loud the clips sit, and the BOOMs. Room tone rides under
+            every build (DEFAULT_ROOM_TONE) with nothing to switch it, and
+            there is no song to pick — the music goes on natively when the
+            video is published (the Instagram audio in Vids2PublishPanel). */}
         <div className="border-b border-zinc-800 px-3 py-3">
           <p className="mb-2 text-xs font-semibold uppercase tracking-wider text-zinc-500">Sound</p>
-          {/* The song and how loud it is are one thing in two rows, so the
-              word for them sits against the pair rather than against the top
-              of it: the label column is centred on the block beside it, which
-              with a song chosen puts "Music" between the list and its volume,
-              and with none puts it against the list on its own. */}
           <div className="flex items-center gap-2">
-            <span className="w-10 shrink-0 text-xs text-zinc-300">Music</span>
-            <div className="flex min-w-0 flex-1 flex-col">
-              <MusicPicker
-                tracks={tracks}
-                music={music.url}
-                level={music.level}
-                onChoose={(t) => {
-                  musicChosenRef.current = true;
-                  setMusic((m) => ({ ...m, url: t?.url ?? null, label: t?.label ?? '' }));
-                }}
-              />
-              {music.url && (
-                <div className="mt-1 flex items-center gap-2">
-                  <input
-                    type="range"
-                    min={MIN_MUSIC_LEVEL}
-                    max={MAX_MUSIC_LEVEL}
-                    step={LEVEL_STEP}
-                    value={music.level}
-                    onChange={(e) => setMusic((m) => ({ ...m, level: clampMusicLevel(snapLevel(Number(e.target.value))) }))}
-                    className="h-1.5 flex-1"
-                    style={{ '--fill': `${(music.level / MAX_MUSIC_LEVEL) * 100}%` } as CSSProperties}
-                  />
-                  <span className="w-12 text-right font-mono text-[10px] text-zinc-400">
-                    {Math.round(music.level * 100)}%
-                  </span>
-                </div>
-              )}
-              {!tracks.length && (
-                <p className="mt-1 text-[9px] text-zinc-600">
-                  {tracksError ? `Couldn't list the audio library: ${tracksError}` : 'No tracks in the audio library yet.'}
-                </p>
-              )}
-            </div>
-          </div>
-          <div className="mt-2 flex items-center gap-2">
             <span className="w-10 shrink-0 text-xs text-zinc-300">Clips</span>
             <input
               type="range"
@@ -2626,6 +2430,31 @@ export function Vids2Builder({
             sidebar paints nothing, and a transparent sticky footer would have
             the rest scroll through it. Padded clear of a phone's home bar. */}
         <div className={`sticky bottom-0 mt-auto border-t border-zinc-800 bg-black px-3 py-3 max-md:pb-[max(0.75rem,env(safe-area-inset-bottom))] ${typing ? 'max-md:hidden' : ''}`}>
+          {/* Speed: the whole video, faster — every clip's rate times this
+              (buildPlan's tempo), so the file is the same video in less time.
+              At the foot with Download because it is the last thing about
+              the finished video rather than a part of it; the readout says
+              how long it comes out. Studio only: the clipper page runs every
+              video at CLIPPER_TEMPO and has nothing to move. Not while a
+              render is under way, whose length is already decided. */}
+          {!CLIPPERS && (
+            <div className="mb-3 flex items-center gap-2">
+              <span className="w-10 shrink-0 text-xs text-zinc-300">Speed</span>
+              <input
+                type="range"
+                min={MIN_TEMPO}
+                max={MAX_TEMPO}
+                step={TEMPO_STEP}
+                value={tempo}
+                disabled={!!exporting}
+                onChange={(e) => changeTempo(Number(e.target.value))}
+                title={`The whole video ${fmtSpeed(tempo)} as shot${total ? ` — ${fmtTime(total)}` : ''}`}
+                className="h-1.5 flex-1 disabled:opacity-40"
+                style={{ '--fill': `${((tempo - MIN_TEMPO) / (MAX_TEMPO - MIN_TEMPO)) * 100}%` } as CSSProperties}
+              />
+              <span className="w-12 text-right font-mono text-[10px] text-zinc-400">{fmtSpeed(tempo)}</span>
+            </div>
+          )}
           {exporting ? (
             <div>
               <div className="flex items-center gap-2 text-sm text-zinc-300">

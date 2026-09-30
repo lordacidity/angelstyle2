@@ -21,6 +21,9 @@ export interface BuildState {
   bars: BarsLayout;
   /** Normal, or Bottom A sped up to fit ten seconds. */
   bottomAPace: BottomAPace;
+  /** What every rate was multiplied by — the whole video, faster. See
+   *  DEFAULT_TEMPO in vidsPlan. */
+  tempo: number;
   roomTone: RoomTone;
   music: Music;
   clipLevel: number;
@@ -68,6 +71,7 @@ export function specFromBuild(s: BuildState): VidBuildSpec {
     picks,
     bars: { ...s.bars },
     bottomAPace: s.bottomAPace,
+    tempo: s.tempo,
     roomTone: { ...s.roomTone },
     music: { ...s.music },
     clipLevel: s.clipLevel,
