@@ -49,6 +49,16 @@
 //             clipper's video still gets its code, on the file name and the
 //             caption, but bringing one back is the Studio's.
 //
+// The clipper page (pauv.io/clipping, CLIPPERS) is this section with the
+// tuning page taken out: ONE screen. The cards — with a fifth, Caption, after
+// Persona: the Start caption, written as soon as there is a persona, there to
+// be retyped, in a look that was rolled and can be changed — and beside them
+// (under them on a phone) the persona's opening frame with that caption on
+// it (Vids2ClipPanel). The one button is Download: it makes the recordings,
+// renders the video and saves the file in that one press, with no tuning page
+// and no post captions between (the clipper page's part below, and `auto` on
+// Vids2Builder, which does the rendering without drawing anything).
+//
 // This section owns the recordings' bytes: it made them, it lets them go
 // when a second Generate replaces them, and again when the page is left.
 // Nothing downstream releases a clip.
@@ -63,11 +73,16 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useVidsLibrary } from '@/app/hooks/useVidsLibrary';
-import { CLIPPERS } from '@/lib/clipping';
-import { CAPTION_STYLES } from '@/lib/simpler/vidsCaptions';
+import { CLIPPERS, withBase } from '@/lib/clipping';
+import { CAPTION_STYLES, DEFAULT_CAPTION_STYLE } from '@/lib/simpler/vidsCaptions';
+import { cachedClipBlob, isCacheableClipUrl } from '@/lib/vids-clip-cache';
+import { DownloadIcon, SpinnerIcon } from '@/lib/icons';
 import { parseRecipeCode, suggestedFrom, type VidRecipe, type Vids2Answers } from '@/lib/vids-types';
-import { Vids2Builder } from './Vids2Builder';
-import { Vids2Form, type Vids2Job, type Vids2Leg } from './Vids2Form';
+import {
+  ShareIcon, Vids2Builder, canShareVideo, downloadBlob, rollStyleId, type Vids2Auto,
+} from './Vids2Builder';
+import { Vids2ClipCaption, Vids2ClipPreview } from './Vids2ClipPanel';
+import { Vids2Form, jobLegs, jobProgress, type Vids2Job, type Vids2Leg } from './Vids2Form';
 import { Vids2Recall } from './Vids2Recall';
 import {
   DEFAULT_TEMPO, DEFAULT_TRIM, INTAKE_SPEED, LIBRARY_FOLDERS, PERSONA_PART_SLOT, SLOT_META,
@@ -84,11 +99,11 @@ import { isOutletId, outletById } from '@/lib/news/outlets';
 import { getRecipe, writeHook, writePostCaptions } from '@/lib/vids-client';
 import {
   EMPTY_SETUP, answersFromRecord, answersOf, bottomANewsName, loadSetup, makeNewsClip, makeTradeClip,
-  readStoryAgain, rollStartNudge, sameVideo, saveSetup, setupFromAnswers, setupReady, storyFor, themeFor,
+  readStoryAgain, rollClipperTempo, rollStartNudge, sameVideo, saveSetup, setupFromAnswers, setupReady, storyFor, themeFor,
   type Direction, type Theme, type Vids2Build, type Vids2Setup, type Vids2Story,
 } from '@/lib/vids2/vids2Build';
 import {
-  VIDS2_BARS, VIDS2_PACE, draftLines, personaContextOf, useEmojiPalette, type Vids2Early,
+  VIDS2_BARS, VIDS2_PACE, draftLines, personaContextOf, useEmojiPalette, type LinesDraft, type Vids2Early,
 } from '@/lib/vids2/vids2Words';
 
 const pickRandom = <T,>(xs: readonly T[]): T | undefined =>
@@ -391,6 +406,17 @@ export function Vids2Section({ active }: { active: boolean }) {
     return offered.length ? offered : CAPTION_STYLES.slice(0, 1);
   }, [lib.clipable]);
 
+  /** A look for the next clipper video, by the builder's odds among the looks
+   *  on offer. */
+  const rollLook = () => rollStyleId(looks) ?? looks[0]?.id ?? DEFAULT_CAPTION_STYLE;
+  // Rolled when the looks arrive with the library, and again if the one
+  // standing is not on offer; one pressed by hand stays while it is.
+  useEffect(() => {
+    if (!CLIPPERS) return;
+    setClipStyle((cur) => (stylePicked.current && looks.some((l) => l.id === cur) ? cur : rollLook()));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [looks]);
+
   const [setup, setSetup] = useState<Vids2Setup>(loadSetup);
   const [picks, setPicks] = useState<Picks>({});
   const [build, setBuild] = useState<Vids2Build | null>(null);
@@ -418,6 +444,28 @@ export function Vids2Section({ active }: { active: boolean }) {
   const recallRef = useRef<AbortController | null>(null);
 
   useEffect(() => { saveSetup(setup); }, [setup]);
+
+  // ── The clipper page ────────────────────────────────────────────────────
+  // One screen and one press — see the note at the top. All of this is
+  // CLIPPERS only: in the Studio none of it is read.
+  /** The Start caption in the box: written for `hookFor`, or typed over. */
+  const [clipHook, setClipHook] = useState('');
+  const [hookWriting, setHookWriting] = useState(false);
+  const [hookError, setHookError] = useState<string | null>(null);
+  /** The answers the caption in the box was written for — see hookKey. */
+  const hookFor = useRef<string | null>(null);
+  const hookCtrl = useRef<AbortController | null>(null);
+  /** The look the words go out in: rolled, until somebody presses one. */
+  const [clipStyle, setClipStyle] = useState<string>(DEFAULT_CAPTION_STYLE);
+  const stylePicked = useRef(false);
+  /** The build is made and is being rendered (Vids2Builder's auto), and how
+   *  that is getting on. */
+  const [rendering, setRendering] = useState(false);
+  const [render, setRender] = useState<{ frac: number; label: string } | null>(null);
+  /** The file last made — kept so it can be saved again, and so a phone whose
+   *  share sheet would not open by itself has something to open it with. */
+  const [saved, setSaved] = useState<File | null>(null);
+  const [savePrompt, setSavePrompt] = useState(false);
 
   // The four library folders always exist at the top level. Vids 2 only reads
   // Persona and End (and Bottom B, for a BOOM filed by hand), but the library
@@ -517,10 +565,120 @@ export function Vids2Section({ active }: { active: boolean }) {
     return out;
   };
 
+  /** The video under way is let go: the build (which unmounts the builder,
+   *  and stops its render with it) and the recordings under it. */
+  const dropBuild = () => {
+    dropLocal(picksRef.current);
+    setPicks({});
+    setBuild(null);
+    setRendering(false);
+    setRender(null);
+  };
+
   const cancel = () => {
     jobRef.current?.abort();
     jobRef.current = null;
     setJob(null);
+    // On the clipper page the press also covers the render that follows.
+    if (CLIPPERS && build) dropBuild();
+  };
+
+  // The persona on the clipper page's preview, and its Start clip.
+  const clipPersona = CLIPPERS ? personas.find((p) => p.id === setup.personaId) ?? null : null;
+  const clipStart = clipPersona?.startId ? videos.find((v) => v.id === clipPersona.startId) ?? null : null;
+
+  // The persona's three clips and every End, fetched the moment a persona is
+  // chosen (lib/vids-clip-cache), so the render that follows Download reads
+  // them off this machine. Only Start came early before — the preview samples
+  // it — and Top A, the longest of the three (up to 35MB in the library), was
+  // fetched when the build mounted, after the press, with the exporter's
+  // first step waiting on it: five seconds on a good connection, far more on
+  // a phone's. The bytes are the same bytes the exporter would have fetched
+  // then; a persona changed before Download leaves its clips in the cache for
+  // next time. The Studio's tuning page shows its clips as it fetches them,
+  // so this is the clipper page's alone.
+  useEffect(() => {
+    if (!CLIPPERS || !clipPersona) return;
+    const rows = [
+      ...PERSONA_PARTS.map((part) => (clipPersona[part] ? videos.find((v) => v.id === clipPersona[part]) : undefined)),
+      ...clipsForSlot('end'),
+    ];
+    for (const row of rows) {
+      if (!row || isPhoto(row)) continue;
+      const url = withBase(row.url);
+      if (isCacheableClipUrl(url)) void cachedClipBlob(url).catch(() => { /* the exporter fetches it then */ });
+    }
+  }, [clipPersona, videos, clipsForSlot]);
+  /** What the Start caption is written from — who, which way and the persona
+   *  — as one string. Null until all three are in. */
+  const hookKey = clipPersona && setup.person.trim()
+    ? `${setup.person.trim().toLowerCase()}|${setup.direction}|${clipPersona.id}`
+    : null;
+
+  /** Write the Start caption for the answers as they stand (api/vids/hook, to
+   *  the clipper mode's guide) and put it in the box. */
+  const writeClipHook = () => {
+    if (!hookKey || !clipPersona) return;
+    hookCtrl.current?.abort();
+    const ctrl = new AbortController();
+    hookCtrl.current = ctrl;
+    hookFor.current = hookKey;
+    setHookWriting(true);
+    setHookError(null);
+    writeHook({
+      mode: setup.mode,
+      person: setup.person.trim(),
+      direction: setup.direction,
+      personaContext: clipPersona.context || clipStart?.context || '',
+    }, ctrl.signal)
+      .then((r) => { if (!ctrl.signal.aborted) setClipHook(r.start); })
+      .catch((e: unknown) => { if (!ctrl.signal.aborted && !cancelled(e)) setHookError(msg(e)); })
+      .finally(() => { if (hookCtrl.current === ctrl) { hookCtrl.current = null; setHookWriting(false); } });
+  };
+  // Written the moment there is a persona to write it for, and again when
+  // who, which way or the persona changes: the caption in the box was about
+  // the video those answers made, typed over or not.
+  useEffect(() => {
+    if (!CLIPPERS || hookFor.current === hookKey) return;
+    setClipHook('');
+    setHookError(null);
+    if (hookKey) { writeClipHook(); return; }
+    hookCtrl.current?.abort();
+    hookCtrl.current = null;
+    hookFor.current = null;
+    setHookWriting(false);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [hookKey]);
+  useEffect(() => () => hookCtrl.current?.abort(), []);
+
+  /** The file, out of the page: the share sheet on a phone — Save Video is a
+   *  press away there, and no page can write to Photos itself — or the
+   *  browser's downloads anywhere else. A sheet the browser will not open
+   *  without a press of its own (the one that started all this is a minute
+   *  old) gets the whole screen as that press (savePrompt). */
+  const saveFile = async (file: File) => {
+    if (!canShareVideo()) { downloadBlob(file, file.name); return; }
+    try {
+      await navigator.share({ files: [file] });
+    } catch (e) {
+      if (cancelled(e)) return;
+      setSavePrompt(true);
+    }
+  };
+
+  /** What the build that renders by itself reports (Vids2Builder auto). */
+  const auto: Vids2Auto = {
+    onStatus: (status) => { if (status) setRender(status); },
+    onMade: (blob, name) => {
+      const file = new File([blob], name, { type: blob.type || 'video/mp4' });
+      setSaved(file);
+      dropBuild();
+      // The next video gets a look of its own.
+      stylePicked.current = false;
+      setClipStyle(rollLook());
+      void saveFile(file);
+    },
+    onFail: (message) => { setJobError(message); dropBuild(); },
   };
 
   // ── The head start ────────────────────────────────────────────────────
@@ -612,6 +770,90 @@ export function Vids2Section({ active }: { active: boolean }) {
     if (warmRef.current.trade && warmRef.current.trade.key !== warmKey('trade', setup)) dropWarm('trade');
   }, [setup]);
 
+  // ── The words' head start (the clipper page) ──────────────────────────
+  // The step-by-step captions are written off the plan the recordings are
+  // about to make (draftLines), and Generate used to ask for them as it was
+  // pressed — so with both recordings already made by then, which the head
+  // start sees to, the model's answer was most of what Download waited on
+  // before the render could begin. Everything the writer reads is known the
+  // moment a persona is chosen: the persona's clips and an End make the rest
+  // of the plan, and each recording lays itself out before its first frame
+  // (laid). So on the clipper page the draft is asked for then — while the
+  // hook is being written and the caption is being read over — and Download
+  // takes it, the way it takes the recordings.
+  //
+  // Keyed by what it was written for (draftKey): the two recordings' own
+  // keys and the persona. An answer changed under it makes it a draft for a
+  // video nobody is making — it is dropped, and the answer that replaced it
+  // starts another when it settles. The End and the speed are rolled here
+  // rather than at Download, since the words are timed against both, and
+  // Download takes those rolls with the draft. Studio builds draft at
+  // Generate as before: their words are also the tuning page's to rewrite.
+  interface WordsDraft {
+    key: string;
+    ctrl: AbortController;
+    /** The persona's clips and the End, as the plan was laid out from. */
+    base: Picks;
+    /** The speed the words were timed against (rollClipperTempo). */
+    tempo: number;
+    lines: Promise<LinesDraft>;
+  }
+  const draftRef = useRef<WordsDraft | null>(null);
+  const draftKey = (s: Vids2Setup): string | null => {
+    const trade = warmKey('trade', s);
+    const intro = s.intro === 'none' ? 'none' : warmKey('intro', s);
+    return trade && intro && s.personaId ? `${intro}|${trade}|${s.personaId}` : null;
+  };
+  const dropDraft = () => {
+    draftRef.current?.ctrl.abort();
+    draftRef.current = null;
+  };
+  useEffect(() => {
+    if (!CLIPPERS || jobRef.current) return;
+    const key = draftKey(setup);
+    if (draftRef.current && draftRef.current.key !== key) dropDraft();
+    if (!key || draftRef.current) return;
+    const persona = personas.find((p) => p.id === setup.personaId);
+    if (!persona) return;
+    // Both recordings have to be going for these very answers, and going
+    // well: a run that failed is not taken by Generate either.
+    const introRun = setup.intro === 'none' ? null : warmRef.current.intro;
+    const tradeRun = warmRef.current.trade;
+    if (!tradeRun || tradeRun.key !== warmKey('trade', setup) || tradeRun.failed) return;
+    if (setup.intro !== 'none' && (!introRun || introRun.key !== warmKey('intro', setup) || introRun.failed)) return;
+    const base = personaPicks(persona);
+    const end = pickRandom(clipsForSlot('end'));
+    if (end) base.end = freshPick('end', end);
+    const tempo = rollClipperTempo();
+    const ctrl = new AbortController();
+    const { direction, intro } = setup;
+    const introLaid: Promise<VidRow | null> = introRun ? introRun.laid : Promise.resolve(null);
+    const lines = quiet(Promise.all([introLaid, tradeRun.laid]).then(([introRow, trade]) => {
+      if (ctrl.signal.aborted) throw new DOMException('Cancelled', 'AbortError');
+      const draft: Picks = { ...base, bottomB: tradePick(trade.row) };
+      if (introRow) draft.bottomA = freshPick('bottomA', introRow);
+      const known = Object.values(draft).every((p) => !p || isPhoto(p.video) || (p.video.duration ?? 0) > 0);
+      if (!known) throw new Error('a clip has no length to time the words against');
+      return draftLines({
+        plan: buildPlan(draft, {}, VIDS2_BARS, VIDS2_PACE, [], tempo),
+        picks: draft,
+        pace: VIDS2_PACE,
+        intro,
+        person: trade.person,
+        direction,
+        personaName: persona.name,
+        personaContext: personaContextOf(persona, base),
+        emojiPalette,
+        signal: ctrl.signal,
+      });
+    }));
+    draftRef.current = { key, ctrl, base, tempo, lines };
+    // The runs are a ref and start without a render of their own; `warm` is
+    // the state that moves when one does, which is what brings this back.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [setup, warm, personas, videos]);
+  useEffect(() => () => dropDraft(), []);
+
   /** Reset, top right of either page: Vids 2 as it opens. The answers go
    *  back to empty (and are saved that way), the recordings are let go, and
    *  the build goes — which unmounts the tuning page and everything it was
@@ -621,6 +863,7 @@ export function Vids2Section({ active }: { active: boolean }) {
     cancel();
     dropWarm('intro');
     dropWarm('trade');
+    dropDraft();
     dropLocal(picksRef.current);
     // A code on its way in, or waiting for Generate, goes with the answers
     // it was for.
@@ -634,13 +877,20 @@ export function Vids2Section({ active }: { active: boolean }) {
     setJobError(null);
     setOnForm(true);
     setFormKey((k) => k + 1);
+    // The clipper page's own: the render, the file kept, and a fresh look.
+    setRendering(false);
+    setRender(null);
+    setSaved(null);
+    setSavePrompt(false);
+    stylePicked.current = false;
+    if (CLIPPERS) setClipStyle(rollLook());
   };
 
   /** The form's Reset. A Generate under way is the one thing on the form
    *  worth asking about before it is thrown away; answers are a few presses
    *  to give again, so they go without a word. */
   const resetForm = () => {
-    if (job && !window.confirm('Reset? The video being made is dropped, and every answer is cleared.')) return;
+    if ((job || rendering) && !window.confirm('Reset? The video being made is dropped, and every answer is cleared.')) return;
     reset();
   };
 
@@ -755,7 +1005,7 @@ export function Vids2Section({ active }: { active: boolean }) {
   const generate = async (from: Vids2Setup) => {
     // The ref rather than the state: loadCode cancels a job and presses this
     // in the same breath, before the state has caught up.
-    if (!setupReady(from) || jobRef.current) return;
+    if (!setupReady(from) || jobRef.current || rendering) return;
     const persona = personas.find((p) => p.id === from.personaId) ?? null;
     if (!persona) { setJobError('That persona is no longer in the library. Choose another.'); return; }
     const { direction, mode, intro } = from;
@@ -803,6 +1053,9 @@ export function Vids2Section({ active }: { active: boolean }) {
     const ctrl = new AbortController();
     jobRef.current = ctrl;
     setJobError(null);
+    // The file from last time is not this video's.
+    setSaved(null);
+    setSavePrompt(false);
     // Whatever each run has got to by now: one that has been going since the
     // form was halfway through says so, rather than starting its line again
     // at nothing.
@@ -819,23 +1072,39 @@ export function Vids2Section({ active }: { active: boolean }) {
     /** The first real failure takes the other one down with it. */
     const stopBoth = (e: unknown) => { if (!cancelled(e)) ctrl.abort(); throw e; };
 
+    // The words already on their way for these very answers, on the clipper
+    // page (the draft above): taken with the End and the speed they were
+    // timed against, so the plan the words are laid onto is the plan they
+    // were written for. Taken once; the next Download drafts afresh.
+    const pre = CLIPPERS && !restore && draftRef.current && draftRef.current.key === draftKey(from)
+      ? draftRef.current
+      : null;
+    if (pre) draftRef.current = null;
+    else dropDraft();
+
     // The rest of the stage — the persona's three clips and an End — settled
     // now rather than once the recordings are back: the words are written
     // against the whole video, and these are most of it.
-    const base = personaPicks(persona);
+    const base = pre?.base ?? personaPicks(persona);
     // A video brought back opens where it went out: its Start was nudged by
     // a roll of its own, and the record has that nudge on the pick.
     const recordedStart = restore?.recipe.build.picks.start?.transform;
     if (base.start && recordedStart) base.start = { ...base.start, transform: { ...recordedStart } };
-    const end = pickRandom(clipsForSlot('end'));
-    if (end) base.end = freshPick('end', end);
+    if (!pre) {
+      const end = pickRandom(clipsForSlot('end'));
+      if (end) base.end = freshPick('end', end);
+    }
     const personaContext = personaContextOf(persona, base);
 
     // The hook and the post captions need nothing either recording has, so
     // they go now, and the whole render is theirs to come back in. A video
     // brought back has its hook on the record already; the post captions are
     // not on it, and are written fresh the way they always are.
-    const hook: Vids2Early['hook'] = restore ? null : {
+    // On the clipper page the hook is the one standing in the box (preset), and
+    // only an empty box is written for; no post captions are written there.
+    // Its speed is rolled here, per video, so the words below are timed on it.
+    const preset = CLIPPERS ? { hook: clipHook.trim(), styleId: clipStyle, tempo: pre?.tempo ?? rollClipperTempo() } : undefined;
+    const hook: Vids2Early['hook'] = restore || preset?.hook ? null : {
       person: from.person,
       start: quiet(writeHook({ mode, person: from.person, direction, personaContext }, ctrl.signal)
         .then((r) => r.start)),
@@ -843,7 +1112,7 @@ export function Vids2Section({ active }: { active: boolean }) {
     // Who and which way told outright, so the route goes straight to the news
     // search without reading them off the recordings first; fresh, so a second
     // video on them today gets words of its own.
-    const post: Vids2Early['post'] = {
+    const post: Vids2Early['post'] = CLIPPERS ? null : {
       person: from.person,
       position: direction,
       draft: quiet(writePostCaptions({ person: from.person, position: direction, fresh: true }, ctrl.signal)),
@@ -855,7 +1124,7 @@ export function Vids2Section({ active }: { active: boolean }) {
     // inside an object: a promise returned bare from .then would be waited
     // on, and the stage would wait for the words.
     const introLaid: Promise<VidRow | null> = introRun ? introRun.laid.then(stamp) : Promise.resolve(null);
-    const linesP = quiet(Promise.all([introLaid, tradeRun.laid]).then(([introRow, trade]) => {
+    const linesP = pre ? Promise.resolve({ lines: pre.lines }) : quiet(Promise.all([introLaid, tradeRun.laid]).then(([introRow, trade]) => {
       const draft: Picks = { ...base, bottomB: tradePick(trade.row) };
       if (introRow) draft.bottomA = freshPick('bottomA', introRow);
       // The captions are timed against the clips' lengths, so they are only
@@ -868,7 +1137,7 @@ export function Vids2Section({ active }: { active: boolean }) {
         lines: known && !restore ? quiet(draftLines({
           // On the tempo every video opens at, so the windows the words are
           // timed against are the ones the tuning page shows.
-          plan: buildPlan(draft, {}, VIDS2_BARS, VIDS2_PACE, [], DEFAULT_TEMPO),
+          plan: buildPlan(draft, {}, VIDS2_BARS, VIDS2_PACE, [], preset?.tempo ?? DEFAULT_TEMPO),
           picks: draft,
           pace: VIDS2_PACE,
           intro,
@@ -940,8 +1209,15 @@ export function Vids2Section({ active }: { active: boolean }) {
         // and the record this one was brought back from, if it was.
         answers: answersOf(from, { person: trade.person.name, question, story, theme }),
         restore: restore?.recipe ?? null,
+        ...(preset ? { preset } : {}),
       });
-      setOnForm(false);
+      // The Studio goes to the tuning page. The clipper page stays where it
+      // is: the build renders by itself from here (auto) and hands the file
+      // back.
+      if (CLIPPERS) {
+        setRendering(true);
+        setRender({ frac: 0, label: 'Writing the captions…' });
+      } else setOnForm(false);
     } catch (e) {
       if (!cancelled(e)) setJobError(e instanceof Error ? e.message : String(e));
     } finally {
@@ -949,7 +1225,70 @@ export function Vids2Section({ active }: { active: boolean }) {
     }
   };
 
-  const showForm = onForm || !build;
+  // The clipper page never leaves the form: its build renders out of sight.
+  const showForm = CLIPPERS || onForm || !build;
+
+  // ── The clipper page's foot: Download, and how it is getting on ──────────
+  // The recordings are the first six tenths of the bar, the words and the
+  // render the rest — roughly how the minute divides.
+  const clipRunning = !!job || rendering;
+  const clipFrac = job ? jobProgress(job) * 0.6 : 0.6 + (render?.frac ?? 0) * 0.4;
+  const clipPct = Math.round(clipFrac * 100);
+  const clipFooter = clipRunning ? (
+    <div className="rounded-2xl border border-zinc-800 bg-[#111] p-4">
+      <div className="relative h-14 overflow-hidden rounded-xl bg-zinc-900 sm:h-12">
+        <span className="absolute inset-y-0 left-0 bg-white/20 transition-[width]" style={{ width: `${clipPct}%` }} />
+        <span className="relative flex h-full items-center justify-center gap-2 text-base font-semibold text-white">
+          <SpinnerIcon size={16} className="animate-spin" />
+          Making the video · {clipPct}%
+        </span>
+      </div>
+      <div className="mt-3 space-y-1">
+        {job ? jobLegs(job).map((leg, i) => (
+          <div key={i} className="flex items-center gap-2 text-xs">
+            <span className={`w-3 shrink-0 text-center ${leg.done ? 'text-emerald-400' : 'text-zinc-600'}`}>{leg.done ? '✓' : '·'}</span>
+            <span className={`min-w-0 flex-1 truncate ${leg.done ? 'text-zinc-500' : 'text-zinc-300'}`}>{leg.label}</span>
+            {!leg.done && leg.frac != null && <span className="shrink-0 font-mono text-zinc-500">{Math.round(leg.frac * 100)}%</span>}
+          </div>
+        )) : (
+          <div className="flex items-center gap-2 text-xs">
+            <span className="w-3 shrink-0 text-center text-zinc-600">·</span>
+            <span className="min-w-0 flex-1 truncate text-zinc-300">{render?.label ?? 'Rendering…'}</span>
+          </div>
+        )}
+      </div>
+      <button type="button" onClick={cancel} className="mt-3 text-xs text-zinc-500 hover:text-red-400">Cancel</button>
+    </div>
+  ) : (
+    <>
+      <button
+        type="button"
+        onClick={() => void generate(setup)}
+        // Not until the Start caption is in: the video goes out with the one
+        // in the box, and a press before it lands would go without it.
+        disabled={!setupReady(setup) || !loaded || hookWriting}
+        title={hookWriting ? 'Writing the start caption…' : 'Makes the video, renders it and saves the MP4'}
+        className="flex h-14 w-full items-center justify-center gap-2 rounded-xl bg-white text-lg font-semibold text-black transition-colors hover:bg-zinc-200 disabled:cursor-not-allowed disabled:opacity-30 disabled:hover:bg-white sm:h-12 sm:text-base"
+      >
+        <DownloadIcon size={16} /> Download
+      </button>
+      {saved && (
+        <div className="mt-2 flex items-center gap-3 text-xs text-zinc-500">
+          <span className="min-w-0 flex-1 truncate" title={saved.name}>
+            <span className="text-emerald-400">✓</span> {saved.name}
+          </span>
+          <button
+            type="button"
+            onClick={() => void saveFile(saved)}
+            className="shrink-0 font-semibold text-zinc-300 underline decoration-zinc-600 underline-offset-2 hover:text-white"
+          >
+            Save again
+          </button>
+        </div>
+      )}
+      {jobError && <p className="mt-2 text-[13px] text-red-400">{jobError}</p>}
+    </>
+  );
 
   return (
     <div className="vids2-root vids-scroll relative flex h-full flex-col text-white">
@@ -1008,6 +1347,24 @@ export function Vids2Section({ active }: { active: boolean }) {
             onHeadStart={headStart}
             onGenerate={() => void generate(setup)}
             onCancel={cancel}
+            {...(CLIPPERS ? {
+              locked: rendering,
+              footer: clipFooter,
+              side: <Vids2ClipPreview start={clipStart} text={clipHook} styleId={clipStyle} made={saved} />,
+              captionSummary: hookWriting ? 'Writing…' : clipHook,
+              captionCard: (
+                <Vids2ClipCaption
+                  text={clipHook}
+                  onText={setClipHook}
+                  writing={hookWriting}
+                  error={hookError}
+                  onRewrite={hookKey ? writeClipHook : null}
+                  looks={looks}
+                  styleId={clipStyle}
+                  onStyle={(id) => { stylePicked.current = true; setClipStyle(id); }}
+                />
+              ),
+            } : {})}
           />
         )}
 
@@ -1032,10 +1389,38 @@ export function Vids2Section({ active }: { active: boolean }) {
               build={build}
               onReset={reset}
               looks={looks}
+              auto={CLIPPERS ? auto : undefined}
             />
           </div>
         )}
       </div>
+
+      {/* The clipper page on a phone, when the share sheet would not open by
+          itself: the whole screen is the press it wants. Not now leaves the
+          file on Save again, under Download. */}
+      {CLIPPERS && savePrompt && saved && (
+        <div
+          role="button"
+          tabIndex={0}
+          onClick={() => { setSavePrompt(false); void saveFile(saved); }}
+          onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { setSavePrompt(false); void saveFile(saved); } }}
+          className="fixed inset-0 z-50 flex cursor-pointer flex-col items-center justify-center gap-4 bg-black/95 px-8 text-center"
+        >
+          <span className="flex h-20 w-20 items-center justify-center rounded-full bg-white text-black [&_svg]:h-9 [&_svg]:w-9">
+            <ShareIcon />
+          </span>
+          <p className="text-2xl font-semibold text-white">Rendered</p>
+          <p className="text-base text-zinc-300">Tap anywhere to save it to Photos</p>
+          <p className="text-sm text-zinc-500">Then tap Save Video in the sheet</p>
+          <button
+            type="button"
+            onClick={(e) => { e.stopPropagation(); setSavePrompt(false); }}
+            className="mt-6 text-sm text-zinc-500 underline decoration-zinc-700 underline-offset-4 hover:text-white"
+          >
+            Not now
+          </button>
+        </div>
+      )}
     </div>
   );
 }

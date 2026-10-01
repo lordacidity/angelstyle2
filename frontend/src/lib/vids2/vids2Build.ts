@@ -197,6 +197,16 @@ export const rollStartNudge = (): number => {
   return Math.random() < 0.5 ? -n : n;
 };
 
+/** How fast the whole of a clipper video runs (buildPlan's tempo): rolled for
+ *  every video, anywhere from 1.1× to 1.2× to the hundredth (1.13×, 1.18×),
+ *  with nothing on that page to move it — one more thing no two of them
+ *  share, beside the Start nudge and the veil. The house's fixed 1.1× until
+ *  2026-09-30. */
+export const CLIPPER_TEMPO_MIN = 1.1;
+export const CLIPPER_TEMPO_MAX = 1.2;
+export const rollClipperTempo = (): number =>
+  Math.round((CLIPPER_TEMPO_MIN + Math.random() * (CLIPPER_TEMPO_MAX - CLIPPER_TEMPO_MIN)) * 100) / 100;
+
 const SETUP_KEY = 'vids2-setup-v1';
 
 /** How a WRITTEN question comes back: lower case throughout, the way a search
@@ -312,6 +322,13 @@ export interface Vids2Build {
    *  build the form made from scratch. The tuning page takes the words, the
    *  look and the sound off it rather than rolling and asking (Vids2Builder). */
   restore: VidRecipe | null;
+  /** The clipper page's one screen, which settles the hook and the look
+   *  before anything is made: the Start caption as it stood in the box when
+   *  Download was pressed (empty for one to be written), the look the words
+   *  are drawn in, and the speed rolled for this video (rollClipperTempo) —
+   *  which the words were timed against. With it the build renders and hands its file back by
+   *  itself (Vids2Builder's `auto`). Never set in the Studio. */
+  preset?: { hook: string; styleId: string; tempo: number };
 }
 
 /** The moments degen mode hangs a BOOM on, in each recording's OWN clip
@@ -818,7 +835,12 @@ async function tradePoster(
     // on at that moment rather than a different view of it.
     const clip = createTradeClip(ctx, assets, direction, { zoom });
     clip.draw(Math.min(beats.confirming.start + 0.8, Math.max(0, clip.seconds - 0.1)));
-    return await new Promise<Blob | null>((resolve) => canvas.toBlob(resolve, 'image/jpeg', 0.8));
+    const blob = await new Promise<Blob | null>((resolve) => canvas.toBlob(resolve, 'image/jpeg', 0.8));
+    // The bitmap goes now rather than when the collector gets to it — see
+    // renderTradeVideo, which does the same with its own.
+    canvas.width = 0;
+    canvas.height = 0;
+    return blob;
   } catch {
     return null;
   }

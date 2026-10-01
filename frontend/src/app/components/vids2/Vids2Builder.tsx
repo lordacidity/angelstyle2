@@ -170,20 +170,18 @@ const pickRandom = <T,>(xs: readonly T[]): T | undefined =>
 const STYLE_ODDS: Record<string, number> = { clean: 0.4, soft: 0.4, gold: 0.2 };
 
 /** One look by STYLE_ODDS. Every roll is its own — the look the last video had
- *  has no say, or Gold would come up more often than its fifth. */
-function rollStyleId(): string | null {
-  const total = CAPTION_STYLES.reduce((n, s) => n + (STYLE_ODDS[s.id] ?? 0), 0);
+ *  has no say, or Gold would come up more often than its fifth. `from` is the
+ *  looks on offer: all of them here, the ones switched on for the clippers on
+ *  their page (Vids2Section), where the odds hold among those. */
+export function rollStyleId(from: readonly CaptionStyle[] = CAPTION_STYLES): string | null {
+  const total = from.reduce((n, s) => n + (STYLE_ODDS[s.id] ?? 0), 0);
   let r = Math.random() * total;
-  for (const s of CAPTION_STYLES) {
+  for (const s of from) {
     r -= STYLE_ODDS[s.id] ?? 0;
     if (r < 0) return s.id;
   }
   return null;
 }
-
-/** What the clipper page runs every video at — no slider there, so it is the
- *  house's own tempo and nothing else. */
-const CLIPPER_TEMPO = DEFAULT_TEMPO;
 
 /** Volume moves in twentieths — five points of the readout per notch, and
  *  never a value off that grid, whatever the level started as. */
@@ -211,7 +209,7 @@ const activeAt = (plan: Plan, t: number) => {
   return plan.items.filter((i) => tt >= i.start && tt < i.end);
 };
 
-function downloadBlob(blob: Blob, name: string) {
+export function downloadBlob(blob: Blob, name: string) {
   const url = URL.createObjectURL(blob);
   const a = document.createElement('a');
   a.href = url;
@@ -230,7 +228,7 @@ function downloadBlob(blob: Blob, name: string) {
  *  rather than dropping it on the browser (see runExport). A desktop browser
  *  can share files too, and has no Photos to save to, so this also asks for a
  *  touch screen — the primary pointer being a finger is what a phone is. */
-function canShareVideo(): boolean {
+export function canShareVideo(): boolean {
   if (typeof navigator === 'undefined' || typeof navigator.canShare !== 'function') return false;
   if (!window.matchMedia?.('(pointer: coarse)').matches) return false;
   try {
@@ -241,7 +239,7 @@ function canShareVideo(): boolean {
 }
 
 /** The share sheet's own glyph — a box with an arrow out of the top. */
-function ShareIcon() {
+export function ShareIcon() {
   return (
     <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
       <path d="M12 3v13M7 8l5-5 5 5M5 13v7h14v-7" />
@@ -376,11 +374,25 @@ interface Props {
   /** The caption looks on offer — all of them in the Studio, only the ones
    *  switched on for the clippers out at pauv.io/clipping. */
   looks: readonly CaptionStyle[];
+  /** The clipper page's one flow: nothing of this page is drawn. The build
+   *  takes its hook and look off `build.preset`, renders the moment its words
+   *  are in, and hands the file back — see the Auto section below. */
+  auto?: Vids2Auto;
+}
+
+/** What a build that renders by itself reports to whoever mounted it. */
+export interface Vids2Auto {
+  /** How it is getting on: the words, then the render. Null when idle. */
+  onStatus: (status: { frac: number; label: string } | null) => void;
+  /** The MP4, and the name it goes out under. */
+  onMade: (blob: Blob, name: string) => void;
+  /** It stopped, and why. Never called for a cancel. */
+  onFail: (message: string) => void;
 }
 
 export function Vids2Builder({
   picks, onPicksChange, clipsForSlot,
-  personas, appliedPersonaId, active, libraryLoaded, build, onReset, looks,
+  personas, appliedPersonaId, active, libraryLoaded, build, onReset, looks, auto,
 }: Props) {
   const outW = OUT_W;
   const outH = OUT_H;
@@ -399,8 +411,10 @@ export function Vids2Builder({
   const [clipLevel, setClipLevel] = useState(DEFAULT_CLIP_LEVEL);
   // The whole video, faster — every rate times this (buildPlan's tempo). The
   // Studio has a slider for it at the foot of the sidebar; the clipper page
-  // runs every video at the house tempo and shows nothing.
-  const [tempo, setTempo] = useState(CLIPPERS ? CLIPPER_TEMPO : DEFAULT_TEMPO);
+  // rolls one for every video and shows nothing.
+  // (It mounts this page afresh for every video, with the speed rolled for
+  // that one on the build — rollClipperTempo.)
+  const [tempo, setTempo] = useState(build.preset?.tempo ?? DEFAULT_TEMPO);
   // The faint tint and grain over every frame, rolled afresh for every build
   // (or the record's, brought back) so no two videos share a pixel — see
   // lib/simpler/vidsVeil. Laid on by the stage and the export alike, last.
@@ -682,6 +696,9 @@ export function Vids2Builder({
    *  one before are still out starts a write of its own, and whatever the
    *  older one brings back is about clips that are gone. */
   const writeSeq = useRef(0);
+  /** The build whose words have come back, well or badly — what a build that
+   *  renders by itself waits on (the Auto section). */
+  const wroteFor = useRef(0);
 
   /** The words, written off the clips (lib/vids2/vids2Words): the hook to the
    *  mode's own guide (api/vids/hook), and everything else off each bottom
@@ -689,7 +706,7 @@ export function Vids2Builder({
    *  while the recordings were being drawn — taken instead of asking again.
    *  Rewrite passes nothing, and asks afresh from the stage. */
   const writeLines = async (early?: Vids2Early) => {
-    if (!canCaption) return;
+    if (!canCaption) { wroteFor.current = build.id; return; }
     const seq = ++writeSeq.current;
     const latest = () => seq === writeSeq.current;
     const persona = personas.find((p) => p.id === appliedPersonaId) ?? null;
@@ -699,7 +716,10 @@ export function Vids2Builder({
     // Somebody who starts typing after this has gone out is covered too:
     // whatever comes back for the hook is dropped on arrival if the box has
     // words in it by then.
-    const wantHook = !!windows.start && !hookIsTheirs(startTouched.current, lines);
+    // Nor is one the clipper page settled before the build was made: it went
+    // on in the same breath this was called in, so `lines` here has not got
+    // it yet and has to be told.
+    const wantHook = !!windows.start && !hookIsTheirs(startTouched.current, lines) && !build.preset?.hook.trim();
     // Generate asked with the form's name for them; it stands as long as that
     // is the name Pauv came back with.
     const earlyHook = early?.hook && personKey(early.hook.person) === personKey(build.person)
@@ -751,6 +771,7 @@ export function Vids2Builder({
       .flatMap((r) => (r.status === 'rejected' ? [r.reason] : []));
     if (!latest()) return;
     if (failed.length) setCaptionError(failed.map((e) => (e instanceof Error ? e.message : String(e))).join(' · '));
+    wroteFor.current = build.id;
     setWriting(false);
   };
   // A slot is known by its clip, a BOOM by itself: every BOOM is the same file,
@@ -1503,6 +1524,12 @@ export function Vids2Builder({
         setRecipeError(`Exported, but no code could be saved for it: ${e instanceof Error ? e.message : String(e)}`);
       }
       const name = recipe ? `${recipe.name}.mp4` : exportName();
+      // A build that renders by itself hands the file to whoever mounted it,
+      // which does the saving — a download, or the share sheet on a phone.
+      if (auto) {
+        autoRef.current?.onMade(blob, name);
+        return;
+      }
       // A phone gets the Save to Photos button instead of a download — the
       // share sheet wants a press of its own, and this is a minute after the
       // last one (see canShareVideo). A File rather than the Blob: the sheet
@@ -1535,6 +1562,7 @@ export function Vids2Builder({
       recipeP.then((r) => deleteRecipe(r.code)).catch(() => { /* never minted, or already gone */ });
       if (!(e instanceof DOMException && e.name === 'AbortError')) {
         setExportError(e instanceof Error ? e.message : String(e));
+        autoRef.current?.onFail(e instanceof Error ? e.message : String(e));
       }
     } finally {
       setExporting(null);
@@ -1685,7 +1713,17 @@ export function Vids2Builder({
   useEffect(() => {
     pause();
     // The words were written about whatever was there before — they go with it.
-    clearLines();
+    // On the clipper page the hook was settled before the build was made
+    // (build.preset): it goes on as somebody's own, so nothing writes over it
+    // and nothing is asked for another. An empty one is written as ever.
+    const presetHook = build.preset?.hook.trim() ?? '';
+    if (presetHook) {
+      startTouched.current = true;
+      setLines({ ...EMPTY_LINES, start: capLine(presetHook, EMPTY_LINES.start.oneLine) });
+    } else {
+      if (build.preset) startTouched.current = false;
+      clearLines();
+    }
     setCaptionError(null);
     // So do the BOOMs: they were pressed in against a video that is gone.
     setBooms([]);
@@ -1706,7 +1744,13 @@ export function Vids2Builder({
     // one — nobody's decision until somebody makes it one — and a veil of its
     // own (lib/simpler/vidsVeil). The tempo is not rolled and not reset: it is
     // a setting, and the one you left it on is the one the next video opens on.
-    rollStyle();
+    // (The clipper page rolled its look before the build, and may have had it
+    // changed by hand: that one is the build's.)
+    if (build.preset) {
+      setTempo(clampTempo(build.preset.tempo));
+      styleChosenRef.current = true;
+      setStyleId(captionStyle(build.preset.styleId).id);
+    } else rollStyle();
     setVeil(rollVeil());
     // The words have been on their way since the recordings were laid out —
     // Generate asked for them off the same plan this stage is showing — so
@@ -1826,6 +1870,38 @@ export function Vids2Builder({
   }, [active]);
 
 
+  // ── Auto ──
+  // The clipper page's one press (Vids2Section): this page is never shown.
+  // The build lands with its hook and look already settled, the rest of the
+  // words arrive, and the render starts by itself — once per build, the
+  // moment those words are in. The file goes back to the section, which saves
+  // it. Words that could not be written stop it there: a video with no
+  // captions is not one to hand anybody.
+  const autoRef = useRef(auto);
+  autoRef.current = auto;
+  const autoRanFor = useRef(0);
+  const runExportRef = useRef<() => Promise<void>>(async () => {});
+  useEffect(() => { runExportRef.current = runExport; });
+  useEffect(() => {
+    if (!auto || autoRanFor.current === buildId) return;
+    if (busy || writing || exporting || wroteFor.current !== buildId) return;
+    autoRanFor.current = buildId;
+    if (captionError) { autoRef.current?.onFail(`The captions could not be written: ${captionError}`); return; }
+    if (!plan.items.length) { autoRef.current?.onFail('There is nothing on the stage to render.'); return; }
+    if (broken.length) { autoRef.current?.onFail(`${broken.map((i) => i.video.name).join(', ')} would not load.`); return; }
+    void runExportRef.current();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [auto, buildId, busy, writing, exporting, captionError, plan]);
+  useEffect(() => {
+    if (!auto) return;
+    autoRef.current?.onStatus(
+      exporting ?? (busy || writing ? { frac: 0, label: 'Writing the captions…' } : null),
+    );
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [exporting, busy, writing]);
+  // Taken off the page mid-render — Cancel, or Reset — the render stops.
+  useEffect(() => () => abortRef.current?.abort(), []);
+
   // ── Render ──
 
   // The one line the sidebar has for how the build is getting on. Everything
@@ -1898,6 +1974,66 @@ export function Vids2Builder({
     </button>
   );
 
+  /** One hidden element per filled slot: what the stage samples its picture
+   *  from, and what measures each clip's length for the plan. */
+  const decoders = SLOTS.map((s, i) => {
+    const p = picks[s.id];
+    if (!p) return null;
+    // A photo is held rather than played: no seeking, no sound, no metadata
+    // to wait on — the canvas just samples the same picture every frame.
+    if (isPhoto(p.video)) {
+      return (
+        // eslint-disable-next-line @next/next/no-img-element
+        <img
+          key={`${s.id}:${p.video.id}`}
+          ref={layerRefs.image(s.id)}
+          src={withBase(p.video.url)}
+          crossOrigin="anonymous"
+          alt=""
+          onLoad={() => { clearError(p.video.id); draw(timeRef.current); }}
+          onError={() => setErrors((prev) => ({ ...prev, [p.video.id]: 'Could not load this photo.' }))}
+          className="pointer-events-none absolute h-px w-px opacity-0"
+          aria-hidden
+        />
+      );
+    }
+    return (
+      <video
+        key={`${s.id}:${p.video.id}`}
+        ref={layerRefs.video(s.id)}
+        // Off this machine once fetched (slotSrcs); nothing to load until
+        // the bytes are here, and the element carries on from there.
+        src={slotSrcs[i] ?? undefined}
+        crossOrigin="anonymous"
+        playsInline
+        preload="auto"
+        muted={p.muted}
+        onLoadedMetadata={handleMeta(p.video.id)}
+        onLoadedData={(e) => { clearError(p.video.id); handleFrame(s.id)(e); }}
+        onSeeked={handleFrame(s.id)}
+        onError={() => setErrors((prev) => ({ ...prev, [p.video.id]: 'Could not load this clip (unsupported codec or network error).' }))}
+        className="pointer-events-none absolute h-px w-px opacity-0"
+        aria-hidden
+      />
+    );
+  });
+
+  // A build that renders by itself (auto) draws none of this page — and
+  // mounts none of the elements above unless a clip's length is unknown and
+  // has to be measured. Each one is a <video preload="auto"> pulling and
+  // decoding its clip while the exporter opens and decodes the very same
+  // bytes beside it, for nothing: nothing is shown, and the lengths the plan
+  // wants are on the rows (every recording's and nearly every library
+  // clip's), which is also the plan the words were drafted against. A clip
+  // the exporter can't open still fails the export, with its reason.
+  if (auto) {
+    const unmeasured = SLOTS.some((s) => {
+      const p = picks[s.id];
+      return !!p && !isPhoto(p.video) && !((p.video.duration ?? 0) > 0);
+    });
+    return <>{unmeasured ? decoders : null}</>;
+  }
+
   return (
     // A row — the stage and the sidebar — from md up; under that, one column
     // that scrolls: the stage, the transport, then the sidebar's sections.
@@ -1908,47 +2044,7 @@ export function Vids2Builder({
       {!full && startOver('absolute right-3 top-3 z-30 bg-zinc-950/90 backdrop-blur md:hidden')}
 
       {/* Hidden decode elements — one per filled slot; the canvas samples from them. */}
-      {SLOTS.map((s, i) => {
-        const p = picks[s.id];
-        if (!p) return null;
-        // A photo is held rather than played: no seeking, no sound, no metadata
-        // to wait on — the canvas just samples the same picture every frame.
-        if (isPhoto(p.video)) {
-          return (
-            // eslint-disable-next-line @next/next/no-img-element
-            <img
-              key={`${s.id}:${p.video.id}`}
-              ref={layerRefs.image(s.id)}
-              src={withBase(p.video.url)}
-              crossOrigin="anonymous"
-              alt=""
-              onLoad={() => { clearError(p.video.id); draw(timeRef.current); }}
-              onError={() => setErrors((prev) => ({ ...prev, [p.video.id]: 'Could not load this photo.' }))}
-              className="pointer-events-none absolute h-px w-px opacity-0"
-              aria-hidden
-            />
-          );
-        }
-        return (
-          <video
-            key={`${s.id}:${p.video.id}`}
-            ref={layerRefs.video(s.id)}
-            // Off this machine once fetched (slotSrcs); nothing to load until
-            // the bytes are here, and the element carries on from there.
-            src={slotSrcs[i] ?? undefined}
-            crossOrigin="anonymous"
-            playsInline
-            preload="auto"
-            muted={p.muted}
-            onLoadedMetadata={handleMeta(p.video.id)}
-            onLoadedData={(e) => { clearError(p.video.id); handleFrame(s.id)(e); }}
-            onSeeked={handleFrame(s.id)}
-            onError={() => setErrors((prev) => ({ ...prev, [p.video.id]: 'Could not load this clip (unsupported codec or network error).' }))}
-            className="pointer-events-none absolute h-px w-px opacity-0"
-            aria-hidden
-          />
-        );
-      })}
+      {decoders}
 
       {/* One hidden element per BOOM on the video — the same kind a slot has,
           sampled onto the frame over everything else. Keyed on the BOOM rather
@@ -2457,8 +2553,8 @@ export function Vids2Builder({
               (buildPlan's tempo), so the file is the same video in less time.
               At the foot with Download because it is the last thing about
               the finished video rather than a part of it; the readout says
-              how long it comes out. Studio only: the clipper page runs every
-              video at CLIPPER_TEMPO and has nothing to move. Not while a
+              how long it comes out. Studio only: the clipper page rolls a
+              speed for every video and has nothing to move. Not while a
               render is under way, whose length is already decided. */}
           {!CLIPPERS && (
             <div className="mb-3 flex items-center gap-2">

@@ -17,9 +17,37 @@ searched for somebody already chosen) wait for **Continue**. Which way, Look
 and Mode have a default but are still asked once each. On a return visit
 every answer is already there, every card is folded, and Generate is lit.
 
-**The clipper page asks four of the six.** pauv.io/clipping is this same
-section built with `NEXT_PUBLIC_APP=clippers` (`lib/clipping.ts`), and there
-Look and Mode are not cards: every clipper video is Serious, and light or
+**The clipper page is one screen** (since 2026-09-30). pauv.io/clipping is
+this same section built with `NEXT_PUBLIC_APP=clippers` (`lib/clipping.ts`),
+and there the tuning page is never shown. The form has five cards — Who,
+Intro, Which way, Persona, **Caption** — and a preview: to the right of the
+cards on a desktop, under them all on a phone.
+
+- **Caption** is the last card. The Start caption is written the moment a
+  persona is chosen (who, which way and the persona are all it is written
+  from — `writeClipHook` in `Vids2Section`, the same `api/vids/hook`), and
+  again when any of the three changes. It sits in a box to retype, with
+  **↻ Rewrite** for another and **@** for the emoji picker (the hint is top
+  right of the card), over the look the
+  words are drawn in: rolled by the builder's odds among the looks switched
+  on for the clippers, and a press to change.
+- **The preview** (`Vids2ClipPanel`) is one still: the persona's Start clip
+  halfway through, with that caption on it, drawn by the calls the export
+  uses (`drawPlanItem`, `drawCaption`). Nothing is played and nothing is
+  rendered for it. Once a Download lands, the finished MP4 plays there
+  instead, straight away, until the persona or caption is changed.
+- **Download** is the one button, in place of Generate: it makes the
+  recordings, then the build renders itself out of sight and the file is
+  saved — the browser's downloads on a PC, the share sheet on a phone — with
+  one bar for the lot. `Vids2Build.preset` carries the caption, the look and
+  the speed to `Vids2Builder`, which under `auto` draws nothing, puts them
+  on, waits for the rest of the words and exports once. No post captions are
+  written there.
+- **The speed is rolled per video**, 1.1× to 1.2× to the hundredth
+  (`rollClipperTempo`), and the words are timed against that roll. The Start
+  nudge and the veil are rolled as in the Studio.
+
+Look and Mode are not cards there either: every clipper video is Serious, and light or
 dark is rolled the way every build's used to be. `LOOK_ASKED` and
 `MODE_ASKED` in `lib/vids2/vids2Build.ts` say so, and the form, the saved
 answers (`loadSetup`) and a code brought back (`answersFromRecord`, which
@@ -223,8 +251,8 @@ timeline scales as one and every caption and BOOM stays on its moment. Room
 tone is never sped, as with Fast. Every video opens at **`DEFAULT_TEMPO`,
 1.1×**; the Studio has a slider for it at the foot of the sidebar (1× to 2×,
 `changeTempo` carries the BOOMs and the playhead across so nothing moves off
-its frame), and the **clipper page fixes it at 1.1×** (`CLIPPER_TEMPO`) and
-shows nothing. It is a setting, not a roll: the next video opens on what the
+its frame), and the **clipper page rolls one per video, 1.1× to 1.2×**
+(`rollClipperTempo`) and shows nothing. It is a setting, not a roll: the next video opens on what the
 last was left at. The record writes it down (`VidBuildSpec.tempo`) and a
 record from before there was one comes back at 1, as it went out, because its
 BOOMs were laid on that timeline. Generate drafts the words against the
@@ -560,6 +588,55 @@ line carries "$10", never "10 dollars"; a trade line that still comes back
 without a $ amount is replaced with "put $10 up on {name}". The confirmation
 never repeats a line Bottom A's pick already landed on ("locked in" is in
 both sets).
+
+## What Download waits on, and what it no longer does
+
+Measured on 2026-10-01 in Chrome on a desktop with a hardware H.264 encoder,
+driving the real modules against the clipper dev server: the two recordings
+take about ten seconds each and are usually done before Download is pressed
+(the head start), and nearly everything after the press was the **export** —
+73 seconds for a 26-second build (782 frames), over three times the length
+of the video. Four things, in `lib/simpler/vidsCompose` unless said:
+
+- **The words and the veil are layers, not strokes.** The caption used to be
+  drawn onto every output frame with its blurred shadow, and the veil's
+  grain pattern laid over it; the blur on the output canvas, with the pattern
+  fill after it, stalled the canvas pipeline every frame — the stall landed
+  on whatever synced next, so it read as slow decoding. Each is now painted
+  once into a transparent layer the size of the frame (the caption again
+  when the caption changes) and stamped. Every operation involved is
+  source-over, so the file's pixels are the same; the loop went from 85 to
+  25 seconds on its own.
+- **Decoded frames are drawn straight into the composite.** A clip filed the
+  right way up skips the copy through a part-sized canvas; one carrying a
+  rotation still goes through `drawWithFit`, which turns it. And the next
+  frame's decoding is asked for before this frame's encoding is waited on,
+  so the two overlap. Together about a fifth more off.
+- **The persona's clips are fetched when the persona is chosen**
+  (`Vids2Section`), Top A and Top B and every End alongside the Start the
+  preview already took: Top A runs to 35MB in the library, and the exporter's
+  first step used to wait on it after the press. The bytes are the same
+  bytes; `lib/vids-clip-cache` keeps them.
+- **The words have a head start too.** `draftLines` was asked for as
+  Download was pressed, so with both recordings already made it was most of
+  what the press waited on. On the clipper page it is asked for when the
+  persona is chosen — the recordings have laid themselves out by then, and
+  the End and the speed are rolled there with it, so the plan the words are
+  laid onto is the plan they were written for (`draftRef` in `Vids2Section`,
+  keyed like the head starts and dropped the same way). Download takes it.
+- **No hidden decoders under a build that renders itself.** `Vids2Builder`
+  under `auto` used to mount a `<video preload="auto">` per slot to measure
+  the clips, each pulling and decoding its clip beside the exporter opening
+  the same bytes. Every length the plan wants is on the rows, so they are
+  mounted only for a clip whose length is unknown.
+
+After all of it the same export took 16 seconds on that machine. The
+recordings' encoder settings were tried every way (`latencyMode`,
+`hardwareAcceleration`) and made no difference, so they stay. One more
+thing the measuring turned up: a page that has rendered many times slows
+down, by several times, as canvas memory piles up — the renderers and the
+exporter now zero their canvases when they are done rather than leaving
+them to the collector.
 
 ## Things worth knowing
 

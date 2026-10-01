@@ -15,6 +15,7 @@
 
 import { useEffect, useRef, useState, useSyncExternalStore } from 'react';
 import { PHONEDECK_URL } from '@/lib/canvasVideoExport';
+import { CLIPPERS } from '@/lib/clipping';
 
 export interface PhonedeckFile {
   name: string;
@@ -86,8 +87,12 @@ export function usePhonedeck({ onPushed }: { onPushed?: (fileName: string) => vo
   const onPushedRef = useRef(onPushed);
   useEffect(() => { onPushedRef.current = onPushed; }, [onPushed]);
 
-  // Live file feed.
+  // Live file feed. Never on the clipper build (pauv.io/clipping): Phonedeck
+  // is a server on the Studio's own machine, and a public page reaching for
+  // localhost is what makes a browser ask to "connect to devices on your
+  // local network" — for something a clipper has no use for.
   useEffect(() => {
+    if (CLIPPERS) return;
     const es = new EventSource(`${PHONEDECK_URL}/api/stream`);
     es.addEventListener('files', (e) => {
       try {
@@ -103,6 +108,7 @@ export function usePhonedeck({ onPushed }: { onPushed?: (fileName: string) => vo
 
   // Phones list — poll every 3s, matches the cadence Phonedeck's own UI uses.
   useEffect(() => {
+    if (CLIPPERS) return;
     let cancelled = false;
     const fetchDevices = async () => {
       try {

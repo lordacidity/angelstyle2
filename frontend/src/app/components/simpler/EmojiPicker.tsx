@@ -235,8 +235,9 @@ export function useEmojiField(
     setTrigger(null);
   }, [ref]);
 
-  // The "@" must start the field or follow whitespace, so emails/@handles inside
-  // a word don't trigger the picker.
+  // The "@" may sit anywhere — straight after a word as well as after a space
+  // ("fire@" as much as "fire @") — and everything from it to the caret is the
+  // search. Escape puts the picker away for an "@" that was meant as one.
   const detect = useCallback(() => {
     const el = ref.current;
     if (!el) return;
@@ -246,7 +247,7 @@ export function useEmojiField(
     const value = el.value;
     let i = caret - 1;
     while (i >= 0 && value[i] !== '@' && !/\s/.test(value[i])) i--;
-    if (i < 0 || value[i] !== '@' || (i > 0 && !/\s/.test(value[i - 1]))) {
+    if (i < 0 || value[i] !== '@') {
       setTrigger(null);
       return;
     }

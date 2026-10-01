@@ -953,6 +953,13 @@ export async function renderNewsVideo(assets: NewsAssets, o: RenderOptions = {})
   const buf = output.target.buffer;
   if (!buf) throw new Error('The encoder produced nothing.');
   const slug = safeExportName(assets.source.name).toLowerCase().replace(/\s+/g, '-') || 'news';
+  const { width, height } = canvas;
+  const still = await poster(canvas, () => draw(seconds / 2));
+  // The frame's bitmap goes now rather than when the collector gets to it:
+  // a page that keeps rendering holds every one it has made until then, and
+  // a browser short of canvas memory draws the next ones in software.
+  canvas.width = 0;
+  canvas.height = 0;
   return {
     blob: new Blob([buf], { type: mp4 ? 'video/mp4' : 'video/webm' }),
     filename: `news-${slug}-${assets.source.article.outlet}.${mp4 ? 'mp4' : 'webm'}`,
@@ -961,9 +968,9 @@ export async function renderNewsVideo(assets: NewsAssets, o: RenderOptions = {})
     pulseAt: clip.pulseAt,
     leftGoogleAt: clip.leftGoogleAt,
     seconds,
-    width: canvas.width,
-    height: canvas.height,
-    poster: await poster(canvas, () => draw(seconds / 2)),
+    width,
+    height,
+    poster: still,
   };
 }
 

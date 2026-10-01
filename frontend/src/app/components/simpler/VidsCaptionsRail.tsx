@@ -108,7 +108,7 @@ const HINT_MS = 2000;
  *
  *  It starts on the first of the set rather than a random one: the server
  *  renders this too, and the two have to agree on the first paint. */
-function EmojiHint() {
+export function EmojiHint() {
   const [i, setI] = useState(0);
   useEffect(() => {
     const t = window.setInterval(

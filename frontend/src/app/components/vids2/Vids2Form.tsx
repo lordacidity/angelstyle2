@@ -73,11 +73,17 @@ import {
 import { OUTLET_IDS, OUTLETS, outletById } from '@/lib/news/outlets';
 import type { NamedPerson, NewsCategory, NewsHit, OutletId, TrendingHit } from '@/lib/news/types';
 import { SpinnerIcon, VideoIcon } from '@/lib/icons';
+import { CLIPPERS } from '@/lib/clipping';
+import { EmojiHint } from '@/app/components/simpler/VidsCaptionsRail';
 
 // ── Labels ──────────────────────────────────────────────────────────────────
 
 const DIRECTIONS: readonly Direction[] = ['up', 'down'];
-const DIRECTION_LABEL: Record<Direction, string> = { up: '📈 Up', down: '📉 Down' };
+// The clipper page says the whole of it — Trade up, Trade down — under a card
+// that asks which direction we are trading.
+const DIRECTION_LABEL: Record<Direction, string> = CLIPPERS
+  ? { up: '📈 Trade up', down: '📉 Trade down' }
+  : { up: '📈 Up', down: '📉 Down' };
 const DIRECTION_ON: Record<Direction, string> = {
   up: 'border-emerald-500 bg-emerald-500/15 text-emerald-300',
   down: 'border-red-500 bg-red-500/15 text-red-300',
@@ -139,7 +145,7 @@ const WIDEN_UNDER = 5;
 
 // ── The steps ────────────────────────────────────────────────────────────────
 
-type StepId = 'who' | 'intro' | 'direction' | 'look' | 'mode' | 'persona';
+type StepId = 'who' | 'intro' | 'direction' | 'look' | 'mode' | 'persona' | 'caption';
 interface Step {
   id: StepId;
   label: string;
@@ -153,18 +159,23 @@ interface Step {
 const EVERY_STEP: readonly Step[] = [
   { id: 'who', label: 'Who', askOnce: false, asked: true },
   { id: 'intro', label: 'Intro', askOnce: false, asked: true },
-  { id: 'direction', label: 'Which way', askOnce: true, asked: true },
+  { id: 'direction', label: CLIPPERS ? 'Which direction we trading' : 'Which way', askOnce: true, asked: true },
   { id: 'look', label: 'Look', askOnce: true, asked: LOOK_ASKED },
   { id: 'mode', label: 'Mode', askOnce: true, asked: MODE_ASKED },
   { id: 'persona', label: 'Persona', askOnce: false, asked: true },
+  // The clipper page's last card: the Start caption, written the moment the
+  // persona is chosen, and the look it is drawn in (Vids2Section hands the
+  // insides in). It has an answer from the start and opens once on the way
+  // down. The Studio settles both on its tuning page instead.
+  { id: 'caption', label: 'Caption', askOnce: true, asked: CLIPPERS },
 ];
-/** This build's cards, in order: six in the Studio, four on the clipper page. */
+/** This build's cards, in order: six in the Studio, five on the clipper page. */
 const STEPS: readonly Step[] = EVERY_STEP.filter((s) => s.asked);
 const LAST = STEPS.length - 1;
 /** Where a card sits on this build's form; -1 for one it hasn't got, which
  *  nothing then asks for. */
 const at = (id: StepId) => STEPS.findIndex((s) => s.id === id);
-const WHO = at('who'), INTRO = at('intro'), DIRECTION = at('direction'), LOOK = at('look'), MODE = at('mode'), PERSONA = at('persona');
+const WHO = at('who'), INTRO = at('intro'), DIRECTION = at('direction'), LOOK = at('look'), MODE = at('mode'), PERSONA = at('persona'), CAPTION = at('caption');
 /** The card the trade recording's head start shows its line on — the last
  *  of the answers it waits on. */
 const TRADE_CARD: StepId = LOOK_ASKED ? 'look' : 'direction';
@@ -228,6 +239,18 @@ interface Props {
   onHeadStart: (what: 'intro' | 'trade', from: Vids2Setup) => void;
   onGenerate: () => void;
   onCancel: () => void;
+  /** The clipper page's one screen (Vids2Section): what stands beside the
+   *  cards — the preview — to their right from md up, under them all on a
+   *  phone. The Studio passes nothing and the form is the cards. */
+  side?: ReactNode;
+  /** The Caption card's insides there, and what it says folded. */
+  captionCard?: ReactNode;
+  captionSummary?: string;
+  /** And what stands in the foot of the page in place of Generate and its
+   *  progress: there the one button makes, renders and saves the video. */
+  footer?: ReactNode;
+  /** The cards are not to be pressed — a video is being rendered from them. */
+  locked?: boolean;
 }
 
 // ── Bits of page ─────────────────────────────────────────────────────────────
@@ -351,9 +374,9 @@ function PasteLink({ disabled, reading, onUse }: {
 
 export function Vids2Form({
   setup, onChange, personas, resolveVideo, libraryLoaded, suggested, job, jobError, warm, onHeadStart,
-  onGenerate, onCancel,
+  onGenerate, onCancel, side, footer, locked, captionCard, captionSummary,
 }: Props) {
-  const busy = !!job;
+  const busy = !!job || !!locked;
   const who = setup.person.trim();
   const persona = personas.find((p) => p.id === setup.personaId) ?? null;
   /** The story chosen for THIS person — one chosen and then Who changed is
@@ -431,6 +454,12 @@ export function Vids2Form({
   }, [open, stillNeeding]);
   /** A folded card pressed is opened; the open card pressed is folded, if it
    *  has an answer to fold to. */
+  // The Caption card has nothing to press to answer it — the words are there
+  // already — so opening it is having been asked.
+  useEffect(() => {
+    if (open !== null && open === CAPTION && !touched.has('caption')) touch('caption');
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [open]);
   const toggle = (i: number) => {
     if (open === i) { if (answered(STEPS[i].id)) setOpen(null); return; }
     setOpen(i);
@@ -880,6 +909,7 @@ export function Vids2Form({
       case 'direction': return DIRECTION_LABEL[setup.direction];
       case 'look': return LOOK_LABEL[setup.look];
       case 'mode': return MODE_LABEL[setup.mode];
+      case 'caption': return captionSummary?.trim() || '…';
       case 'persona': {
         const thumb = resolveVideo(persona?.topAId ?? '')?.thumbUrl;
         return (
@@ -1472,6 +1502,7 @@ export function Vids2Form({
           />
         );
       case 'persona': return personaCard;
+      case 'caption': return captionCard;
     }
   };
 
@@ -1519,6 +1550,8 @@ export function Vids2Form({
           <span className="shrink-0 text-sm font-semibold text-zinc-100">{s.label}</span>
           <span className="min-w-0 flex-1" />
           {leg && <LegPill leg={leg} />}
+          {/* Top right of the open Caption card: "@" in its box is an emoji. */}
+          {isOpen && s.id === 'caption' && <EmojiHint />}
           {done && <span className="min-w-0 max-w-[60%] truncate text-sm text-zinc-300">{summary(s.id)}</span>}
           {done && <span className="shrink-0 text-[11px] text-zinc-500">Change</span>}
           {pending && <span className="shrink-0 text-[11px] font-semibold text-amber-300">Needs an answer</span>}
@@ -1565,11 +1598,17 @@ export function Vids2Form({
         {/* Room at the top for the two corner boxes the section floats over
             the form — the code box at the left, Reset at the right — so the
             title starts under them at any width. */}
-        <div className="mx-auto w-full max-w-2xl px-4 pb-6 pt-14 sm:px-6">
-          <h1 className="text-2xl font-semibold text-white">Make a video</h1>
-          <div className={`mt-5 flex flex-col gap-2.5 ${busy ? 'pointer-events-none opacity-50' : ''}`}>
-            {STEPS.map((_, i) => card(i))}
+        <div className={`mx-auto w-full px-4 pb-6 pt-14 sm:px-6 ${side ? 'max-w-5xl md:grid md:grid-cols-[minmax(0,1fr)_300px] md:items-start md:gap-x-8' : 'max-w-2xl'}`}>
+          <div className="min-w-0">
+            <h1 className="text-2xl font-semibold text-white">Make a video</h1>
+            <div className={`mt-5 flex flex-col gap-2.5 ${busy ? 'pointer-events-none opacity-50' : ''}`}>
+              {STEPS.map((_, i) => card(i))}
+            </div>
           </div>
+          {/* Kept in view beside the cards as they scroll, from md up. */}
+          {side && (
+            <div className={`max-md:mt-6 md:sticky md:top-14 ${busy ? 'pointer-events-none opacity-50' : ''}`}>{side}</div>
+          )}
         </div>
       </div>
 
@@ -1578,8 +1617,8 @@ export function Vids2Form({
           on a phone, where it is pressed with a thumb, and padded clear of
           the home bar on one with a notch. */}
       <div className={`shrink-0 border-t border-zinc-900 bg-black pb-[env(safe-area-inset-bottom)] ${typing ? 'max-md:hidden' : ''}`}>
-        <div className="mx-auto w-full max-w-2xl px-4 py-3 sm:px-6 sm:py-4">
-          {job ? (
+        <div className={`mx-auto w-full px-4 py-3 sm:px-6 sm:py-4 ${side ? 'max-w-5xl' : 'max-w-2xl'}`}>
+          {footer ?? (job ? (
             <div className="rounded-2xl border border-zinc-800 bg-[#111] p-4">
               <div className="relative h-14 overflow-hidden rounded-xl bg-zinc-900 sm:h-12">
                 <span className="absolute inset-y-0 left-0 bg-white/20 transition-[width]" style={{ width: `${pct}%` }} />
@@ -1609,8 +1648,8 @@ export function Vids2Form({
             >
               Generate
             </button>
-          )}
-          {jobError && <p className="mt-2 text-[13px] text-red-400">{jobError}</p>}
+          ))}
+          {!footer && jobError && <p className="mt-2 text-[13px] text-red-400">{jobError}</p>}
         </div>
       </div>
     </div>

@@ -78,7 +78,22 @@ interface Part {
   /** Null for a still: nothing advances, so there is nothing to pull from. */
   gen: AsyncGenerator<MB.VideoSample | null, void, unknown> | null;
   hasFrame: boolean;
+  /** The decoded frame on screen, held as it came off the decoder and drawn
+   *  straight into the composite — for a clip filed the right way up. One
+   *  that carries a rotation goes through `canvas` instead, where drawWithFit
+   *  turns it; the composite's own draw would not. Closed when the next
+   *  frame replaces it or the window ends. */
+  frame: MB.VideoSample | null;
+  /** The next frame, asked for before the encoder is waited on for this one,
+   *  so the decoder works while the encoder does — see the frame loop. */
+  ahead: Promise<IteratorResult<MB.VideoSample | null, void>> | null;
 }
+
+/** Let a canvas's bitmap go now rather than when the collector gets to it.
+ *  An export makes several the size of a clip and one the size of the frame;
+ *  a page that keeps rendering holds them all until collection, and a browser
+ *  short of canvas memory answers by drawing the next ones in software. */
+const freeCanvas = (c: HTMLCanvasElement) => { c.width = 0; c.height = 0; };
 
 /** A photo, decoded once. It goes into the frame loop as a part that never
  *  advances: every output frame in its window samples the same picture, which
@@ -118,6 +133,8 @@ export async function composeSequence(opts: ComposeOptions): Promise<Blob> {
 
   const parts: Part[] = [];
   const inputs: MB.Input[] = [];
+  /** Every canvas made here, freed on the way out — see freeCanvas. */
+  const canvases: HTMLCanvasElement[] = [];
 
   try {
     report(0, 'Opening clips…');
@@ -180,6 +197,7 @@ export async function composeSequence(opts: ComposeOptions): Promise<Blob> {
         throw new Error(`${item.video.name}: this photo couldn't be loaded.`);
       });
       const canvas = document.createElement('canvas');
+      canvases.push(canvas);
       canvas.width = Math.max(1, img.naturalWidth);
       canvas.height = Math.max(1, img.naturalHeight);
       const ctx = canvas.getContext('2d');
@@ -187,7 +205,7 @@ export async function composeSequence(opts: ComposeOptions): Promise<Blob> {
       smoothScaling(ctx);
       ctx.drawImage(img, 0, 0);
       const { first, last } = onScreen(item);
-      parts.push({ item, input: null, first, last, canvas, ctx, gen: null, hasFrame: true });
+      parts.push({ item, input: null, first, last, canvas, ctx, gen: null, hasFrame: true, frame: null, ahead: null });
     }
 
     for (const { item, input, track } of opened) {
@@ -215,6 +233,7 @@ export async function composeSequence(opts: ComposeOptions): Promise<Blob> {
       // fitted region out of that. Keeping the last frame there is what makes
       // the hold-last-frame behaviour free.
       const canvas = document.createElement('canvas');
+      canvases.push(canvas);
       canvas.width = track.displayWidth;
       canvas.height = track.displayHeight;
       const ctx = canvas.getContext('2d');
@@ -222,7 +241,7 @@ export async function composeSequence(opts: ComposeOptions): Promise<Blob> {
       smoothScaling(ctx);
       const sink = new VideoSampleSink(track);
       parts.push({
-        item, input, first, last, canvas, ctx, hasFrame: false,
+        item, input, first, last, canvas, ctx, hasFrame: false, frame: null, ahead: null,
         gen: (async function* () {
           for (const r of runs) yield* sink.samplesAtTimestamps(r.values());
         })(),
@@ -373,6 +392,7 @@ export async function composeSequence(opts: ComposeOptions): Promise<Blob> {
 
     // ── Video ────────────────────────────────────────────────────────────────
     const canvas = document.createElement('canvas');
+    canvases.push(canvas);
     canvas.width = width;
     canvas.height = height;
     const ctx = canvas.getContext('2d');
@@ -400,24 +420,74 @@ export async function composeSequence(opts: ComposeOptions): Promise<Blob> {
     // Every emoji in the captions is painted from its Apple image; fetched now
     // so no frame goes out with the OS glyph in its place.
     await preloadCaptionEmoji(captions);
+
+    // ── The overlays, painted once ──────────────────────────────────────────
+    // The words and the veil go on through the same calls the stage makes,
+    // but not onto every frame: each is painted into a transparent layer the
+    // size of the frame — the caption again whenever the caption changes, the
+    // veil once — and the layer is stamped over the picture. Everything either
+    // call does is source-over, so a stamped layer is the same picture as
+    // drawing straight onto the frame. What it is not is the same cost: a
+    // caption carries a blurred shadow, and that blur on the output canvas,
+    // with the veil's pattern fill laid after it, stalled the canvas pipeline
+    // on every frame. Measured on a 26-second build (782 frames) in Chrome on
+    // a desktop with a hardware encoder: the frame loop ran 85s with both
+    // drawn live and 25s with both stamped (2026-10-01).
+    const layer = () => {
+      const c = document.createElement('canvas');
+      canvases.push(c);
+      c.width = width;
+      c.height = height;
+      const lctx = c.getContext('2d');
+      if (!lctx) throw new Error('Canvas 2D unavailable');
+      return { canvas: c, ctx: lctx };
+    };
+    const veilLayer = opts.veil ? layer() : null;
+    if (veilLayer) drawVeil(veilLayer.ctx, width, height, opts.veil ?? null);
+    const capLayer = captions.length ? layer() : null;
+    let capShown: Caption | null = null;
+    const captionLayer = (cap: Caption): HTMLCanvasElement | null => {
+      if (!capLayer) return null;
+      if (cap !== capShown) {
+        capLayer.ctx.clearRect(0, 0, width, height);
+        drawCaption(capLayer.ctx, cap, width, height, capStyle, plan.bars);
+        capShown = cap;
+      }
+      return capLayer.canvas;
+    };
+
     await output.start();
     try {
+      const wants = (p: Part, f: number) => !!p.gen && f >= p.first && f < p.last;
       for (let f = 0; f < frameCount; f++) {
         throwIfAborted();
         for (const p of parts) {
-          if (!p.gen || f < p.first || f >= p.last) continue;
+          if (!wants(p, f)) {
+            // Off screen now: the frame it was holding is done with.
+            if (p.frame && f >= p.last) { p.frame.close(); p.frame = null; }
+            continue;
+          }
           // samplesAtTimestamps clones when one decoded frame serves several
           // output frames, so every yielded sample is ours to close.
-          const { value: sample } = await p.gen.next();
+          const { value: sample } = await (p.ahead ?? p.gen!.next());
+          p.ahead = null;
           if (sample) {
-            // Wiped before the frame goes on: drawWithFit composites rather
-            // than replaces, so a clip with nothing behind its picture (the
-            // BOOM) would drag every frame it had already shown along with it.
-            // Only when there is a new frame — a window holding its last one
-            // has nothing to redraw, and that hold is what keeps it free.
-            p.ctx.clearRect(0, 0, p.canvas.width, p.canvas.height);
-            sample.drawWithFit(p.ctx, { fit: 'fill' });
-            sample.close();
+            if (sample.rotation === 0) {
+              // Kept as decoded and drawn from directly — no copy through the
+              // part's canvas. A window holding its last frame keeps this one.
+              p.frame?.close();
+              p.frame = sample;
+            } else {
+              // Wiped before the frame goes on: drawWithFit composites rather
+              // than replaces, so a clip with nothing behind its picture (the
+              // BOOM) would drag every frame it had already shown along with
+              // it. Only when there is a new frame — a window holding its
+              // last one has nothing to redraw, and that hold is what keeps
+              // it free.
+              p.ctx.clearRect(0, 0, p.canvas.width, p.canvas.height);
+              sample.drawWithFit(p.ctx, { fit: 'fill' });
+              sample.close();
+            }
             p.hasFrame = true;
           }
         }
@@ -425,15 +495,25 @@ export async function composeSequence(opts: ComposeOptions): Promise<Blob> {
         ctx.fillRect(0, 0, width, height);
         const paint = (p: Part) => {
           if (f < p.first || f >= p.last || !p.hasFrame) return;
-          drawPlanItem(ctx, p.canvas, p.canvas.width, p.canvas.height, p.item, width, height, plan.bars);
+          if (p.frame) {
+            drawPlanItem(ctx, p.frame.toCanvasImageSource(), p.frame.displayWidth, p.frame.displayHeight, p.item, width, height, plan.bars);
+          } else {
+            drawPlanItem(ctx, p.canvas, p.canvas.width, p.canvas.height, p.item, width, height, plan.bars);
+          }
         };
         for (const p of parts) if (!isBoomItem(p.item)) paint(p);
         const cap = captionAt(captions, f / fps);
-        if (cap) drawCaption(ctx, cap, width, height, capStyle, plan.bars);
+        const words = cap ? captionLayer(cap) : null;
+        if (words) ctx.drawImage(words, 0, 0);
         // Over the words as well as the pictures — see isBoomItem.
         for (const p of parts) if (isBoomItem(p.item)) paint(p);
         // And the veil over the lot, as the stage lays it.
-        drawVeil(ctx, width, height, opts.veil ?? null);
+        if (veilLayer) ctx.drawImage(veilLayer.canvas, 0, 0);
+        // The next frame's decoding is set going before this frame's encoding
+        // is waited on, so the two overlap rather than take turns. The
+        // generator is never asked twice at once: what is asked for here is
+        // taken, above, before anything else is.
+        for (const p of parts) if (wants(p, f + 1)) p.ahead = p.gen!.next();
         await videoSource.add(f / fps, 1 / fps);
         if (f % 5 === 0 || f === frameCount - 1) {
           report(0.05 + ((f + 1) / frameCount) * 0.9, `Rendering frame ${f + 1} / ${frameCount}`);
@@ -461,9 +541,18 @@ export async function composeSequence(opts: ComposeOptions): Promise<Blob> {
     report(1, 'Done');
     return new Blob([buf], { type: 'video/mp4' });
   } finally {
-    // Stop any decoder pumps still running (e.g. after a cancel), then free the
-    // inputs' file handles / caches.
+    // A frame asked for ahead and never taken, and the one each part was
+    // holding, are closed; then any decoder pumps still running (e.g. after a
+    // cancel) are stopped, the inputs' file handles / caches freed, and every
+    // canvas let go.
+    for (const p of parts) {
+      if (p.ahead) await p.ahead.then((r) => r.value?.close(), () => { /* already failed */ });
+      p.ahead = null;
+      p.frame?.close();
+      p.frame = null;
+    }
     await Promise.allSettled(parts.map((p) => p.gen?.return()));
     for (const input of inputs) input.dispose();
+    for (const c of canvases) freeCanvas(c);
   }
 }
