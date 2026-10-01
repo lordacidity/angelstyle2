@@ -115,6 +115,7 @@ export async function frameThumb(photo: NewsPhoto, size: PhotoSize, scale = 1.5)
 
 /** The credit line printed under the photo: author, where it's from, licence. */
 export function photoCredit(photo: NewsPhoto): string {
+  if (photo.source !== 'commons') return photo.creator;
   const who = photo.creator && !/^(unknown|anonymous)/i.test(photo.creator) ? `${photo.creator} / ` : '';
   const free = /^(cc0|public domain|pd\b)/i.test(photo.license);
   return `${who}Wikimedia Commons${free ? '' : ` (${photo.license})`}`;

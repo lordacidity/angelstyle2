@@ -1845,6 +1845,8 @@ export function Vids2Builder({
   /** The still beside the summary: the trade, which is the one of the two
    *  recordings with a face in it. */
   const buildThumb = picks.bottomB?.video.thumbUrl ?? picks.bottomA?.video.thumbUrl ?? null;
+  /** Nothing under way and nothing wrong: the status line is only "Ready". */
+  const settled = !working && !broken.length && !!appliedPersonaId;
   const status = (() => {
     if (working) return 'Putting it together — the sound and the captions.';
     if (broken.length) return 'One of these clips would not load — press Reset and make it again.';
@@ -2256,12 +2258,18 @@ export function Vids2Builder({
           full ? 'hidden' : ''
         }`}
       >
-        <div className="border-b border-zinc-800 px-3 py-4">
-          <div className="mb-3 flex items-center gap-2">
-            <p className="min-w-0 flex-1 truncate text-sm font-semibold text-white">Tune it up</p>
+        {/* Out at pauv.io/clipping this is the Start over button and nothing
+            else, bar a line when the build is under way or has gone wrong —
+            so on a phone, where the button is in the corner, it is not there
+            at all until there is such a line. */}
+        <div className={`border-b border-zinc-800 px-3 py-4 ${CLIPPERS && settled ? 'max-md:hidden' : ''}`}>
+          <div className={`flex items-center justify-end gap-2 ${CLIPPERS ? '' : 'mb-3'}`}>
+            {!CLIPPERS && <p className="min-w-0 flex-1 truncate text-sm font-semibold text-white">Tune it up</p>}
             {/* From md up only: on a phone it is in the page's corner (above). */}
             {startOver('shrink-0 max-md:hidden')}
           </div>
+
+          {!CLIPPERS && (<>
 
           {/* What the form asked for, and what came of it. Not a control: the
               two cards that were here were the deciding, and the deciding is
@@ -2327,10 +2335,11 @@ export function Vids2Builder({
               {[...build.notes, ...restoreNotes].map((n) => <li key={n}>{n}</li>)}
             </ul>
           )}
+          </>)}
 
           {/* One line for how it is getting on. Stands down when there is
               nothing to say. */}
-          {status && (
+          {status && !(CLIPPERS && settled) && (
             <div className="mt-3 flex items-start gap-1.5 text-xs text-zinc-500">
               {working && <SpinnerIcon size={12} className="mt-px shrink-0 animate-spin" />}
               <p className="min-w-0 flex-1">{status}</p>
@@ -2341,8 +2350,9 @@ export function Vids2Builder({
         {/* Sound: how loud the clips sit, and the BOOMs. Room tone rides under
             every build (DEFAULT_ROOM_TONE) with nothing to switch it, and
             there is no song to pick — the music goes on natively when the
-            video is published (the Instagram audio in Vids2PublishPanel). */}
-        <div className="border-b border-zinc-800 px-3 py-3">
+            video is published (the Instagram audio in Vids2PublishPanel).
+            Not out at pauv.io/clipping: the levels there are the house's. */}
+        {!CLIPPERS && <div className="border-b border-zinc-800 px-3 py-3">
           <p className="mb-2 text-xs font-semibold uppercase tracking-wider text-zinc-500">Sound</p>
           <div className="flex items-center gap-2">
             <span className="w-10 shrink-0 text-xs text-zinc-300">Clips</span>
@@ -2386,7 +2396,7 @@ export function Vids2Builder({
           {soundError && (
             <p className="mt-2 text-[9px] text-red-400">Sound didn&rsquo;t load: {soundError}</p>
           )}
-        </div>
+        </div>}
 
         <VidsCaptionsRail
           canCaption={canCaption}

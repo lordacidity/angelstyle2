@@ -172,9 +172,11 @@ export interface NameHighlight {
 }
 
 /** A photo a page may use: a free one from Wikimedia Commons (with what its
- *  licence asks us to credit), or a profile photo from pauv.com. */
+ *  licence asks us to credit), or a profile photo from pauv.com. When Commons
+ *  has nothing of the person, the picture on their Wikipedia article, which may
+ *  not be free. */
 export interface NewsPhoto {
-  source: 'commons' | 'pauv';
+  source: 'commons' | 'pauv' | 'wikipedia';
   /** Up to 1600px wide. */
   url: string;
   /** Size of the original file. */

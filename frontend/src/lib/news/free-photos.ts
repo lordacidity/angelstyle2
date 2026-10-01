@@ -251,7 +251,9 @@ async function findPersonPhotos(name: string): Promise<PersonPhotosResponse> {
     return n < 3;
   }).slice(0, PERSON_CANDIDATES);
   if (candidates.length === 0) {
-    return { photos: [], ai: false, note: `No free photo of ${name} on Wikimedia Commons, so the page keeps a placeholder.` };
+    const photos = await ordinaryPhotos(name);
+    if (photos.length > 0) return { photos, ai: false, note: null };
+    return { photos: [], ai: false, note: `No photo of ${name} could be found, so the page keeps a placeholder.` };
   }
 
   let reports: (PersonReport | null)[];
@@ -278,9 +280,51 @@ async function findPersonPhotos(name: string): Promise<PersonPhotosResponse> {
   }).sort((a, b) => b.score - a.score);
 
   if (ranked.length === 0) {
-    return { photos: [], ai: true, note: `None of the free photos of ${name} were a clear photo of them, so the page keeps a placeholder.` };
+    const photos = await ordinaryPhotos(name);
+    if (photos.length > 0) return { photos, ai: true, note: null };
+    return { photos: [], ai: true, note: `None of the photos of ${name} were a clear photo of them, so the page keeps a placeholder.` };
   }
   return { photos: ranked.slice(0, 6).map(r => r.photo), ai: true, note: null };
+}
+
+// ── When Commons has nothing ───────────────────────────────────────────────
+//
+// An ordinary photo rather than a placeholder: the picture at the top of the
+// person's Wikipedia article (whatever its licence) and their profile photo on
+// pauv.com, the larger first. Neither is checked or framed by Gemini; the crop
+// is centred a little above the middle, where a portrait's face is.
+
+async function wikipediaPhoto(name: string): Promise<PersonPhoto | null> {
+  const url = new URL('https://en.wikipedia.org/w/api.php');
+  url.search = new URLSearchParams({
+    action: 'query', format: 'json',
+    generator: 'search', gsrsearch: name, gsrlimit: '3',
+    prop: 'pageimages', piprop: 'thumbnail|name', pithumbsize: String(FULL_WIDTH), pilicense: 'any',
+  }).toString();
+  const res = await fetch(url, { headers: { 'User-Agent': UA, Accept: 'application/json' }, signal: AbortSignal.timeout(12_000), cache: 'no-store' });
+  if (!res.ok) throw new Error(`Wikipedia answered ${res.status}`);
+  type Page = { pageid: number; title: string; index: number; pageimage?: string; thumbnail?: { source: string; width: number; height: number } };
+  const pages = Object.values(((await res.json()) as { query?: { pages?: Record<string, Page> } }).query?.pages ?? {});
+  // Their own article only: the search also brings back people they're linked to.
+  const page = pages.sort((a, b) => a.index - b.index)
+    .find(p => p.thumbnail && mentionsName(p.title, name) && !NOT_A_PORTRAIT.test(p.pageimage ?? ''));
+  if (!page?.thumbnail) return null;
+  return {
+    source: 'wikipedia', url: page.thumbnail.source, width: page.thumbnail.width, height: page.thumbnail.height, title: page.title,
+    creator: 'Wikipedia', license: 'not checked', licenseUrl: '', page: `https://en.wikipedia.org/?curid=${page.pageid}`, face: null,
+  };
+}
+
+async function ordinaryPhotos(name: string): Promise<PersonPhoto[]> {
+  const [wiki, roster] = await Promise.all([
+    wikipediaPhoto(name).catch(() => null),
+    pauvPeople().catch(() => [] as PauvPerson[]),
+  ]);
+  const onPauv = roster.find(p => fold(p.name) === fold(name));
+  const photos: PersonPhoto[] = [];
+  if (wiki) photos.push(wiki);
+  if (onPauv) photos.push({ ...pauvPhoto(onPauv), face: null });
+  return photos.sort((a, b) => Math.min(b.width, b.height) - Math.min(a.width, a.height));
 }
 
 // ── Side-column thumbnails ─────────────────────────────────────────────────

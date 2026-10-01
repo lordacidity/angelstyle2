@@ -23,6 +23,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { writePostCaptions, type PostCaptionsDraft, type TradePosition } from '@/lib/vids-client';
 import { personKey } from '@/lib/simpler/vidsBottom';
+import { CLIPPERS } from '@/lib/clipping';
 import type { Vids2Early } from '@/lib/vids2/vids2Words';
 import { SpinnerIcon } from '@/lib/icons';
 
@@ -233,7 +234,7 @@ export function Vids2PostCaption({ buildId, person, position, early, code, expor
         </div>
       ) : cur?.loading ? (
         <p className="mt-2 text-xs text-zinc-500">Reading this week&apos;s news, then writing…</p>
-      ) : ready && cur ? (
+      ) : ready && cur && !CLIPPERS ? (
         <p className="mt-2 truncate text-xs text-zinc-500">{cur.person} · {cur.position === 'up' ? '📈 Up' : '📉 Down'}</p>
       ) : null}
     </div>
