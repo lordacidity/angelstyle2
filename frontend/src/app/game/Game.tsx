@@ -184,7 +184,7 @@ interface World {
   tech: Record<TechKey, number>;
   meta: Record<MetaKey, number>;
   over: 'win' | 'lose' | null;
-  flash: { text: string; sub?: string; age: number; ttl: number } | null;
+  flash: { text: string; age: number; ttl: number } | null;
   selected: number | null;
   /** The outpost whose standing order is being pointed at, while it is. */
   picking: number | null;
@@ -460,7 +460,7 @@ function buildWorld(rules: Rules, meta: Record<MetaKey, number>, seedExtra = 0):
     gold: 40 + META.gold.per * meta.gold, time: 0,
     nextId: 1,
     tech: { logistics: 0, conscription: 0, tithe: 0, scouts: 0, thrift: 0 }, meta, autoSeq: 0,
-    over: null, flash: { text: rules.endless ? 'THE LONG WAR' : rules.title ?? `LEVEL ${rules.level}`, sub: rules.blurb, age: 0, ttl: rules.blurb ? 5 : 1.6 }, selected: null, picking: null, pickN: 1, picked: [], shiftT: rules.shift ?? 0, hillT: 0,
+    over: null, flash: null, selected: null, picking: null, pickN: 1, picked: [], shiftT: rules.shift ?? 0, hillT: 0,
   };
 }
 
@@ -1163,17 +1163,6 @@ function draw(ctx: CanvasRenderingContext2D, w: World, view: { s: number; ox: nu
     ctx.font = '800 30px -apple-system, system-ui, sans-serif';
     ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
     ctx.fillText(f.text, MAP_W / 2, view.midY - 40);
-    if (f.sub) {
-      // The blurb, wrapped to the map's width, on a dark band so it reads over the roads.
-      ctx.font = '500 12px -apple-system, system-ui, sans-serif';
-      const words = f.sub.split(' '); const lines: string[] = []; let line = '';
-      for (const wd of words) { const t = line ? `${line} ${wd}` : wd; if (ctx.measureText(t).width > MAP_W - 50 && line) { lines.push(line); line = wd; } else line = t; }
-      if (line) lines.push(line);
-      ctx.fillStyle = `rgba(0,0,0,${a * 0.75})`;
-      ctx.fillRect(18, view.midY - 20, MAP_W - 36, 8 + lines.length * 16);
-      ctx.fillStyle = `rgba(255,255,255,${a * 0.9})`;
-      lines.forEach((l, i) => ctx.fillText(l, MAP_W / 2, view.midY - 8 + i * 16));
-    }
   }
   ctx.restore();
 }
@@ -1189,7 +1178,7 @@ interface Ui {
   prodPerMin: number; goldPerMin: number;
   mine: number; theirs: number; picking: boolean; pickN: number; pickLeft: number;
   selHidden: boolean; shiftT: number;
-  truceT: number; hillT: number; hillNeed: number; blurb: string | null;
+  truceT: number; hillT: number; hillNeed: number; blurb: string | null; title: string | null;
   /** Whether the map runs past the screen, and which way there is more of it. */
   /** The scrollbar: how far down the map the view is (0..1) and how much of it shows (0..1); 1 means all. */
   scrollFrac: number; viewFrac: number; scrollFracX: number; viewFracX: number;
@@ -1205,6 +1194,8 @@ export default function Game() {
   const [screen, setScreen] = useState<'menu' | 'armoury' | 'play'>('menu');
   const [ui, setUi] = useState<Ui | null>(null);
   const [tab, setTab] = useState<'post' | 'tech'>('post');
+  // The card over the map at the start: the level's name and what it brings, until "Got it".
+  const [intro, setIntro] = useState(false);
   // Which outpost the panel last showed, so a new pick flips it back to Outpost.
   const lastSelRef = useRef<number | null>(null);
   const [run, setRun] = useState<{ level: number; endless: boolean }>({ level: 1, endless: false });
@@ -1253,7 +1244,8 @@ export default function Game() {
   const start = useCallback((level: number, endless: boolean) => {
     const s = loadSave();
     worldRef.current = buildWorld(rulesFor(level, endless), s.meta);
-    pausedRef.current = false; speedRef.current = 0.5; sendPctRef.current = 1; settledRef.current = false;
+    pausedRef.current = true; speedRef.current = 0.5; sendPctRef.current = 1; settledRef.current = false;
+    setIntro(true);
     dragRef.current = null;
     setRun({ level, endless });
     setTab('post');
@@ -1373,7 +1365,7 @@ export default function Game() {
           prodPerMin: w.nodes.filter((n) => n.owner === PLAYER && n.troops < capOf(n) - 0.5).reduce((t, n) => t + prodOf(w, n) * 60, 0),
           goldPerMin: w.nodes.filter((n) => n.owner === PLAYER).reduce((t, n) => t + goldOf(n), 0) * goldMult(w) * 60,
           mine: w.nodes.filter((n) => n.owner === PLAYER).length, theirs: w.nodes.filter((n) => n.owner >= 2).length, picking: w.picking !== null, pickN: w.pickN, pickLeft: w.pickN - w.picked.length,
-          selHidden: !!(w.rules.fog && sel && sel.owner !== PLAYER && !(seenByPlayer(w)?.has(sel.id) && ringOf(w, sel.id) < (w.rules.fog ?? 0))), shiftT: w.rules.shift ? w.shiftT : 0, truceT: w.rules.truce ? Math.max(0, w.rules.truce - w.time) : 0, hillT: w.hillT, hillNeed: w.rules.hill ?? 0, blurb: w.rules.blurb ?? null,
+          selHidden: !!(w.rules.fog && sel && sel.owner !== PLAYER && !(seenByPlayer(w)?.has(sel.id) && ringOf(w, sel.id) < (w.rules.fog ?? 0))), shiftT: w.rules.shift ? w.shiftT : 0, truceT: w.rules.truce ? Math.max(0, w.rules.truce - w.time) : 0, hillT: w.hillT, hillNeed: w.rules.hill ?? 0, blurb: w.rules.blurb ?? null, title: w.rules.title ?? null,
           scrollFrac: scrollFracRef.current, viewFrac: viewFracRef.current, scrollFracX: scrollFracXRef.current, viewFracX: viewFracXRef.current,
           army: (() => {
             const by = new Map<number, number>();
@@ -1704,6 +1696,14 @@ export default function Game() {
             onPointerUp={() => { barGrabXRef.current = null; }} onPointerCancel={() => { barGrabXRef.current = null; }}>
             <div className="absolute left-0 right-0 top-2 h-3 rounded-full bg-white/10" />
             <div className="absolute top-2 h-3 rounded-full bg-white/70" style={{ left: `${ui.scrollFracX * (1 - ui.viewFracX) * 100}%`, width: `${ui.viewFracX * 100}%` }} />
+          </div>
+        )}
+        {intro && !ui?.over && (
+          <div className="absolute inset-0 flex flex-col items-center justify-center bg-black/60 px-7 text-center">
+            <div className="text-3xl font-black">{run.endless ? 'THE LONG WAR' : (ui?.title ?? `LEVEL ${run.level}`)}</div>
+            {ui?.blurb && <div className="mt-3 text-[14px] leading-snug text-white/80">{ui.blurb}</div>}
+            <button className={`${btn} mt-5 bg-white px-6 py-2.5 text-black`} onClick={() => setIntro(false)}>Got it</button>
+            <div className="mt-3 text-[11px] text-white/40">Paused. Press ▶ when ready.</div>
           </div>
         )}
         {ui?.over && (
