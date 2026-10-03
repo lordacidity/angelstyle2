@@ -1193,6 +1193,7 @@ export default function Game() {
       <div className="px-3 pb-1 pt-1">
         <div className="flex items-center justify-between text-[13px]">
           <div className="leading-tight">
+            <button className={`${btn} mb-1 bg-white/10 px-2 py-0.5 text-[11px]`} onClick={() => act((w) => { for (const n of w.nodes) n.route = null; w.picking = null; w.picked = []; })}>Clear auto-sends</button>
             <div className="text-[11px] text-white/40"><b className="text-white/80">+{Math.round(ui?.prodPerMin ?? 0)}</b> troops/min</div>
             <div><span className="text-white/40">Gold </span><b className="text-white">{fmt(ui?.gold ?? 0)}</b></div>
           </div>
