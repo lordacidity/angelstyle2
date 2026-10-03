@@ -53,7 +53,7 @@ const CANNON_CD = 0.4;
 
 // A mine: an outpost dug out for gold. It breeds nothing and keeps no
 // walls, guns or barracks, only whatever garrison is sent to sit in it.
-// Digging costs the garrison; so does deepening. Gold a second by depth.
+// Digging and deepening each cost a set number of troops. Gold a second by depth.
 const MINE_GOLD = [0, 1.5, 3, 5];
 /** Troops it takes to dig, then to deepen to 2 and to 3. */
 const MINE_TROOPS = [100, 150, 250];
@@ -588,15 +588,15 @@ function step(w: World, dt: number) {
   if (!theirs) w.over = 'win';
 }
 
-/** Dig, or deepen, a mine: the garrison is spent, and so is everything
- *  built here. What can be dug: an outpost of yours with the troops for it. */
+/** Dig, or deepen, a mine: the troops it costs are spent, and so is
+ *  everything built here; the rest of the garrison stays. */
 function mineCost(n: Node): number | null { return n.mine >= 3 ? null : MINE_TROOPS[n.mine]; }
 function digMine(w: World, id: number) {
   const n = w.nodes[id];
   if (n.owner !== PLAYER || n.base) return;
   const need = mineCost(n);
   if (need === null || n.troops < need) return;
-  n.troops = 0; n.mine++;
+  n.troops -= need; n.mine++;
   n.wall = 0; n.cannon = 0; n.prod = 0; n.route = null; n.cd = 0;
 }
 
@@ -1076,7 +1076,7 @@ export default function Game() {
             <p><b className="text-white/80">Drag</b> from one of your outposts to any other to march. Columns take the shortest road through your ground and fight at the first outpost on it that is not yours, and columns that outnumber the defenders take the ground. <b className="text-white/80">Tap</b> an outpost to build on it, or give it a standing order to keep shipping troops somewhere.</p>
             <p>Outposts breed troops up to their cap. Gold trickles from everything you hold. Spend it on the picked outpost, or on tech for all of them.</p>
             <p>The red plays by your rules: same breeding, same gold, same upgrades bought with it. On the harder levels it starts with more ground and more gold, and its generals are quicker. Clear every red outpost to win.</p>
-            <p>An outpost with 100 troops can be dug into a <b className="text-white/80">mine</b>: it breeds nothing and keeps nothing built, but pays gold, more the deeper it goes. Digging and deepening spend the garrison. Whoever takes a mine keeps it.</p>
+            <p>An outpost with 100 troops can be dug into a <b className="text-white/80">mine</b>: it breeds nothing and keeps nothing built, but pays gold, more the deeper it goes. Digging and deepening cost troops. Whoever takes a mine keeps it.</p>
             <p className="text-white/30">Walls are inherited by whoever takes the outpost. Cannons are not.</p>
           </div>
         </div>
@@ -1257,7 +1257,7 @@ export default function Game() {
                 <div className="flex items-center justify-between rounded-xl bg-white/5 px-3 py-2">
                   <div>
                     <div className="text-[13px]"><b className="text-[#ffd166]">Mine {sel.mine}</b> <span className="text-white/45">· +{Math.round(MINE_GOLD[sel.mine] * 60)} gold/min</span></div>
-                    <div className="text-[11px] text-white/45">{mineCost(sel) === null ? 'As deep as it goes.' : `Deepen: ${MINE_TROOPS[sel.mine]} troops, spent · +${Math.round((MINE_GOLD[sel.mine + 1] - MINE_GOLD[sel.mine]) * 60)} gold/min`}</div>
+                    <div className="text-[11px] text-white/45">{mineCost(sel) === null ? 'As deep as it goes.' : `Deepen: ${MINE_TROOPS[sel.mine]} troops · +${Math.round((MINE_GOLD[sel.mine + 1] - MINE_GOLD[sel.mine]) * 60)} gold/min`}</div>
                   </div>
                   {mineCost(sel) !== null && (
                     <button disabled={sel.troops < MINE_TROOPS[sel.mine]} onClick={() => act((w) => digMine(w, sel.id))} className={`${btn} bg-[#ffd166] px-3 py-1.5 text-[13px] text-black`}>Deepen</button>
