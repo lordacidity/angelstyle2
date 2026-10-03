@@ -613,7 +613,7 @@ function draw(ctx: CanvasRenderingContext2D, w: World, view: { s: number; ox: nu
     }
     ctx.fillStyle = '#000000';
     ctx.beginPath(); ctx.arc(n.x, n.y, r, 0, Math.PI * 2); ctx.fill();
-    ctx.fillStyle = n.owner === 0 ? '#111111' : n.owner === PLAYER ? '#ffffff' : col + '33';
+    ctx.fillStyle = n.owner === 0 ? '#111111' : n.owner === PLAYER ? (n.route ? '#a3a3a3' : '#ffffff') : col + '33';
     ctx.beginPath(); ctx.arc(n.x, n.y, r, 0, Math.PI * 2); ctx.fill();
     ctx.strokeStyle = col; ctx.lineWidth = n.base ? 4 : 2.5;
     ctx.beginPath(); ctx.arc(n.x, n.y, r, 0, Math.PI * 2); ctx.stroke();
@@ -720,6 +720,8 @@ export default function Game() {
   const speedRef = useRef(1);
   const sendPctRef = useRef(0.5);
   const settledRef = useRef(false);
+  // The last outpost tapped and when: a second tap on it inside 350ms is a double tap.
+  const lastTapRef = useRef<{ id: number; t: number }>({ id: -1, t: 0 });
   const scrollByRef = useRef<(dir: number) => void>(() => {});
 
   // localStorage is the browser's: read it once mounted, never on the server.
@@ -857,6 +859,16 @@ export default function Game() {
       const from = w.nodes[w.picking];
       if (n.id !== from.id && from.owner === PLAYER) { from.route = { to: n.id }; from.routeT = 0; }
       w.picking = null; dragRef.current = null;
+      return;
+    }
+    // Double tap on one of yours: set an auto-send (tap the target next), or
+    // clear the one it has.
+    const now = performance.now();
+    const twice = lastTapRef.current.id === n.id && now - lastTapRef.current.t < 350;
+    lastTapRef.current = { id: n.id, t: now };
+    if (twice && n.owner === PLAYER) {
+      if (n.route) n.route = null; else w.picking = n.id;
+      w.selected = n.id; dragRef.current = null;
       return;
     }
     w.selected = n.id;
@@ -1068,7 +1080,7 @@ export default function Game() {
             </button>
           </div>
         </div>
-        <div className="mt-2 h-[186px]">
+        <div className="mt-2 h-[168px]">
           {tab === 'tech' ? (
             <div className="grid grid-cols-2 gap-1.5">
               {(Object.keys(TECH) as TechKey[]).map((k) => {
@@ -1092,23 +1104,14 @@ export default function Game() {
             </div>
           ) : (
             <>
-              <div className="mb-1.5 flex items-center justify-between rounded-xl bg-white/5 px-3 py-1.5 text-[12px]">
-                {ui?.picking ? (
-                  <span className="text-white">Tap where to send.</span>
-                ) : sel.route ? (
-                  <span><b className="text-[#ffd166]">Auto-sending</b></span>
-                ) : (
-                  <span className="text-white/45">Auto-send</span>
-                )}
-                {ui?.picking ? (
-                  <button className={`${btn} bg-white/10 px-2.5 py-1`} onClick={() => act((w) => { w.picking = null; })}>Cancel</button>
-                ) : sel.route ? (
-                  <button className={`${btn} bg-white/10 px-2.5 py-1`} onClick={() => act((w) => { w.nodes[sel.id].route = null; })}>Clear</button>
-                ) : (
-                  <button className={`${btn} bg-white px-2.5 py-1 text-black`} onClick={() => act((w) => { w.picking = sel.id; })}>Set</button>
-                )}
-              </div>
               <div className="grid grid-cols-2 gap-1.5">{upgRows(sel)}</div>
+              {ui?.picking ? (
+                <div className="mt-1.5 text-center text-[12px] text-[#ffd166]">Tap where it should auto-send.</div>
+              ) : sel.route ? (
+                <div className="mt-1.5 text-center text-[12px] text-[#ffd166]">Auto-sending · double-tap to stop</div>
+              ) : (
+                <div className="mt-1.5 text-center text-[12px] text-white/30">Double-tap to auto-send</div>
+              )}
               <div className="mt-1.5 flex justify-between text-[12px] text-white/50">
                 <span><b className="text-white">+{Math.round(ui?.selProdPerMin ?? 0)}</b> troops/min{sel.troops >= capOf(sel) - 0.5 ? ' (full)' : ''}</span>
                 <span>falls to <b className="text-white">{(ui?.selHold ?? 0) + 1}</b>+</span>
