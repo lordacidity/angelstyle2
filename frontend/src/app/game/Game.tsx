@@ -41,7 +41,7 @@ const capAt = (tier: number) => 40 * Math.pow(1.8, tier - 1);
 const BASE_PROD_PER_S = 0.9;
 
 const UPG = {
-  prod: { name: 'Barracks', base: 30, growth: 1.75, desc: '+45% troops/s' },
+  prod: { name: 'Barracks', base: 30, growth: 1.75, desc: '+35% troops/s' },
   wall: { name: 'Walls', base: 25, growth: 1.8, desc: '+25% defence' },
   cannon: { name: 'Cannon', base: 45, growth: 1.8, desc: 'shooter' },
   tier: { name: 'Expand', base: 60, growth: 2.2, desc: 'bigger, faster' },
@@ -475,7 +475,7 @@ const prodOf = (w: World, n: Node) => {
   let m = n.owner === PLAYER
     ? (1 + META.prod.per * w.meta.prod / 100) * (1 + 0.15 * w.tech.conscription)
     : 1 + 0.15 * (w.factions.find((f) => f.id === n.owner)?.tech.conscription ?? 0);
-  m *= (n.base ? 1.5 : 1) * (1 + 0.45 * n.prod);
+  m *= (n.base ? 1.5 : 1) * (1 + 0.35 * n.prod);
   return BASE_PROD_PER_S * m;
 };
 /** What your gold is worth: Tithe and the Vaults. */
@@ -1565,7 +1565,7 @@ export default function Game() {
         <div className="text-[11px] text-white/45">{(() => {
           // Barracks and Expand: what the next level adds here, a minute.
           const rate = ui?.selProdPerMin ?? 0;
-          if (k === 'prod') { const gain = rate * ((1 + 0.45 * (lvl + 1)) / (1 + 0.45 * lvl) - 1); return `+${Math.round(gain)} troops/min · lv ${lvl}`; }
+          if (k === 'prod') { const gain = rate * ((1 + 0.35 * (lvl + 1)) / (1 + 0.35 * lvl) - 1); return `+${Math.round(gain)} troops/min · lv ${lvl}`; }
           if (k === 'tier') return `holds ${Math.round(capOf({ ...n, tier: n.tier + 1 }))} · +20% range · size ${n.tier}`;
           if (k === 'cannon') return `${cannonDmg(lvl + 1)} a shot · lv ${lvl}`;
           return `${u.desc} · lv ${lvl}`;
