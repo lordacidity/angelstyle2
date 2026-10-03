@@ -1096,10 +1096,15 @@ function draw(ctx: CanvasRenderingContext2D, w: World, view: { s: number; ox: nu
       const bits = [n.hub ? 'HUB' : '', n.loot ? `+${n.loot}` : '', n.gold ? `${n.gold}g` : '', n.mine ? `MINE ${n.mine}` : '', n.base ? 'HQ' : '', n.prod ? `B${n.prod}` : '', n.cannon ? `C${n.cannon}` : ''].filter(Boolean).join(' ');
       ctx.fillText(bits, n.x, n.y + r + 11);
     }
-    // A green dot at the top right of any of yours whose Barracks you can afford now.
+    // A green dot at the top right of any of yours whose Barracks you can afford now,
+    // and a pink one at the top left of any with an upgrade buying itself.
     if (n.owner === PLAYER && !n.mine && w.gold >= upgradeCost(w, n, 'prod')) {
       ctx.fillStyle = '#38e08a';
       ctx.beginPath(); ctx.arc(n.x + r * 0.75, n.y - r * 0.75, 3.5, 0, Math.PI * 2); ctx.fill();
+    }
+    if (n.owner === PLAYER && Object.keys(n.auto).length) {
+      ctx.fillStyle = '#ff4fa3';
+      ctx.beginPath(); ctx.arc(n.x - r * 0.75, n.y - r * 0.75, 3.5, 0, Math.PI * 2); ctx.fill();
     }
   }
   // Standing orders, for the picked outpost only: gold for where it ships,
@@ -1609,9 +1614,9 @@ export default function Game() {
     return (
       <button key={k} onPointerDown={down} onPointerUp={up} onPointerLeave={up} onPointerCancel={up} onContextMenu={(e) => e.preventDefault()}
         onClick={() => { if (holdRef.current.fired) { holdRef.current.fired = false; return; } if (!poor) act((w) => buyUpgrade(w, n.id, k)); }}
-        className={`${btn} relative flex flex-col items-start rounded-xl px-3 py-1 text-left ${auto ? 'bg-[#38e08a]/15 ring-1 ring-[#38e08a]/70' : 'bg-white/5'} ${poor && !auto ? 'opacity-30' : ''}`}>
+        className={`${btn} relative flex flex-col items-start rounded-xl px-3 py-1 text-left ${auto ? 'bg-[#ff4fa3]/15 ring-1 ring-[#ff4fa3]/70' : 'bg-white/5'} ${poor && !auto ? 'opacity-30' : ''}`}>
         {k === 'prod' && <span className="absolute right-1.5 top-1.5 h-2 w-2 rounded-full bg-[#38e08a]" />}
-        <div className="flex w-full items-center justify-between text-[13px]"><b>{u.name}{auto && <span className="ml-1.5 text-[9px] font-bold tracking-wide text-[#38e08a]">AUTO</span>}</b><span className="text-white">{cost}g</span></div>
+        <div className="flex w-full items-center justify-between text-[13px]"><b>{u.name}{auto && <span className="ml-1.5 text-[9px] font-bold tracking-wide text-[#ff4fa3]">AUTO</span>}</b><span className="text-white">{cost}g</span></div>
         <div className="text-[11px] text-white/45">{(() => {
           // Barracks and Expand: what the next level adds here, a minute.
           const rate = ui?.selProdPerMin ?? 0;
