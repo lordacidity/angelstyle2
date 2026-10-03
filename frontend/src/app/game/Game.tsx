@@ -694,6 +694,8 @@ interface Ui {
   sendPct: number; selected: Node | null; tech: Record<TechKey, number>;
   /** The picked outpost: troops it breeds a minute, and what it takes to fall. */
   selProdPerMin: number; selHold: number;
+  /** Everything you hold, breeding, a minute (full outposts breed nothing). */
+  prodPerMin: number;
   mine: number; theirs: number; picking: boolean;
   /** Every troop on the map and on the road, by faction. */
   army: { owner: number; n: number }[];
@@ -796,6 +798,7 @@ export default function Game() {
           gold: w.gold, time: w.time, rounds: w.rounds, over: w.over, paused: pausedRef.current, speed: speedRef.current,
           sendPct: sendPctRef.current, selected: sel, tech: { ...w.tech },
           selProdPerMin: sel ? prodOf(w, sel) * 60 : 0, selHold: sel ? Math.ceil(sel.troops * wallMult(sel)) : 0,
+          prodPerMin: w.nodes.filter((n) => n.owner === PLAYER && n.troops < capOf(n) - 0.5).reduce((t, n) => t + prodOf(w, n) * 60, 0),
           mine: w.nodes.filter((n) => n.owner === PLAYER).length, theirs: w.nodes.filter((n) => n.owner >= 2).length, picking: w.picking !== null,
           army: (() => {
             const by = new Map<number, number>();
@@ -1026,7 +1029,10 @@ export default function Game() {
       </div>
       <div className="px-3 pb-2 pt-1">
         <div className="flex items-center justify-between text-[13px]">
-          <div><span className="text-white/40">Gold </span><b className="text-white">{fmt(ui?.gold ?? 0)}</b></div>
+          <div className="leading-tight">
+            <div className="text-[11px] text-white/40"><b className="text-white/80">+{Math.round(ui?.prodPerMin ?? 0)}</b> troops/min</div>
+            <div><span className="text-white/40">Gold </span><b className="text-white">{fmt(ui?.gold ?? 0)}</b></div>
+          </div>
           <div className="flex gap-1.5">
             <button className={`${btn} px-3 py-1.5 ${tab === 'post' ? 'bg-white/20' : 'bg-white/5'}`} onClick={() => setTab('post')}>Outpost</button>
             <button className={`${btn} px-3 py-1.5 ${tab === 'tech' ? 'bg-white/20' : 'bg-white/5'}`} onClick={() => setTab('tech')}>Tech</button>
