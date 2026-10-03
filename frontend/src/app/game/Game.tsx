@@ -13,10 +13,10 @@
 // on the map (outposts already held, a fatter purse) and sharper generals.
 // Clear every red outpost to win. Lose your last one and it's over.
 //
-// Campaign: twelve levels, each meaner than the last. Endless: two red
-// factions that never stay dead, each landing heavier than the last, scored
-// in time survived. Scrap earned either way buys permanent upgrades in the
-// Armoury.
+// Campaign: twelve levels, each meaner than the last. The Long War: one
+// map many screens tall, three factions stacked up it, scrolled with the
+// arrows, won the same way. Scrap earned either way buys permanent upgrades
+// in the Armoury.
 //
 // Everything is one canvas and a few buttons; it is meant for an iPhone held
 // upright in Safari.
@@ -99,6 +99,8 @@ interface Faction { id: number; tick: number; dead: number; gold: number; buyT: 
 
 interface Rules {
   level: number; endless: boolean; nodeCount: number; enemies: number;
+  /** How tall the map is; wider than a screen is scrolled. */
+  mapH: number;
   aiInterval: number; sendFrac: number;
   /** How good the generals are: the margin they will attack on (bigger is
    *  bolder), and how often they think to mass for a push (1 is every tick). */
@@ -113,7 +115,7 @@ interface World {
   convoys: Convoy[]; shots: Shot[]; factions: Faction[];
   gold: number; time: number;
   /** Endless: how many times a broken faction has landed again. */
-  rounds: number; nextId: number;
+  nextId: number;
   tech: Record<TechKey, number>;
   meta: Record<MetaKey, number>;
   over: 'win' | 'lose' | null;
@@ -128,14 +130,14 @@ interface World {
 function rulesFor(level: number, endless: boolean): Rules {
   if (endless) {
     return {
-      level, endless, nodeCount: 18, enemies: 2,
-      aiInterval: 1.4, sendFrac: 0.65, aiMargin: 0.8, aiStageEvery: 2,
-      enemyExtra: 2, enemyGold: 80, neutralBase: 14,
+      level, endless, nodeCount: 90, enemies: 3, mapH: 3200,
+      aiInterval: 1.3, sendFrac: 0.7, aiMargin: 0.8, aiStageEvery: 2,
+      enemyExtra: 4, enemyGold: 200, neutralBase: 14,
     };
   }
   const L = level;
   return {
-    level, endless,
+    level, endless, mapH: MAP_H,
     nodeCount: Math.min(18, 9 + L),
     enemies: L >= 10 ? 3 : L >= 5 ? 2 : 1,
     aiInterval: Math.max(1.0, 3.3 - L * 0.2),
@@ -170,9 +172,9 @@ function buildWorld(rules: Rules, meta: Record<MetaKey, number>, seedExtra = 0):
   const PAD = 34;
   const MIN_D = 74;
   let tries = 0;
-  while (nodes.length < rules.nodeCount && tries++ < 4000) {
+  while (nodes.length < rules.nodeCount && tries++ < 40000) {
     const x = PAD + rnd() * (MAP_W - PAD * 2);
-    const y = PAD + rnd() * (MAP_H - PAD * 2);
+    const y = PAD + rnd() * (rules.mapH - PAD * 2);
     if (nodes.every((n) => Math.hypot(n.x - x, n.y - y) >= MIN_D)) {
       nodes.push({ id: nodes.length, x, y, owner: 0, troops: 0, tier: 1, base: false, prod: 0, wall: 0, cannon: 0, cd: 0, route: null, routeT: 0 });
     }
@@ -219,12 +221,22 @@ function buildWorld(rules: Rules, meta: Record<MetaKey, number>, seedExtra = 0):
   const factions: Faction[] = [];
   for (let f = 0; f < rules.enemies; f++) {
     const fid = 2 + f;
-    let best: Node | null = null; let bestD = -1;
-    for (const n of nodes) {
-      if (taken.has(n.id) || hops[n.id] < Math.min(rules.level >= 6 || rules.endless ? 4 : 3, maxHops)) continue;
-      let d = Math.hypot(n.x - home.x, n.y - home.y) + hops[n.id] * 40;
-      for (const t of taken) if (t !== home.id) d = Math.min(d, Math.hypot(n.x - nodes[t].x, n.y - nodes[t].y) * 1.4);
-      if (d > bestD) { bestD = d; best = n; }
+    let best: Node | null = null; let bestD = -Infinity;
+    if (rules.endless) {
+      // The long war: each HQ sits higher up the map than the last.
+      const want = rules.mapH * (0.62 - 0.28 * f);
+      for (const n of nodes) {
+        if (taken.has(n.id) || hops[n.id] < 4) continue;
+        const d = -Math.abs(n.y - want);
+        if (d > bestD) { bestD = d; best = n; }
+      }
+    } else {
+      for (const n of nodes) {
+        if (taken.has(n.id) || hops[n.id] < Math.min(rules.level >= 6 ? 4 : 3, maxHops)) continue;
+        let d = Math.hypot(n.x - home.x, n.y - home.y) + hops[n.id] * 40;
+        for (const t of taken) if (t !== home.id) d = Math.min(d, Math.hypot(n.x - nodes[t].x, n.y - nodes[t].y) * 1.4);
+        if (d > bestD) { bestD = d; best = n; }
+      }
     }
     if (!best) break;
     best.owner = fid; best.base = true; best.tier = 2; best.troops = 40; best.wall = 1;
@@ -242,7 +254,7 @@ function buildWorld(rules: Rules, meta: Record<MetaKey, number>, seedExtra = 0):
   }
   for (const n of nodes) {
     if (n.owner !== 0) continue;
-    const far = Math.hypot(n.x - home.x, n.y - home.y) / Math.hypot(MAP_W, MAP_H);
+    const far = Math.min(1, Math.hypot(n.x - home.x, n.y - home.y) / Math.hypot(MAP_W, MAP_H));
     n.troops = Math.round(rules.neutralBase * (0.4 + 1.6 * far) + rnd() * 10);
     if (rnd() < 0.18) n.tier = 2;
   }
@@ -250,9 +262,9 @@ function buildWorld(rules: Rules, meta: Record<MetaKey, number>, seedExtra = 0):
   return {
     rules, nodes, edges, adj, convoys: [], shots: [], factions,
     gold: 40 + META.gold.per * meta.gold, time: 0,
-    rounds: 0, nextId: 1,
+    nextId: 1,
     tech: { logistics: 0, conscription: 0 }, meta,
-    over: null, flash: { text: rules.endless ? 'ENDLESS' : `LEVEL ${rules.level}`, age: 0 }, selected: null, picking: null, pickKeep: false,
+    over: null, flash: { text: rules.endless ? 'THE LONG WAR' : `LEVEL ${rules.level}`, age: 0 }, selected: null, picking: null, pickKeep: false,
   };
 }
 
@@ -437,21 +449,6 @@ function aiSpend(w: World, f: Faction) {
   }
 }
 
-// Endless: a broken faction comes back, somewhere, and it may well be
-// behind your lines. The longer the run, the heavier the landing.
-function respawn(w: World, f: Faction) {
-  const pool = w.nodes.filter((n) => !(n.base && n.owner === PLAYER));
-  if (!pool.length) return;
-  w.rounds++;
-  const pick = mulberry32(w.rounds * 31 + f.id * 97);
-  const best = pool[Math.floor(pick() * pool.length)];
-  best.owner = f.id; best.base = true; best.tier = 2; best.troops = 60 + w.rounds * 40;
-  best.cannon = Math.min(3, 1 + Math.floor(w.rounds / 4)); best.wall = Math.min(3, 1 + Math.floor(w.rounds / 3));
-  best.route = null;
-  f.dead = 0; f.gold += 100 + w.rounds * 50;
-  w.flash = { text: `${NAMES[f.id]} LANDS · ${w.rounds}`, age: 0 };
-}
-
 function step(w: World, dt: number) {
   if (w.over) return;
   w.time += dt;
@@ -530,10 +527,7 @@ function step(w: World, dt: number) {
 
   // Generals.
   for (const f of w.factions) {
-    if (f.dead) {
-      if (w.rules.endless && w.time - f.dead > 8) respawn(w, f);
-      continue;
-    }
+    if (f.dead) continue;
     f.tick -= dt;
     if (f.tick <= 0) { aiTick(w, f); f.tick = w.rules.aiInterval; }
     f.buyT -= dt;
@@ -543,10 +537,8 @@ function step(w: World, dt: number) {
   // The end.
   const mine = w.nodes.some((n) => n.owner === PLAYER) || w.convoys.some((c) => c.owner === PLAYER);
   if (!mine) { w.over = 'lose'; return; }
-  if (!w.rules.endless) {
-    const theirs = w.nodes.some((n) => n.owner >= 2) || w.convoys.some((c) => c.owner >= 2);
-    if (!theirs) w.over = 'win';
-  }
+  const theirs = w.nodes.some((n) => n.owner >= 2) || w.convoys.some((c) => c.owner >= 2);
+  if (!theirs) w.over = 'win';
 }
 
 /** What the next level of this costs here, or null at the top. */
@@ -576,7 +568,7 @@ function buyTech(w: World, key: TechKey) {
 
 const nodeR = (n: Node) => (n.base ? 20 : 13 + n.tier * 2);
 
-function draw(ctx: CanvasRenderingContext2D, w: World, view: { s: number; ox: number; oy: number }, drag: { from: number; x: number; y: number; over: number | null } | null) {
+function draw(ctx: CanvasRenderingContext2D, w: World, view: { s: number; ox: number; oy: number; midY: number }, drag: { from: number; x: number; y: number; over: number | null } | null) {
   const { s, ox, oy } = view;
   ctx.save();
   ctx.translate(ox, oy);
@@ -682,7 +674,7 @@ function draw(ctx: CanvasRenderingContext2D, w: World, view: { s: number; ox: nu
     ctx.fillStyle = `rgba(255,255,255,${a})`;
     ctx.font = '800 30px -apple-system, system-ui, sans-serif';
     ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
-    ctx.fillText(w.flash.text, MAP_W / 2, MAP_H * 0.42);
+    ctx.fillText(w.flash.text, MAP_W / 2, view.midY - 40);
   }
   ctx.restore();
 }
@@ -690,13 +682,15 @@ function draw(ctx: CanvasRenderingContext2D, w: World, view: { s: number; ox: nu
 // ── UI ─────────────────────────────────────────────────────────────────────
 
 interface Ui {
-  gold: number; time: number; rounds: number; over: 'win' | 'lose' | null; paused: boolean; speed: number;
+  gold: number; time: number; over: 'win' | 'lose' | null; paused: boolean; speed: number;
   sendPct: number; selected: Node | null; tech: Record<TechKey, number>;
   /** The picked outpost: troops it breeds a minute, and what it takes to fall. */
   selProdPerMin: number; selHold: number;
   /** Everything you hold, breeding, a minute (full outposts breed nothing). */
   prodPerMin: number;
   mine: number; theirs: number; picking: boolean;
+  /** Whether the map runs past the screen, and which way there is more of it. */
+  canUp: boolean; canDown: boolean;
   /** Every troop on the map and on the road, by faction. */
   army: { owner: number; n: number }[];
 }
@@ -714,12 +708,17 @@ export default function Game() {
   const worldRef = useRef<World | null>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const wrapRef = useRef<HTMLDivElement>(null);
-  const viewRef = useRef({ s: 1, ox: 0, oy: 0 });
+  const viewRef = useRef({ s: 1, ox: 0, oy: 0, midY: MAP_H / 2 });
+  // How far down the map the top of the screen is (map px), on a tall map.
+  const scrollRef = useRef(0);
+  const maxScrollRef = useRef(0);
+  const maxScroll = () => maxScrollRef.current;
   const dragRef = useRef<{ from: number; x: number; y: number; moved: boolean; over: number | null } | null>(null);
   const pausedRef = useRef(false);
   const speedRef = useRef(1);
   const sendPctRef = useRef(0.5);
   const settledRef = useRef(false);
+  const scrollByRef = useRef<(dir: number) => void>(() => {});
 
   // localStorage is the browser's: read it once mounted, never on the server.
   useEffect(() => { const t = setTimeout(() => setSave(loadSave()), 0); return () => clearTimeout(t); }, []);
@@ -732,6 +731,8 @@ export default function Game() {
     setRun({ level, endless });
     setTab('post');
     setScreen('play');
+    // Back to the bottom of the map, where home is.
+    scrollRef.current = Infinity; scrollByRef.current(0);
   }, []);
 
   // When a run ends, bank the scrap once.
@@ -740,8 +741,8 @@ export default function Game() {
     settledRef.current = true;
     const s = loadSave();
     if (w.rules.endless) {
-      s.scrap += Math.floor(w.time / 20);
-      s.bestTime = Math.max(s.bestTime, Math.floor(w.time));
+      s.scrap += w.over === 'win' ? 150 : Math.min(30, Math.floor(w.time / 20));
+      if (w.over === 'win') s.bestTime = s.bestTime ? Math.min(s.bestTime, Math.floor(w.time)) : Math.floor(w.time);
     } else if (w.over === 'win') {
       const first = s.cleared < w.rules.level;
       s.scrap += (15 + w.rules.level * 6) * (first ? 2 : 1);
@@ -764,10 +765,27 @@ export default function Game() {
       const dpr = Math.min(2, window.devicePixelRatio || 1);
       canvas.width = Math.round(r.width * dpr); canvas.height = Math.round(r.height * dpr);
       canvas.style.width = `${r.width}px`; canvas.style.height = `${r.height}px`;
-      const s = Math.min(r.width / MAP_W, r.height / MAP_H);
-      viewRef.current = { s: s * dpr, ox: (r.width - MAP_W * s) / 2 * dpr, oy: (r.height - MAP_H * s) / 2 * dpr };
+      const mapH = worldRef.current?.rules.mapH ?? MAP_H;
+      // Fit the map, or fit its width and scroll, when it is taller than that.
+      let s = Math.min(r.width / MAP_W, r.height / mapH);
+      let oy = (r.height - mapH * s) / 2;
+      // Too small to read whole: fill the width instead and scroll it.
+      if (s < 0.55) { s = (r.width / MAP_W) * 0.8; oy = 0; }
+      const visibleH = r.height / s;
+      maxScrollRef.current = Math.max(0, mapH - visibleH);
+      scrollRef.current = Math.max(0, Math.min(maxScrollRef.current, scrollRef.current));
+      if (maxScrollRef.current > 0) oy = -scrollRef.current * s;
+      const midY = (r.height / 2 - oy) / s;
+      viewRef.current = { s: s * dpr, ox: (r.width - MAP_W * s) / 2 * dpr, oy: oy * dpr, midY };
     };
+    scrollRef.current = Infinity; // start at the bottom: home
     fit();
+    scrollByRef.current = (dir: number) => {
+      const r = wrap.getBoundingClientRect();
+      const visibleH = r.height / (viewRef.current.s / Math.min(2, window.devicePixelRatio || 1));
+      scrollRef.current += dir * visibleH * 0.6;
+      fit();
+    };
     const ro = new ResizeObserver(fit);
     ro.observe(wrap);
     let last = performance.now();
@@ -795,11 +813,12 @@ export default function Game() {
         uiAcc = 0;
         const sel = w.selected !== null ? { ...w.nodes[w.selected] } : null;
         setUi({
-          gold: w.gold, time: w.time, rounds: w.rounds, over: w.over, paused: pausedRef.current, speed: speedRef.current,
+          gold: w.gold, time: w.time, over: w.over, paused: pausedRef.current, speed: speedRef.current,
           sendPct: sendPctRef.current, selected: sel, tech: { ...w.tech },
           selProdPerMin: sel ? prodOf(w, sel) * 60 : 0, selHold: sel ? Math.ceil(sel.troops * wallMult(sel)) : 0,
           prodPerMin: w.nodes.filter((n) => n.owner === PLAYER && n.troops < capOf(n) - 0.5).reduce((t, n) => t + prodOf(w, n) * 60, 0),
           mine: w.nodes.filter((n) => n.owner === PLAYER).length, theirs: w.nodes.filter((n) => n.owner >= 2).length, picking: w.picking !== null,
+          canUp: scrollRef.current > 0.5, canDown: scrollRef.current < maxScroll() - 0.5,
           army: (() => {
             const by = new Map<number, number>();
             for (const n of w.nodes) if (n.owner !== 0) by.set(n.owner, (by.get(n.owner) ?? 0) + n.troops);
@@ -892,7 +911,7 @@ export default function Game() {
           <div className="text-sm text-white/50 mt-1">Hold the line. Then take theirs.</div>
           <div className="mt-5 flex items-center justify-between rounded-2xl bg-white/5 px-4 py-3">
             <div><div className="text-[11px] uppercase tracking-wider text-white/40">Scrap</div><div className="text-xl font-bold">{save.scrap}</div></div>
-            <div className="text-right"><div className="text-[11px] uppercase tracking-wider text-white/40">Best endless</div><div className="text-xl font-bold">{save.bestTime ? clock(save.bestTime) : '—'}</div></div>
+            <div className="text-right"><div className="text-[11px] uppercase tracking-wider text-white/40">Long war best</div><div className="text-xl font-bold">{save.bestTime ? clock(save.bestTime) : '—'}</div></div>
             <button className={`${btn} bg-white/10 px-4 py-2 text-sm`} onClick={() => setScreen('armoury')}>Armoury</button>
           </div>
           <div className="mt-6 text-[11px] uppercase tracking-wider text-white/40">Campaign</div>
@@ -910,7 +929,7 @@ export default function Game() {
           </div>
           <button disabled={!endlessOpen} onClick={() => start(1, true)}
             className={`${btn} mt-6 w-full bg-white py-4 text-lg text-black`}>
-            {endlessOpen ? 'ENDLESS' : `Endless unlocks after level ${ENDLESS_UNLOCK}`}
+            {endlessOpen ? 'THE LONG WAR' : `The Long War unlocks after level ${ENDLESS_UNLOCK}`}
           </button>
           <div className="mt-8 space-y-2 text-[13px] leading-snug text-white/50">
             <p><b className="text-white/80">Drag</b> from one of your outposts to any other to march. Columns take the shortest road through your ground and fight at the first outpost on it that is not yours, and columns that outnumber the defenders take the ground. <b className="text-white/80">Tap</b> an outpost to build on it, or give it a standing order to keep shipping troops somewhere.</p>
@@ -983,8 +1002,8 @@ export default function Game() {
       <div className="flex items-center justify-between px-3 pt-2 pb-1 text-[13px]">
         <button className={`${btn} bg-white/10 px-3 py-1.5`} onClick={() => { setScreen('menu'); worldRef.current = null; }}>✕</button>
         <div className="text-center">
-          <div className="font-black">{run.endless ? 'ENDLESS' : `LEVEL ${run.level}`} <span className="text-white/40">· {clock(ui?.time ?? 0)}</span></div>
-          <div className="text-[11px] text-white/45">{ui?.mine ?? 0} vs {ui?.theirs ?? 0} outposts{run.endless ? ` · landing ${ui?.rounds ?? 0}` : ''}</div>
+          <div className="font-black">{run.endless ? 'LONG WAR' : `LEVEL ${run.level}`} <span className="text-white/40">· {clock(ui?.time ?? 0)}</span></div>
+          <div className="text-[11px] text-white/45">{ui?.mine ?? 0} vs {ui?.theirs ?? 0} outposts</div>
         </div>
         <div className="flex gap-1.5">
           <button className={`${btn} bg-white/10 px-2.5 py-1.5`} onClick={() => { if (confirm('Restart this level?')) start(run.level, run.endless); }}>↻</button>
@@ -1013,10 +1032,16 @@ export default function Game() {
       <div ref={wrapRef} className="relative flex-1 min-h-0">
         <canvas ref={canvasRef} className="absolute inset-0 block" style={{ touchAction: 'none' }}
           onPointerDown={onDown} onPointerMove={onMove} onPointerUp={onUp} onPointerCancel={onUp} />
+        {(ui?.canUp || ui?.canDown) && (
+          <div className="absolute left-2 top-2 flex flex-col gap-1.5">
+            <button disabled={!ui?.canUp} className={`${btn} h-11 w-11 bg-white/10 text-lg`} onClick={() => scrollByRef.current(-1)}>▲</button>
+            <button disabled={!ui?.canDown} className={`${btn} h-11 w-11 bg-white/10 text-lg`} onClick={() => scrollByRef.current(1)}>▼</button>
+          </div>
+        )}
         {ui?.over && (
           <div className="absolute inset-0 flex flex-col items-center justify-center bg-black/70 px-8 text-center">
             <div className={`text-5xl font-black ${ui.over === 'win' ? 'text-white' : 'text-[#ff3b3b]'}`}>{ui.over === 'win' ? 'HELD' : 'OVERRUN'}</div>
-            <div className="mt-2 text-white/60">{run.endless ? `Survived ${clock(ui.time)}, ${ui.rounds} landings.` : ui.over === 'win' ? `Level ${run.level} cleared in ${clock(ui.time)}.` : `Fell at ${clock(ui.time)}.`}</div>
+            <div className="mt-2 text-white/60">{ui.over === 'win' ? `${run.endless ? 'The long war won' : `Level ${run.level} cleared`} in ${clock(ui.time)}.` : `Fell at ${clock(ui.time)}.`}</div>
             <div className="mt-6 flex gap-3">
               <button className={`${btn} bg-white/10 px-5 py-3`} onClick={() => { setScreen('menu'); worldRef.current = null; }}>Menu</button>
               <button className={`${btn} bg-white px-5 py-3 text-black`} onClick={() => start(run.level, run.endless)}>{ui.over === 'win' ? 'Again' : 'Retry'}</button>
