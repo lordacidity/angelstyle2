@@ -1614,7 +1614,7 @@ export default function Game() {
     return (
       <button key={k} onPointerDown={down} onPointerUp={up} onPointerLeave={up} onPointerCancel={up} onContextMenu={(e) => e.preventDefault()}
         onClick={() => { if (holdRef.current.fired) { holdRef.current.fired = false; return; } if (!poor) act((w) => buyUpgrade(w, n.id, k)); }}
-        className={`${btn} relative flex flex-col items-start rounded-xl px-3 py-1 text-left ${auto ? 'bg-[#ff4fa3]/15 ring-1 ring-[#ff4fa3]/70' : 'bg-white/5'} ${poor && !auto ? 'opacity-30' : ''}`}>
+        className={`${btn} relative flex flex-col items-start rounded-xl px-3 py-1 text-left ${auto ? 'bg-[#ff4fa3]/15 ring-1 ring-inset ring-[#ff4fa3]/70' : 'bg-white/5'} ${poor && !auto ? 'opacity-30' : ''}`}>
         {k === 'prod' && <span className="absolute right-1.5 top-1.5 h-2 w-2 rounded-full bg-[#38e08a]" />}
         <div className="flex w-full items-center justify-between text-[13px]"><b>{u.name}{auto && <span className="ml-1.5 text-[9px] font-bold tracking-wide text-[#ff4fa3]">AUTO</span>}</b><span className="text-white">{cost}g</span></div>
         <div className="text-[11px] text-white/45">{(() => {
@@ -1669,7 +1669,8 @@ export default function Game() {
         <div className="pointer-events-none absolute inset-x-0 bottom-0 flex items-end justify-between px-3 pb-1.5 text-[13px]">
           <div className="flex flex-col items-start gap-1.5">
             <div className="rounded-md bg-[#000000] px-1 text-[15px] leading-tight"><span className="text-white/40">Gold </span><b className="text-white">{fmt(ui?.gold ?? 0)}</b></div>
-            <button className={`${btn} pointer-events-auto whitespace-nowrap bg-[#1c1c1c] px-3 py-1.5`} onClick={() => act((w) => { for (const n of w.nodes) n.route = null; w.picking = null; w.picked = []; })}>Clear autos</button>
+            <button className={`${btn} pointer-events-auto whitespace-nowrap bg-[#1c1c1c] px-3 py-1.5`} onClick={() => act((w) => { for (const n of w.nodes) n.auto = {}; })}>Clear AU</button>
+            <button className={`${btn} pointer-events-auto whitespace-nowrap bg-[#1c1c1c] px-3 py-1.5`} onClick={() => act((w) => { for (const n of w.nodes) n.route = null; w.picking = null; w.picked = []; })}>Clear AS</button>
           </div>
           <div className="flex flex-col items-end gap-1.5">
             <button className={`${btn} pointer-events-auto bg-[#1c1c1c] px-3 py-1.5`} onClick={() => { const steps = [0.5, 1, 2]; speedRef.current = steps[(steps.indexOf(speedRef.current) + 1) % steps.length]; }}>{ui?.speed ?? 1}×</button>
