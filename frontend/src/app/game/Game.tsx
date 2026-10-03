@@ -59,10 +59,10 @@ const MINE_GOLD = [0, 1.5, 3, 5];
 const MINE_TROOPS = [100, 150, 250];
 
 const TECH = {
-  logistics: { name: 'Logistics', cost: [80, 280], desc: 'columns march 25% faster' },
-  conscription: { name: 'Conscription', cost: [100, 160, 240, 520], desc: '+15% troops/s everywhere' },
-  tithe: { name: 'Tithe', cost: [150, 340], desc: '+20% gold from all ground' },
-  scouts: { name: 'Scouts', cost: [120, 280], desc: 'cannons reach 15% further' },
+  logistics: { name: 'Logistics', cost: [80, 280], desc: 'march 25% faster' },
+  conscription: { name: 'Conscription', cost: [100, 160, 240, 520], desc: '+15% troops/s' },
+  tithe: { name: 'Tithe', cost: [150, 340], desc: '+20% gold' },
+  scouts: { name: 'Scouts', cost: [120, 280], desc: '+15% cannon range' },
 } as const;
 type TechKey = keyof typeof TECH;
 
@@ -1126,7 +1126,7 @@ export default function Game() {
     const cost = max ? 0 : costs[lvl];
     return (
       <button key={k} disabled={max || (ui?.gold ?? 0) < cost} onClick={() => act((w) => buyUpgrade(w, n.id, k))}
-        className={`${btn} flex flex-col items-start rounded-xl bg-white/5 px-3 py-1.5 text-left`}>
+        className={`${btn} flex flex-col items-start rounded-xl bg-white/5 px-3 py-1 text-left`}>
         <div className="flex w-full items-center justify-between text-[13px]"><b>{u.name}</b><span className="text-white">{max ? 'MAX' : `${cost}g`}</span></div>
         <div className="text-[11px] text-white/45">{(() => {
           // Barracks and Expand: what the next level adds here, a minute.
@@ -1176,11 +1176,11 @@ export default function Game() {
           onPointerDown={onDown} onPointerMove={onMove} onPointerUp={onUp} onPointerCancel={onUp} />
         {/* A tall map: a scrollbar down the left, dragged or tapped, the thumb as long as the view is. */}
         {ui && ui.viewFrac < 1 && (
-          <div className="absolute bottom-2 left-0 top-2 w-7" style={{ touchAction: 'none' }}
+          <div className="absolute bottom-2 left-0 top-2 w-11" style={{ touchAction: 'none' }}
             onPointerDown={(e) => { e.currentTarget.setPointerCapture(e.pointerId); const r = e.currentTarget.getBoundingClientRect(); const vf = ui.viewFrac; scrollToRef.current(((e.clientY - r.top) / r.height - vf / 2) / (1 - vf)); }}
             onPointerMove={(e) => { if (e.buttons === 0 && e.pointerType === 'mouse') return; if (!e.currentTarget.hasPointerCapture(e.pointerId)) return; const r = e.currentTarget.getBoundingClientRect(); const vf = ui.viewFrac; scrollToRef.current(((e.clientY - r.top) / r.height - vf / 2) / (1 - vf)); }}>
-            <div className="absolute bottom-0 left-2.5 top-0 w-1.5 rounded-full bg-white/10" />
-            <div className="absolute left-2.5 w-1.5 rounded-full bg-white/70" style={{ top: `${ui.scrollFrac * (1 - ui.viewFrac) * 100}%`, height: `${ui.viewFrac * 100}%` }} />
+            <div className="absolute bottom-0 left-2 top-0 w-3 rounded-full bg-white/10" />
+            <div className="absolute left-2 w-3 rounded-full bg-white/70" style={{ top: `${ui.scrollFrac * (1 - ui.viewFrac) * 100}%`, height: `${ui.viewFrac * 100}%` }} />
           </div>
         )}
         {ui?.over && (
@@ -1197,7 +1197,7 @@ export default function Game() {
           </div>
         )}
       </div>
-      <div className="px-3 pb-1 pt-1">
+      <div className="px-3 pb-0.5 pt-1">
         <div className="flex items-center justify-between text-[13px]">
           <div className="leading-tight">
             <button className={`${btn} mb-0.5 whitespace-nowrap bg-white/10 px-2 py-0.5 text-[11px]`} onClick={() => act((w) => { for (const n of w.nodes) n.route = null; w.picking = null; w.picked = []; })}>Clear autos</button>
@@ -1212,14 +1212,14 @@ export default function Game() {
             </button>
           </div>
         </div>
-        <div className="mt-1.5 h-[166px]">
+        <div className="mt-1 h-[154px]">
           {tab === 'tech' ? (
             <div className="grid grid-cols-2 gap-1.5">
               {(Object.keys(TECH) as TechKey[]).map((k) => {
                 const t = TECH[k]; const lvl = ui?.tech[k] ?? 0; const costs = t.cost as readonly number[]; const max = lvl >= costs.length; const cost = max ? 0 : costs[lvl];
                 return (
                   <button key={k} disabled={max || (ui?.gold ?? 0) < cost} onClick={() => act((w) => buyTech(w, k))}
-                    className={`${btn} flex flex-col items-start rounded-xl bg-white/5 px-3 py-1.5 text-left`}>
+                    className={`${btn} flex flex-col items-start rounded-xl bg-white/5 px-3 py-1 text-left`}>
                     <div className="flex w-full items-center justify-between text-[13px]"><b>{t.name}</b><span className="text-white">{max ? 'MAX' : `${cost}g`}</span></div>
                     <div className="text-[11px] text-white/45">{t.desc} · {lvl}/{costs.length}</div>
                   </button>
@@ -1236,7 +1236,7 @@ export default function Game() {
             </div>
           ) : (
             <>
-              <div className="mb-1.5 flex items-center justify-between text-[12px]">
+              <div className="mb-1 flex items-center justify-between text-[12px]">
                 {ui?.picking ? (
                   <span className="text-[#ffd166]">{ui.pickN === 1 ? 'Tap the target.' : ui.pickLeft === 2 ? 'Tap the first target.' : 'Tap the second.'}</span>
                 ) : (
@@ -1268,7 +1268,7 @@ export default function Game() {
                   <div className="grid grid-cols-2 gap-1.5">{upgRows(sel)}</div>
                   {!sel.base && (
                     <button disabled={sel.troops < MINE_TROOPS[0]} onClick={() => act((w) => digMine(w, sel.id))}
-                      className={`${btn} mt-1.5 flex w-full items-center justify-between rounded-xl bg-white/5 px-3 py-1.5 text-left`}>
+                      className={`${btn} mt-1 flex w-full items-center justify-between rounded-xl bg-white/5 px-3 py-1 text-left`}>
                       <span className="text-[13px]"><b className="text-[#ffd166]">Dig mine</b> <span className="text-white/45">· +{Math.round(MINE_GOLD[1] * 60)} gold/min</span></span>
                       <span className="text-[12px] text-white/60">{MINE_TROOPS[0]} troops</span>
                     </button>
