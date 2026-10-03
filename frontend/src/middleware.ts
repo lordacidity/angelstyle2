@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { verifyToken, COOKIE_NAME, SITE_SCOPE } from '@/lib/auth';
 import { CLIPPERS } from '@/lib/clipping';
 import { hasAidenToken } from '@/lib/aiden-auth';
+import { GAME_KEY } from '@/lib/game-key';
 
 // Site-wide password gate. Every route requires a signed `site_auth` cookie except the
 // unlock UI/endpoint (and framework internals, excluded via the matcher). The cookie is
@@ -114,6 +115,13 @@ export async function middleware(req: NextRequest) {
   }
 
   if (PUBLIC_PREFIXES.some((p) => pathname === p || pathname.startsWith(p + '/'))) {
+    return NextResponse.next();
+  }
+
+  // The game: open to the exact link and nothing else. Without the key the
+  // page itself answers 404 (src/app/game/page.tsx), and here it is just
+  // another locked path.
+  if (pathname === '/game' && req.nextUrl.searchParams.get('k') === GAME_KEY) {
     return NextResponse.next();
   }
 
