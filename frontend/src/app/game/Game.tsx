@@ -7,15 +7,16 @@
 // breeds troops. Tap one of yours, tap a neighbour, and a column marches: if
 // it outnumbers what is waiting it takes the ground, otherwise it dies on the
 // walls. Gold trickles in from everything you hold and buys walls, barracks,
-// cannons and bigger outposts. Every thirty seconds or so a WAVE lands on
-// the red: its outposts fill up, its generals get bolder, and the longer the
-// level runs the worse it gets. Clear every red outpost to win. Lose your
-// last one and it's over.
+// cannons and bigger outposts. The red plays by the same rules: same
+// breeding, same caps, the same gold from the same ground, spent on the same
+// upgrades. What it gets on the harder levels is a head start you can see
+// on the map (outposts already held, a fatter purse) and sharper generals.
+// Clear every red outpost to win. Lose your last one and it's over.
 //
 // Campaign: twelve levels, each meaner than the last. Endless: two red
-// factions that never stay dead, counted in waves survived. Scrap earned
-// either way buys permanent upgrades in the Armoury. The numbers below are
-// tuned so the early levels teach and the later ones take a few deaths.
+// factions that never stay dead, each landing heavier than the last, scored
+// in time survived. Scrap earned either way buys permanent upgrades in the
+// Armoury.
 //
 // Everything is one canvas and a few buttons; it is meant for an iPhone held
 // upright in Safari.
@@ -33,13 +34,13 @@ const PLAYER = 1;
 const COLORS: Record<number, string> = { 0: '#4a4a4a', 1: '#ffffff', 2: '#ff3b3b', 3: '#ff8a3b', 4: '#c04bff' };
 const NAMES: Record<number, string> = { 2: 'RED', 3: 'AMBER', 4: 'VIOLET' };
 
-const TIER_CAP = [40, 70, 120];
+const TIER_CAP = [40, 75, 150];
 const TIER_PROD = [1, 1.5, 2.2];
 const BASE_PROD_PER_S = 0.9;
 
 const UPG = {
   prod: { name: 'Barracks', cost: [30, 55, 95], desc: '+35% troops/s' },
-  wall: { name: 'Walls', cost: [25, 50, 90], desc: '+30% defence' },
+  wall: { name: 'Walls', cost: [25, 50, 90], desc: '+20% defence' },
   cannon: { name: 'Cannon', cost: [45, 80, 130], desc: 'shoots passing enemies' },
   tier: { name: 'Expand', cost: [60, 130], desc: 'bigger, faster' },
 } as const;
@@ -64,9 +65,9 @@ type MetaKey = keyof typeof META;
 
 // ── Save ───────────────────────────────────────────────────────────────────
 
-interface Save { scrap: number; cleared: number; bestWave: number; meta: Record<MetaKey, number> }
+interface Save { scrap: number; cleared: number; bestTime: number; meta: Record<MetaKey, number> }
 const SAVE_KEY = 'redline.v1';
-const freshSave = (): Save => ({ scrap: 0, cleared: 0, bestWave: 0, meta: { prod: 0, speed: 0, gold: 0, cannon: 0 } });
+const freshSave = (): Save => ({ scrap: 0, cleared: 0, bestTime: 0, meta: { prod: 0, speed: 0, gold: 0, cannon: 0 } });
 function loadSave(): Save {
   try {
     const raw = localStorage.getItem(SAVE_KEY);
@@ -92,20 +93,25 @@ interface Edge { a: number; b: number; len: number }
  *  whole route, and `leg` which step of it. */
 interface Convoy { id: number; owner: number; n: number; from: number; to: number; t: number; dur: number; path: number[]; leg: number }
 interface Shot { x1: number; y1: number; x2: number; y2: number; age: number }
-interface Faction { id: number; tick: number; dead: number }
+interface Faction { id: number; tick: number; dead: number; gold: number; buyT: number }
 
 interface Rules {
   level: number; endless: boolean; nodeCount: number; enemies: number;
-  enemyProd: number; aiInterval: number; sendFrac: number; waveLen: number;
-  enemyStart: number; enemyExtra: number; neutralBase: number; enemyWall: number; enemyCannon: number;
+  aiInterval: number; sendFrac: number;
+  /** How good the generals are: the margin they will attack on (bigger is
+   *  bolder), and how often they think to mass for a push (1 is every tick). */
+  aiMargin: number; aiStageEvery: number;
+  /** The head start: outposts already held beside each HQ, and gold in hand. */
+  enemyExtra: number; enemyGold: number; neutralBase: number;
 }
 
 interface World {
   rules: Rules;
   nodes: Node[]; edges: Edge[]; adj: number[][];
   convoys: Convoy[]; shots: Shot[]; factions: Faction[];
-  gold: number; wave: number; waveT: number; time: number;
-  surge: number; nextId: number;
+  gold: number; time: number;
+  /** Endless: how many times a broken faction has landed again. */
+  rounds: number; nextId: number;
   tech: Record<TechKey, number>;
   meta: Record<MetaKey, number>;
   over: 'win' | 'lose' | null;
@@ -119,8 +125,8 @@ function rulesFor(level: number, endless: boolean): Rules {
   if (endless) {
     return {
       level, endless, nodeCount: 18, enemies: 2,
-      enemyProd: 1.0, aiInterval: 1.6, sendFrac: 0.6, waveLen: 28,
-      enemyStart: 25, enemyExtra: 1, neutralBase: 14, enemyWall: 1, enemyCannon: 1,
+      aiInterval: 1.4, sendFrac: 0.65, aiMargin: 0.8, aiStageEvery: 2,
+      enemyExtra: 2, enemyGold: 80, neutralBase: 14,
     };
   }
   const L = level;
@@ -128,15 +134,13 @@ function rulesFor(level: number, endless: boolean): Rules {
     level, endless,
     nodeCount: Math.min(18, 9 + L),
     enemies: L >= 10 ? 3 : L >= 5 ? 2 : 1,
-    enemyProd: 0.65 + L * 0.03,
-    aiInterval: Math.max(1.1, 2.6 - L * 0.11),
+    aiInterval: Math.max(1.0, 3.3 - L * 0.2),
     sendFrac: Math.min(0.8, 0.5 + L * 0.025),
-    waveLen: Math.max(18, 32 - L * 1.2),
-    enemyStart: 10 + L * 2,
-    enemyExtra: Math.floor(L / 4),
+    aiMargin: Math.min(0.85, 0.45 + L * 0.035),
+    aiStageEvery: Math.max(1, 7 - Math.ceil(L / 2)),
+    enemyExtra: Math.min(3, Math.floor(L / 3)),
+    enemyGold: L * 20,
     neutralBase: 6 + L * 2,
-    enemyWall: Math.min(3, Math.floor(L / 3)),
-    enemyCannon: L >= 7 ? 1 : 0,
   };
 }
 
@@ -219,8 +223,7 @@ function buildWorld(rules: Rules, meta: Record<MetaKey, number>, seedExtra = 0):
       if (d > bestD) { bestD = d; best = n; }
     }
     if (!best) break;
-    best.owner = fid; best.base = true; best.tier = 2; best.troops = rules.enemyStart;
-    best.wall = rules.enemyWall; best.cannon = rules.enemyCannon;
+    best.owner = fid; best.base = true; best.tier = 2; best.troops = 40; best.wall = 1;
     taken.add(best.id);
     // A few outposts already theirs, beside the base.
     let extra = rules.enemyExtra;
@@ -228,10 +231,10 @@ function buildWorld(rules: Rules, meta: Record<MetaKey, number>, seedExtra = 0):
       if (extra <= 0) break;
       const n = nodes[nb];
       if (taken.has(n.id) || n.owner !== 0) continue;
-      n.owner = fid; n.troops = Math.round(rules.enemyStart * 0.4); n.wall = Math.max(0, rules.enemyWall - 1);
+      n.owner = fid; n.troops = 15;
       taken.add(n.id); extra--;
     }
-    factions.push({ id: fid, tick: rnd() * rules.aiInterval, dead: 0 });
+    factions.push({ id: fid, tick: rnd() * rules.aiInterval, dead: 0, gold: rules.enemyGold, buyT: 3 });
   }
   for (const n of nodes) {
     if (n.owner !== 0) continue;
@@ -242,8 +245,8 @@ function buildWorld(rules: Rules, meta: Record<MetaKey, number>, seedExtra = 0):
 
   return {
     rules, nodes, edges, adj, convoys: [], shots: [], factions,
-    gold: 40 + META.gold.per * meta.gold, wave: 0, waveT: rules.waveLen, time: 0,
-    surge: 0, nextId: 1,
+    gold: 40 + META.gold.per * meta.gold, time: 0,
+    rounds: 0, nextId: 1,
     tech: { logistics: 0, conscription: 0 }, meta,
     over: null, flash: { text: rules.endless ? 'ENDLESS' : `LEVEL ${rules.level}`, age: 0 }, selected: null, picking: null,
   };
@@ -252,16 +255,17 @@ function buildWorld(rules: Rules, meta: Record<MetaKey, number>, seedExtra = 0):
 // ── Simulation ─────────────────────────────────────────────────────────────
 
 const capOf = (n: Node) => TIER_CAP[n.tier - 1] * (n.base ? 1.5 : 1);
-const wallMult = (n: Node) => 1 + 0.3 * n.wall;
+const wallMult = (n: Node) => 1 + 0.2 * n.wall;
+// One formula for everyone. Your tech and Armoury sit on top; the red has
+// neither, only what it builds on the ground.
 const prodOf = (w: World, n: Node) => {
-  let m = n.owner === PLAYER
-    ? (1 + META.prod.per * w.meta.prod / 100) * (1 + 0.15 * w.tech.conscription)
-    : w.rules.enemyProd * (w.rules.endless ? 1 + w.wave * 0.12 : 1 + w.wave * (0.05 + w.rules.level * 0.015));
+  let m = n.owner === PLAYER ? (1 + META.prod.per * w.meta.prod / 100) * (1 + 0.15 * w.tech.conscription) : 1;
   m *= (n.base ? 1.5 : 1) * TIER_PROD[n.tier - 1] * (1 + 0.35 * n.prod);
   return BASE_PROD_PER_S * m;
 };
+const goldOf = (n: Node) => (n.base ? 1.0 : 0.35 + 0.15 * (n.tier - 1));
 const convoySpeed = (w: World, owner: number) =>
-  60 * (owner === PLAYER ? (1 + META.speed.per * w.meta.speed / 100) * (1 + 0.25 * w.tech.logistics) : 1 + w.rules.level * 0.02 + (w.rules.endless ? w.wave * 0.01 : 0));
+  60 * (owner === PLAYER ? (1 + META.speed.per * w.meta.speed / 100) * (1 + 0.25 * w.tech.logistics) : 1);
 const convoyPos = (w: World, c: Convoy) => {
   const a = w.nodes[c.from], b = w.nodes[c.to];
   return { x: a.x + (b.x - a.x) * c.t, y: a.y + (b.y - a.y) * c.t };
@@ -342,11 +346,10 @@ function arrive(w: World, c: Convoy) {
 
 // What a faction's general does with every outpost it holds, once a tick:
 // takes what it can beat, keeps pressure on what it almost can, and feeds
-// the front from the rear. Bolder on a surge.
+// the front from the rear.
 function aiTick(w: World, f: Faction) {
   const r = w.rules;
-  const boost = w.surge > 0 ? 1.3 : 1;
-  const frac = Math.min(0.9, r.sendFrac * boost);
+  const frac = r.sendFrac;
   for (const n of w.nodes) {
     if (n.owner !== f.id || n.troops < 8) continue;
     // Only the HQ acts every tick: an outpost's garrison sits out half of them.
@@ -369,25 +372,64 @@ function aiTick(w: World, f: Faction) {
       const yours = hostile.filter((m) => m.owner === PLAYER).sort((a, b) => a.troops * wallMult(a) - b.troops * wallMult(b));
       if (yours.length && avail > yours[0].troops * wallMult(yours[0]) * 0.6) { send(w, n.id, yours[0].id, 0.8); continue; }
     }
-    // Rear outpost: feed the front.
-    if (hostile.length === 0 && n.troops > 15) {
-      const front = nbs.filter((m) => m.owner === f.id && w.adj[m.id].some((i) => w.nodes[i].owner !== f.id))
-        .sort((a, b) => a.troops - b.troops);
-      if (front.length) send(w, n.id, front[0].id, 0.6);
-    }
+  }
+  // Nothing falls to one column: the general picks the target that is
+  // nearest to falling, stages for it — every outpost of its that touches
+  // nothing hostile ships to the outpost of its beside the target, by road,
+  // however far — and goes when what is staged plus what touches the target
+  // can break it. Columns arrive one after another and each thins the walls
+  // for the next.
+  let bestT: Node | null = null; let bestRatio = Infinity; let bestFrom: Node[] = [];
+  for (const m of w.nodes) {
+    if (m.owner === f.id) continue;
+    const ring = w.adj[m.id].filter((i) => w.nodes[i].owner === f.id);
+    if (!ring.length) continue;
+    const ids = new Set<number>(ring);
+    for (const i of ring) for (const j of w.adj[i]) if (w.nodes[j].owner === f.id && j !== m.id) ids.add(j);
+    const from = [...ids].map((i) => w.nodes[i]).filter((n) => n.troops >= 10);
+    if (!from.length) continue;
+    const incoming = w.convoys.filter((c) => c.to === m.id && c.owner === m.owner).reduce((s, c) => s + c.n, 0);
+    const need = (m.troops + incoming) * wallMult(m) + 1 + (m.cannon ? 15 * m.cannon : 0);
+    const avail = from.reduce((s, n) => s + n.troops * frac, 0);
+    const ratio = need / avail;
+    if (ratio < bestRatio) { bestRatio = ratio; bestT = m; bestFrom = from; }
+  }
+  if (!bestT) return;
+  if (bestRatio < r.aiMargin) { for (const n of bestFrom) send(w, n.id, bestT.id, frac); return; }
+  if (Math.floor(w.time / r.aiInterval) % r.aiStageEvery !== 0) return;
+  const stage = w.adj[bestT.id].map((i) => w.nodes[i]).filter((n) => n.owner === f.id).sort((a, b) => b.troops - a.troops)[0];
+  if (!stage) return;
+  for (const n of w.nodes) {
+    if (n.owner !== f.id || n.id === stage.id || n.troops < 12) continue;
+    if (w.adj[n.id].some((i) => w.nodes[i].owner !== f.id && w.nodes[i].owner !== 0)) continue; // it holds a front
+    send(w, n.id, stage.id, 0.7);
   }
 }
 
-function surge(w: World) {
-  const r = w.rules;
-  const L = r.endless ? 6 + w.wave * 0.5 : r.level;
-  for (const n of w.nodes) {
-    if (n.owner < 2) continue;
-    n.troops += n.base ? (3 + L) * w.wave : (1 + L * 0.35) * w.wave;
-    if (r.endless && w.wave % 4 === 0) n.wall = Math.min(3, n.wall + 1);
+// What a general buys, every few seconds, out of the same purse you have:
+// walls and then a cannon where the enemy is closest, barracks and a bigger
+// HQ behind that. One thing a tick, the most urgent it can afford.
+function aiSpend(w: World, f: Faction) {
+  const mine = w.nodes.filter((n) => n.owner === f.id);
+  if (!mine.length) return;
+  const threat = (n: Node) => w.adj[n.id].reduce((s, i) => s + (w.nodes[i].owner !== f.id && w.nodes[i].owner !== 0 ? w.nodes[i].troops : 0), 0);
+  const front = mine.filter((n) => threat(n) > 0).sort((a, b) => threat(b) - threat(a));
+  const hq = mine.find((n) => n.base) ?? mine[0];
+  const wants: [Node, UpgKey][] = [];
+  for (const n of front.slice(0, 2)) { if (n.wall < 2) wants.push([n, 'wall']); }
+  if (front[0] && front[0].cannon < 1) wants.push([front[0], 'cannon']);
+  if (hq.prod < 2) wants.push([hq, 'prod']);
+  if (front[0] && front[0].wall < 3) wants.push([front[0], 'wall']);
+  if (hq.tier < 3) wants.push([hq, 'tier']);
+  if (front[0] && front[0].cannon < 3) wants.push([front[0], 'cannon']);
+  for (const n of mine) if (n.prod < 3) wants.push([n, 'prod']);
+  for (const [n, k] of wants) {
+    const cost = upgradeCost(n, k);
+    if (cost === null) continue;
+    if (f.gold < cost) return; // the most urgent thing it cannot yet afford: save for it
+    f.gold -= cost; applyUpgrade(n, k);
+    return;
   }
-  w.surge = 6;
-  w.flash = { text: `WAVE ${w.wave}`, age: 0 };
 }
 
 // Endless: a broken faction comes back, somewhere, and it may well be
@@ -395,26 +437,28 @@ function surge(w: World) {
 function respawn(w: World, f: Faction) {
   const pool = w.nodes.filter((n) => !(n.base && n.owner === PLAYER));
   if (!pool.length) return;
-  const pick = mulberry32(w.wave * 31 + f.id * 97);
+  w.rounds++;
+  const pick = mulberry32(w.rounds * 31 + f.id * 97);
   const best = pool[Math.floor(pick() * pool.length)];
-  best.owner = f.id; best.base = true; best.tier = 2; best.troops = 40 + w.wave * 15;
-  best.cannon = Math.min(3, 1 + Math.floor(w.wave / 6)); best.wall = Math.min(3, 1 + Math.floor(w.wave / 4));
-  f.dead = 0;
-  w.flash = { text: `${NAMES[f.id]} LANDS`, age: 0 };
+  best.owner = f.id; best.base = true; best.tier = 2; best.troops = 60 + w.rounds * 40;
+  best.cannon = Math.min(3, 1 + Math.floor(w.rounds / 4)); best.wall = Math.min(3, 1 + Math.floor(w.rounds / 3));
+  best.route = null;
+  f.dead = 0; f.gold += 100 + w.rounds * 50;
+  w.flash = { text: `${NAMES[f.id]} LANDS · ${w.rounds}`, age: 0 };
 }
 
 function step(w: World, dt: number) {
   if (w.over) return;
   w.time += dt;
   if (w.flash) { w.flash.age += dt; if (w.flash.age > 1.6) w.flash = null; }
-  if (w.surge > 0) w.surge -= dt;
 
   // Breeding and gold.
   for (const n of w.nodes) {
     if (n.owner === 0) continue;
     const cap = capOf(n);
     if (n.troops < cap) n.troops = Math.min(cap, n.troops + prodOf(w, n) * dt);
-    if (n.owner === PLAYER) w.gold += (n.base ? 1.0 : 0.35 + 0.15 * (n.tier - 1)) * dt;
+    if (n.owner === PLAYER) w.gold += goldOf(n) * dt;
+    else { const f = w.factions.find((x) => x.id === n.owner); if (f) f.gold += goldOf(n) * dt; }
   }
 
   // Standing orders.
@@ -461,14 +505,15 @@ function step(w: World, dt: number) {
     let target: Convoy | null = null; let td = CANNON_RANGE;
     for (const c of w.convoys) {
       if (c.owner === n.owner) continue;
-      if (n.owner !== PLAYER && c.owner !== PLAYER) continue; // red guns only mind you
       const p = convoyPos(w, c);
       const d = Math.hypot(p.x - n.x, p.y - n.y);
       if (d < td) { td = d; target = c; }
     }
     if (!target) continue;
-    const dmg = CANNON_DMG[n.cannon] * (n.owner === PLAYER ? 1 + META.cannon.per * w.meta.cannon / 100 : 0.55);
-    target.n -= dmg;
+    // A shot takes at most a fifth of the column: guns shred a trickle and
+    // only thin a push.
+    const dmg = CANNON_DMG[n.cannon] * (n.owner === PLAYER ? 1 + META.cannon.per * w.meta.cannon / 100 : 1);
+    target.n -= Math.min(dmg, target.n * 0.2);
     const p = convoyPos(w, target);
     w.shots.push({ x1: n.x, y1: n.y, x2: p.x, y2: p.y, age: 0 });
     n.cd = CANNON_CD;
@@ -484,12 +529,10 @@ function step(w: World, dt: number) {
       continue;
     }
     f.tick -= dt;
-    if (f.tick <= 0) { aiTick(w, f); f.tick = w.rules.aiInterval * (w.surge > 0 ? 0.55 : 1); }
+    if (f.tick <= 0) { aiTick(w, f); f.tick = w.rules.aiInterval; }
+    f.buyT -= dt;
+    if (f.buyT <= 0) { aiSpend(w, f); f.buyT = 3; }
   }
-
-  // Waves.
-  w.waveT -= dt;
-  if (w.waveT <= 0) { w.wave++; w.waveT = w.rules.waveLen; surge(w); }
 
   // The end.
   const mine = w.nodes.some((n) => n.owner === PLAYER) || w.convoys.some((c) => c.owner === PLAYER);
@@ -500,16 +543,20 @@ function step(w: World, dt: number) {
   }
 }
 
+/** What the next level of this costs here, or null at the top. */
+function upgradeCost(n: Node, key: UpgKey): number | null {
+  const lvl = key === 'tier' ? n.tier - 1 : n[key];
+  const costs = UPG[key].cost as readonly number[];
+  return lvl >= costs.length ? null : costs[lvl];
+}
+function applyUpgrade(n: Node, key: UpgKey) { if (key === 'tier') n.tier++; else n[key]++; }
 function buyUpgrade(w: World, id: number, key: UpgKey) {
   const n = w.nodes[id];
   if (n.owner !== PLAYER) return;
-  const lvl = key === 'tier' ? n.tier - 1 : n[key];
-  const costs = UPG[key].cost as readonly number[];
-  if (lvl >= costs.length) return;
-  const cost = costs[lvl];
-  if (w.gold < cost) return;
+  const cost = upgradeCost(n, key);
+  if (cost === null || w.gold < cost) return;
   w.gold -= cost;
-  if (key === 'tier') n.tier++; else n[key]++;
+  applyUpgrade(n, key);
 }
 function buyTech(w: World, key: TechKey) {
   const lvl = w.tech[key];
@@ -633,7 +680,7 @@ function draw(ctx: CanvasRenderingContext2D, w: World, view: { s: number; ox: nu
 // ── UI ─────────────────────────────────────────────────────────────────────
 
 interface Ui {
-  gold: number; wave: number; waveT: number; over: 'win' | 'lose' | null; paused: boolean; speed: number;
+  gold: number; time: number; rounds: number; over: 'win' | 'lose' | null; paused: boolean; speed: number;
   sendPct: number; selected: Node | null; tech: Record<TechKey, number>;
   mine: number; theirs: number; picking: boolean;
   /** Every troop on the map and on the road, by faction. */
@@ -641,6 +688,7 @@ interface Ui {
 }
 
 const fmt = (n: number) => String(Math.floor(n));
+const clock = (s: number) => `${Math.floor(s / 60)}:${String(Math.floor(s % 60)).padStart(2, '0')}`;
 
 export default function Game() {
   const [save, setSave] = useState<Save>(freshSave);
@@ -678,14 +726,14 @@ export default function Game() {
     settledRef.current = true;
     const s = loadSave();
     if (w.rules.endless) {
-      s.scrap += w.wave * 2;
-      s.bestWave = Math.max(s.bestWave, w.wave);
+      s.scrap += Math.floor(w.time / 20);
+      s.bestTime = Math.max(s.bestTime, Math.floor(w.time));
     } else if (w.over === 'win') {
       const first = s.cleared < w.rules.level;
       s.scrap += (15 + w.rules.level * 6) * (first ? 2 : 1);
       s.cleared = Math.max(s.cleared, w.rules.level);
     } else {
-      s.scrap += Math.min(10, w.wave * 2);
+      s.scrap += Math.min(10, Math.floor(w.time / 30));
     }
     storeSave(s); setSave(s);
   }, []);
@@ -733,7 +781,7 @@ export default function Game() {
         uiAcc = 0;
         const sel = w.selected !== null ? { ...w.nodes[w.selected] } : null;
         setUi({
-          gold: w.gold, wave: w.wave, waveT: w.waveT, over: w.over, paused: pausedRef.current, speed: speedRef.current,
+          gold: w.gold, time: w.time, rounds: w.rounds, over: w.over, paused: pausedRef.current, speed: speedRef.current,
           sendPct: sendPctRef.current, selected: sel, tech: { ...w.tech },
           mine: w.nodes.filter((n) => n.owner === PLAYER).length, theirs: w.nodes.filter((n) => n.owner >= 2).length, picking: w.picking !== null,
           army: (() => {
@@ -828,7 +876,7 @@ export default function Game() {
           <div className="text-sm text-white/50 mt-1">Hold the line. Then take theirs.</div>
           <div className="mt-5 flex items-center justify-between rounded-2xl bg-white/5 px-4 py-3">
             <div><div className="text-[11px] uppercase tracking-wider text-white/40">Scrap</div><div className="text-xl font-bold">{save.scrap}</div></div>
-            <div className="text-right"><div className="text-[11px] uppercase tracking-wider text-white/40">Best endless</div><div className="text-xl font-bold">{save.bestWave ? `wave ${save.bestWave}` : '—'}</div></div>
+            <div className="text-right"><div className="text-[11px] uppercase tracking-wider text-white/40">Best endless</div><div className="text-xl font-bold">{save.bestTime ? clock(save.bestTime) : '—'}</div></div>
             <button className={`${btn} bg-white/10 px-4 py-2 text-sm`} onClick={() => setScreen('armoury')}>Armoury</button>
           </div>
           <div className="mt-6 text-[11px] uppercase tracking-wider text-white/40">Campaign</div>
@@ -851,7 +899,7 @@ export default function Game() {
           <div className="mt-8 space-y-2 text-[13px] leading-snug text-white/50">
             <p><b className="text-white/80">Drag</b> from one of your outposts to any other to march. Columns take the shortest road through your ground and fight at the first outpost on it that is not yours, and columns that outnumber the defenders take the ground. <b className="text-white/80">Tap</b> an outpost to build on it, or give it a standing order to keep shipping troops somewhere.</p>
             <p>Outposts breed troops up to their cap. Gold trickles from everything you hold. Spend it on the picked outpost, or on tech for all of them.</p>
-            <p>Every <b className="text-white/80">wave</b> the red fills up and gets bolder. Stalling is losing. Clear every red outpost to win.</p>
+            <p>The red plays by your rules: same breeding, same gold, same upgrades bought with it. On the harder levels it starts with more ground and more gold, and its generals are quicker. Clear every red outpost to win.</p>
             <p className="text-white/30">Walls are inherited by whoever takes the outpost. Cannons are not.</p>
           </div>
         </div>
@@ -913,8 +961,8 @@ export default function Game() {
       <div className="flex items-center justify-between px-3 pt-2 pb-1 text-[13px]">
         <button className={`${btn} bg-white/10 px-3 py-1.5`} onClick={() => { setScreen('menu'); worldRef.current = null; }}>✕</button>
         <div className="text-center">
-          <div className="font-black">{run.endless ? 'ENDLESS' : `LEVEL ${run.level}`} <span className="text-white/40">· wave {ui?.wave ?? 0}</span></div>
-          <div className="text-[11px] text-white/45">next wave in {fmt(ui?.waveT ?? 0)}s · {ui?.mine ?? 0} vs {ui?.theirs ?? 0}</div>
+          <div className="font-black">{run.endless ? 'ENDLESS' : `LEVEL ${run.level}`} <span className="text-white/40">· {clock(ui?.time ?? 0)}</span></div>
+          <div className="text-[11px] text-white/45">{ui?.mine ?? 0} vs {ui?.theirs ?? 0} outposts{run.endless ? ` · landing ${ui?.rounds ?? 0}` : ''}</div>
         </div>
         <div className="flex gap-1.5">
           <button className={`${btn} bg-white/10 px-2.5 py-1.5`} onClick={() => { if (confirm('Restart this level?')) start(run.level, run.endless); }}>↻</button>
@@ -946,7 +994,7 @@ export default function Game() {
         {ui?.over && (
           <div className="absolute inset-0 flex flex-col items-center justify-center bg-black/70 px-8 text-center">
             <div className={`text-5xl font-black ${ui.over === 'win' ? 'text-white' : 'text-[#ff3b3b]'}`}>{ui.over === 'win' ? 'HELD' : 'OVERRUN'}</div>
-            <div className="mt-2 text-white/60">{run.endless ? `Survived ${ui.wave} waves.` : ui.over === 'win' ? `Level ${run.level} cleared on wave ${ui.wave}.` : `Fell on wave ${ui.wave}.`}</div>
+            <div className="mt-2 text-white/60">{run.endless ? `Survived ${clock(ui.time)}, ${ui.rounds} landings.` : ui.over === 'win' ? `Level ${run.level} cleared in ${clock(ui.time)}.` : `Fell at ${clock(ui.time)}.`}</div>
             <div className="mt-6 flex gap-3">
               <button className={`${btn} bg-white/10 px-5 py-3`} onClick={() => { setScreen('menu'); worldRef.current = null; }}>Menu</button>
               <button className={`${btn} bg-white px-5 py-3 text-black`} onClick={() => start(run.level, run.endless)}>{ui.over === 'win' ? 'Again' : 'Retry'}</button>
