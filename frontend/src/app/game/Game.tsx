@@ -110,7 +110,7 @@ interface Edge { a: number; b: number; len: number }
  *  whole route, and `leg` which step of it. */
 interface Convoy { id: number; owner: number; n: number; from: number; to: number; t: number; dur: number; path: number[]; leg: number }
 interface Shot { x1: number; y1: number; x2: number; y2: number; age: number }
-interface Faction { id: number; tick: number; dead: number; gold: number; buyT: number; mercT: number; tech: { conscription: number; logistics: number } }
+interface Faction { id: number; tick: number; dead: number; gold: number; buyT: number; tech: { conscription: number; logistics: number } }
 
 interface Rules {
   level: number; endless: boolean; nodeCount: number; enemies: number;
@@ -118,20 +118,23 @@ interface Rules {
   mapH: number;
   /** The twists of the later levels. */
   title?: string;
-  twinHQ?: boolean; mines?: number; fortress?: boolean; playerTier?: number;
+  twinHQ?: boolean; mines?: number; fortress?: boolean;
   /** Roads an outpost may have at most (4 unless said), and the size every neutral starts at. */
   maxDeg?: number; neutralTier?: number;
   /** Fog: only outposts beside yours show their numbers. Mercs: gold for 30
    *  troops at any outpost of yours. Shift: every so many seconds one road
    *  goes and another appears. */
-  fog?: boolean; mercs?: number; shift?: number;
+  /** Fog: how many roads out from your ground you can see (the last ring
+   *  shows no numbers); nothing past that. Shift: every so many seconds one
+   *  road goes and another appears. */
+  fog?: number; shift?: number;
   /** Choke: every side in its own sector, all of them meeting at one hub.
    *  Hill: hold the hub this many seconds to win. Loot and gold piles sit on
    *  neutral outposts for whoever takes them; hubLoot sits on the hub. Truce:
    *  nobody can take held ground for this many seconds. */
   choke?: boolean; hill?: number; loot?: { count: number; troops: number }; goldPiles?: { count: number; gold: number }; hubLoot?: number; truce?: number;
-  /** Gold you open with, and walls on every enemy outpost. */
-  playerGold?: number; enemyWalls?: number;
+  /** Walls on every enemy outpost. */
+  enemyWalls?: number;
   /** How canny the generals are: 1 pulls out of a lost outpost and shies
    *  from guns; 2 also rides out to meet columns on the road. */
   aiSmart: number;
@@ -194,26 +197,26 @@ function rulesFor(level: number, endless: boolean): Rules {
     case 2: return { ...base, title: 'THE SPREAD', nodeCount: 13 };
     case 3: return { ...base, title: 'LOOT', loot: { count: 3, troops: 40 } };
     case 4: return { ...base, title: 'TRUCE', truce: 90, enemies: 2 };
-    case 5: return { ...base, title: 'GOLD PILES', goldPiles: { count: 3, gold: 80 } };
+    case 5: return { ...base, title: 'GOLD PILES', goldPiles: { count: 3, gold: 80 }, fog: 3 };
     case 6: return { ...base, title: 'THE CHOKE', choke: true, enemies: 2, nodeCount: 16, mapH: 900 };
-    case 7: return { ...base, title: 'WALLS UP', enemyWalls: 2, playerGold: 100 };
+    case 7: return { ...base, title: 'WALLS UP', enemyWalls: 2 };
     case 8: return { ...base, title: 'THE HILL', choke: true, hill: 60, enemies: 3, nodeCount: 20, mapH: 1000 };
     case 9: return { ...base, title: 'TWIN HQ', twinHQ: true, enemies: 3, enemyGold: 200 };
-    case 10: return { ...base, title: 'NARROW ROADS', maxDeg: 3, nodeCount: 22, mapH: 800 };
+    case 10: return { ...base, title: 'NARROW ROADS', maxDeg: 3, nodeCount: 22, mapH: 800, fog: 3 };
     case 11: return { ...base, title: 'TRUCE II', truce: 120, loot: { count: 4, troops: 50 }, enemyGold: 250 };
-    case 12: return { ...base, title: 'FORTRESS', fortress: true, playerTier: 3, enemyGold: 300 };
+    case 12: return { ...base, title: 'FORTRESS', fortress: true, enemyGold: 300 };
     case 13: return { ...base, title: 'GOLD RUSH', mines: 5, enemyGold: 250, neutralBase: 20 };
-    case 14: return { ...base, title: 'DEEP POCKETS', enemyGold: 500, enemyExtra: 1, neutralBase: 18 };
+    case 14: return { ...base, title: 'DEEP POCKETS', enemyGold: 500, enemyExtra: 1, neutralBase: 18, fog: 2 };
     case 15: return { ...base, title: 'FOUR FRONTS', enemies: 4, nodeCount: 36, mapH: 1200, enemyExtra: 2, enemyGold: 260 };
-    case 16: return { ...base, title: 'RICH LAND', mines: 6, playerTier: 3, enemyGold: 300, enemyExtra: 1 };
+    case 16: return { ...base, title: 'RICH LAND', mines: 6, enemyGold: 300, enemyExtra: 1, fog: 2 };
     case 17: return { ...base, title: 'THE CHOKE II', choke: true, enemies: 3, fortress: true, hubLoot: 120, nodeCount: 24, mapH: 1100, enemyGold: 300 };
-    case 18: return { ...base, title: 'FOG OF WAR', fog: true, enemyGold: 150, enemyExtra: 1 };
+    case 18: return { ...base, title: 'HEAVY FOG', fog: 1, enemyGold: 150, enemyExtra: 1 };
     case 19: return { ...base, title: 'SHIFTING SANDS', shift: 40, maxDeg: 3, nodeCount: 22, mapH: 800, enemyGold: 350, enemyExtra: 2 };
-    case 20: return { ...base, title: 'MERCENARIES', mercs: 60, truce: 60, enemyGold: 300, enemyExtra: 1 };
-    case 21: return { ...base, title: 'THE LONG CHOKE', choke: true, enemies: 4, fog: true, loot: { count: 2, troops: 60 }, nodeCount: 30, mapH: 1300, enemyGold: 300 };
-    case 22: return { ...base, title: 'THE GAUNTLET', enemies: 4, nodeCount: 54, mapH: 1800, twinHQ: true, playerTier: 3, enemyExtra: 3, enemyGold: 600 };
-    case 23: return { ...base, title: 'THE HILL II', choke: true, hill: 90, enemies: 4, shift: 45, mercs: 60, nodeCount: 28, mapH: 1300, enemyGold: 400 };
-    case 24: return { ...base, title: 'ALL OF IT', fog: true, mercs: 60, shift: 45, enemies: 4, nodeCount: 48, mapH: 1600, fortress: true, twinHQ: true, playerTier: 3, enemyExtra: 2, enemyGold: 450, aiInterval: 1.0, aiMargin: 0.85, aiStageEvery: 1 };
+    case 20: return { ...base, title: 'SCRAMBLE', truce: 45, loot: { count: 6, troops: 50 }, goldPiles: { count: 2, gold: 100 }, enemyGold: 300, enemyExtra: 1, fog: 2 };
+    case 21: return { ...base, title: 'THE LONG CHOKE', choke: true, enemies: 4, fog: 2, loot: { count: 2, troops: 60 }, nodeCount: 30, mapH: 1300, enemyGold: 300 };
+    case 22: return { ...base, title: 'THE GAUNTLET', enemies: 4, nodeCount: 54, mapH: 1800, twinHQ: true, enemyExtra: 3, enemyGold: 600, fog: 3 };
+    case 23: return { ...base, title: 'THE HILL II', choke: true, hill: 90, enemies: 4, shift: 45, nodeCount: 28, mapH: 1300, enemyGold: 400, fog: 2 };
+    case 24: return { ...base, title: 'ALL OF IT', fog: 1, shift: 45, enemies: 4, nodeCount: 48, mapH: 1600, fortress: true, twinHQ: true, enemyExtra: 2, enemyGold: 450, aiInterval: 1.0, aiMargin: 0.85, aiStageEvery: 1 };
     default: return base;
   }
 }
@@ -338,7 +341,7 @@ function buildWorld(rules: Rules, meta: Record<MetaKey, number>, seedExtra = 0):
   // Bases: yours at the bottom, theirs as far from you as the map allows.
   const byY = [...nodes].sort((p, q) => q.y - p.y);
   const home = choke ? nodes[choke.hqs[0]] : byY[Math.floor(rnd() * Math.min(3, byY.length))];
-  home.owner = PLAYER; home.base = true; home.tier = rules.playerTier ?? 2; home.troops = 40; home.wall = 1;
+  home.owner = PLAYER; home.base = true; home.tier = 2; home.troops = 40; home.wall = 1;
   // Hops from home, so no enemy HQ ever sits a march away.
   const hops = new Array(nodes.length).fill(Infinity) as number[];
   hops[home.id] = 0;
@@ -380,7 +383,7 @@ function buildWorld(rules: Rules, meta: Record<MetaKey, number>, seedExtra = 0):
       n.owner = fid; n.troops = 15; n.wall = rules.enemyWalls ?? 0;
       taken.add(n.id); extra--;
     }
-    factions.push({ id: fid, tick: rnd() * rules.aiInterval, dead: 0, gold: rules.enemyGold, buyT: 2, mercT: -99, tech: { conscription: 0, logistics: 0 } });
+    factions.push({ id: fid, tick: rnd() * rules.aiInterval, dead: 0, gold: rules.enemyGold, buyT: 2, tech: { conscription: 0, logistics: 0 } });
   }
   for (const n of nodes) {
     if (n.owner !== 0) continue;
@@ -416,7 +419,7 @@ function buildWorld(rules: Rules, meta: Record<MetaKey, number>, seedExtra = 0):
 
   return {
     rules, nodes, edges, adj, convoys: [], shots: [], factions,
-    gold: (rules.playerGold ?? 40) + META.gold.per * meta.gold, time: 0,
+    gold: 40 + META.gold.per * meta.gold, time: 0,
     nextId: 1,
     tech: { logistics: 0, conscription: 0, tithe: 0, scouts: 0 }, meta,
     over: null, flash: { text: rules.endless ? 'THE LONG WAR' : rules.title ?? `LEVEL ${rules.level}`, age: 0 }, selected: null, picking: null, pickN: 1, picked: [], shiftT: rules.shift ?? 0, hillT: 0,
@@ -656,10 +659,6 @@ function aiSpend(w: World, f: Faction) {
   const threat = (n: Node) => w.adj[n.id].reduce((s, i) => s + (w.nodes[i].owner !== f.id && w.nodes[i].owner !== 0 ? reckon(w, f.id, w.nodes[i]) : 0), 0);
   const front = mine.filter((n) => threat(n) > 0).sort((a, b) => threat(b) - threat(a));
   const hq = mine.find((n) => n.base) ?? mine[0];
-  // Mercenaries, when the purse is deep, a front is thin, and not within fifteen seconds of the last.
-  if (w.rules.mercs && front[0] && f.gold >= w.rules.mercs * 4 && front[0].troops < capOf(front[0]) * 0.5 && w.time - f.mercT > 15) {
-    f.gold -= w.rules.mercs; front[0].troops += 30; f.mercT = w.time;
-  }
   // A mine in the rear, once there is a rear: one for every four outposts.
   const rear = held.filter((n) => !n.base && !n.mine && !w.adj[n.id].some((i) => w.nodes[i].owner !== f.id));
   const minesHeld = held.filter((n) => n.mine).length;
@@ -747,30 +746,31 @@ function seenByPlayer(w: World): Set<number> | null { return seenBy(w, PLAYER); 
  *  Null when there is no fog. */
 function seenBy(w: World, owner: number): Set<number> | null {
   if (!w.rules.fog) return null;
-  const seen = new Set<number>();
-  for (const n of w.nodes) if (n.owner === owner) { seen.add(n.id); for (const j of w.adj[n.id]) seen.add(j); }
-  return seen;
+  return new Set([...ringsFrom(w, owner).entries()].filter(([, r]) => r <= (w.rules.fog ?? 0)).map(([i]) => i));
 }
+/** How many roads each outpost is from a side's nearest ground (0 on it). */
+function ringsFrom(w: World, owner: number): Map<number, number> {
+  const ring = new Map<number, number>();
+  const q: number[] = [];
+  for (const n of w.nodes) if (n.owner === owner) { ring.set(n.id, 0); q.push(n.id); }
+  while (q.length) { const i = q.shift()!; for (const j of w.adj[i]) if (!ring.has(j)) { ring.set(j, ring.get(i)! + 1); q.push(j); } }
+  return ring;
+}
+const ringOf = (w: World, id: number) => ringsFrom(w, PLAYER).get(id) ?? Infinity;
 /** The garrison a side reckons an outpost holds. In the fog, nobody's
  *  numbers show but your own: a neutral is taken for an average one, and a
  *  held outpost for half full. Walls show, so they are counted as they are. */
 function reckon(w: World, owner: number, m: Node): number {
   if (!w.rules.fog || m.owner === owner) return m.troops;
+  // Inside the fog's reach but short of its last ring, the numbers show.
+  if ((ringsFrom(w, owner).get(m.id) ?? Infinity) < (w.rules.fog ?? 0)) return m.troops;
   return m.owner === 0 ? w.rules.neutralBase * 1.2 : capOf(m) * 0.5;
 }
 /** A column a side can see: on a road touching its ground. */
 function seesColumn(w: World, owner: number, c: Convoy): boolean {
   if (!w.rules.fog || c.owner === owner) return true;
-  const a = w.nodes[c.from].owner === owner, b = w.nodes[c.to].owner === owner;
-  return a || b;
-}
-
-/** Mercenaries: gold for thirty troops, at an outpost of yours. */
-function hireMercs(w: World, id: number) {
-  const n = w.nodes[id];
-  const price = w.rules.mercs;
-  if (!price || n.owner !== PLAYER || w.gold < price) return;
-  w.gold -= price; n.troops += 30;
+  const seen = seenBy(w, owner)!;
+  return seen.has(c.from) && seen.has(c.to);
 }
 
 function step(w: World, dt: number) {
@@ -930,11 +930,11 @@ function draw(ctx: CanvasRenderingContext2D, w: World, view: { s: number; ox: nu
   ctx.scale(s, s);
 
   const seen = seenByPlayer(w);
-  const own = new Set(w.nodes.filter((n) => n.owner === PLAYER).map((n) => n.id));
+  const rings = seen ? ringsFrom(w, PLAYER) : new Map<number, number>();
   // Edges. In the fog, only roads that touch your ground.
   ctx.lineCap = 'round';
   for (const e of w.edges) {
-    if (seen && !own.has(e.a) && !own.has(e.b)) continue;
+    if (seen && !(seen.has(e.a) && seen.has(e.b))) continue;
     const a = w.nodes[e.a], b = w.nodes[e.b];
     const sel = w.selected !== null && (e.a === w.selected || e.b === w.selected) && w.nodes[w.selected].owner === PLAYER;
     ctx.strokeStyle = sel ? 'rgba(255,255,255,0.6)' : '#1c1c1c';
@@ -962,7 +962,7 @@ function draw(ctx: CanvasRenderingContext2D, w: World, view: { s: number; ox: nu
   for (const n of w.nodes) {
     if (seen && !seen.has(n.id)) continue;
     const r = nodeR(n);
-    const hidden = seen !== null && n.owner !== PLAYER;
+    const hidden = seen !== null && n.owner !== PLAYER && rings.get(n.id) === (w.rules.fog ?? 0);
     const col = COLORS[n.owner];
     const isSel = w.selected === n.id;
     const canTarget = w.picking !== null && w.picking !== n.id;
@@ -1045,7 +1045,7 @@ function draw(ctx: CanvasRenderingContext2D, w: World, view: { s: number; ox: nu
   }
   // Columns.
   for (const c of w.convoys) {
-    if (seen && c.owner !== PLAYER && !own.has(c.from) && !own.has(c.to)) continue;
+    if (seen && c.owner !== PLAYER && !(seen.has(c.from) && seen.has(c.to))) continue;
     const p = convoyPos(w, c);
     const col = COLORS[c.owner];
     ctx.fillStyle = col;
@@ -1067,8 +1067,8 @@ function draw(ctx: CanvasRenderingContext2D, w: World, view: { s: number; ox: nu
     fc.setTransform(s, 0, 0, s, ox, oy);
     fc.globalCompositeOperation = 'destination-out';
     for (const n of w.nodes) {
-      if (n.owner !== PLAYER) continue;
-      const reach = Math.max(60, ...w.adj[n.id].map((j) => Math.hypot(w.nodes[j].x - n.x, w.nodes[j].y - n.y))) + 30;
+      if (!seen.has(n.id)) continue;
+      const reach = n.owner === PLAYER ? 90 : 62;
       const g = fc.createRadialGradient(n.x, n.y, reach * 0.55, n.x, n.y, reach);
       g.addColorStop(0, 'rgba(0,0,0,1)'); g.addColorStop(1, 'rgba(0,0,0,0)');
       fc.fillStyle = g;
@@ -1099,7 +1099,7 @@ interface Ui {
   /** Everything you hold, breeding, a minute (full outposts breed nothing). */
   prodPerMin: number;
   mine: number; theirs: number; picking: boolean; pickN: number; pickLeft: number;
-  mercs: number; selHidden: boolean; shiftT: number;
+  selHidden: boolean; shiftT: number;
   truceT: number; hillT: number; hillNeed: number;
   /** Whether the map runs past the screen, and which way there is more of it. */
   /** The scrollbar: how far down the map the view is (0..1) and how much of it shows (0..1); 1 means all. */
@@ -1253,7 +1253,7 @@ export default function Game() {
           selProdPerMin: sel ? prodOf(w, sel) * 60 : 0, selHold: sel ? Math.ceil(sel.troops * wallMult(sel)) : 0,
           prodPerMin: w.nodes.filter((n) => n.owner === PLAYER && n.troops < capOf(n) - 0.5).reduce((t, n) => t + prodOf(w, n) * 60, 0),
           mine: w.nodes.filter((n) => n.owner === PLAYER).length, theirs: w.nodes.filter((n) => n.owner >= 2).length, picking: w.picking !== null, pickN: w.pickN, pickLeft: w.pickN - w.picked.length,
-          mercs: w.rules.mercs ?? 0, selHidden: !!(w.rules.fog && sel && sel.owner !== PLAYER), shiftT: w.rules.shift ? w.shiftT : 0, truceT: w.rules.truce ? Math.max(0, w.rules.truce - w.time) : 0, hillT: w.hillT, hillNeed: w.rules.hill ?? 0,
+          selHidden: !!(w.rules.fog && sel && sel.owner !== PLAYER && !(seenByPlayer(w)?.has(sel.id) && ringOf(w, sel.id) < (w.rules.fog ?? 0))), shiftT: w.rules.shift ? w.shiftT : 0, truceT: w.rules.truce ? Math.max(0, w.rules.truce - w.time) : 0, hillT: w.hillT, hillNeed: w.rules.hill ?? 0,
           scrollFrac: scrollFracRef.current, viewFrac: viewFracRef.current,
           army: (() => {
             const by = new Map<number, number>();
@@ -1592,13 +1592,6 @@ export default function Game() {
                   </button>
                 );
               })}
-              {(ui?.mercs ?? 0) > 0 && (
-                <button disabled={!mineSel || (ui?.gold ?? 0) < (ui?.mercs ?? 0)} onClick={() => act((w) => { if (sel) hireMercs(w, sel.id); })}
-                  className={`${btn} flex flex-col items-start rounded-xl bg-white/5 px-3 py-1 text-left`}>
-                  <div className="flex w-full items-center justify-between text-[13px]"><b>Mercenaries</b><span className="text-white">{ui?.mercs}g</span></div>
-                  <div className="text-[11px] text-white/45">30 troops at the picked outpost</div>
-                </button>
-              )}
             </div>
           ) : !sel ? (
             <div className="flex h-full items-center justify-center text-center text-[13px] text-white/35">Drag from one of yours to march. Tap one to build.</div>
