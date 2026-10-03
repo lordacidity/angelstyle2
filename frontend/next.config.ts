@@ -69,6 +69,13 @@ const nextConfig: NextConfig = {
     '/api/pricer/price': ['./src/lib/pricer/data/*.csv'],
     '/api/pricer/log': ['./src/lib/pricer/data/*.csv'],
   },
+  // The persona routes ship ffmpeg + ffprobe (~140MB) and sharp, and the tracer, seeing exec.js join
+  // paths onto process.cwd(), also sweeps in all of public/ (~90MB of audio, video and images none of
+  // them read). Together that ran a function past Vercel's 250MB cap. public/ is served from the CDN,
+  // and Vercel's runtime is glibc, so the musl sharp builds are dead weight too.
+  outputFileTracingExcludes: {
+    '/api/ai-persona/**': ['./public/**', 'node_modules/@img/*linuxmusl*/**'],
+  },
   serverExternalPackages: ['ffmpeg-static', 'ffprobe-static', 'fluent-ffmpeg', 'youtube-dl-exec', '@fal-ai/client'],
   // The password middleware sits in front of every route, and Next buffers a request body
   // through it only up to 10MB by default — past that the route gets it cut short. The Music
