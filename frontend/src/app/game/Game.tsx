@@ -36,13 +36,12 @@ const NAMES: Record<number, string> = { 2: 'RED', 3: 'AMBER', 4: 'VIOLET', 5: 'C
 
 // No upgrade has a top: each level costs more than the last, until the
 // next one is out of any reasonable reach. Size: what an outpost holds
-// and how fast it breeds, by size.
+// and how far its cannon reaches; breeding is the Barracks' alone.
 const capAt = (tier: number) => 40 * Math.pow(1.8, tier - 1);
-const prodAt = (tier: number) => Math.pow(1.45, tier - 1);
 const BASE_PROD_PER_S = 0.9;
 
 const UPG = {
-  prod: { name: 'Barracks', base: 30, growth: 1.75, desc: '+35% troops/s' },
+  prod: { name: 'Barracks', base: 30, growth: 1.75, desc: '+45% troops/s' },
   wall: { name: 'Walls', base: 25, growth: 1.8, desc: '+25% defence' },
   cannon: { name: 'Cannon', base: 45, growth: 1.8, desc: 'shooter' },
   tier: { name: 'Expand', base: 60, growth: 2.2, desc: 'bigger, faster' },
@@ -67,9 +66,13 @@ const TECH = {
   conscription: { name: 'Conscription', base: 60, growth: 1.7, desc: '+15% troops/s' },
   tithe: { name: 'Tithe', base: 70, growth: 1.8, desc: '+15% gold' },
   scouts: { name: 'Scouts', base: 60, growth: 1.8, desc: '+12% cannon range' },
+  thrift: { name: 'Thrift', base: 80, growth: 1.9, desc: '-7% upgrade cost' },
 } as const;
 const techCost = (key: TechKey, lvl: number) => Math.round(TECH[key].base * Math.pow(TECH[key].growth, lvl));
 type TechKey = keyof typeof TECH;
+/** What Thrift takes off an outpost upgrade: 7% a level, compounding, and
+ *  never past half price. */
+const thriftMult = (lvl: number) => Math.max(0.5, Math.pow(0.93, lvl));
 
 const META = {
   prod: { name: 'Drill', cost: [40, 75, 120, 180, 260], desc: '+4% troops/s', unit: '%', per: 4 },
@@ -450,7 +453,7 @@ function buildWorld(rules: Rules, meta: Record<MetaKey, number>, seedExtra = 0):
     rules, nodes, edges, adj, convoys: [], shots: [], factions,
     gold: 40 + META.gold.per * meta.gold, time: 0,
     nextId: 1,
-    tech: { logistics: 0, conscription: 0, tithe: 0, scouts: 0 }, meta,
+    tech: { logistics: 0, conscription: 0, tithe: 0, scouts: 0, thrift: 0 }, meta,
     over: null, flash: { text: rules.endless ? 'THE LONG WAR' : rules.title ?? `LEVEL ${rules.level}`, age: 0 }, selected: null, picking: null, pickN: 1, picked: [], shiftT: rules.shift ?? 0, hillT: 0,
   };
 }
@@ -472,7 +475,7 @@ const prodOf = (w: World, n: Node) => {
   let m = n.owner === PLAYER
     ? (1 + META.prod.per * w.meta.prod / 100) * (1 + 0.15 * w.tech.conscription)
     : 1 + 0.15 * (w.factions.find((f) => f.id === n.owner)?.tech.conscription ?? 0);
-  m *= (n.base ? 1.5 : 1) * prodAt(n.tier) * (1 + 0.35 * n.prod);
+  m *= (n.base ? 1.5 : 1) * (1 + 0.45 * n.prod);
   return BASE_PROD_PER_S * m;
 };
 /** What your gold is worth: Tithe and the Vaults. */
@@ -705,7 +708,7 @@ function aiSpend(w: World, f: Faction) {
   }
   // The list, most urgent first: a buy is an upgrade on an outpost or a tech.
   type Want = { cost: number; buy: () => void };
-  const upg = (n: Node, k: UpgKey): Want => ({ cost: upgradeCost(n, k), buy: () => applyUpgrade(n, k) });
+  const upg = (n: Node, k: UpgKey): Want => ({ cost: upgradeCost(w, n, k), buy: () => applyUpgrade(n, k) });
   const tech = (k: 'conscription' | 'logistics'): Want => ({ cost: techCost(k, f.tech[k]), buy: () => { f.tech[k]++; } });
   const wants: Want[] = [];
   for (const n of front.slice(0, 2)) if (n.wall < 2) wants.push(upg(n, 'wall'));
@@ -925,16 +928,18 @@ function digMineAt(n: Node) {
   n.wall = 0; n.cannon = 0; n.prod = 0; n.route = null; n.cd = 0;
 }
 
-/** What the next level of this costs here. There is no top. */
-function upgradeCost(n: Node, key: UpgKey): number {
+/** What the next level of this costs here. There is no top. Thrift is
+ *  yours alone; a general pays full price. */
+function upgradeCost(w: World, n: Node, key: UpgKey): number {
   const lvl = key === 'tier' ? n.tier - 1 : n[key];
-  return Math.round(UPG[key].base * Math.pow(UPG[key].growth, lvl));
+  const disc = n.owner === PLAYER ? thriftMult(w.tech.thrift) : 1;
+  return Math.round(UPG[key].base * Math.pow(UPG[key].growth, lvl) * disc);
 }
 function applyUpgrade(n: Node, key: UpgKey) { if (key === 'tier') n.tier++; else n[key]++; }
 function buyUpgrade(w: World, id: number, key: UpgKey) {
   const n = w.nodes[id];
   if (n.owner !== PLAYER || n.mine) return;
-  const cost = upgradeCost(n, key);
+  const cost = upgradeCost(w, n, key);
   if (w.gold < cost) return;
   w.gold -= cost;
   applyUpgrade(n, key);
@@ -1552,7 +1557,7 @@ export default function Game() {
   const mineSel = sel?.owner === PLAYER;
   const upgRows = (n: Node) => (Object.keys(UPG) as UpgKey[]).map((k) => {
     const u = UPG[k]; const lvl = k === 'tier' ? n.tier - 1 : n[k];
-    const cost = upgradeCost(n, k);
+    const cost = upgradeCost({ tech: { thrift: ui?.tech.thrift ?? 0 } } as unknown as World, n, k);
     return (
       <button key={k} disabled={(ui?.gold ?? 0) < cost} onClick={() => act((w) => buyUpgrade(w, n.id, k))}
         className={`${btn} flex flex-col items-start rounded-xl bg-white/5 px-3 py-1 text-left`}>
@@ -1560,8 +1565,8 @@ export default function Game() {
         <div className="text-[11px] text-white/45">{(() => {
           // Barracks and Expand: what the next level adds here, a minute.
           const rate = ui?.selProdPerMin ?? 0;
-          if (k === 'prod') { const gain = rate * ((1 + 0.35 * (lvl + 1)) / (1 + 0.35 * lvl) - 1); return `+${Math.round(gain)} troops/min · lv ${lvl}`; }
-          if (k === 'tier') { const gain = rate * (prodAt(n.tier + 1) / prodAt(n.tier) - 1); return `+${Math.round(gain)}/min · holds ${Math.round(capOf({ ...n, tier: n.tier + 1 }))} · size ${n.tier}`; }
+          if (k === 'prod') { const gain = rate * ((1 + 0.45 * (lvl + 1)) / (1 + 0.45 * lvl) - 1); return `+${Math.round(gain)} troops/min · lv ${lvl}`; }
+          if (k === 'tier') return `holds ${Math.round(capOf({ ...n, tier: n.tier + 1 }))} · +20% range · size ${n.tier}`;
           if (k === 'cannon') return `${cannonDmg(lvl + 1)} a shot · lv ${lvl}`;
           return `${u.desc} · lv ${lvl}`;
         })()}</div>
