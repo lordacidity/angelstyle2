@@ -86,7 +86,7 @@ interface Node {
   id: number; x: number; y: number;
   owner: number; troops: number; tier: number; base: boolean;
   prod: number; wall: number; cannon: number; cd: number;
-  /** A standing order: everything goes, every few seconds, split evenly
+  /** A standing order: everything goes, every second, split evenly
    *  between these outposts. Yours only. */
   route: { to: number[] } | null; routeT: number;
 }
@@ -471,7 +471,7 @@ function step(w: World, dt: number) {
   }
 
   // Standing orders.
-  const ROUTE_EVERY = 2;
+  const ROUTE_EVERY = 1;
   for (const n of w.nodes) {
     if (!n.route || n.owner !== PLAYER) continue;
     n.routeT -= dt;
@@ -869,7 +869,7 @@ export default function Game() {
       const from = w.nodes[w.picking];
       if (n.id !== from.id && from.owner === PLAYER && !w.picked.includes(n.id)) w.picked.push(n.id);
       if (w.picked.length >= w.pickN) {
-        from.route = { to: [...w.picked] }; from.routeT = 2;
+        from.route = { to: [...w.picked] }; from.routeT = 1;
         shipOrder(w, from);
         w.picking = null; w.picked = [];
       }
