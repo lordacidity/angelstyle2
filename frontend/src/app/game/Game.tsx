@@ -126,6 +126,8 @@ interface Node {
   /** A standing order: everything goes, every second, split evenly
    *  between these outposts. Yours only. */
   route: { to: number[] } | null; routeT: number;
+  /** Upgrades set to buy themselves, each with the order it was switched on. Yours only. */
+  auto: Partial<Record<UpgKey, number>>;
 }
 interface Edge { a: number; b: number; len: number }
 /** A column on the road. `from`/`to` are the leg it is on; `path` is the
@@ -172,6 +174,8 @@ interface Rules {
 
 interface World {
   rules: Rules;
+  /** Counts the auto-upgrades switched on, so ties go to the one set first. */
+  autoSeq: number;
   nodes: Node[]; edges: Edge[]; adj: number[][];
   convoys: Convoy[]; shots: Shot[]; factions: Faction[];
   gold: number; time: number;
@@ -271,7 +275,7 @@ function segmentsCross(p1: Node, p2: Node, p3: Node, p4: Node) {
 }
 
 const newNode = (id: number, x: number, y: number): Node =>
-  ({ id, x, y, owner: 0, troops: 0, tier: 1, base: false, prod: 0, wall: 0, cannon: 0, cd: 0, mine: 0, loot: 0, gold: 0, hub: false, wallBoost: 0, capBoost: 0, route: null, routeT: 0 });
+  ({ id, x, y, owner: 0, troops: 0, tier: 1, base: false, prod: 0, wall: 0, cannon: 0, cd: 0, mine: 0, loot: 0, gold: 0, hub: false, wallBoost: 0, capBoost: 0, route: null, routeT: 0, auto: {} });
 
 /** A choke map: one hub in the middle, every side in a wedge of its own
  *  around it, each wedge joined to the hub by a single road and to nothing
@@ -455,7 +459,7 @@ function buildWorld(rules: Rules, meta: Record<MetaKey, number>, seedExtra = 0):
     rules, nodes, edges, adj, convoys: [], shots: [], factions,
     gold: 40 + META.gold.per * meta.gold, time: 0,
     nextId: 1,
-    tech: { logistics: 0, conscription: 0, tithe: 0, scouts: 0, thrift: 0 }, meta,
+    tech: { logistics: 0, conscription: 0, tithe: 0, scouts: 0, thrift: 0 }, meta, autoSeq: 0,
     over: null, flash: { text: rules.endless ? 'THE LONG WAR' : rules.title ?? `LEVEL ${rules.level}`, sub: rules.blurb, age: 0, ttl: rules.blurb ? 5 : 1.6 }, selected: null, picking: null, pickN: 1, picked: [], shiftT: rules.shift ?? 0, hillT: 0,
   };
 }
@@ -581,7 +585,7 @@ function arrive(w: World, c: Convoy) {
       n.gold = 0;
     }
     n.cannon = 0; // the guns are spiked as the walls fall
-    n.route = null;
+    n.route = null; n.auto = {};
     n.cd = 0;
     if (c.owner === PLAYER) { w.gold += 12; }
     if (was !== 0 && was !== PLAYER && !w.nodes.some((m) => m.owner === was)) {
@@ -830,6 +834,8 @@ function step(w: World, dt: number) {
     else { const f = w.factions.find((x) => x.id === n.owner); if (f) f.gold += goldOf(n) * dt; }
   }
 
+  autoUpgrade(w);
+
   // Standing orders.
   const ROUTE_EVERY = 1;
   for (const n of w.nodes) {
@@ -927,7 +933,31 @@ function digMineAt(n: Node) {
   const need = mineCost(n);
   if (need === null || n.troops < need) return;
   n.troops -= need; n.mine++;
-  n.wall = 0; n.cannon = 0; n.prod = 0; n.route = null; n.cd = 0;
+  n.wall = 0; n.cannon = 0; n.prod = 0; n.route = null; n.auto = {}; n.cd = 0;
+}
+/** Switch an upgrade's buying itself on or off here. */
+function toggleAuto(w: World, id: number, key: UpgKey) {
+  const n = w.nodes[id];
+  if (n.owner !== PLAYER || n.mine) return;
+  if (n.auto[key] !== undefined) delete n.auto[key]; else n.auto[key] = ++w.autoSeq;
+}
+/** The auto-upgrades buy, cheapest first, the earliest set on a tie, as
+ *  far as the purse goes. */
+function autoUpgrade(w: World) {
+  const wants: { n: Node; key: UpgKey; cost: number; order: number }[] = [];
+  for (const n of w.nodes) {
+    if (n.owner !== PLAYER || n.mine) continue;
+    for (const key of Object.keys(n.auto) as UpgKey[]) wants.push({ n, key, cost: upgradeCost(w, n, key), order: n.auto[key]! });
+  }
+  if (!wants.length) return;
+  wants.sort((a, b) => a.cost - b.cost || a.order - b.order);
+  for (let i = 0; i < 4; i++) {
+    const c = wants[0];
+    if (!c || w.gold < c.cost) return;
+    w.gold -= c.cost; applyUpgrade(c.n, c.key);
+    c.cost = upgradeCost(w, c.n, c.key);
+    wants.sort((a, b) => a.cost - b.cost || a.order - b.order);
+  }
 }
 
 /** What the next level of this costs here. There is no top. Thrift is
@@ -1208,6 +1238,8 @@ export default function Game() {
   const settledRef = useRef(false);
   // The last outpost tapped and when: a second tap on it inside 350ms is a double tap.
   const lastTapRef = useRef<{ id: number; t: number }>({ id: -1, t: 0 });
+  // A finger held on an upgrade card: the timer that makes it a hold, and whether it fired.
+  const holdRef = useRef<{ t: ReturnType<typeof setTimeout> | undefined; fired: boolean }>({ t: undefined, fired: false });
   /** Scroll to a fraction of the way down the map. */
   const scrollToRef = useRef<(frac: number) => void>(() => {});
   /** Scroll to a fraction of the way across the map. */
@@ -1577,11 +1609,17 @@ export default function Game() {
   const upgRows = (n: Node) => (Object.keys(UPG) as UpgKey[]).map((k) => {
     const u = UPG[k]; const lvl = k === 'tier' ? n.tier - 1 : n[k];
     const cost = upgradeCost({ tech: { thrift: ui?.tech.thrift ?? 0 } } as unknown as World, n, k);
+    const auto = n.auto[k] !== undefined;
+    const poor = (ui?.gold ?? 0) < cost;
+    // A tap buys one. A hold switches auto on or off; the tap that ends it buys nothing.
+    const down = () => { clearTimeout(holdRef.current.t); holdRef.current = { t: setTimeout(() => { holdRef.current.fired = true; act((w) => toggleAuto(w, n.id, k)); }, 450), fired: false }; };
+    const up = () => { clearTimeout(holdRef.current.t); };
     return (
-      <button key={k} disabled={(ui?.gold ?? 0) < cost} onClick={() => act((w) => buyUpgrade(w, n.id, k))}
-        className={`${btn} relative flex flex-col items-start rounded-xl bg-white/5 px-3 py-1 text-left`}>
+      <button key={k} onPointerDown={down} onPointerUp={up} onPointerLeave={up} onPointerCancel={up} onContextMenu={(e) => e.preventDefault()}
+        onClick={() => { if (holdRef.current.fired) { holdRef.current.fired = false; return; } if (!poor) act((w) => buyUpgrade(w, n.id, k)); }}
+        className={`${btn} relative flex flex-col items-start rounded-xl px-3 py-1 text-left ${auto ? 'bg-[#38e08a]/15 ring-1 ring-[#38e08a]/70' : 'bg-white/5'} ${poor && !auto ? 'opacity-30' : ''}`}>
         {k === 'prod' && <span className="absolute right-1.5 top-1.5 h-2 w-2 rounded-full bg-[#38e08a]" />}
-        <div className="flex w-full items-center justify-between text-[13px]"><b>{u.name}</b><span className="text-white">{cost}g</span></div>
+        <div className="flex w-full items-center justify-between text-[13px]"><b>{u.name}{auto && <span className="ml-1.5 text-[9px] font-bold tracking-wide text-[#38e08a]">AUTO</span>}</b><span className="text-white">{cost}g</span></div>
         <div className="text-[11px] text-white/45">{(() => {
           // Barracks and Expand: what the next level adds here, a minute.
           const rate = ui?.selProdPerMin ?? 0;
@@ -1700,7 +1738,7 @@ export default function Game() {
           ) : !sel ? (
             <div className="flex h-full flex-col items-center justify-center gap-1 px-2 text-center text-[13px] text-white/35">
               {ui?.blurb && <div className="text-[12px] text-white/60">{ui.blurb}</div>}
-              <div>Drag from one of yours to march. Tap one to build.</div>
+              <div>Drag from one of yours to march. Tap one to build. Hold an upgrade to make it buy itself.</div>
             </div>
           ) : !mineSel ? (
             <div className="flex h-full flex-col items-center justify-center text-center text-[13px] text-white/50">
