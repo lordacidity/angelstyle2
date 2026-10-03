@@ -1154,7 +1154,7 @@ export default function Game() {
   const viewRef = useRef({ s: 1, ox: 0, oy: 0, midY: MAP_H / 2 });
   // The camera: how far past the fit it is zoomed (1 is the fit), and the
   // map point under the middle of the screen. Set while paused, kept while
-  // playing. Infinity for cy means "the bottom, where home is".
+  // playing. Infinity for cy means "not placed yet: open on home".
   const camRef = useRef({ zoom: 1.3, cx: MAP_W / 2, cy: Infinity });
   // What the scrollbar reads: how far down the view is, and how much it shows.
   const scrollFracRef = useRef(0);
@@ -1189,7 +1189,7 @@ export default function Game() {
     setRun({ level, endless });
     setTab('post');
     setScreen('play');
-    // Back to the bottom of the map, where home is, at the fit.
+    // Back onto home, near the bottom of the screen, at the fit.
     camRef.current = { zoom: 1.3, cx: MAP_W / 2, cy: Infinity }; refitRef.current();
   }, []);
 
@@ -1236,6 +1236,12 @@ export default function Game() {
       // The map never leaves the screen: centred where it is smaller than the
       // view, and held inside it where it is larger.
       cam.cx = MAP_W <= visW ? MAP_W / 2 : Math.max(visW / 2, Math.min(MAP_W - visW / 2, cam.cx));
+      // A fresh run opens on home, four fifths of the way down the screen,
+      // whichever map it is and wherever the map put it.
+      if (cam.cy === Infinity) {
+        const home = worldRef.current?.nodes.find((n) => n.base && n.owner === 1);
+        if (home) cam.cy = home.y - visH * 0.3;
+      }
       cam.cy = mapH <= visH ? mapH / 2 : Math.max(visH / 2, Math.min(mapH - visH / 2, cam.cy));
       const ox = r.width / 2 - cam.cx * s, oy = r.height / 2 - cam.cy * s;
       viewFracRef.current = Math.min(1, visH / mapH);
