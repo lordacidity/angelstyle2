@@ -1751,11 +1751,13 @@ export default function Game() {
           </div>
         )}
         {intro && !ui?.over && (
-          <div className="absolute inset-0 flex flex-col items-center justify-center bg-black/60 px-7 text-center">
-            <div className="text-3xl font-black">{run.endless ? 'THE LONG WAR' : (ui?.title ?? `LEVEL ${run.level}`)}</div>
-            {ui?.blurb && <div className="mt-3 text-[14px] leading-snug text-white/80">{ui.blurb}</div>}
-            <button className={`${btn} mt-5 bg-white px-6 py-2.5 text-black`} onClick={() => setIntro(false)}>Got it</button>
-            <div className="mt-3 text-[11px] text-white/40">Paused. Press ▶ when ready.</div>
+          <div className="absolute inset-0 flex flex-col items-center justify-center bg-black/60 px-6">
+            <div className="w-full rounded-2xl bg-white px-5 py-5 text-center text-black">
+              <div className="text-3xl font-black">{run.endless ? 'THE LONG WAR' : (ui?.title ?? `LEVEL ${run.level}`)}</div>
+              {ui?.blurb && <div className="mt-3 text-[14px] leading-snug text-black/80">{ui.blurb}</div>}
+              <button className={`${btn} mt-5 bg-black px-6 py-2.5 text-white`} onClick={() => setIntro(false)}>Got it</button>
+              <div className="mt-3 text-[11px] text-black/50">Paused. Press ▶ when ready.</div>
+            </div>
           </div>
         )}
         {ui?.over && (
