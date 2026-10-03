@@ -10,11 +10,13 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type {
-  AidenEntity, AidenEvent, AidenFirm, AidenIngestResult, AidenLink, AidenPerson, AidenPlace, AidenSnapshot,
+  AidenEntity, AidenEvent, AidenFirm, AidenIngestResult, AidenLink, AidenPerson, AidenPlace, AidenRound,
+  AidenSnapshot,
 } from '@/lib/aiden-types';
+import { coInvestors, newestRoundFirst } from '@/lib/aiden-rounds';
 
 const EMPTY: AidenSnapshot = {
-  places: [], firms: [], people: [], events: [], links: [], goals: [], notes: [],
+  places: [], firms: [], people: [], events: [], links: [], rounds: [], goals: [], notes: [],
 };
 
 /** Thrown by any call the server answered with 401: the lock is back on. */
@@ -47,6 +49,11 @@ export interface AidenIndex {
   /** Firms that have invested: an Invested event is filed under them, or one
    *  of their people is an investor. */
   investedFirms: Set<string>;
+  /** Each firm's rounds, newest first. */
+  roundsOf: Map<string, AidenRound[]>;
+  /** Each firm's co-investors: the firms it has shared a round with, and the
+   *  rounds they shared. */
+  sharedWith: Map<string, Map<string, AidenRound[]>>;
 }
 
 export interface UseAidenData {
@@ -196,6 +203,15 @@ export function useAidenData(onLocked: () => void): UseAidenData {
         linksOf.set(id, list);
       }
     }
+    const roundsOf = new Map<string, AidenRound[]>();
+    for (const r of [...data.rounds].sort(newestRoundFirst)) {
+      for (const rf of r.firms) {
+        const list = roundsOf.get(rf.firmId) ?? [];
+        list.push(r);
+        roundsOf.set(rf.firmId, list);
+      }
+    }
+
     return {
       place: new Map(data.places.map((p) => [p.id, p])),
       firm: new Map(data.firms.map((f) => [f.id, f])),
@@ -205,6 +221,8 @@ export function useAidenData(onLocked: () => void): UseAidenData {
       lastTouch,
       invested,
       investedFirms,
+      roundsOf,
+      sharedWith: coInvestors(data.rounds),
     };
   }, [data]);
 

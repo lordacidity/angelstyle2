@@ -17,7 +17,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import * as client from '@/lib/vids-client';
 import { withBase } from '@/lib/clipping';
 import { trimClipCache } from '@/lib/vids-clip-cache';
-import type { PersonaParts, PersonaUpdate } from '@/lib/vids-client';
+import type { PersonaStart, PersonaUpdate } from '@/lib/vids-client';
 import { PERSONA_PARTS, PERSONA_PART_LABEL } from '@/lib/vids-types';
 import type {
   ClipableKind, VidClipableFlag, VidContextPatch, VidEdit, VidFolder, VidLink, VidMark, VidPersona, VidRow,
@@ -219,6 +219,8 @@ export function useVidsLibrary(active: boolean) {
     const target = folders.find((f) => f.id === id);
     setFolders((prev) => prev.filter((f) => !doomed.has(f.id)));
     setVideos((prev) => prev.map((v) => (v.folderId && doomed.has(v.folderId) ? { ...v, folderId: null } : v)));
+    // And a persona filed in one of them is left standing, in no folder.
+    setPersonas((prev) => prev.map((p) => (p.folderId && doomed.has(p.folderId) ? { ...p, folderId: null } : p)));
     setSelectedFolderId((cur) => (cur && doomed.has(cur) ? (target?.parentId ?? null) : cur));
     try {
       await tracked(client.deleteFolder(id));
@@ -235,11 +237,11 @@ export function useVidsLibrary(active: boolean) {
 
   const personaSorted = (list: VidPersona[]) => [...list].sort((a, b) => a.name.localeCompare(b.name));
 
-  const createPersona = useCallback(async (name: string, degen: boolean, parts: PersonaParts = {}) => {
+  const createPersona = useCallback(async (name: string, degen: boolean, start: PersonaStart = {}) => {
     const clean = name.trim();
     if (!clean) return null;
     try {
-      const p = await tracked(client.createPersona(clean, degen, parts));
+      const p = await tracked(client.createPersona(clean, degen, start));
       setPersonas((prev) => personaSorted([...prev, p]));
       return p;
     } catch (e) {

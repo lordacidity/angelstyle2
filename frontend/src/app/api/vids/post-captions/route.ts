@@ -130,7 +130,7 @@ VOICE, both captions
 - talk to the reader's read and conviction ("pauv is where that read finally has somewhere to live"), not to pauv's features.
 - never mean: nothing on looks, family, health or private life. a down trade argues the peak, never the person.
 
-INSTAGRAM: 1,900 to 2,200 characters of short paragraphs separated by blank lines, in this order.
+INSTAGRAM: 1,100 to 1,300 characters in all, counting the keyword line and the hashtags. short paragraphs separated by blank lines, a line or two each, in this order.
 1. hook, one line under 125 characters: a joke built on the real news ("down 20 to the no. 1 team... decided that was a good time to start"). on a down trade it can admit the take sounds crazy.
 2. the facts: specific scores, records, dates, dollar figures, names, teams and events from the brief. each name and event doubles as a search keyword.
 3. a second joke, to keep people reading.
@@ -138,7 +138,7 @@ INSTAGRAM: 1,900 to 2,200 characters of short paragraphs separated by blank line
 5. the trader read, in the chart language crypto and memecoin traders use. up: the doubters were the dip, the new highs are the trend. down: the peak, what's already priced in, no next catalyst. about the chart, never the person.
 6. fans vs traders: "fans ask x. traders ask y."
 7. the close: "trade the trajectory, not the person." and a line crediting the reader for spotting it early.
-8. a keyword line: 12 to 17 comma-separated phrases people search for ("<name> highlights", the event, the rival, the season). no hashtags in it.
+8. a keyword line: 8 to 10 comma-separated phrases people search for ("<name> highlights", the event, the rival, the season). no hashtags in it.
 9. the last line: 3 to 5 hashtags: the name, the team or project, the category, #pauv.
 
 TIKTOK: 2 to 4 short sentences, then the 5 hashtags.
@@ -162,7 +162,7 @@ async function draft(ask: string): Promise<string> {
     // No max_tokens: on the v4 reasoning models it counts the thinking too,
     // and an empty reply is worse than a slow one. The timeout is the old
     // Claude call's 90 s rather than the helper's 45: the Instagram caption
-    // alone is 2,000 characters on top of the thinking.
+    // alone is 1,200 characters on top of the thinking.
     { temperature: 0.7, timeoutMs: 90_000 },
   );
   if (!reply.trim()) throw new Error('the model came back with nothing');
@@ -228,6 +228,11 @@ const BANNED_RE = new RegExp(
   'i',
 );
 
+/** The Instagram caption is asked for about 1,200 characters (1,100 to
+ *  1,300); past this, with some give, it is redrawn once. The TikTok one is a
+ *  few sentences and never near it. */
+const MAX_IG_CHARS = 1400;
+
 export async function POST(req: NextRequest) {
   try {
     const input = Schema.parse(await req.json());
@@ -276,10 +281,13 @@ export async function POST(req: NextRequest) {
 
     let out = split(await draft(ask));
     const banned = out && `${out.ig}\n${out.tiktok}`.match(BANNED_RE);
-    if (!out || banned) {
+    const long = out && out.ig.trim().length > MAX_IG_CHARS ? out.ig.trim().length : 0;
+    if (!out || banned || long) {
       const fix = banned
         ? `Your last draft used "${banned[0]}". It may not appear in any form, in either caption.`
-        : 'Your last reply lost the OUTPUT layout. Follow it exactly.';
+        : long
+          ? `Your last instagram caption ran to ${long} characters. It may not pass 1,300, hashtags and keyword line included. Cut the facts and the jokes down, keep every section.`
+          : 'Your last reply lost the OUTPUT layout. Follow it exactly.';
       out = split(await draft(`${ask}\n\n${fix}`)) ?? out;
     }
     if (!out) return NextResponse.json({ error: 'The reply came back without the two captions in it.' }, { status: 502 });

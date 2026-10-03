@@ -1,5 +1,5 @@
 // /api/aiden/data — the whole log in one read: places, firms, people, events
-// (with who was at each), links, goals and notes.
+// (with who was at each), links, rounds (with the firms in each), goals and notes.
 import { NextRequest, NextResponse } from 'next/server';
 import { aidenLocked, isAidenUnlocked } from '@/lib/aiden-auth';
 import { readSnapshot } from '@/lib/aiden-db';

@@ -197,6 +197,14 @@ export const rollStartNudge = (): number => {
   return Math.random() < 0.5 ? -n : n;
 };
 
+/** Whether this build plays its persona flipped left to right: even odds,
+ *  every time a persona is put on the stage, and one answer for all three of
+ *  its clips — Start, Top A and Top B are one performance, and half of it
+ *  mirrored would have him change hands mid-video. On each pick as
+ *  SlotPick.mirror, which the record writes down, so a code brings the video
+ *  back the way round it went out. */
+export const rollMirror = (): boolean => Math.random() < 0.5;
+
 /** How fast the whole of a clipper video runs (buildPlan's tempo): rolled for
  *  every video, anywhere from 1.1× to 1.2× to the hundredth (1.13×, 1.18×),
  *  with nothing on that page to move it — one more thing no two of them

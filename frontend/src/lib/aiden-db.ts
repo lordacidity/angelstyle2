@@ -2,7 +2,7 @@
 // (DATABASE_PUBLIC_URL), in tables prefixed `aiden_` so they can't collide with
 // anything already there. The schema creates itself on first use.
 //
-// Seven kinds of row are edited through one spec-driven path (SPECS below):
+// Eight kinds of row are edited through one spec-driven path (SPECS below):
 // each kind names its table and its editable columns, and a column names its
 // type. A request body is read against that spec and nothing else, so a client
 // can't smuggle in a column, and table names never come from the request.
@@ -12,12 +12,13 @@
 
 import pg from 'pg';
 import {
-  EVENT_KINDS, EVENT_ROLES, FIRM_KINDS, GEO_STATUSES, GOAL_STATUSES, LINK_KINDS, WARMTHS,
+  EVENT_KINDS, EVENT_ROLES, FIRM_KINDS, GEO_STATUSES, GOAL_STATUSES, LINK_KINDS, ROUND_ROLES, WARMTHS,
   type AidenChatMessage, type AidenEntity, type AidenEvent, type AidenEventPerson,
   type AidenIngestResult, type AidenIngestedRow,
   type AidenFirm, type AidenGoal, type AidenLink, type AidenNote, type AidenPerson,
-  type AidenPlace, type AidenSnapshot, type EventRole,
+  type AidenPlace, type AidenRound, type AidenRoundFirm, type AidenSnapshot, type EventRole, type RoundRole,
 } from '@/lib/aiden-types';
+import { ANNOUNCED_RE } from '@/lib/aiden-rounds';
 
 /** A request that can't be saved as asked. The routes answer these with 400. */
 export class AidenInputError extends Error {}
@@ -133,6 +134,27 @@ const SCHEMA: string[] = [
   `ALTER TABLE aiden_places ADD COLUMN IF NOT EXISTS geo_query TEXT NOT NULL DEFAULT ''`,
   `ALTER TABLE aiden_places ADD COLUMN IF NOT EXISTS geo_label TEXT NOT NULL DEFAULT ''`,
   `ALTER TABLE aiden_places ADD COLUMN IF NOT EXISTS geo_status TEXT NOT NULL DEFAULT ''`,
+  // Shared rounds (added 2026-10-01): a round some company raised, and the
+  // firms in the log that were in it. `announced` is text on purpose: it holds
+  // a year, a year and month, or a full day, and no more than is known.
+  `CREATE TABLE IF NOT EXISTS aiden_rounds (
+    id        UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    company   TEXT NOT NULL DEFAULT '',
+    stage     TEXT NOT NULL DEFAULT '',
+    announced TEXT NOT NULL DEFAULT '',
+    amount    TEXT NOT NULL DEFAULT '',
+    others    TEXT NOT NULL DEFAULT '',
+    source    TEXT NOT NULL DEFAULT '',
+    notes     TEXT NOT NULL DEFAULT '',
+    ${STAMPS}
+  )`,
+  `CREATE TABLE IF NOT EXISTS aiden_round_firms (
+    round_id UUID NOT NULL REFERENCES aiden_rounds(id) ON DELETE CASCADE,
+    firm_id  UUID NOT NULL REFERENCES aiden_firms(id) ON DELETE CASCADE,
+    role     TEXT NOT NULL DEFAULT 'participant',
+    PRIMARY KEY (round_id, firm_id)
+  )`,
+  `CREATE INDEX IF NOT EXISTS aiden_round_firms_firm_idx ON aiden_round_firms (firm_id)`,
 ];
 
 // One place per name, one firm per name, held by the database itself.
@@ -145,11 +167,17 @@ const SCHEMA: string[] = [
 //
 // A name is read here as `nameKey` reads it below: case and spacing ignored.
 // People are left out on purpose: two people can share a name.
-const NAME_KEY_SQL = `lower(regexp_replace(btrim(name), '\\s+', ' ', 'g'))`;
+const keySql = (col: string) => `lower(regexp_replace(btrim(${col}), '\\s+', ' ', 'g'))`;
+const NAME_KEY_SQL = keySql('name');
 
 const UNIQUE_NAMES: string[] = [
   `CREATE UNIQUE INDEX IF NOT EXISTS aiden_places_name_key ON aiden_places ((${NAME_KEY_SQL}))`,
   `CREATE UNIQUE INDEX IF NOT EXISTS aiden_firms_name_key ON aiden_firms ((${NAME_KEY_SQL}))`,
+  // One round per company, stage and year, for the same reason: the same round
+  // read off two sources must land once. The year is in it because a company
+  // can raise twice with no stage given to either round.
+  `CREATE UNIQUE INDEX IF NOT EXISTS aiden_rounds_company_stage_year_key
+     ON aiden_rounds ((${keySql('company')}), (${keySql('stage')}), (left(announced, 4)))`,
 ];
 
 const UNIQUE_VIOLATION = '23505';
@@ -157,7 +185,7 @@ const UNIQUE_VIOLATION = '23505';
 // Raised whenever SCHEMA or UNIQUE_NAMES changes. The schema is set up once per
 // process and remembered on globalThis, which a dev hot reload does not clear:
 // without this a server already running would never pick the change up.
-const SCHEMA_VERSION = 3;
+const SCHEMA_VERSION = 5;
 
 function ensureSchema(): Promise<void> {
   if (g.__aidenSchema?.version === SCHEMA_VERSION) return g.__aidenSchema.ready;
@@ -187,8 +215,10 @@ function ensureSchema(): Promise<void> {
 // ── The spec ──────────────────────────────────────────────────────────────────
 // 'ref' is a nullable pointer at another row; 'ref!' one that must be there.
 // 'when' is a nullable moment; 'when!' one that must be there. 'num' is a
-// nullable number. A list of strings is an enum: the value has to be one of them.
-type ColType = 'text' | 'ref' | 'ref!' | 'when' | 'when!' | 'bool' | 'tags' | 'num' | readonly string[];
+// nullable number. 'day' is a date only as exact as it is known: a year, a year
+// and month, or a full day, or '' for not known. A list of strings is an enum:
+// the value has to be one of them.
+type ColType = 'text' | 'ref' | 'ref!' | 'when' | 'when!' | 'bool' | 'tags' | 'num' | 'day' | readonly string[];
 
 interface Col {
   key: string;
@@ -265,6 +295,20 @@ const SPECS: Record<AidenEntity, Spec> = {
       { key: 'bId', col: 'b_id', type: 'ref!' },
       { key: 'kind', col: 'kind', type: LINK_KINDS },
       { key: 'note', col: 'note', type: 'text' },
+    ],
+  },
+  rounds: {
+    table: 'aiden_rounds',
+    // Newest first. '' (not known) sorts below every year.
+    order: 'announced DESC, lower(company) ASC, lower(stage) ASC',
+    cols: [
+      { key: 'company', col: 'company', type: 'text' },
+      { key: 'stage', col: 'stage', type: 'text' },
+      { key: 'announced', col: 'announced', type: 'day' },
+      { key: 'amount', col: 'amount', type: 'text' },
+      { key: 'others', col: 'others', type: 'text' },
+      { key: 'source', col: 'source', type: 'text' },
+      { key: 'notes', col: 'notes', type: 'text' },
     ],
   },
   goals: {
@@ -356,6 +400,16 @@ function readValue(type: ColType, raw: unknown): { value: unknown } | undefined 
       const tags = cleanTags(raw);
       return tags ? { value: tags } : undefined;
     }
+    case 'day': {
+      if (raw === null) return { value: '' };
+      if (typeof raw !== 'string') return undefined;
+      const v = raw.trim();
+      if (!v) return { value: '' };
+      if (!ANNOUNCED_RE.test(v)) {
+        throw new AidenInputError(`"${v.slice(0, 40)}" is not a date: write 2021, 2021-02 or 2021-02-17`);
+      }
+      return { value: v };
+    }
   }
 }
 
@@ -392,6 +446,23 @@ function pickPeople(body: unknown): AidenEventPerson[] | undefined {
   return out;
 }
 
+function pickRoundFirms(body: unknown): AidenRoundFirm[] | undefined {
+  const raw = (body as Record<string, unknown> | null)?.firms;
+  if (!Array.isArray(raw)) return undefined;
+  const seen = new Set<string>();
+  const out: AidenRoundFirm[] = [];
+  for (const item of raw) {
+    const f = (item ?? {}) as Record<string, unknown>;
+    if (!isUuid(f.firmId) || seen.has(f.firmId)) continue;
+    seen.add(f.firmId);
+    const role = (ROUND_ROLES as readonly string[]).includes(String(f.role))
+      ? (f.role as RoundRole)
+      : 'participant';
+    out.push({ firmId: f.firmId, role });
+  }
+  return out;
+}
+
 // ── Rows out ──────────────────────────────────────────────────────────────────
 type DbRow = Record<string, unknown>;
 
@@ -420,10 +491,16 @@ export async function readSnapshot(): Promise<AidenSnapshot> {
       .query<DbRow>(`SELECT * FROM ${SPECS[entity].table} ORDER BY ${SPECS[entity].order}`)
       .then((r) => r.rows.map((row) => toRow(entity, row)));
 
-  const [places, firms, people, events, links, goals, notes, eventPeople] = await Promise.all([
-    all('places'), all('firms'), all('people'), all('events'), all('links'), all('goals'), all('notes'),
+  const [places, firms, people, events, links, rounds, goals, notes, eventPeople, roundFirms] = await Promise.all([
+    all('places'), all('firms'), all('people'), all('events'), all('links'), all('rounds'), all('goals'), all('notes'),
     pool.query<{ event_id: string; person_id: string; role: string }>(
       'SELECT event_id, person_id, role FROM aiden_event_people',
+    ),
+    // Leads first, then by name, so every reader lists a round's firms the same way.
+    pool.query<{ round_id: string; firm_id: string; role: string }>(
+      `SELECT rf.round_id, rf.firm_id, rf.role
+       FROM aiden_round_firms rf JOIN aiden_firms f ON f.id = rf.firm_id
+       ORDER BY (rf.role = 'lead') DESC, lower(f.name) ASC`,
     ),
   ]);
 
@@ -434,12 +511,20 @@ export async function readSnapshot(): Promise<AidenSnapshot> {
     byEvent.set(ep.event_id, list);
   }
 
+  const byRound = new Map<string, AidenRoundFirm[]>();
+  for (const rf of roundFirms.rows) {
+    const list = byRound.get(rf.round_id) ?? [];
+    list.push({ firmId: rf.firm_id, role: rf.role as RoundRole });
+    byRound.set(rf.round_id, list);
+  }
+
   return {
     places: places as unknown as AidenPlace[],
     firms: firms as unknown as AidenFirm[],
     people: people as unknown as AidenPerson[],
     events: (events as unknown as AidenEvent[]).map((e) => ({ ...e, people: byEvent.get(e.id) ?? [] })),
     links: links as unknown as AidenLink[],
+    rounds: (rounds as unknown as AidenRound[]).map((r) => ({ ...r, firms: byRound.get(r.id) ?? [] })),
     goals: goals as unknown as AidenGoal[],
     notes: notes as unknown as AidenNote[],
   };
@@ -466,6 +551,9 @@ function checkNew(entity: AidenEntity, fields: Picked[]): void {
       return;
     case 'goals':
       if (!has(fields, 'title')) throw new AidenInputError('a title is required');
+      return;
+    case 'rounds':
+      if (!has(fields, 'company')) throw new AidenInputError('a round needs the company that raised it');
       return;
     case 'notes':
       if (!has(fields, 'title') && !has(fields, 'body')) throw new AidenInputError('the note is empty');
@@ -502,6 +590,23 @@ async function writeEventPeople(
   }
 }
 
+async function writeRoundFirms(
+  client: pg.PoolClient,
+  roundId: string,
+  firms: AidenRoundFirm[],
+): Promise<void> {
+  await client.query('DELETE FROM aiden_round_firms WHERE round_id = $1', [roundId]);
+  for (const f of firms) {
+    // A firm deleted in another tab since the form opened just isn't on it.
+    await client.query(
+      `INSERT INTO aiden_round_firms (round_id, firm_id, role)
+       SELECT $1::uuid, id, $3::text FROM aiden_firms WHERE id = $2::uuid
+       ON CONFLICT DO NOTHING`,
+      [roundId, f.firmId, f.role],
+    );
+  }
+}
+
 /** A pointer at a row that isn't there any more, or a name that is already
  *  taken, is a bad request and not a crash. */
 function asInputError(e: unknown): unknown {
@@ -516,6 +621,9 @@ function asInputError(e: unknown): unknown {
     if (err.constraint === 'aiden_firms_name_key') {
       return new AidenInputError('there is already a firm with that name');
     }
+    if (err.constraint === 'aiden_rounds_company_stage_year_key') {
+      return new AidenInputError('that round is already in the log: same company, same stage, same year');
+    }
   }
   return e;
 }
@@ -526,6 +634,7 @@ async function insertWith(
   entity: AidenEntity,
   fields: Picked[],
   people?: AidenEventPerson[],
+  roundFirms?: AidenRoundFirm[],
 ): Promise<string> {
   checkNew(entity, fields);
   const r = await client.query<{ id: string }>(
@@ -536,6 +645,7 @@ async function insertWith(
   );
   const id = r.rows[0].id;
   if (people) await writeEventPeople(client, id, people);
+  if (roundFirms) await writeRoundFirms(client, id, roundFirms);
   return id;
 }
 
@@ -546,10 +656,14 @@ async function patchWith(
   id: string,
   fields: Picked[],
   people?: AidenEventPerson[],
+  roundFirms?: AidenRoundFirm[],
 ): Promise<boolean> {
   const { table } = SPECS[entity];
   if (fields.some((f) => f.key === 'name' && f.value === '')) {
     throw new AidenInputError('a name is required');
+  }
+  if (entity === 'rounds' && fields.some((f) => f.key === 'company' && f.value === '')) {
+    throw new AidenInputError('a round needs the company that raised it');
   }
   const sets = ['updated_at = now()', ...fields.map((f, i) => `${f.col} = $${i + 1}`)];
   const r = await client.query(
@@ -562,6 +676,7 @@ async function patchWith(
     if ((same.rowCount ?? 0) > 0) throw new AidenInputError('a link needs two different people');
   }
   if (found && people) await writeEventPeople(client, id, people);
+  if (found && roundFirms) await writeRoundFirms(client, id, roundFirms);
   return found;
 }
 
@@ -585,13 +700,15 @@ async function inTransaction<T>(work: (client: pg.PoolClient) => Promise<T>): Pr
 export async function createRow(entity: AidenEntity, body: unknown): Promise<{ id: string }> {
   const fields = pick(entity, body);
   const people = entity === 'events' ? pickPeople(body) : undefined;
-  return inTransaction(async (client) => ({ id: await insertWith(client, entity, fields, people) }));
+  const roundFirms = entity === 'rounds' ? pickRoundFirms(body) : undefined;
+  return inTransaction(async (client) => ({ id: await insertWith(client, entity, fields, people, roundFirms) }));
 }
 
 export async function updateRow(entity: AidenEntity, id: string, body: unknown): Promise<boolean> {
   const fields = pick(entity, body);
   const people = entity === 'events' ? pickPeople(body) : undefined;
-  return inTransaction((client) => patchWith(client, entity, id, fields, people));
+  const roundFirms = entity === 'rounds' ? pickRoundFirms(body) : undefined;
+  return inTransaction((client) => patchWith(client, entity, id, fields, people, roundFirms));
 }
 
 export async function deleteRow(entity: AidenEntity, id: string): Promise<boolean> {
@@ -611,6 +728,9 @@ export async function deleteRow(entity: AidenEntity, id: string): Promise<boolea
 //   - `place` and `firm` on anything, and `people` on an event, are names too
 //   - an event sent twice (same kind, same words, same day) lands once
 //   - a tie is matched on its two people and its kind; a goal on its title
+//   - a round is matched on its company, its stage and the year it was
+//     announced; its `firms` are names too, and sent on a round already there
+//     they replace who was in it
 //   - anything may carry an `id` instead, to say exactly which row is meant
 // All of it in one transaction: a batch lands whole or not at all.
 
@@ -672,7 +792,7 @@ async function takeIngestLock(client: pg.PoolClient): Promise<void> {
 export async function ingest(body: unknown): Promise<IngestResult> {
   const b = isBag(body) ? body : {};
   const result: IngestResult = {
-    places: [], firms: [], people: [], events: [], links: [], goals: [], notes: [],
+    places: [], firms: [], people: [], events: [], links: [], rounds: [], goals: [], notes: [],
   };
 
   return inTransaction(async (client) => {
@@ -812,6 +932,67 @@ export async function ingest(body: unknown): Promise<IngestResult> {
       } else {
         const id = await insertWith(client, 'events', fields, people);
         result.events.push({ id, label, created: true });
+      }
+    }
+
+    for (const raw of bags(b.rounds)) {
+      const fields = pick('rounds', raw);
+      const company = text(raw.company);
+      const stage = text(raw.stage);
+
+      // Left out, the firms on a round being edited are left as they are.
+      let firms: AidenRoundFirm[] | undefined;
+      if (Array.isArray(raw.firms)) {
+        firms = [];
+        const seen = new Set<string>();
+        for (const item of raw.firms) {
+          const f: Bag = typeof item === 'string' ? { name: item } : isBag(item) ? item : {};
+          const name = text(f.name);
+          const firmId = isUuid(f.firmId) ? f.firmId
+            : isUuid(f.id) ? f.id
+            : name ? await resolve('firms', name)
+            : '';
+          if (!firmId || seen.has(firmId)) continue;
+          seen.add(firmId);
+          const role = (ROUND_ROLES as readonly string[]).includes(String(f.role))
+            ? (f.role as RoundRole)
+            : 'participant';
+          firms.push({ firmId, role });
+        }
+      }
+
+      // The same company and stage, and then the year. A round sent with a year
+      // is the one in the log with that year, or the one whose year was not
+      // known till now. Sent with no year, it is the only one there is.
+      let target = isUuid(raw.id) ? raw.id : undefined;
+      if (!target && company) {
+        const same = (await client.query<{ id: string; year: string }>(
+          `SELECT id, left(announced, 4) AS year FROM aiden_rounds
+           WHERE ${keySql('company')} = $1 AND ${keySql('stage')} = $2
+           ORDER BY created_at ASC`,
+          [nameKey(company), nameKey(stage)],
+        )).rows;
+        const year = String(fields.find((f) => f.key === 'announced')?.value ?? '').slice(0, 4);
+        if (year) {
+          target = (same.find((r) => r.year === year) ?? same.find((r) => !r.year))?.id;
+        } else if (same.length > 1) {
+          throw new AidenInputError(
+            `${same.length} rounds in the log are "${[company, stage].filter(Boolean).join(' ')}": say which year, or give its id`,
+          );
+        } else {
+          target = same[0]?.id;
+        }
+      }
+      const label = [company, stage].filter(Boolean).join(' ') || String(target ?? '');
+      if (target) {
+        if (!(await patchWith(client, 'rounds', target, fields, undefined, firms))) {
+          throw new AidenInputError(`no round has the id ${target}`);
+        }
+        record(result.rounds, { id: target, label, created: false });
+      } else {
+        if (!company) throw new AidenInputError('every round needs the company that raised it');
+        const id = await insertWith(client, 'rounds', fields, undefined, firms);
+        result.rounds.push({ id, label, created: true });
       }
     }
 

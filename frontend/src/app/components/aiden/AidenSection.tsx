@@ -12,6 +12,8 @@
 //   People     everyone, with or without an event to their name
 //   Firms      the funds and companies, and who is known at each
 //   Places     SF, Austin, and who is where
+//   Rounds     which firms have been in the same funding round, and so which
+//              warm firm can introduce a cold one
 //   Views      the web, laid out five ways (free, on a map, in rings by
 //              warmth, in clusters by firm or place, along a timeline), and
 //              Activity: each person's touches as dots along the months
@@ -24,15 +26,16 @@ import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { useAidenData } from './useAidenData';
 import type { AidenNav, ModalState, Selection } from './aiden-nav';
 import { AidenTimeline, AidenPeople, AidenFirms, AidenPlaces } from './AidenLists';
+import { AidenRounds } from './AidenRounds';
 import { AidenGraph, type Layout } from './AidenGraph';
 import { AidenActivity } from './AidenActivity';
 import { AidenMind } from './AidenMind';
 import { AidenChat } from './AidenChat';
 import { AidenDetail } from './AidenDetail';
-import { EventForm, FirmForm, LinkForm, PersonForm, PlaceForm } from './AidenForms';
+import { EventForm, FirmForm, LinkForm, PersonForm, PlaceForm, RoundForm } from './AidenForms';
 import { btnGhost, btnPrimary } from './aiden-ui';
 
-type Tab = 'timeline' | 'people' | 'firms' | 'places' | 'views' | 'mind' | 'chat';
+type Tab = 'timeline' | 'people' | 'firms' | 'places' | 'rounds' | 'views' | 'mind' | 'chat';
 type View = Layout | 'activity';
 
 const VIEWS: { id: View; label: string; hint: string }[] = [
@@ -197,6 +200,7 @@ export function AidenSection({ active }: { active: boolean }) {
     { id: 'people', label: 'People', count: d.people.length },
     { id: 'firms', label: 'Firms', count: d.firms.length },
     { id: 'places', label: 'Places', count: d.places.length },
+    { id: 'rounds', label: 'Shared rounds', count: d.rounds.length },
     { id: 'views', label: 'Views' },
     { id: 'mind', label: 'Goals & thoughts', count: d.goals.filter((x) => x.status === 'active').length + d.notes.length },
     { id: 'chat', label: 'Chat' },
@@ -220,6 +224,7 @@ export function AidenSection({ active }: { active: boolean }) {
           <button type="button" onClick={() => setModal({ kind: 'person' })} className={btnGhost}>+ Person</button>
           <button type="button" onClick={() => setModal({ kind: 'firm' })} className={btnGhost}>+ Firm</button>
           <button type="button" onClick={() => setModal({ kind: 'place' })} className={btnGhost}>+ Place</button>
+          <button type="button" onClick={() => setModal({ kind: 'round' })} className={btnGhost}>+ Round</button>
           <div className="ml-auto flex items-center gap-2">
             {api.loading && (
               <span className="h-3.5 w-3.5 animate-spin rounded-full border-2 border-zinc-700 border-t-zinc-400" />
@@ -276,6 +281,7 @@ export function AidenSection({ active }: { active: boolean }) {
               {tab === 'people' && <AidenPeople api={api} nav={nav} />}
               {tab === 'firms' && <AidenFirms api={api} nav={nav} />}
               {tab === 'places' && <AidenPlaces api={api} nav={nav} />}
+              {tab === 'rounds' && <AidenRounds api={api} nav={nav} />}
               {tab === 'views' && (
                 <div className="flex h-full min-h-0 flex-col gap-3">
                   <div className="flex shrink-0 flex-wrap items-center gap-2">
@@ -360,6 +366,15 @@ export function AidenSection({ active }: { active: boolean }) {
       )}
       {modal?.kind === 'link' && (
         <LinkForm api={api} initial={modal.initial} fromId={modal.fromId} onClose={closeModal} />
+      )}
+      {modal?.kind === 'round' && (
+        <RoundForm
+          api={api}
+          initial={modal.initial}
+          presetFirmIds={modal.presetFirmIds}
+          presetCompany={modal.presetCompany}
+          onClose={closeModal}
+        />
       )}
     </div>
   );

@@ -59,6 +59,7 @@ const pickSpec = (p: SlotPick): RecipePick => ({
   // Written down only when it is on, so a record of an ordinary build reads
   // exactly as it always has.
   ...(p.centred ? { centred: true } : {}),
+  ...(p.mirror ? { mirror: true } : {}),
 });
 
 /** The record of what is on the stage right now. Copies rather than shares, so
@@ -144,6 +145,7 @@ export function picksFromSpec(
       trim: { ...rp.trim },
       speed: clampSpeed(rp.speed),
       ...(rp.centred ? { centred: true } : {}),
+      ...(rp.mirror ? { mirror: true } : {}),
     };
   }
   const persona = spec.persona;

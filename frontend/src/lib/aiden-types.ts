@@ -3,7 +3,9 @@
 // Everything that happens is an EVENT: an email sent, a LinkedIn message, a
 // call, a coffee, a networking night. Events point at the PEOPLE they involved;
 // people sit under FIRMS; people and firms sit in PLACES; people are tied to
-// each other by LINKS (friend, mutual, colleague...). Goals and notes are the
+// each other by LINKS (friend, mutual, colleague...). Firms are tied to each
+// other by ROUNDS: two firms that put money into the same round of the same
+// company have a shared round, and know each other. Goals and notes are the
 // thinking that goes on around all of it.
 //
 // These are the shapes the client and the server both speak. Nothing in here
@@ -71,6 +73,15 @@ export const LINK_KIND_LABEL: Record<LinkKind, string> = {
   partner: 'Partners',
   family: 'Family',
   other: 'Connected',
+};
+
+/** What a firm was to a round. */
+export const ROUND_ROLES = ['lead', 'participant'] as const;
+export type RoundRole = (typeof ROUND_ROLES)[number];
+
+export const ROUND_ROLE_LABEL: Record<RoundRole, string> = {
+  lead: 'Led',
+  participant: 'Took part',
 };
 
 export const GOAL_STATUSES = ['active', 'done', 'parked'] as const;
@@ -154,6 +165,34 @@ export interface AidenLink {
   updatedAt: string;
 }
 
+export interface AidenRoundFirm {
+  firmId: string;
+  role: RoundRole;
+}
+
+/** A funding round some company raised, and the firms in the log that were in
+ *  it. Two firms on the same round have a shared round. */
+export interface AidenRound {
+  id: string;
+  /** Who raised it. A name: it may or may not also be a firm in the log. */
+  company: string;
+  /** Seed, Series A... as it was announced. */
+  stage: string;
+  /** When it was announced, only as exactly as it is known: '2021',
+   *  '2021-02' or '2021-02-17'. '' when it is not known. */
+  announced: string;
+  /** As announced: "$30M". */
+  amount: string;
+  /** The investors in the round that are not firms in the log. */
+  others: string;
+  /** Where this was read. */
+  source: string;
+  notes: string;
+  firms: AidenRoundFirm[];
+  createdAt: string;
+  updatedAt: string;
+}
+
 export interface AidenGoal {
   id: string;
   title: string;
@@ -188,6 +227,7 @@ export interface AidenSnapshot {
   people: AidenPerson[];
   events: AidenEvent[];
   links: AidenLink[];
+  rounds: AidenRound[];
   goals: AidenGoal[];
   notes: AidenNote[];
 }
@@ -200,7 +240,7 @@ export interface AidenIngestedRow {
   created: boolean;
 }
 
-export const AIDEN_ENTITIES = ['places', 'firms', 'people', 'events', 'links', 'goals', 'notes'] as const;
+export const AIDEN_ENTITIES = ['places', 'firms', 'people', 'events', 'links', 'rounds', 'goals', 'notes'] as const;
 export type AidenEntity = (typeof AIDEN_ENTITIES)[number];
 
 export type AidenIngestResult = Record<AidenEntity, AidenIngestedRow[]>;

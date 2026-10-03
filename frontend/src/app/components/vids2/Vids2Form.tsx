@@ -58,7 +58,8 @@
 // model — is unchanged from before this page was redrawn; only the page is.
 
 import { useEffect, useMemo, useRef, useState, type FocusEvent, type KeyboardEvent, type ReactNode } from 'react';
-import { PERSONA_PARTS, type VidPersona, type VidRow } from '@/lib/vids-types';
+import { PERSONA_PARTS, type VidFolder, type VidPersona, type VidRow } from '@/lib/vids-types';
+import { groupPersonas, isWholePersona, personaLabel, type PersonaGroup } from '@/lib/vids-persona-folders';
 import { writeQuestion, type QuestionKind } from '@/lib/vids-client';
 import {
   INTROS_OFFERED, LOOK_ASKED, MODE_ASKED, VIDS2_LOOKS, VIDS2_MODES, introReady, loadRoster, lower, setupReady,
@@ -89,6 +90,9 @@ const DIRECTION_ON: Record<Direction, string> = {
   down: 'border-red-500 bg-red-500/15 text-red-300',
 };
 const LOOK_LABEL: Record<Vids2Look, string> = { roll: '🎲 Random', light: '☀️ Light', dark: '🌙 Dark' };
+/** The Persona card's key, and its name, for the personas in no folder. */
+const OTHER = '__other__';
+const OTHER_LABEL = 'Other';
 const LOOK_ON: Record<Vids2Look, string> = {
   roll: 'border-zinc-300 bg-white/10 text-white',
   light: 'border-amber-200 bg-amber-100/15 text-amber-100',
@@ -219,6 +223,9 @@ interface Props {
   setup: Vids2Setup;
   onChange: (next: Vids2Setup) => void;
   personas: VidPersona[];
+  /** The library's folders — the Persona card reads whose each persona is
+   *  off them (lib/vids-persona-folders). */
+  folders: VidFolder[];
   resolveVideo: (id: string) => VidRow | undefined;
   libraryLoaded: boolean;
   /** The few names starred in gold at the top of the search — set on Studio
@@ -373,12 +380,17 @@ function PasteLink({ disabled, reading, onUse }: {
 // ── The form ─────────────────────────────────────────────────────────────────
 
 export function Vids2Form({
-  setup, onChange, personas, resolveVideo, libraryLoaded, suggested, job, jobError, warm, onHeadStart,
+  setup, onChange, personas, folders, resolveVideo, libraryLoaded, suggested, job, jobError, warm, onHeadStart,
   onGenerate, onCancel, side, footer, locked, captionCard, captionSummary,
 }: Props) {
   const busy = !!job || !!locked;
   const who = setup.person.trim();
   const persona = personas.find((p) => p.id === setup.personaId) ?? null;
+  /** Which folder the Persona card is showing the inside of — see personaCard.
+   *  A folder's key, null for the list of folders, and undefined until the
+   *  card has been moved by hand: it then shows wherever the chosen persona
+   *  is. */
+  const [browse, setBrowse] = useState<string | null | undefined>(undefined);
   /** The story chosen for THIS person — one chosen and then Who changed is
    *  about somebody else, and doesn't count (storyFor). */
   const story = storyFor(setup);
@@ -881,17 +893,30 @@ export function Vids2Form({
     commit(next);
     advance(PERSONA, next);
   };
-  /** The personas Random can land on: those with all three clips in the
-   *  library, so a random pick never leaves the stage short. */
-  const wholePersonas = personas.filter((p) => PERSONA_PARTS.every((part) => {
-    const id = p[part];
-    return !!id && !!resolveVideo(id);
-  }));
-  /** One of them at random — never the one already chosen, when there is
-   *  anyone else. */
-  const randomPersona = () => {
-    const others = wholePersonas.filter((p) => p.id !== setup.personaId);
-    const from = others.length ? others : wholePersonas;
+  // ── Who, then which video ───────────────────────────────────────────────────
+  // A persona is a person and has videos (lib/vids-persona-folders — in this
+  // file `personas` are the videos, the code's older name for them), so the
+  // card asks twice: the persona — Aiden, Baldy, Dorky — and then which of
+  // their videos. The clipper page offers only the videos with all three clips
+  // (a new one is on offer from its first part, and one still being filed must
+  // not be picked); the Studio shows every one, a part short or not.
+  const offered = CLIPPERS ? personas.filter((p) => isWholePersona(p, resolveVideo)) : personas;
+  const personaGroups = groupPersonas(offered, folders, { empty: false });
+  const groupKey = (g: PersonaGroup) => g.folder?.id ?? OTHER;
+  /** Nothing is in a folder yet, so there is no first question to ask. */
+  const flat = personaGroups.length === 1 && !personaGroups[0].folder;
+  const chosenGroup = persona ? personaGroups.find((g) => g.personas.some((p) => p.id === persona.id)) ?? null : null;
+  const insideKey = flat ? OTHER : browse === undefined ? (chosenGroup ? groupKey(chosenGroup) : null) : browse;
+  const inside = personaGroups.find((g) => groupKey(g) === insideKey) ?? null;
+  /** The ones Random can land on in a folder: those with all three clips in
+   *  the library, so a random pick never leaves the stage short. */
+  const wholeIn = (g: PersonaGroup) => g.personas.filter((p) => isWholePersona(p, resolveVideo));
+  /** One of the folder's at random — never the one already chosen, when there
+   *  is another. */
+  const randomPersona = (g: PersonaGroup) => {
+    const whole = wholeIn(g);
+    const others = whole.filter((p) => p.id !== setup.personaId);
+    const from = others.length ? others : whole;
     if (from.length) pickPersona(from[Math.floor(Math.random() * from.length)].id);
   };
 
@@ -918,7 +943,7 @@ export function Vids2Form({
               // eslint-disable-next-line @next/next/no-img-element
               <img src={thumb} alt="" className="h-6 w-6 shrink-0 rounded-md object-cover" draggable={false} />
             )}
-            <span className="truncate">{persona?.name ?? (libraryLoaded ? '' : '…')}</span>
+            <span className="truncate">{persona ? personaLabel(persona, folders) : (libraryLoaded ? '' : '…')}</span>
           </span>
         );
       }
@@ -1409,23 +1434,71 @@ export function Vids2Form({
     <p className="flex h-24 items-center justify-center gap-2 text-[13px] text-zinc-500">
       <SpinnerIcon size={13} className="animate-spin" /> Loading the library…
     </p>
-  ) : personas.length === 0 ? (
+  ) : offered.length === 0 ? (
     <p className="flex h-24 items-center justify-center rounded-xl border border-dashed border-zinc-800 text-[13px] text-zinc-500">
-      No personas in the library yet.
+      No persona videos in the library yet.
     </p>
+  ) : !inside ? (
+    // First: whose. One tile per person, wearing a still of one of theirs.
+    <div className="vids-scroll grid max-h-[420px] grid-cols-3 gap-2 overflow-y-auto pr-1 sm:grid-cols-5">
+      {personaGroups.map((g) => {
+        const name = g.folder?.name ?? OTHER_LABEL;
+        const thumb = g.personas.map((p) => resolveVideo(p.topAId ?? '')?.thumbUrl).find(Boolean);
+        const on = g === chosenGroup;
+        return (
+          <button
+            key={groupKey(g)}
+            type="button"
+            onClick={() => setBrowse(groupKey(g))}
+            title={`${name} — ${g.personas.length} to choose from`}
+            className={`relative overflow-hidden rounded-xl border bg-black text-left transition-colors ${
+              on ? 'border-white ring-1 ring-white' : 'border-zinc-800 hover:border-zinc-500'
+            }`}
+          >
+            <span className="block aspect-square w-full overflow-hidden sm:aspect-[3/4]">
+              {thumb ? (
+                // eslint-disable-next-line @next/next/no-img-element
+                <img src={thumb} alt="" className="h-full w-full object-cover" draggable={false} />
+              ) : (
+                <span className="flex h-full items-center justify-center"><VideoIcon size={18} className="text-zinc-700" /></span>
+              )}
+            </span>
+            <span className="absolute inset-x-0 bottom-0 truncate bg-gradient-to-t from-black/90 via-black/60 to-transparent px-1.5 pb-1.5 pt-5 text-[11px] font-semibold text-white sm:hidden">
+              {name}
+            </span>
+            <span className="hidden truncate px-1.5 py-1 text-[11px] font-semibold text-zinc-200 sm:block">{name}</span>
+            <span className="absolute right-1.5 top-1.5 rounded bg-black/80 px-1 text-[10px] font-bold text-zinc-300">{g.personas.length}</span>
+            {on && (
+              <span className="absolute left-1.5 top-1.5 rounded-full bg-emerald-500 px-1.5 text-[10px] font-bold text-black">✓</span>
+            )}
+          </button>
+        );
+      })}
+    </div>
   ) : (
+    // Then: which of their videos, with Random among just these.
+    <>
+    {!flat && (
+      <div className="mb-2 flex items-center gap-2 text-[12px]">
+        <button type="button" onClick={() => setBrowse(null)} className={pill(false)}>← Personas</button>
+        <span className="min-w-0 truncate font-semibold text-zinc-200">{inside.folder?.name ?? OTHER_LABEL}</span>
+        <span className="shrink-0 text-zinc-500">choose a video</span>
+      </div>
+    )}
     <div className="vids-scroll grid max-h-[420px] grid-cols-3 gap-2 overflow-y-auto pr-1 sm:grid-cols-5">
       <button
         type="button"
-        onClick={randomPersona}
-        disabled={!wholePersonas.length}
-        title={wholePersonas.length ? `One of ${wholePersonas.length} at random` : 'No persona has all three clips yet'}
+        onClick={() => randomPersona(inside)}
+        disabled={!wholeIn(inside).length}
+        title={wholeIn(inside).length
+          ? `One of ${flat ? 'the' : `${inside.folder?.name ?? OTHER_LABEL}'s`} ${wholeIn(inside).length} at random`
+          : 'None of these has all three clips yet'}
         className="flex aspect-square flex-col items-center justify-center rounded-xl border border-dashed border-zinc-700 text-zinc-300 transition-colors hover:border-zinc-400 hover:text-white disabled:opacity-40 sm:aspect-[3/4]"
       >
         <span className="text-2xl">🎲</span>
         <span className="mt-1 text-xs font-semibold">Random</span>
       </button>
-      {personas.map((p) => {
+      {inside.personas.map((p) => {
         const v = resolveVideo(p.topAId ?? '');
         const filled = PERSONA_PARTS.filter((k) => p[k]).length;
         const on = p.id === setup.personaId;
@@ -1465,6 +1538,7 @@ export function Vids2Form({
         );
       })}
     </div>
+    </>
   );
 
   const body = (i: number): ReactNode => {

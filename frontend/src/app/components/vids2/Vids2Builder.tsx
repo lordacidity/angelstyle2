@@ -1478,12 +1478,11 @@ export function Vids2Builder({
     // code on a video that never existed — see the catch.
     const run = ++exportRun.current;
     // The code is minted here, in this press: pressing the button is what
-    // writes the build down, and the caption the code belongs on is the thing
-    // being copied and pasted while the frames are still going — so it goes
-    // on the end of both post captions now, not when the server answers,
-    // which waits on the model for the title. The record is written under it
-    // (the server mints its own only if this one is somehow taken, and the
-    // captions swap to that one when it lands), and the three-word title is
+    // writes the build down, so the line under the summary shows it now, not
+    // when the server answers, which waits on the model for the title. (It
+    // went on the end of both post captions too until 2026-10-01.) The record
+    // is written under it (the server mints its own only if this one is
+    // somehow taken, and that one is shown when it lands), and the three-word title is
     // worked out while the frames render, so by the time the file exists its
     // name is waiting. The render is the long part.
     const code = mintRecipeCode();
@@ -1519,7 +1518,7 @@ export function Vids2Builder({
         recipe = await recipeP;
       } catch (e) {
         // The file still goes out — under the old kind of name, and saying
-        // so. The code comes back off the captions: nothing answers to it.
+        // so. The code is taken back: nothing answers to it.
         if (exportRun.current === run) setExportCode(null);
         setRecipeError(`Exported, but no code could be saved for it: ${e instanceof Error ? e.message : String(e)}`);
       }
@@ -2388,7 +2387,9 @@ export function Vids2Builder({
                 </span>
               </p>
               <p className="truncate text-xs text-zinc-500">
-                {appliedPersona?.name ?? 'no persona'} · {build.theme}
+                {appliedPersona?.name ?? 'no persona'}
+                {/* Which way round this build rolled him — see rollMirror. */}
+                {picks.start?.mirror ? ' · mirrored' : ''} · {build.theme}
               </p>
               {/* The intro: the question ChatGPT was asked, the story that
                   was opened, or that there wasn't one. */}
@@ -2533,9 +2534,6 @@ export function Vids2Builder({
           position={build.direction}
           // What Generate asked for the moment it was pressed.
           early={build.early.post}
-          // The code minted as Download was pressed, so both captions end on
-          // it from that press — the same code the file name ends on.
-          code={exportCode}
           // Starting an export tries again a draft that failed.
           exporting={!!exporting}
           // Mirrored up so the Publish panel can default to it.

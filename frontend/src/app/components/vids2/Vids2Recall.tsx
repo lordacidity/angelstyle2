@@ -42,7 +42,7 @@ export function Vids2Recall({ disabled, busy, loaded, problems, error, onLoad }:
     <form
       data-vids2-recall
       onSubmit={submit}
-      title="Every downloaded video has a code after its title and on the end of its caption. Type it here and that video comes back — the answers, the words, the song, the look."
+      title="Every downloaded video has a code after its title in the file name. Type it here and that video comes back — the answers, the words, the song, the look."
       className="absolute left-3 top-3 z-30 w-[236px] rounded-lg border border-zinc-700 bg-zinc-950/90 p-1.5 shadow-lg backdrop-blur"
     >
       <div className="flex items-center gap-1">

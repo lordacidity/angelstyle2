@@ -91,9 +91,18 @@ The six cards —
    Light or Dark pins it. Studio only.
 5. **Mode** — 👔 Serious, 😐 Middle or 💀 Degen (`Vids2Mode`). Each is below.
    Studio only; the clipper page is Serious throughout.
-6. **Persona** — every persona in the library as a tile (its Top A still and
-   its name), with a **🎲 Random** tile first that picks one of the personas
-   with all three clips. A tile pressed is the last answer, and Generate lights.
+6. **Persona** — asked in two presses: the persona, then which of their
+   videos. A persona is a person (Aiden, Baldy, Dorky) and a persona video is
+   one video of them — in code the person is a folder under the library's
+   Persona folder and the video is a `VidPersona` (`lib/vids-persona-folders`;
+   arranged on Vids > Personas). The card first shows one tile per persona,
+   and pressing one shows that persona's videos as tiles (Top A still and
+   name), with a **🎲 Random** tile first that picks one of *theirs* with all
+   three clips. There is no Random across everybody. Videos that are nobody's
+   yet sit under an **Other** tile; while no video has a persona at all the
+   card skips the first press and lists them straight. The clipper page lists
+   only videos with all three clips (a new one is on offer from its first
+   part). A video pressed is the last answer, and Generate lights.
 
 The order is what each recording waits on, soonest first — because each one
 **starts as soon as its own answers are in**, not when Generate is pressed.
@@ -261,10 +270,19 @@ speed-up from the tempo's by asking `slotSpeed` at the plan's own tempo.
 
 ## No two builds on the same pixels
 
-The persona clips go up in every video made here, so two things are rolled
+The persona clips go up in every video made here, so three things are rolled
 per build to keep the frames from reading as a repost of the last one — on
 the Studio and the clipper page alike, since both are this section:
 
+- **The mirror.** Every time a persona is put on the stage it is flipped
+  left to right or it isn't, at even odds (`rollMirror` in
+  `lib/vids2/vids2Build`, put on all three picks as `SlotPick.mirror` by
+  `personaPicks`) — Start, Top A and Top B the same way, since they are one
+  performance. `drawInRegion` flips the picture about the middle of the box
+  it is drawn in, so it lands on the pixels it would have had; the words are
+  drawn after and are never flipped. The tuning page's summary says
+  "mirrored" when it came up. The clipper page's preview still is not
+  flipped — the roll is made with the build, after it.
 - **The Start nudge.** Start is moved a whole number of pixels up or down,
   1 to 12 in output px either way and never nothing (`rollStartNudge` in
   `lib/vids2/vids2Build`, put on the pick's `transform.dy` by `personaPicks`
@@ -279,9 +297,10 @@ the Studio and the clipper page alike, since both are this section:
   the same frame. Everything about a veil follows from its seed, which is
   all the record keeps (`VidBuildSpec.veil`).
 
-A code brings both back: the nudge is on the Start pick the record holds
-(`generate` takes it over the fresh roll), the veil off its seed. A record
-from before either existed comes back bare, as it went out.
+A code brings all three back: the nudge and the mirror are on the picks the
+record holds (`generate` takes them over the fresh rolls), the veil off its
+seed. A record from before any of them existed comes back bare, as it went
+out — un-mirrored included.
 
 ## Bringing a video back by its code
 
@@ -291,13 +310,12 @@ title from the model, the persona, every slot's clip and settings, the sound,
 the captions — and, since 2026-09-22, **the form's answers** (`Vids2Answers`,
 `build.vids2` in the record), because the two recordings the record names were
 never filed and can't be pointed at. The code sits after the title in the file
-name (`Chipotle Lebron Trade - 8JEQMP.mp4`), on the end of both post captions
-on a line of its own, and on the line under the tuning page's summary. It is
-**minted in the browser as Download is pressed** (`mintRecipeCode`), so the
-captions carry it in that same press; the server writes the record under it
-and only mints its own if that one is taken (the reply says which), while the
-three-word title is written during the render. An export that fails or is
-cancelled takes the code back off the captions.
+name (`Chipotle Lebron Trade - 8JEQMP.mp4`) and on the line under the tuning
+page's summary. It is not on the post captions (taken off 2026-10-01). It is
+**minted in the browser as Download is pressed** (`mintRecipeCode`); the
+server writes the record under it and only mints its own if that one is taken
+(the reply says which), while the three-word title is written during the
+render. An export that fails or is cancelled takes the code back.
 
 **The code box** sits top left of the form, and only there (`Vids2Recall`).
 Type a code — or paste the whole file name; the code is picked out of it — and
@@ -334,7 +352,7 @@ the story's photos are today's; the words over them are the ones that were
 exported. Reset clears a waiting record with the answers. The box is the
 Studio's alone: the clipper page does not draw it (`CLIPPERS` in
 `Vids2Section`), though a clipper's export still writes its record and puts
-the code on the file name and the caption, so the Studio can bring that video
+the code on the file name, so the Studio can bring that video
 back. The recipes route stays in the clipper allowlist (`CLIPPER_API_UNDER`
 in `middleware.ts`) for the export's own writing and taking back of a record.
 

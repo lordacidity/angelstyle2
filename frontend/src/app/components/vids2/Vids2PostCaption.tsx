@@ -16,9 +16,8 @@
 //
 // Under the buttons, one line: who and which way it was written for.
 //
-// The build's code goes on the end of both, on a line of its own, as it does
-// on Simpler's one caption: the same code that ends the file name, taken back
-// off if the export fails or is cancelled.
+// The build's code is not on either (taken off 2026-10-01): it still ends the
+// file name, which is where a video is brought back from.
 
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { writePostCaptions, type PostCaptionsDraft, type TradePosition } from '@/lib/vids-client';
@@ -40,32 +39,13 @@ interface CaptionState {
   position: TradePosition;
   ig: string;
   tiktok: string;
-  /** The build code currently on the end of both, or null. Kept beside them so
-   *  it comes off again by the exact string it went on as. */
-  code: string | null;
   loading: boolean;
   error: string | null;
   copied: Which | null;
 }
 
-/** The code as it reads under a post: a line of its own after a blank one. */
-const withCode = (text: string, code: string | null): string => (code ? `${text}\n\n${code}` : text);
-
-const withoutCode = (text: string, code: string | null): string => {
-  const suffix = code ? `\n\n${code}` : '';
-  return suffix && text.endsWith(suffix) ? text.slice(0, -suffix.length) : text;
-};
-
-/** Both captions carrying `next` as their code instead of the current one. */
-const swapCode = (c: CaptionState, next: string | null): CaptionState => ({
-  ...c,
-  ig: withCode(withoutCode(c.ig, c.code), next),
-  tiktok: withCode(withoutCode(c.tiktok, c.code), next),
-  code: next,
-});
-
 const blank = (build: number): CaptionState => ({
-  build, person: '', position: 'up', ig: '', tiktok: '', code: null,
+  build, person: '', position: 'up', ig: '', tiktok: '',
   loading: false, error: null, copied: null,
 });
 
@@ -78,18 +58,16 @@ interface Props {
   /** The draft Generate asked for the moment it was pressed, and who and which
    *  way it asked for. Taken in place of asking when they are this build's. */
   early: Vids2Early['post'];
-  /** The code the last export minted, or null before one has run. */
-  code: string | null;
   /** An export is running. Its start tries again a draft that failed. */
   exporting: boolean;
   /** Fires with the current IG/TikTok text every time a ready draft changes
-   *  (a fresh one lands, the code goes on or off it) — so the Publish panel
+   *  (a fresh one lands) — so the Publish panel
    *  can default its caption to whatever this card is showing, without
    *  asking for its own draft. Not fired while loading or on a failed draft. */
   onDraftChange?: (ig: string, tiktok: string) => void;
 }
 
-export function Vids2PostCaption({ buildId, person, position, early, code, exporting, onDraftChange }: Props) {
+export function Vids2PostCaption({ buildId, person, position, early, exporting, onDraftChange }: Props) {
   const [caption, setCaption] = useState<CaptionState | null>(null);
   const captionRef = useRef(caption);
   captionRef.current = caption;
@@ -97,22 +75,10 @@ export function Vids2PostCaption({ buildId, person, position, early, code, expor
   buildRef.current = buildId;
   const askRef = useRef({ person, position });
   askRef.current = { person, position };
-  const codeRef = useRef(code);
-  codeRef.current = code;
-  /** Which build the code was minted for: a code only goes on captions written
-   *  for the build it was exported from. */
-  const codeBuild = useRef<number | null>(null);
   // The request that counts, so an answer for an earlier build can't land over
   // the later one's.
   const seqRef = useRef(0);
   const copiedTimer = useRef<number | null>(null);
-
-  // A draft still being written picks the code up when it lands; one already
-  // written takes it on now.
-  useEffect(() => {
-    codeBuild.current = code ? buildRef.current : null;
-    setCaption((c) => (c && c.build === buildRef.current && !c.loading ? swapCode(c, code) : c));
-  }, [code]);
 
   /** The build the latest draft was asked for — set as it is asked, so asking
    *  twice for the same build (an effect run twice) is caught before either
@@ -130,11 +96,10 @@ export function Vids2PostCaption({ buildId, person, position, early, code, expor
     try {
       const d = await (asked ?? writePostCaptions({ ...askRef.current, fresh: true }));
       if (seq !== seqRef.current) return;
-      const forCode = codeBuild.current === forBuild ? codeRef.current : null;
       setCaption({
         build: forBuild, person: d.person, position: d.position,
-        ig: withCode(d.ig, forCode), tiktok: withCode(d.tiktok, forCode),
-        code: forCode, loading: false, error: null, copied: null,
+        ig: d.ig, tiktok: d.tiktok,
+        loading: false, error: null, copied: null,
       });
     } catch (e) {
       if (seq !== seqRef.current) return;

@@ -22,6 +22,9 @@ const Pick = z.object({
   // Bottom B dead centre rather than nudged left (SlotPick.centred). Only a
   // Vids 2 build sends it; every other record leaves it out and is nudged.
   centred: z.boolean().optional(),
+  // Played flipped left to right (SlotPick.mirror) — a Vids 2 build's roll for
+  // the persona's three clips. Left out when it is not.
+  mirror: z.boolean().optional(),
 });
 
 const Line = z.object({

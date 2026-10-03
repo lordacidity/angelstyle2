@@ -1,6 +1,7 @@
 'use client';
 
-// The forms: a person, a firm, a place, an event, a tie between two people.
+// The forms: a person, a firm, a place, an event, a tie between two people,
+// a round and the firms that were in it.
 // Each one adds when it is opened bare and edits when it is handed a row.
 //
 // Nothing on a form is a dead end. The firm and the place can be made from the
@@ -11,10 +12,12 @@
 import React, { useMemo, useState } from 'react';
 import {
   EVENT_KINDS, EVENT_KIND_LABEL, EVENT_ROLES, EVENT_ROLE_LABEL, FIRM_KINDS, FIRM_KIND_LABEL,
-  LINK_KINDS, LINK_KIND_LABEL, WARMTHS,
+  LINK_KINDS, LINK_KIND_LABEL, ROUND_ROLES, ROUND_ROLE_LABEL, WARMTHS,
   type AidenEvent, type AidenEventPerson, type AidenFirm, type AidenLink, type AidenPerson,
-  type AidenPlace, type EventKind, type EventRole, type FirmKind, type LinkKind, type Warmth,
+  type AidenPlace, type AidenRound, type AidenRoundFirm, type EventKind, type EventRole, type FirmKind,
+  type LinkKind, type RoundRole, type Warmth,
 } from '@/lib/aiden-types';
+import { ANNOUNCED_RE } from '@/lib/aiden-rounds';
 import { aidenFetch, type UseAidenData } from './useAidenData';
 import {
   Field, KIND_COLOR, Modal, RefSelect, WARMTH_COLOR, btnDanger, btnGhost, btnPrimary,
@@ -903,6 +906,219 @@ export function LinkForm({
           busy={busy}
           canSave={Boolean(otherId)}
           saveLabel={initial ? 'Save' : 'Connect'}
+        />
+      </form>
+    </Modal>
+  );
+}
+
+// ── Round ─────────────────────────────────────────────────────────────────────
+// A funding round and the firms in the log that were in it. Two firms on one
+// round have a shared round. Investors that are not in the log are written
+// down as text, so the firm list stays the firms he is actually working on.
+const STAGES = ['Pre-seed', 'Seed', 'Series A', 'Series B', 'Series C', 'Series D', 'Growth', 'Strategic'];
+
+function FirmPicker({
+  api, value, onChange,
+}: {
+  api: UseAidenData;
+  value: AidenRoundFirm[];
+  onChange: (next: AidenRoundFirm[]) => void;
+}) {
+  const [q, setQ] = useState('');
+  const [busy, setBusy] = useState(false);
+  const picked = useMemo(() => new Set(value.map((v) => v.firmId)), [value]);
+
+  const needle = q.trim().toLowerCase();
+  const matches = useMemo(() => {
+    if (!needle) return [];
+    return api.data.firms
+      .filter((f) => !picked.has(f.id) && f.name.toLowerCase().includes(needle))
+      .slice(0, 6);
+  }, [api.data.firms, needle, picked]);
+  const exact = api.data.firms.some((f) => f.name.toLowerCase() === needle);
+
+  function add(firmId: string) {
+    onChange([...value, { firmId, role: 'participant' }]);
+    setQ('');
+  }
+
+  async function createAndAdd() {
+    const name = q.trim();
+    if (!name || busy) return;
+    setBusy(true);
+    const id = await api.create('firms', { name, kind: 'vc' });
+    setBusy(false);
+    if (id) add(id);
+  }
+
+  return (
+    <div className="flex flex-col gap-1.5">
+      {value.length > 0 && (
+        <div className="flex flex-col gap-1">
+          {value.map((v) => {
+            const f = api.index.firm.get(v.firmId);
+            return (
+              <div key={v.firmId} className="flex items-center gap-2 rounded-md border border-zinc-800 bg-zinc-950 px-2.5 py-1.5">
+                <div className="min-w-0 flex-1 truncate text-[12.5px] text-white">{f?.name ?? 'A firm removed'}</div>
+                <select
+                  value={v.role}
+                  onChange={(e) =>
+                    onChange(value.map((x) => (x.firmId === v.firmId ? { ...x, role: e.target.value as RoundRole } : x)))
+                  }
+                  className="rounded border border-zinc-800 bg-zinc-900 px-1.5 py-0.5 text-[11px] text-zinc-300 outline-none"
+                >
+                  {ROUND_ROLES.map((r) => <option key={r} value={r}>{ROUND_ROLE_LABEL[r]}</option>)}
+                </select>
+                <button
+                  type="button"
+                  onClick={() => onChange(value.filter((x) => x.firmId !== v.firmId))}
+                  className="text-zinc-600 transition-colors hover:text-red-400"
+                  aria-label="Remove"
+                >
+                  <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round">
+                    <path d="M6 6l12 12M18 6L6 18" />
+                  </svg>
+                </button>
+              </div>
+            );
+          })}
+        </div>
+      )}
+
+      <div className="relative">
+        <input
+          value={q}
+          onChange={(e) => setQ(e.target.value)}
+          onKeyDown={(e) => {
+            if (e.key !== 'Enter') return;
+            e.preventDefault();
+            if (matches.length) add(matches[0].id);
+            else if (needle && !exact) void createAndAdd();
+          }}
+          placeholder="Type a firm to add it"
+          className={inputCls}
+        />
+        {needle && (
+          <div className="absolute left-0 right-0 top-full z-10 mt-1 overflow-hidden rounded-md border border-zinc-800 bg-[#161616] shadow-xl">
+            {matches.map((f) => (
+              <button
+                key={f.id}
+                type="button"
+                onClick={() => add(f.id)}
+                className="flex w-full items-baseline gap-2 px-2.5 py-1.5 text-left transition-colors hover:bg-zinc-800"
+              >
+                <span className="text-[12.5px] text-white">{f.name}</span>
+                <span className="truncate text-[11px] text-zinc-600">{FIRM_KIND_LABEL[f.kind]}</span>
+              </button>
+            ))}
+            {!exact && (
+              <button
+                type="button"
+                onClick={() => void createAndAdd()}
+                disabled={busy}
+                className="flex w-full items-center gap-1.5 border-t border-zinc-800 px-2.5 py-1.5 text-left text-[12px] text-emerald-300 transition-colors hover:bg-zinc-800"
+              >
+                {busy ? 'Adding...' : `+ New firm "${q.trim()}"`}
+              </button>
+            )}
+            {exact && matches.length === 0 && (
+              <p className="px-2.5 py-1.5 text-[11.5px] text-zinc-600">Already on this round.</p>
+            )}
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+export function RoundForm({
+  api, initial, presetFirmIds, presetCompany, onClose,
+}: {
+  api: UseAidenData;
+  initial?: AidenRound;
+  presetFirmIds?: string[];
+  presetCompany?: string;
+  onClose: () => void;
+}) {
+  const [company, setCompany] = useState(initial?.company ?? presetCompany ?? '');
+  const [stage, setStage] = useState(initial?.stage ?? '');
+  const [announced, setAnnounced] = useState(initial?.announced ?? '');
+  const [amount, setAmount] = useState(initial?.amount ?? '');
+  const [firms, setFirms] = useState<AidenRoundFirm[]>(
+    initial?.firms ?? (presetFirmIds ?? []).map((firmId) => ({ firmId, role: 'participant' as RoundRole })),
+  );
+  const [others, setOthers] = useState(initial?.others ?? '');
+  const [source, setSource] = useState(initial?.source ?? '');
+  const [notes, setNotes] = useState(initial?.notes ?? '');
+  const [busy, setBusy] = useState(false);
+
+  const when = announced.trim();
+  const whenOk = !when || ANNOUNCED_RE.test(when);
+  const canSave = Boolean(company.trim()) && whenOk;
+
+  async function submit(e: React.FormEvent) {
+    e.preventDefault();
+    if (!canSave || busy) return;
+    setBusy(true);
+    const body = { company, stage, announced: when, amount, firms, others, source, notes };
+    const ok = initial
+      ? await api.update('rounds', initial.id, body)
+      : Boolean(await api.create('rounds', body));
+    setBusy(false);
+    if (ok) onClose();
+  }
+
+  async function del() {
+    if (!initial) return;
+    if (!window.confirm('Delete this round? The firms on it stay.')) return;
+    setBusy(true);
+    const ok = await api.remove('rounds', initial.id);
+    setBusy(false);
+    if (ok) onClose();
+  }
+
+  return (
+    <Modal title={initial ? 'Edit round' : 'Add a round'} onClose={onClose} wide>
+      <form onSubmit={submit} className="flex flex-col gap-3">
+        <div className="grid grid-cols-[1fr_170px] gap-3">
+          <Field label="Company" hint="Who raised it">
+            <input autoFocus value={company} onChange={(e) => setCompany(e.target.value)} placeholder="Kalshi" className={inputCls} />
+          </Field>
+          <Field label="Stage">
+            <input value={stage} onChange={(e) => setStage(e.target.value)} list="aiden-round-stages" placeholder="Seed, Series A..." className={inputCls} />
+            <datalist id="aiden-round-stages">
+              {STAGES.map((s) => <option key={s} value={s} />)}
+            </datalist>
+          </Field>
+        </div>
+        <div className="grid grid-cols-2 gap-3">
+          <Field label="Announced" hint="Only as exact as you know it">
+            <input value={announced} onChange={(e) => setAnnounced(e.target.value)} placeholder="2021, 2021-02 or 2021-02-17" className={inputCls} />
+            {!whenOk && <span className="text-[11px] text-red-300">Write it as 2021, 2021-02 or 2021-02-17.</span>}
+          </Field>
+          <Field label="Amount">
+            <input value={amount} onChange={(e) => setAmount(e.target.value)} placeholder="$30M" className={inputCls} />
+          </Field>
+        </div>
+        <Field label="Firms in it" hint="The ones in your log; two on one round have a shared round">
+          <FirmPicker api={api} value={firms} onChange={setFirms} />
+        </Field>
+        <Field label="Also in it" hint="Investors that are not in your log">
+          <textarea value={others} onChange={(e) => setOthers(e.target.value)} rows={2} placeholder="Sequoia (lead), Charles Schwab..." className={textareaCls} />
+        </Field>
+        <Field label="Source" hint="Where this was read">
+          <input value={source} onChange={(e) => setSource(e.target.value)} placeholder="https://..." className={inputCls} />
+        </Field>
+        <Field label="Notes">
+          <textarea value={notes} onChange={(e) => setNotes(e.target.value)} rows={2} className={textareaCls} />
+        </Field>
+        <Footer
+          onClose={onClose}
+          onDelete={initial ? del : undefined}
+          busy={busy}
+          canSave={canSave}
+          saveLabel={initial ? 'Save' : 'Add round'}
         />
       </form>
     </Modal>

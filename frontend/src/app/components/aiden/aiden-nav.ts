@@ -3,7 +3,7 @@
 // any view can reach any other thing without knowing where it lives.
 
 import type {
-  AidenEvent, AidenFirm, AidenLink, AidenPerson, AidenPlace, EventKind,
+  AidenEvent, AidenFirm, AidenLink, AidenPerson, AidenPlace, AidenRound, EventKind,
 } from '@/lib/aiden-types';
 
 export type Selection = { type: 'person' | 'firm' | 'place'; id: string };
@@ -20,7 +20,8 @@ export type ModalState =
       presetFirmId?: string | null;
       presetPlaceId?: string | null;
     }
-  | { kind: 'link'; fromId: string; initial?: AidenLink };
+  | { kind: 'link'; fromId: string; initial?: AidenLink }
+  | { kind: 'round'; initial?: AidenRound; presetFirmIds?: string[]; presetCompany?: string };
 
 export interface AidenNav {
   select: (s: Selection | null) => void;

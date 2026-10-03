@@ -317,9 +317,9 @@ export function StudioShell() {
   const [photosEverVisited, setPhotosEverVisited] = useState(false);
   useEffect(() => { if (activeSection === 'photos') setPhotosEverVisited(true); }, [activeSection]);
 
-  // AI Persona too, and most of all: a Kling video is minutes of rendering, so
-  // once opened the section stays mounted and the job it is polling keeps going
-  // while you work somewhere else.
+  // AI Persona too, and most of all: a scene's Kling videos are minutes of
+  // rendering each, so once opened the section stays mounted and the scene it
+  // is polling keeps going while you work somewhere else.
   const [personaEverVisited, setPersonaEverVisited] = useState(false);
   useEffect(() => { if (activeSection === 'aipersona') setPersonaEverVisited(true); }, [activeSection]);
 
@@ -718,8 +718,9 @@ export function StudioShell() {
       {/* Launch-server split button + first-time setup dropdown (see component).
           Off on Vids, whose own bar runs along that edge, and off on Vids 2 for
           the same reason. Off on Aiden too, which fills the window to that
-          corner and has nothing to send to a phone. */}
-      <LaunchServerButton hidden={activeSection === 'vids' || activeSection === 'vids2' || activeSection === 'aiden'} />
+          corner and has nothing to send to a phone — and on AI Persona, whose
+          scene panel keeps its Go and Approve buttons in that corner. */}
+      <LaunchServerButton hidden={activeSection === 'vids' || activeSection === 'vids2' || activeSection === 'aiden' || activeSection === 'aipersona'} />
     </div>
   );
 }

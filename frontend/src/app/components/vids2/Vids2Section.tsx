@@ -86,7 +86,7 @@ import { Vids2Form, jobLegs, jobProgress, type Vids2Job, type Vids2Leg } from '.
 import { Vids2Recall } from './Vids2Recall';
 import {
   DEFAULT_TEMPO, DEFAULT_TRIM, INTAKE_SPEED, LIBRARY_FOLDERS, PERSONA_PART_SLOT, SLOT_META,
-  buildPlan, folderGroupIds, freshPick, type Picks, type SlotId,
+  buildPlan, folderGroupIds, freshPick, type Picks, type SlotId, type SlotPick,
 } from '@/lib/simpler/vidsPlan';
 import { PERSONA_PARTS, isPhoto, type VidPersona, type VidRow } from '@/lib/vids-types';
 import {
@@ -99,7 +99,7 @@ import { isOutletId, outletById } from '@/lib/news/outlets';
 import { getRecipe, writeHook, writePostCaptions } from '@/lib/vids-client';
 import {
   EMPTY_SETUP, answersFromRecord, answersOf, bottomANewsName, loadSetup, makeNewsClip, makeTradeClip,
-  readStoryAgain, rollClipperTempo, rollStartNudge, sameVideo, saveSetup, setupFromAnswers, setupReady, storyFor, themeFor,
+  readStoryAgain, rollClipperTempo, rollMirror, rollStartNudge, sameVideo, saveSetup, setupFromAnswers, setupReady, storyFor, themeFor,
   type Direction, type Theme, type Vids2Build, type Vids2Setup, type Vids2Story,
 } from '@/lib/vids2/vids2Build';
 import {
@@ -549,15 +549,18 @@ export function Vids2Section({ active }: { active: boolean }) {
    *  nudged a few pixels up or down, freshly for every build (rollStartNudge),
    *  so the same opening never goes out on the same pixels twice; the nudge
    *  is on the pick's transform, which the record writes down, so a code
-   *  brings the video back where it was. */
+   *  brings the video back where it was. And every time a persona is put on
+   *  the stage it is flipped left to right or it isn't, at even odds — all
+   *  three clips the same way (rollMirror), written down the same way. */
   const personaPicks = (persona: VidPersona): Picks => {
     const out: Picks = {};
+    const mirror = rollMirror();
     for (const part of PERSONA_PARTS) {
       const id = persona[part];
       const video = id ? videos.find((v) => v.id === id) : undefined;
       const slot = PERSONA_PART_SLOT[part];
       if (!video) continue;
-      const pick = freshPick(slot, video);
+      const pick: SlotPick = { ...freshPick(slot, video), ...(mirror ? { mirror: true } : {}) };
       out[slot] = slot === 'start'
         ? { ...pick, transform: { ...pick.transform, dy: pick.transform.dy + rollStartNudge() } }
         : pick;
@@ -1090,6 +1093,17 @@ export function Vids2Section({ active }: { active: boolean }) {
     // a roll of its own, and the record has that nudge on the pick.
     const recordedStart = restore?.recipe.build.picks.start?.transform;
     if (base.start && recordedStart) base.start = { ...base.start, transform: { ...recordedStart } };
+    // And the way round it went out: the record says of each of the three
+    // whether it was flipped (nothing said is not), in place of this roll.
+    if (restore) {
+      for (const slot of ['start', 'topA', 'topB'] as const) {
+        const pick = base[slot];
+        if (!pick) continue;
+        const { mirror: _rolled, ...plain } = pick;
+        void _rolled;
+        base[slot] = restore.recipe.build.picks[slot]?.mirror ? { ...plain, mirror: true } : plain;
+      }
+    }
     if (!pre) {
       const end = pickRandom(clipsForSlot('end'));
       if (end) base.end = freshPick('end', end);
@@ -1338,6 +1352,7 @@ export function Vids2Section({ active }: { active: boolean }) {
             setup={setup}
             onChange={setSetup}
             personas={personas}
+            folders={folders}
             resolveVideo={resolveVideo}
             libraryLoaded={loaded}
             suggested={suggested}

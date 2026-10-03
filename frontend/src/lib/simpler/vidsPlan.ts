@@ -377,6 +377,11 @@ export interface SlotPick {
    *  Bottom B) is already the page, whole and square on, and wants the middle.
    *  Absent or false anywhere else, so nothing that was nudged stops being. */
   centred?: boolean;
+  /** Played flipped left to right, in the place it would have had anyway. A
+   *  Vids 2 build rolls it at even odds for the persona's three clips together
+   *  (rollMirror in lib/vids2/vids2Build), so the same persona goes out both
+   *  ways round. Absent or false on everything else. */
+  mirror?: boolean;
 }
 export type Picks = Partial<Record<SlotId, SlotPick>>;
 
@@ -419,6 +424,8 @@ export interface PlanItem {
    *  Meaningless on anything else, and on a BOOM, which is over the whole
    *  frame rather than in a region of it. */
   centred?: boolean;
+  /** Off its pick: drawn flipped left to right — see SlotPick.mirror. */
+  mirror?: boolean;
   /** False on a BOOM laid for its noise alone — see BoomInsert.picture. The
    *  item stays on the timeline; both renderers simply never draw it. */
   picture?: boolean;
@@ -592,7 +599,7 @@ export function buildPlan(
     if (!p || end <= start) return;
     items.push({
       slot, video: p.video, start, end, region,
-      fit: p.fit, align: p.align, transform: p.transform ?? DEFAULT_TRANSFORM, centred: p.centred,
+      fit: p.fit, align: p.align, transform: p.transform ?? DEFAULT_TRANSFORM, centred: p.centred, mirror: p.mirror,
       muted: p.muted, trimStart: range(slot).start,
       duration: dur(slot), sourceLength: kept(slot), speed: rate(slot),
       sourceDuration: fullDur(slot),
@@ -807,6 +814,8 @@ export function drawInRegion(
    *  through — the top half, which is fitted tall and shown short (fitRect).
    *  Left out, the two are the same. */
   fitBox: Rect = region,
+  /** Draw the clip flipped left to right — see SlotPick.mirror. */
+  mirror = false,
 ): void {
   if (!sw || !sh) return;
   const r = placedRect(sw, sh, fitBox, fit, align, transform);
@@ -817,6 +826,13 @@ export function drawInRegion(
   if (backing) {
     ctx.fillStyle = backing;
     ctx.fillRect(region.x, region.y, region.w, region.h);
+  }
+  // Flipped about the middle of the box it is drawn in, so it lands on exactly
+  // the pixels it would have: only which way round the picture is changes. The
+  // clip above was set before this, so the region is not flipped with it.
+  if (mirror) {
+    ctx.translate(r.x * 2 + r.w, 0);
+    ctx.scale(-1, 1);
   }
   // The source less its edge — see EDGE_CROP. Naming the source rect also
   // pins what the scaler may sample: a clip drawn whole has its edge pixels
@@ -988,5 +1004,6 @@ export function drawPlanItem(
     ctx, src, sw, sh,
     regionRect(item.region, W, H, bars), item.fit, item.align,
     itemTransform(item, W), itemBacking(item, src, sw, sh), fitRect(item.region, W, H, bars),
+    item.mirror === true,
   );
 }

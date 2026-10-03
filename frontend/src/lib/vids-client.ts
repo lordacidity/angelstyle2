@@ -48,13 +48,19 @@ export const renameFolder = (id: string, name: string) =>
 export const deleteFolder = (id: string) =>
   api<{ ok: true }>(`/folders/${id}`, { method: 'DELETE' });
 
-/** `degen` has no default: making a persona means saying whether it is. */
-export const createPersona = (name: string, degen: boolean, parts: PersonaParts = {}) =>
-  api<VidPersona>('/personas', { method: 'POST', body: JSON.stringify({ name, degen, ...parts }) });
+/** What a persona can be made with beyond its name: any of its clips, the
+ *  folder under Persona it is filed in (whose it is), and `clipable: false` to
+ *  keep it from the clippers — left out, it is on offer to them. */
+export type PersonaStart = PersonaParts & VidClipablePatch & { folderId?: string | null };
 
-/** Anything about a persona that can change on its own: a part, its name, its
- *  context, whether the clippers get it, whether it is degen. */
-export type PersonaUpdate = PersonaParts & VidContextPatch & VidClipablePatch & { name?: string; degen?: boolean };
+/** `degen` has no default: making a persona means saying whether it is. */
+export const createPersona = (name: string, degen: boolean, start: PersonaStart = {}) =>
+  api<VidPersona>('/personas', { method: 'POST', body: JSON.stringify({ name, degen, ...start }) });
+
+/** Anything about a persona that can change on its own: a part, its name, the
+ *  folder it is in, its context, whether the clippers get it, whether it is
+ *  degen. */
+export type PersonaUpdate = PersonaStart & VidContextPatch & { name?: string; degen?: boolean };
 
 export const updatePersona = (id: string, patch: PersonaUpdate) =>
   api<VidPersona>(`/personas/${id}`, { method: 'PATCH', body: JSON.stringify(patch) });
@@ -499,6 +505,12 @@ export async function uploadVideo(file: Blob, opts: UploadVideoOptions): Promise
   };
   return api<VidRow>('/videos', { method: 'POST', body: JSON.stringify(row) });
 }
+
+/** A second clip with the same footage as one already in the library, copied
+ *  server side — nothing is rendered or sent up. Rejects when that clip is no
+ *  longer there. */
+export const copyVideo = (id: string, name: string, folderId: string | null) =>
+  api<VidRow>(`/videos/${id}/copy`, { method: 'POST', body: JSON.stringify({ name, folderId }) });
 
 // ── Recipes ───────────────────────────────────────────────────────────────────
 // A finished build under its code — see VidBuildSpec / VidRecipe in vids-types.

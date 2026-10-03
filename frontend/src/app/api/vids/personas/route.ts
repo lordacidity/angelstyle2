@@ -1,10 +1,13 @@
-// POST /api/vids/personas { name, degen, startId?, topAId?, topBId? } — create a
-// persona, the Start + Top A + Top B bundle a build picks in one go. The three clip
-// ids are optional so a persona can be named first and filled in as its uploads
-// land. Degen is not: whoever makes a persona says whether it is degen.
+// POST /api/vids/personas { name, degen, startId?, topAId?, topBId?, folderId?,
+// clipable? } — create a persona, the Start + Top A + Top B bundle a build picks
+// in one go. The three clip ids are optional so a persona can be named first and
+// filled in as its uploads land. Degen is not: whoever makes a persona says
+// whether it is degen. `folderId` files it under whose it is (a folder under
+// Persona), and `clipable: false` keeps it from the clippers — left out, a new
+// persona is on offer to them.
 import { NextRequest, NextResponse } from 'next/server';
 import { createPersona, errMessage, type PersonaPatch } from '@/lib/vids-db';
-import { readParts } from './parts';
+import { readFolder, readParts } from './parts';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -17,8 +20,8 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: 'say whether the persona is degen (degen: true or false)' }, { status: 400 });
   }
 
-  const patch: PersonaPatch = { degen: body.degen };
-  const bad = readParts(body, patch);
+  const patch: PersonaPatch = { degen: body.degen, clipable: body.clipable !== false };
+  const bad = readParts(body, patch) ?? readFolder(body, patch);
   if (bad) return NextResponse.json({ error: bad }, { status: 400 });
   try {
     return NextResponse.json(await createPersona(name, patch));

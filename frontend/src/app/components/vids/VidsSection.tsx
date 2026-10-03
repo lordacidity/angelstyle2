@@ -1,33 +1,33 @@
 'use client';
 
-// "Vids" — a shared cloud video library (folders + clips in Supabase Storage)
+/// "Vids" — a shared cloud video library (folders + clips in Supabase Storage)
 // in two pages. Nothing is built here: Vids 2 makes the videos. This section
-// is where the footage they are made of comes in, and where what the clippers'
-// app may use is switched on.
+// is where the personas and their videos are kept, and where what the
+// clippers' app may use is switched on.
 //
-//   Edit & file   two pages of its own. Upload: drop footage on the middle
-//                 and it runs the whole errand — folder, context, edit, save —
-//                 with three files at once taken to be a persona, named once,
-//                 given one context, and trimmed clip by clip, and one file on
-//                 its own taken to be a persona as well: the same footage fills
-//                 Start, Top A and Top B, trimmed three times. Edit: a clip
-//                 open in the editor — trim it, cut chunks out of the middle,
-//                 change its speed, drop its sound; saving puts the edit back
-//                 over that clip. Drop straight onto a folder on the left
-//                 instead and it is just filed there, which is how a lone
-//                 Bottom B or End gets in.
+// The words: a persona is a person (Blorky, Dorky, Aiden); a persona video is
+// one video of them doing something, and is what a build picks. See
+// lib/vids-persona-folders for how the code names the two.
+//
+//   Personas      VidsPrep. A narrow upload strip on the left — drop one video
+//                 or three and it becomes a persona video: named, given to a
+//                 persona, trimmed. The rest of the page is the personas and
+//                 their videos: make a persona, rename one, move a video to
+//                 the persona it is of. A video is opened up to its three
+//                 clips only to edit one.
 //   Clippers      what the clippers' app gets (VidsClippers): a switch on
-//                 every persona, bottom clip, song and caption look. Off is
-//                 ours alone — a build can still use it — and on is theirs as
-//                 well. Right-click renames a persona, clip or song
+//                 every persona video, bottom clip, song and caption look.
+//                 Off is ours alone — a build can still use it — and on is
+//                 theirs as well. Right-click renames a video, clip or song
 //                 everywhere.
 //
 // Both pages share one library hook, and an edit keeps its clip's id, so a
-// build always uses the current footage — edit Top A and the persona that uses
-// it plays the edited Top A, with no re-picking.
+// build always uses the current footage — edit a video's middle clip and the
+// video plays the edited one, with no re-picking.
 //
 // Four top-level folders feed the six slots of a sequence:
-//   Persona   a bundle of three clips — Start, Top A, Top B — chosen together.
+//   Persona   holds the personas (a folder each) and every persona video's
+//             three clips — Start, Top A, Top B — which are chosen together.
 //   Bottom A / Bottom B / End   filed one clip at a time, in the folder of
 //                               that name. Bottom A and Bottom B are screen
 //                               recordings Vids 2 makes as it builds and never
@@ -45,7 +45,7 @@ import type { VidRow } from '@/lib/vids-types';
  *  Clippers is where what the clippers' app may use is switched on. */
 type Page = 'prep' | 'clippers';
 const PAGES: { id: Page; label: string }[] = [
-  { id: 'prep',     label: 'Edit & file' },
+  { id: 'prep',     label: 'Personas' },
   { id: 'clippers', label: 'Clippers' },
 ];
 
@@ -113,6 +113,7 @@ export function VidsSection({ active }: { active: boolean }) {
         <VidsClippers
           active={active && page === 'clippers'}
           personas={personas}
+          folders={folders}
           resolveVideo={(id) => (id ? resolveVideo(id) : undefined)}
           clips={clipperClips}
           flags={lib.clipable}

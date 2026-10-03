@@ -78,6 +78,8 @@ export const LINK_COLOR: Record<LinkKind, string> = {
 
 export const FIRM_COLOR = '#3b82f6';
 export const PLACE_COLOR = '#10b981';
+/** A round two firms shared: the line between them, and the round itself. */
+export const ROUND_COLOR = '#a3e635';
 
 // ── Dates ─────────────────────────────────────────────────────────────────────
 export function fmtDay(iso: string | null | undefined): string {

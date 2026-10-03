@@ -21,6 +21,7 @@ export async function GET(req: NextRequest) {
         people: snap.people.length,
         events: snap.events.length,
         links: snap.links.length,
+        rounds: snap.rounds.length,
         goals: snap.goals.length,
         notes: snap.notes.length,
       },

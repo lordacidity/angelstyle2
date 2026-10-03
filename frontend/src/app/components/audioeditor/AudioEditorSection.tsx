@@ -11,10 +11,32 @@
 import { useEffect, useRef, useState, type ChangeEvent, type DragEvent } from 'react';
 import { ROOM_TONE_URL, decodeAudio } from '@/lib/vidsAudio';
 import { AUDIO_MUFFLER, DEFAULT_SETTINGS, EFFECTS, renderMix, toWav, type EffectId, type Settings } from '@/lib/audioMuffler';
+import { VideoEditorSection } from '../videoeditor/VideoEditorSection';
 
 const clock = (s: number) => `${Math.floor(s / 60)}:${String(Math.floor(s % 60)).padStart(2, '0')}`;
 
+// Audio and Video share this section; both stay mounted so a switch keeps the file and settings.
 export function AudioEditorSection({ active }: { active: boolean }) {
+  const [tab, setTab] = useState<'audio' | 'video'>('audio');
+  const tabs = (
+    <div className="flex shrink-0 rounded-md border border-zinc-800 p-0.5 text-xs">
+      {(['audio', 'video'] as const).map((t) => (
+        <button key={t} type="button" onClick={() => setTab(t)}
+          className={`rounded px-2.5 py-1 capitalize transition-colors ${tab === t ? 'bg-zinc-800 text-white' : 'text-zinc-500 hover:text-zinc-200'}`}>
+          {t}
+        </button>
+      ))}
+    </div>
+  );
+  return (
+    <>
+      <div style={{ display: tab === 'audio' ? undefined : 'none' }}><AudioPane active={active && tab === 'audio'} tabs={tabs} /></div>
+      <div style={{ display: tab === 'video' ? undefined : 'none' }}><VideoEditorSection active={active && tab === 'video'} tabs={tabs} /></div>
+    </>
+  );
+}
+
+function AudioPane({ active, tabs }: { active: boolean; tabs: React.ReactNode }) {
   const ctxRef = useRef<AudioContext | null>(null);
   const inputRef = useRef<HTMLInputElement>(null);
   const [file, setFile] = useState<{ name: string; voice: AudioBuffer } | null>(null);
@@ -160,9 +182,12 @@ export function AudioEditorSection({ active }: { active: boolean }) {
     >
       <input ref={inputRef} type="file" accept="audio/*" className="hidden" onChange={onPick} />
 
-      <div className="shrink-0 border-b border-zinc-900 px-6 py-4">
-        <h1 className="text-lg font-semibold">Audio Editor</h1>
-        <p className="text-xs text-zinc-500">Temporary. Drop an MP3, switch on whatever makes it sound less like a studio, download the WAV.</p>
+      <div className="flex shrink-0 items-center justify-between gap-3 border-b border-zinc-900 px-6 py-4">
+        <div>
+          <h1 className="text-lg font-semibold">Audio Editor</h1>
+          <p className="text-xs text-zinc-500">Temporary. Drop an MP3, switch on whatever makes it sound less like a studio, download the WAV.</p>
+        </div>
+        {tabs}
       </div>
 
       <div className="min-h-0 flex-1 overflow-y-auto px-6 py-5">

@@ -13,7 +13,7 @@
 // Server-only — imported by the /api/vids/* route handlers. Never import this
 // from a client component (it would leak the DB string + storage secret).
 
-import { randomInt } from 'node:crypto';
+import { randomInt, randomUUID } from 'node:crypto';
 import { CLIPPERS } from '@/lib/clipping';
 import pg from 'pg';
 import { createClient, type SupabaseClient } from '@supabase/supabase-js';
@@ -39,7 +39,7 @@ export const errMessage = (e: unknown) => (e instanceof Error ? e.message : 'une
 // reload in dev, or a long-lived server between deploys. Comparing the version
 // makes such a process re-run the (idempotent) DDL instead of trusting a
 // promise that was resolved against the older schema.
-const SCHEMA_VERSION = 16;
+const SCHEMA_VERSION = 17;
 
 const g = globalThis as unknown as {
   __vidsPool?: pg.Pool;
@@ -112,6 +112,14 @@ export async function signUpload(path: string): Promise<{ path: string; url: str
   return { path, url: data.signedUrl };
 }
 
+/** Write bytes from the server — for a file that was made here (a cut clip, a
+ *  generated picture) rather than sent up by a browser. */
+export async function putObject(path: string, body: Buffer, contentType: string): Promise<void> {
+  await ensureBucket();
+  const { error } = await getSb().storage.from(VIDS_BUCKET).upload(path, body, { contentType, upsert: true });
+  if (error) throw new Error(`Could not store ${path}: ${error.message}`);
+}
+
 // Best-effort — a leftover object is harmless; a failed delete must not fail
 // the request that already removed the row.
 export async function removeObjects(paths: string[]): Promise<void> {
@@ -180,6 +188,12 @@ function ensureSchema(): Promise<void> {
         updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
       );
     `);
+    // Whose a persona is: the folder under Persona it is filed in, one per
+    // person (see VidPersona.folderId). SET NULL like the parts — deleting a
+    // folder unfiles its personas, it never takes them with it.
+    await pool.query(
+      'ALTER TABLE vids_personas ADD COLUMN IF NOT EXISTS folder_id UUID NULL REFERENCES vids_folders(id) ON DELETE SET NULL',
+    );
     // Likewise for context, on both tables: everything made before simply has
     // nothing said about it yet, which is what the default means.
     for (const table of ['vids_videos', 'vids_personas'] as const) {
@@ -332,7 +346,8 @@ interface VideoDb {
 
 interface PersonaDb {
   id: string; name: string; start_id: string | null; top_a_id: string | null;
-  top_b_id: string | null; context: string; clipable: boolean; degen: boolean; created_at: Date;
+  top_b_id: string | null; folder_id: string | null; context: string; clipable: boolean; degen: boolean;
+  created_at: Date;
 }
 
 interface ClipableDb { kind: string; key: string }
@@ -347,7 +362,7 @@ const FOLDER_COLS = 'id, parent_id, name, created_at';
 const LINK_COLS = 'bottom_a_id, bottom_b_id';
 const CLIPABLE_COLS = 'kind, key';
 const RECIPE_COLS = 'code, title, video_id, build, created_at';
-const PERSONA_COLS = 'id, name, start_id, top_a_id, top_b_id, context, clipable, degen, created_at';
+const PERSONA_COLS = 'id, name, start_id, top_a_id, top_b_id, folder_id, context, clipable, degen, created_at';
 const VIDEO_COLS =
   'id, folder_id, name, storage_path, thumb_path, mime_type, size_bytes, duration_s, width, height, '
   + 'has_sfx, context, marks, source_path, edit, clipable, theme, created_at';
@@ -362,6 +377,7 @@ const toPersona = (r: PersonaDb): VidPersona => ({
   startId: r.start_id,
   topAId: r.top_a_id,
   topBId: r.top_b_id,
+  folderId: r.folder_id ?? null,
   context: r.context ?? '',
   clipable: r.clipable === true,
   degen: r.degen === true,
@@ -741,15 +757,23 @@ export interface PersonaPatch extends VidContextPatch, VidClipablePatch {
   startId?: string | null;
   topAId?: string | null;
   topBId?: string | null;
+  /** The folder under Persona it is filed in, or null to take it out of one. */
+  folderId?: string | null;
   degen?: boolean;
 }
 
+/** A new persona is on offer to the clippers unless it is made saying
+ *  otherwise — the column's own default is off, which is what every row made
+ *  before 2026-10-02 got, so the yes is said here. */
 export async function createPersona(name: string, patch: PersonaPatch = {}): Promise<VidPersona> {
   await ensureSchema();
   const r = await getPool().query<PersonaDb>(
-    `INSERT INTO vids_personas (name, start_id, top_a_id, top_b_id, degen)
-     VALUES ($1, $2, $3, $4, $5) RETURNING ${PERSONA_COLS}`,
-    [name, patch.startId ?? null, patch.topAId ?? null, patch.topBId ?? null, patch.degen === true],
+    `INSERT INTO vids_personas (name, start_id, top_a_id, top_b_id, folder_id, degen, clipable)
+     VALUES ($1, $2, $3, $4, $5, $6, $7) RETURNING ${PERSONA_COLS}`,
+    [
+      name, patch.startId ?? null, patch.topAId ?? null, patch.topBId ?? null, patch.folderId ?? null,
+      patch.degen === true, patch.clipable !== false,
+    ],
   );
   return toPersona(r.rows[0]);
 }
@@ -763,6 +787,7 @@ export async function updatePersona(id: string, patch: PersonaPatch): Promise<Vi
   if (patch.startId !== undefined) put('start_id', patch.startId);
   if (patch.topAId !== undefined) put('top_a_id', patch.topAId);
   if (patch.topBId !== undefined) put('top_b_id', patch.topBId);
+  if (patch.folderId !== undefined) put('folder_id', patch.folderId);
   if (patch.context !== undefined) put('context', patch.context);
   if (patch.clipable !== undefined) put('clipable', patch.clipable);
   if (patch.degen !== undefined) put('degen', patch.degen);
@@ -807,6 +832,53 @@ export async function createVideo(input: CreateVideoInput): Promise<VidRow> {
       ...(input.thumbPath ? [input.thumbPath] : []),
       ...(input.sourcePath ? [input.sourcePath] : []),
     ]);
+    throw e;
+  }
+}
+
+/** A second clip with the same footage as one already here: its render, its
+ *  poster and the recording it was cut from are copied inside the bucket — no
+ *  bytes go through a browser — and the new row carries the same edit and
+ *  marks under its own name and folder. For a clip that would otherwise be
+ *  rendered and sent up again to come out identical. Null when the clip, or
+ *  its render, is no longer there. */
+export async function copyVideo(id: string, name: string, folderId: string | null): Promise<VidRow | null> {
+  await ensureSchema();
+  const found = await getPool().query<VideoDb>(`SELECT ${VIDEO_COLS} FROM vids_videos WHERE id = $1`, [id]);
+  const from = found.rows[0];
+  if (!from) return null;
+  const newId = randomUUID();
+  const under = (path: string, dir: string) => `${dir}/${newId}${/\.[a-z0-9]{2,5}$/i.exec(path)?.[0] ?? ''}`;
+  const bucket = getSb().storage.from(VIDS_BUCKET);
+  const storagePath = under(from.storage_path, 'videos');
+  const made: string[] = [];
+  try {
+    const main = await bucket.copy(from.storage_path, storagePath);
+    if (main.error) {
+      if (/not.?found/i.test(main.error.message)) return null;
+      throw new Error(`Could not copy the clip: ${main.error.message}`);
+    }
+    made.push(storagePath);
+    // The poster and the recording are worth having, not worth failing for.
+    const beside = async (path: string | null, dir: string): Promise<string | null> => {
+      if (!path) return null;
+      const to = under(path, dir);
+      if ((await bucket.copy(path, to)).error) return null;
+      made.push(to);
+      return to;
+    };
+    const thumbPath = await beside(from.thumb_path, 'thumbs');
+    const sourcePath = await beside(from.source_path, 'sources');
+    return await createVideo({
+      id: newId, folderId, name, storagePath, thumbPath,
+      mimeType: from.mime_type, sizeBytes: Number(from.size_bytes) || 0,
+      duration: from.duration_s, width: from.width, height: from.height,
+      hasSfx: from.has_sfx, marks: cleanMarks(from.marks),
+      // The edit is only any use beside the recording it is timed on.
+      sourcePath, edit: sourcePath ? cleanEdit(from.edit) : null,
+    });
+  } catch (e) {
+    await removeObjects(made);
     throw e;
   }
 }

@@ -13,6 +13,9 @@
 //                  "happenedAt": "2026-09-29", "firm": "Sequoia", "place": "SF",
 //                  "people": ["Jane Doe", { "name": "John Roe", "role": "host" }],
 //                  "followUpAt": "2026-10-06" }],
+//     "rounds": [{ "company": "Kalshi", "stage": "Series A", "announced": "2021-02",
+//                  "amount": "$30M", "firms": ["SV Angel", { "name": "Sequoia", "role": "lead" }],
+//                  "others": "Charles Schwab, Henry Kravis", "source": "https://..." }],
 //     "goals":  [{ "title": "...", "body": "...", "dueAt": "2026-12-01" }],
 //     "notes":  [{ "title": "...", "body": "..." }]
 //   }

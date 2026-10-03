@@ -1,5 +1,5 @@
 // /api/aiden/:entity — add a row (POST).
-// :entity is one of places | firms | people | events | links | goals | notes,
+// :entity is one of places | firms | people | events | links | rounds | goals | notes,
 // checked against the allowlist. Reads come whole, from /api/aiden/data.
 import { NextRequest, NextResponse } from 'next/server';
 import { aidenLocked, isAidenUnlocked } from '@/lib/aiden-auth';

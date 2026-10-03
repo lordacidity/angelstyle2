@@ -308,6 +308,26 @@ function MarkIcon({ size = 13 }: { size?: number }) {
 
 // ── Editor ────────────────────────────────────────────────────────────────────
 
+/** A save handed over rather than run (Props.onSaveLater): everything it takes
+ *  to render the edit and file it, with nothing of the panel in it — so the
+ *  panel can go on to the next clip while this one is rendered and uploaded
+ *  behind it. */
+export interface ClipSaveJob {
+  videoId: string;
+  name: string;
+  /** Renders the edit. Null when nothing about the footage changed, and the
+   *  clip is filed as it is. */
+  render: ((onProgress: (frac: number, label: string) => void, signal?: AbortSignal) => Promise<Blob>) | null;
+  /** Whether the file comes out with sound on it — see Props.onSave. */
+  hasSfx: boolean;
+  /** The marks, carried onto the rendered timeline. */
+  marks: VidMark[];
+  /** What the bytes are rendered with, in the stored form. */
+  edit: VidEdit | null;
+  /** The recording's length in seconds, which the edit's times are on. */
+  duration: number;
+}
+
 interface Props {
   /** The clip. One an intake run holds locally — not uploaded yet — carries
    *  the file it plays from, so a render reads the disk. */
@@ -323,6 +343,11 @@ interface Props {
   onSave: (
     blob: Blob | null, name: string, hasSfx: boolean, marks: VidMark[], videoId: string, edit: VidEdit | null,
   ) => Promise<void>;
+  /** Given, Save renders nothing here: it hands the save over as a job and
+   *  comes straight back, and whoever took it renders and files it behind the
+   *  next clip (`onSave` is then never called). What a persona's Start and
+   *  middle do, so nobody waits on a render to go on to the next part. */
+  onSaveLater?: (job: ClipSaveJob) => void;
   /** Prep page is on screen — the preview pauses whenever it isn't. */
   active: boolean;
   onClose: () => void;
@@ -357,11 +382,15 @@ interface Props {
   /** What the progress bar says while the save goes up — the intake run's
    *  first save of a clip is not over any original. */
   savingLabel?: string;
+  /** The line beside the transport, in place of the mode's own. The 'cut'
+   *  mode's speaks of Top A, which is who it was made for; AI Persona runs all
+   *  three parts of a persona through it and says so in its own words. */
+  hint?: string;
 }
 
 export function VidsClipEditor({
-  video, onSave, active, onClose, contextOwner, onContextChange, onMarksChange,
-  mode = 'full', startSpeed = DEFAULT_SPEED, saveLabel, savingLabel,
+  video, onSave, onSaveLater, active, onClose, contextOwner, onContextChange, onMarksChange,
+  mode = 'full', startSpeed = DEFAULT_SPEED, saveLabel, savingLabel, hint,
 }: Props) {
   const trimOnly = mode === 'trim';
   /** Cut and Auto cut are on. */
@@ -963,6 +992,26 @@ export function VidsClipEditor({
     setNote(null);
     const rowName = name.trim() || video.name;
 
+    // Handed over instead of run here — see Props.onSaveLater. The job takes
+    // the edit as it stands now, so whatever is opened next can't change it.
+    if (kind === 'save' && onSaveLater) {
+      if (untouched) {
+        onSaveLater({ videoId: myId, name: rowName, render: null, hasSfx: startHasSfx, marks: rowMarks, edit: savedEdit, duration });
+        return;
+      }
+      const from = { url: video.sourceUrl ?? video.url, file: video.file, edit, duration };
+      onSaveLater({
+        videoId: myId,
+        name: rowName,
+        render: (onProgress, signal) => renderEditedClip({ ...from, onProgress, signal }),
+        hasSfx: !edit.muted || sfxSpans(edit, duration).length > 0,
+        marks: marksToRendered(marks, edit, duration),
+        edit: toStoredEdit(edit, duration),
+        duration,
+      });
+      return;
+    }
+
     // Renaming is not editing. Nothing cut, trimmed, sped or un-muted means the
     // renderer would hand back the footage it was given — so the row just takes
     // the new name, and the clip is not re-encoded, re-uploaded, or made to lose
@@ -1051,11 +1100,11 @@ export function VidsClipEditor({
   const hasRange = !!selection && selection.end - selection.start >= MIN_PIECE;
   const removed = Math.max(0, (range.end - range.start) - keptLength(segs));
   // The keys themselves are spelled out in the legend under the picture.
-  const scrubHint = trimOnly
+  const scrubHint = hint ?? (trimOnly
     ? 'hover the bar to scrub — trimming is all this clip needs'
     : fullKit
       ? 'hover the bar to scrub · drag to select a stretch'
-      : 'hover the bar to scrub · drag to select a stretch — Top A loops under the whole bottom, so cut it';
+      : 'hover the bar to scrub · drag to select a stretch — Top A loops under the whole bottom, so cut it');
 
   return (
     <div className="flex min-h-0 flex-1">

@@ -7,9 +7,15 @@
 // approving: every persona, every Bottom A, Bottom B and End clip, every song
 // in the audio library and every caption look, each with a switch. On, and
 // the clippers' app offers it; off, and it is ours alone — still used here,
-// on Build, exactly as before. Everything starts off.
+// on Build, exactly as before. Everything starts off, bar a persona video:
+// one is made on offer (since 2026-10-02), and this is where it is switched
+// off.
 //
-// A persona is one switch for its three clips. A clip is listed under the
+// On screen a persona is a person and a persona video is one video of them;
+// in this file's code the video is still `persona` (a VidPersona). A video is
+// one switch — its three clips come with it — and the videos are listed under
+// the persona they are of, the way the clippers choose them (see
+// lib/vids-persona-folders). A clip is listed under the
 // folder it is filed in, so one dragged back to the Inbox drops off the page
 // (its switch stays as it was, and comes back with it). Songs and looks live
 // in code rather than in the library, so their switches are kept as a list of
@@ -24,8 +30,9 @@
 
 import { useEffect, useMemo, useRef, useState } from 'react';
 import type { CSSProperties, ReactNode } from 'react';
-import type { ClipableKind, VidClipableFlag, VidPersona, VidRow } from '@/lib/vids-types';
-import { MAX_SUGGESTED, PERSONA_PARTS, PERSONA_PART_LABEL, isClipable, suggestedFrom } from '@/lib/vids-types';
+import type { ClipableKind, VidClipableFlag, VidFolder, VidPersona, VidRow } from '@/lib/vids-types';
+import { UNFILED_LABEL, groupPersonas, personaFolders } from '@/lib/vids-persona-folders';
+import { MAX_SUGGESTED, PERSONA_PARTS, isClipable, suggestedFrom } from '@/lib/vids-types';
 import { withBase } from '@/lib/clipping';
 import { CAPTION_STYLES, type CaptionStyle } from '@/lib/vidsCaptions';
 import { listMusic, type MusicTrack } from '@/lib/vidsAudio';
@@ -48,6 +55,8 @@ interface Props {
   /** Whether the page is on screen — the song list is fetched the first time it is. */
   active: boolean;
   personas: VidPersona[];
+  /** The library's folders — the personas are listed by whose they are. */
+  folders: VidFolder[];
   resolveVideo: (id: string | null) => VidRow | undefined;
   /** Everything filed under Bottom A, Bottom B and End, in library order. */
   clips: Record<ClipSlot, VidRow[]>;
@@ -80,8 +89,8 @@ type Renaming =
   | { kind: 'song'; url: string; name: string };
 
 const RENAME_KIND: Record<Renaming['kind'], { heading: string; hint: string; max: number }> = {
-  persona: { heading: 'Persona', hint: 'Its name everywhere — on Build, in the pickers, on Edit & file. Its three clips follow if they are still named after it.', max: 120 },
-  clip:    { heading: 'Clip',    hint: 'Its name everywhere — on Build, in the pickers, on Edit & file.', max: 200 },
+  persona: { heading: 'Persona video', hint: 'The video\'s name everywhere — in Vids 2, on the clipper page, on Personas. Its three clips follow if they are still named after it.', max: 120 },
+  clip:    { heading: 'Clip',    hint: 'Its name everywhere it is listed.', max: 200 },
   song:    { heading: 'Song',    hint: 'Its name everywhere the audio library is listed — Build\'s Sound rail, the charts, the carousel.', max: 120 },
 };
 
@@ -311,7 +320,10 @@ function Row({ on, title, onChange, onContext, children }: {
   );
 }
 
-// ── Personas ──────────────────────────────────────────────────────────────────
+// ── Persona videos ────────────────────────────────────────────────────────────
+// One row a video (a VidPersona — the code's name for it): its picture, its
+// name, and the switch. Its three clips are its insides and are not shown;
+// only a missing one is said.
 
 function PersonaRow({ persona, resolveVideo, onChange, onContext }: {
   persona: VidPersona;
@@ -320,35 +332,23 @@ function PersonaRow({ persona, resolveVideo, onChange, onContext }: {
   onContext: () => void;
 }) {
   const filled = PERSONA_PARTS.filter((k) => persona[k]).length;
+  const thumb = PERSONA_PARTS.map((part) => resolveVideo(persona[part])?.thumbUrl).find(Boolean);
   return (
     <Row on={persona.clipable} title={onOffTitle(persona.name, persona.clipable)} onChange={onChange} onContext={onContext}>
-      <span className="flex shrink-0 gap-1">
-        {PERSONA_PARTS.map((part) => {
-          const v = resolveVideo(persona[part]);
-          return (
-            <span
-              key={part}
-              title={v ? `${PERSONA_PART_LABEL[part]} — ${v.name}` : `${PERSONA_PART_LABEL[part]} — missing`}
-              className={`flex h-10 w-10 items-center justify-center overflow-hidden rounded border bg-black ${
-                v ? 'border-zinc-700' : 'border-dashed border-zinc-700'
-              }`}
-            >
-              {v?.thumbUrl ? (
-                // eslint-disable-next-line @next/next/no-img-element
-                <img src={v.thumbUrl} alt="" className="h-full w-full object-cover" draggable={false} />
-              ) : (
-                <span className="text-[8px] text-zinc-600">{PERSONA_PART_LABEL[part]}</span>
-              )}
-            </span>
-          );
-        })}
+      <span className={`flex h-10 w-10 shrink-0 items-center justify-center overflow-hidden rounded border bg-black ${
+        thumb ? 'border-zinc-700' : 'border-dashed border-zinc-700'
+      }`}>
+        {thumb && (
+          // eslint-disable-next-line @next/next/no-img-element
+          <img src={thumb} alt="" className="h-full w-full object-cover" draggable={false} />
+        )}
       </span>
       <span className="min-w-0 flex-1">
         <span className="block truncate text-[11px] font-semibold text-zinc-200">{persona.name}</span>
         <span className={`block truncate text-[9px] ${filled === PERSONA_PARTS.length ? 'text-zinc-500' : 'text-amber-400'}`}>
           {filled === PERSONA_PARTS.length
-            ? (persona.context || 'Start · Top A · Top B')
-            : `${filled} of 3 clips — the clippers would get a persona with a gap in it`}
+            ? persona.context
+            : `${filled} of its 3 clips — the clippers would get a video with a gap in it`}
         </span>
       </span>
     </Row>
@@ -435,7 +435,7 @@ function LookRow({ look, on, onChange }: { look: CaptionStyle; on: boolean; onCh
 // ── Page ──────────────────────────────────────────────────────────────────────
 
 export function VidsClippers({
-  active, personas, resolveVideo, clips, flags, onPersona, onClip, onFlag,
+  active, personas, folders, resolveVideo, clips, flags, onPersona, onClip, onFlag,
   onRenamePersona, onRenameClip, onRenameTrack,
 }: Props) {
   // The songs, as the audio library lists them — fetched the first time the
@@ -515,7 +515,7 @@ export function VidsClippers({
           <p className="mt-1 max-w-[640px] text-[11px] leading-relaxed text-zinc-500">
             The clippers make vids of their own out of what is switched on here, and see nothing else.
             Anything off stays ours alone — Build here goes on using all of it either way.
-            Right-click a persona, a clip or a song to rename it; the new name is the name everywhere.
+            Right-click a persona video, a clip or a song to rename it; the new name is the name everywhere.
           </p>
         </div>
 
@@ -537,25 +537,39 @@ export function VidsClippers({
 
         <Section>
           <SectionHead
-            title="Personas"
-            hint="One switch for the persona's Start, Top A and Top B together."
+            title="Persona videos"
+            hint="One switch a video, listed under the persona it is of."
             on={personasOn}
             total={personas.length}
             onAll={() => setEvery(personas, (p) => p.clipable, (p, on) => onPersona(p.id, on), true)}
             onNone={() => setEvery(personas, (p) => p.clipable, (p, on) => onPersona(p.id, on), false)}
           />
           {personas.length === 0 ? (
-            <Empty>No personas yet — make one under <span className="text-zinc-300">Persona</span> on Edit &amp; file.</Empty>
+            <Empty>No persona videos yet — make one on <span className="text-zinc-300">Personas</span>, or in AI Persona.</Empty>
           ) : (
-            <div className="space-y-1.5">
-              {personas.map((p) => (
-                <PersonaRow
-                  key={p.id}
-                  persona={p}
-                  resolveVideo={resolveVideo}
-                  onChange={(on) => onPersona(p.id, on)}
-                  onContext={() => setRenaming({ kind: 'persona', id: p.id, name: p.name })}
-                />
+            // By whose they are, the way the clippers choose them: a folder
+            // per person, then that person's personas.
+            <div className="space-y-3">
+              {groupPersonas(personas, folders, { empty: false }).map((g) => (
+                <div key={g.folder?.id ?? 'unfiled'} className="space-y-1.5">
+                  {personaFolders(folders).length > 0 && (
+                    <p className="text-[9px] font-semibold uppercase tracking-wider text-zinc-500">
+                      {g.folder?.name ?? UNFILED_LABEL}
+                      <span className="ml-1.5 font-normal normal-case tracking-normal text-zinc-600">
+                        {g.personas.filter((p) => p.clipable).length} of {g.personas.length} on
+                      </span>
+                    </p>
+                  )}
+                  {g.personas.map((p) => (
+                    <PersonaRow
+                      key={p.id}
+                      persona={p}
+                      resolveVideo={resolveVideo}
+                      onChange={(on) => onPersona(p.id, on)}
+                      onContext={() => setRenaming({ kind: 'persona', id: p.id, name: p.name })}
+                    />
+                  ))}
+                </div>
               ))}
             </div>
           )}

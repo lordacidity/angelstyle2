@@ -1,95 +1,190 @@
 // Shapes and limits shared between the AI Persona section and its API routes.
-// Nothing in here imports the fal client, so the browser can read it too — the
-// cards show the voice, the models and the price, and they have to come from the
+// Nothing in here imports the fal client or the database, so the browser can
+// read it too — the prompts, the models and the limits have to come from the
 // same place the routes use.
+//
+// The section in one breath: a persona is a name and a character photo. A scene
+// is a video of someone doing something. For every persona in the scene, the
+// video's first frame is redrawn with that persona in it (the "character first
+// frame"), and once those are approved, Kling moves each one the way the video
+// moves. Approved videos are saved to the personas.
 
-/** ElevenLabs v3 on fal. Every input except `voice` is left at its default. */
-export const TTS_MODEL = 'fal-ai/elevenlabs/tts/eleven-v3';
+/** Redraws the first frame with the persona in it. #image1 is the frame,
+ *  #image2 the character photo — the order they are sent in. */
+export const FRAME_MODEL = 'openai/gpt-image-2.5/sunburst/edit';
 
-/** The one voice this section speaks in. */
-export const VOICE = 'Liam';
+/** How hard the image model works on a character first frame: low, medium,
+ *  high, xhigh or max. `high` is the model's own default. The two above it
+ *  draw more detail and are billed for it — the model is charged by the token,
+ *  and fal publishes no price per level — so going up is a choice to make with
+ *  one frame's bill in hand, not a default. */
+export const FRAME_QUALITY: 'low' | 'medium' | 'high' | 'xhigh' | 'max' = 'high';
 
-/** Kling's talking-avatar model — animates a still portrait to an audio track. */
-export const AVATAR_MODEL = 'fal-ai/kling-video/ai-avatar/v2/standard';
+/** Moves the character first frame the way the scene's video moves. Kling's
+ *  pro tier (standard until 2026-10-02, and briefly again that day): the same
+ *  inputs and the same limits as standard, a better picture, and a higher
+ *  price per second. */
+export const MOTION_MODEL = 'fal-ai/kling-video/v2.6/pro/motion-control';
 
-/** fal's price for Kling's standard tier, per second of finished video. Shown
- *  before the job is submitted so the cost of a long script is never a surprise.
- *  Kling matches the video length to the mp3, so the mp3's duration is the bill. */
-export const AVATAR_USD_PER_SEC = 0.0562;
+/** What the image model is told, unless it is edited before Go. */
+export const DEFAULT_FRAME_PROMPT =
+  "Replace the man in #image1 with the character from #image2. Keep the character's clothes and look from #image2. Match only the background, lighting, and body position, of the person in #image1.";
 
-/** Portraits bigger than this are refused. Next's middleware tops out at a 10MB
- *  body, and a portrait needs nothing like that. */
-export const MAX_PHOTO_BYTES = 8 * 1024 * 1024;
+/** What Kling is told. The brackets are a blank to fill in: nothing is sent
+ *  to Kling while a prompt still has one in it — see hasBlank. What follows
+ *  the blank is said of every video: the camera holds still. */
+export const DEFAULT_MOTION_PROMPT =
+  'A man [briefly what he is doing, just a few words]. Do not move the camera or zoom it, it stays still and stable the whole time.';
 
-/** Long enough for a minute or so of speech — about $4 of Kling at the rate
- *  above. Past that the price climbs faster than the idea is worth. */
-export const MAX_SCRIPT_CHARS = 1500;
+/** A prompt that still has a bracket in it has not been filled in. */
+export const hasBlank = (prompt: string) => /[[\]]/.test(prompt);
 
-/** Formats Kling accepts as the avatar. */
-export const PHOTO_TYPES = ['image/jpeg', 'image/png', 'image/webp', 'image/gif', 'image/avif'];
+export const MAX_PROMPT_CHARS = 2000;
+export const MAX_NAME_CHARS = 80;
 
-/** A recording can stand in for ElevenLabs: uploaded as it is, and handed to
- *  Kling in place of the mp3. These are the formats Kling reads; checked by
- *  extension, because browsers disagree on what to call an m4a. */
-export const VOICE_EXTENSIONS = ['mp3', 'wav', 'm4a', 'aac'];
-export const isVoiceFile = (f: { name: string }) =>
-  VOICE_EXTENSIONS.includes(f.name.split('.').pop()?.toLowerCase() ?? '');
+/** Kling follows the video's orientation, and in that mode it takes a video of
+ *  up to this long. Measured after the trim and the speed-up. */
+export const MAX_CLIP_SECONDS = 30;
+/** And of at least this long — Kling's own floor. Checked before Go, so first
+ *  frames are never paid for on a clip Kling would then turn away. */
+export const MIN_CLIP_SECONDS = 3;
 
-/** Under Next's 10MB request cap — ten minutes of mp3, about one of WAV. */
-export const MAX_VOICE_BYTES = 9.5 * 1024 * 1024;
+export const MIN_SPEED = 1;
+export const MAX_SPEED = 3;
+export const clampSpeed = (v: unknown) => {
+  const n = Number(v);
+  return Number.isFinite(n) ? Math.min(MAX_SPEED, Math.max(MIN_SPEED, n)) : 1;
+};
 
-/** Rough reading pace, characters a second — only used to show how long a script
- *  will run before it has been read. The mp3 itself is measured once it lands. */
-export const CHARS_PER_SEC = 15;
+/** How long the clip runs once it is cut and sped up. */
+export const clipSeconds = (start: number, end: number, speed: number) => Math.max(0, end - start) / speed;
 
-/** How hard the finish pass leans on the picture, 0–100. The ask was "not a
- *  ton", and this is the low end of noticeable: enough to read as a recording,
- *  not as a filter. It is a knob rather than a constant because re-running costs
- *  nothing — the pass is local ffmpeg, not fal. The sound has its own switch and
- *  strength: audio muffler mode, 100 being the saved mix (lib/audioMuffler). */
-export const FINISH_DEFAULT = 45;
+/** What the image model reads as a character photo. */
+export const PHOTO_TYPES = ['image/jpeg', 'image/png', 'image/webp'];
+export const MAX_PHOTO_BYTES = 20 * 1024 * 1024;
 
-/** The muffled soundtrack goes up to the finish route as a mono 16-bit WAV at
- *  this rate. The muffler's phone mic keeps the sound well under 16 kHz, so
- *  nothing it makes is lost, and a script at the length limit (about 100s,
- *  ~6MB) stays under Next's 10MB request cap. */
-export const MUFFLED_UPLOAD_RATE = 32000;
-export const MAX_MUFFLED_BYTES = 9.5 * 1024 * 1024;
+// ── Rows ─────────────────────────────────────────────────────────────────────
 
-/** POST /api/ai-persona/photo — the uploaded portrait, now on fal storage. */
-export interface PhotoResponse {
-  /** Public fal URL. Kling reads the avatar from here. */
-  imageUrl: string;
+/** A finished video, saved to a persona when its scene was approved. */
+export interface PersonaVideo {
+  /** The take it came from — see SceneTake. Deleting the video deletes this. */
+  id: string;
+  sceneId: string;
+  sceneName: string;
+  url: string;
+  /** The character first frame it was made from; the poster. */
+  frameUrl: string | null;
+  savedAt: string;
 }
 
-/** POST /api/ai-persona/voice — the script read aloud by ElevenLabs, or an
- *  uploaded recording put on fal storage as it is. */
-export interface VoiceResponse {
-  /** Public fal URL of the audio. Kling reads it from here. */
-  audioUrl: string;
-  /** Which voice said it — Liam, or "your recording" for an upload. */
-  voice: string;
-  /** How long the call took, for the log line. */
-  ms: number;
+export interface Persona {
+  id: string;
+  name: string;
+  photoUrl: string;
+  createdAt: string;
+  /** Newest first. */
+  videos: PersonaVideo[];
 }
 
-/** POST /api/ai-persona/avatar — the Kling job, just submitted. */
-export interface AvatarResponse {
-  /** fal queue id. Poll GET /api/ai-persona/avatar?requestId=… with it. */
-  requestId: string;
+/** Where a scene has got to.
+ *    frames  character first frames are being made and looked over
+ *    prompt  they were approved; the Kling prompt is being written
+ *    videos  Kling is running, or its videos are being looked over
+ *    done    approved, and saved to the personas */
+export type SceneStage = 'frames' | 'prompt' | 'videos' | 'done';
+export const SCENE_STAGES: SceneStage[] = ['frames', 'prompt', 'videos', 'done'];
+
+export type JobStatus = 'idle' | 'running' | 'done' | 'error';
+
+/** One generation for one persona: its character first frame, or its video. */
+export interface SceneJob {
+  status: JobStatus;
+  /** The result, once done. */
+  url: string | null;
+  /** What was asked for the last time it ran — the scene's prompt, or the one
+   *  written for a redo. */
+  prompt: string;
+  error: string;
+  /** While running: its place in fal's queue, when fal is still holding it
+   *  there. Only on a poll; never stored. */
+  queue?: number | null;
+  /** While running: true once a machine has picked it up. Only on a poll. */
+  working?: boolean;
+  /** While running: why the last poll couldn't check on it, if it couldn't.
+   *  The job itself may be fine. */
+  note?: string;
 }
 
-/** GET /api/ai-persona/avatar?requestId=… — where that job has got to. */
-export interface AvatarStatusResponse {
-  status: 'IN_QUEUE' | 'IN_PROGRESS' | 'COMPLETED';
-  /** Place in fal's queue, while it is still waiting for a machine. */
-  queuePosition?: number;
-  /** Anything Kling printed while running. */
-  logs?: string[];
-  /** Set once status is COMPLETED. */
-  videoUrl?: string;
-  /** Seconds of finished video — Kling matches it to the mp3. */
-  duration?: number;
+/** One persona's run through a scene. */
+export interface SceneTake {
+  id: string;
+  personaId: string;
+  personaName: string;
+  photoUrl: string;
+  frame: SceneJob;
+  video: SceneJob;
+}
+
+export interface Scene {
+  id: string;
+  name: string;
+  stage: SceneStage;
+  /** The video, trimmed and sped up — what Kling follows. */
+  clipUrl: string;
+  /** The very first frame of that clip — #image1. */
+  frameUrl: string;
+  width: number;
+  height: number;
+  duration: number;
+  framePrompt: string;
+  videoPrompt: string;
+  takes: SceneTake[];
+  createdAt: string;
+}
+
+/** A scene that has not been approved yet, as the front screen lists it. */
+export interface SceneSummary {
+  id: string;
+  name: string;
+  stage: SceneStage;
+  frameUrl: string;
+  personas: number;
+  createdAt: string;
+}
+
+/** GET /api/ai-persona/personas — everything the front screen shows. */
+export interface LibraryPayload {
+  personas: Persona[];
+  /** Scenes still in progress, newest first. */
+  scenes: SceneSummary[];
+}
+
+// ── Requests ─────────────────────────────────────────────────────────────────
+
+/** POST /api/ai-persona/upload — where the browser should PUT a file. A photo
+ *  is a character photo; a source is the video a scene is cut from. */
+export interface UploadRequest {
+  kind: 'photo' | 'source';
+  name: string;
+  mime: string;
+}
+export interface UploadResponse {
+  path: string;
+  url: string;
+}
+
+/** POST /api/ai-persona/scenes — cut the clip, pull its first frame, and start
+ *  a character first frame for every persona named. */
+export interface CreateSceneRequest {
+  name: string;
+  /** From POST /api/ai-persona/upload, kind `source`. */
+  sourcePath: string;
+  /** Seconds into the upload where the scene starts and ends. */
+  start: number;
+  end: number;
+  speed: number;
+  prompt: string;
+  personaIds: string[];
 }
 
 /** Every route answers a failure as { error } with a 4xx/5xx. */

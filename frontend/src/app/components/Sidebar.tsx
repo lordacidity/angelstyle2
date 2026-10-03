@@ -180,8 +180,8 @@ const NAV: { id: AppSection; label: string; icon: React.ReactNode }[] = [
   {
     id: 'aipersona',
     label: 'AI Persona',
-    // A face inside a play button — a still portrait turned into someone talking:
-    // ElevenLabs reads the script, Kling makes the photo say it.
+    // A face in a circle — a cast of characters, each a name and a photo, and
+    // scenes that put every one of them into the same video.
     icon: (
       <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
         <circle cx="12" cy="12" r="10"/>

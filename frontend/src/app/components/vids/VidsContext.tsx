@@ -29,8 +29,9 @@ export const CONTEXT_PLACEHOLDER = 'chatgpt looking up ronaldo';
 const THEME_LABEL: Record<VidTheme, string> = { light: '☀ Light', dark: '🌙 Dark' };
 
 /** What a save from the popup can change: the context, the name when it was
- *  edited, and — on a Bottom B — which way Pauv was. */
-export type VidsContextSave = VidContextPatch & VidThemePatch & { name?: string };
+ *  edited, on a Bottom B which way Pauv was, and on a persona the folder it
+ *  is in. */
+export type VidsContextSave = VidContextPatch & VidThemePatch & { name?: string; folderId?: string | null };
 
 interface DialogProps {
   /** Whose name and context these are — the heading says which. */
@@ -44,6 +45,11 @@ interface DialogProps {
    *  see VidTheme); `null` there means nobody has said yet. Left undefined for
    *  everything else, and then the popup doesn't ask. */
   theme?: VidTheme | null;
+  /** A persona video's alone (kind 'persona' — the code's name for the video):
+   *  the personas it can belong to — the people, a folder each — and the one
+   *  it is in now (null for none). Left undefined, the popup doesn't ask. */
+  folders?: readonly { id: string; name: string }[];
+  folderId?: string | null;
   onSave: (patch: VidsContextSave) => void;
   onClose: () => void;
 }
@@ -52,9 +58,10 @@ interface DialogProps {
  *  until Save, so Escape or a click outside leaves both exactly as they were;
  *  a name wiped blank is left as it was too, since nothing can be called
  *  nothing. */
-export function VidsContextDialog({ kind, name, hint, value, theme, onSave, onClose }: DialogProps) {
+export function VidsContextDialog({ kind, name, hint, value, theme, folders, folderId, onSave, onClose }: DialogProps) {
   const [title, setTitle] = useState(name);
   const [text, setText] = useState(value.context);
+  const [folder, setFolder] = useState<string | null>(folderId ?? null);
   // Undefined means this thing doesn't carry a theme at all — see the prop.
   const asks = theme !== undefined;
   const [mode, setMode] = useState<VidTheme | null>(theme ?? null);
@@ -67,6 +74,7 @@ export function VidsContextDialog({ kind, name, hint, value, theme, onSave, onCl
     onSave({
       ...(clean && clean !== name ? { name: clean } : {}),
       ...(asks && mode !== theme ? { theme: mode } : {}),
+      ...(folders && folder !== (folderId ?? null) ? { folderId: folder } : {}),
       context: text.trim(),
     });
     onClose();
@@ -91,7 +99,7 @@ export function VidsContextDialog({ kind, name, hint, value, theme, onSave, onCl
         <div className="mb-2 flex items-start gap-2">
           <div className="min-w-0 flex-1">
             <p className="text-[9px] font-semibold uppercase tracking-wider text-zinc-500">
-              {kind === 'persona' ? 'Persona' : 'Clip'}
+              {kind === 'persona' ? 'Persona video' : 'Clip'}
             </p>
             <p className="mt-0.5 text-[10px] leading-relaxed text-zinc-500">{hint}</p>
           </div>
@@ -108,6 +116,20 @@ export function VidsContextDialog({ kind, name, hint, value, theme, onSave, onCl
           maxLength={kind === 'persona' ? 120 : 200}
           className="mb-2 w-full rounded border border-zinc-700 bg-black px-2 py-1.5 text-[11px] text-zinc-100 outline-none placeholder:text-zinc-600 focus:border-zinc-400"
         />
+
+        {folders && (
+          <>
+            <p className="mb-1 text-[9px] font-semibold uppercase tracking-wider text-zinc-500">Persona — whose video it is</p>
+            <select
+              value={folder ?? ''}
+              onChange={(e) => setFolder(e.target.value || null)}
+              className="mb-2 w-full rounded border border-zinc-700 bg-black px-2 py-1.5 text-[11px] text-zinc-100 outline-none focus:border-zinc-400"
+            >
+              <option value="">No persona</option>
+              {folders.map((f) => <option key={f.id} value={f.id}>{f.name}</option>)}
+            </select>
+          </>
+        )}
 
         {asks && (
           <>

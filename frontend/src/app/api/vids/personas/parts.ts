@@ -22,3 +22,13 @@ export function readParts(body: Record<string, unknown>, patch: PersonaPatch): s
   }
   return null;
 }
+
+/** Folds `folderId` out of a body into a patch the same way: absent → leave it
+ *  where it is, null → out of any folder, otherwise a folder id. */
+export function readFolder(body: Record<string, unknown>, patch: PersonaPatch): string | null {
+  const v = body.folderId;
+  if (v === undefined) return null;
+  if (v !== null && !isUuid(v)) return 'folderId must be a folder id or null';
+  patch.folderId = v;
+  return null;
+}

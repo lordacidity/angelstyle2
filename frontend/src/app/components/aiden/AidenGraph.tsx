@@ -10,6 +10,7 @@
 //   center   you, tied to everyone you have ever reached
 //
 // Drawn ties (friends, mutuals...) run person to person in their own colors.
+// A shared round runs firm to firm, thicker the more rounds the two have shared.
 //
 // The same web is laid out five ways, and the lines stay in all of them:
 //
@@ -34,10 +35,11 @@ import {
   type AidenEvent, type AidenPlace, type AidenSnapshot,
 } from '@/lib/aiden-types';
 import { outlines, project } from '@/lib/aiden-geo';
+import { roundLabel, sharedPairs } from '@/lib/aiden-rounds';
 import { AidenLockedError, aidenFetch, type AidenIndex, type UseAidenData } from './useAidenData';
 import type { AidenNav, Selection } from './aiden-nav';
 import {
-  Empty, FIRM_COLOR, INVESTED_COLOR, KIND_COLOR, LINK_COLOR, PLACE_COLOR, SearchBox, WARMTH_COLOR,
+  Empty, FIRM_COLOR, INVESTED_COLOR, KIND_COLOR, LINK_COLOR, PLACE_COLOR, ROUND_COLOR, SearchBox, WARMTH_COLOR,
   ago, btnGhost, btnPrimary, fmtDay, inputCls,
 } from './aiden-ui';
 
@@ -45,7 +47,7 @@ export type Layout = 'free' | 'map' | 'rings' | 'clusters' | 'timeline';
 type ClusterBy = 'firm' | 'place';
 
 type NodeType = 'me' | 'person' | 'firm' | 'place' | 'event';
-type EdgeKind = 'me' | 'firm' | 'place' | 'tie' | 'event';
+type EdgeKind = 'me' | 'firm' | 'place' | 'tie' | 'event' | 'round';
 
 interface NodeDef {
   id: string;
@@ -82,6 +84,7 @@ interface Show {
   places: boolean;
   events: boolean;
   ties: boolean;
+  rounds: boolean;
 }
 
 const ME = 'me';
@@ -89,12 +92,12 @@ const ME_COLOR = '#fafafa';
 
 // What each layout shows to begin with. Any of it can be toggled after.
 const DEFAULT_SHOW: Record<Layout, Show> = {
-  free: { me: true, firms: true, places: true, events: true, ties: true },
+  free: { me: true, firms: true, places: true, events: true, ties: true, rounds: true },
   // On the map everyone is understood to connect to you.
-  map: { me: false, firms: true, places: true, events: true, ties: true },
-  rings: { me: true, firms: true, places: false, events: true, ties: true },
-  clusters: { me: false, firms: true, places: false, events: true, ties: true },
-  timeline: { me: false, firms: true, places: false, events: true, ties: true },
+  map: { me: false, firms: true, places: true, events: true, ties: true, rounds: true },
+  rings: { me: true, firms: true, places: false, events: true, ties: true, rounds: true },
+  clusters: { me: false, firms: true, places: false, events: true, ties: true, rounds: true },
+  timeline: { me: false, firms: true, places: false, events: true, ties: true, rounds: true },
 };
 
 function buildGraph(data: AidenSnapshot, index: AidenIndex, show: Show): Graph {
@@ -178,6 +181,22 @@ function buildGraph(data: AidenSnapshot, index: AidenIndex, show: Show): Graph {
       edges.push({
         a, b, kind: 'tie', color: LINK_COLOR[l.kind], len: 80, pull: 0.3, width: 1.7, opacity: 0.85,
         title: `${LINK_KIND_LABEL[l.kind]}${l.note ? `: ${l.note}` : ''}`,
+      });
+    }
+  }
+
+  if (show.rounds) {
+    for (const pair of sharedPairs(data.rounds)) {
+      const a = `firm:${pair.aId}`;
+      const b = `firm:${pair.bId}`;
+      if (!have.has(a) || !have.has(b)) continue;
+      const n = pair.rounds.length;
+      // A light pull: it says the two know each other, and leaves each firm
+      // sitting with its own people.
+      edges.push({
+        a, b, kind: 'round', color: ROUND_COLOR, len: 150, pull: 0.06,
+        width: Math.min(4, 1 + n * 0.6), opacity: 0.55,
+        title: `${n} shared ${n === 1 ? 'round' : 'rounds'}: ${pair.rounds.map(roundLabel).join(', ')}`,
       });
     }
   }
@@ -592,6 +611,7 @@ const TOGGLES: { key: keyof Show; label: string; color: string }[] = [
   { key: 'places', label: 'Places', color: PLACE_COLOR },
   { key: 'events', label: 'Events', color: KIND_COLOR.event },
   { key: 'ties', label: 'Ties', color: LINK_COLOR.friend },
+  { key: 'rounds', label: 'Shared rounds', color: ROUND_COLOR },
 ];
 
 export function AidenGraph({
@@ -1155,6 +1175,10 @@ export function AidenGraph({
         <span className="flex items-center gap-1">
           <span className="h-2 w-2 rounded-full border" style={{ borderColor: KIND_COLOR.event }} />
           shared event
+        </span>
+        <span className="flex items-center gap-1">
+          <span className="h-0.5 w-3 rounded-full" style={{ backgroundColor: ROUND_COLOR }} />
+          shared round
         </span>
         <span className="text-zinc-700">
           {graph.nodes.length} nodes, {graph.edges.length} lines

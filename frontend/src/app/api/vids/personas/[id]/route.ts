@@ -1,13 +1,14 @@
-// /api/vids/personas/:id — rename, re-point a part, say what the bundle is
-// showing, put it on offer to the clippers, or make it degen or not (PATCH
-// { name?, startId?, topAId?, topBId?, context?, clipable?, degen? }), or
-// delete the bundle (DELETE).
+// /api/vids/personas/:id — rename, re-point a part, move it to another folder
+// under Persona, say what the bundle is showing, put it on offer to the
+// clippers, or make it degen or not (PATCH { name?, startId?, topAId?,
+// topBId?, folderId?, context?, clipable?, degen? }), or delete the bundle
+// (DELETE).
 // Deleting drops only the persona; its clips stay in the Persona folder as
 // unassigned footage.
 import { NextRequest, NextResponse } from 'next/server';
 import { deletePersona, errMessage, isUuid, updatePersona, type PersonaPatch } from '@/lib/vids-db';
 import { readClipablePatch, readContextPatch } from '@/lib/vids-types';
-import { readParts } from '../parts';
+import { readFolder, readParts } from '../parts';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -23,7 +24,7 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
     if (!name) return NextResponse.json({ error: 'name cannot be empty' }, { status: 400 });
     patch.name = name;
   }
-  const bad = readParts(body, patch);
+  const bad = readParts(body, patch) ?? readFolder(body, patch);
   if (bad) return NextResponse.json({ error: bad }, { status: 400 });
   readContextPatch(body, patch);
   readClipablePatch(body, patch);

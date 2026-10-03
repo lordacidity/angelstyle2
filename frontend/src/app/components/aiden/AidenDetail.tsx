@@ -5,18 +5,21 @@
 // name anywhere (a card, a chip, a node on the spider) lands in the same place.
 //
 // For a person that is who they are, who they are tied to, and every event they
-// were part of, in order.
+// were part of, in order. For a firm it is also the rounds it has been in, and
+// the firms it shared them with.
 
 import React, { useMemo } from 'react';
 import {
   FIRM_KIND_LABEL, LINK_KIND_LABEL,
-  type AidenEvent, type AidenFirm, type AidenPerson, type AidenPlace,
+  type AidenEvent, type AidenFirm, type AidenPerson, type AidenPlace, type AidenRound,
 } from '@/lib/aiden-types';
+import { fmtAnnounced, newestRoundFirst, roundLabel, roundName, roundNameKey } from '@/lib/aiden-rounds';
 import type { UseAidenData } from './useAidenData';
 import type { AidenNav, Selection } from './aiden-nav';
 import { EventCard } from './AidenEventCard';
 import {
-  Chip, FIRM_COLOR, LINK_COLOR, PLACE_COLOR, WARMTH_COLOR, ago, btnGhost, btnPrimary, href,
+  Chip, FIRM_COLOR, INVESTED_COLOR, LINK_COLOR, PLACE_COLOR, ROUND_COLOR, WARMTH_COLOR, ago, btnGhost,
+  btnPrimary, href, warmest,
 } from './aiden-ui';
 
 function Section({ title, count, action, children }: {
@@ -90,6 +93,25 @@ function Events({ events, api, nav, hidePersonId }: {
     <div className="flex flex-col gap-2">
       {events.map((e) => <EventCard key={e.id} event={e} api={api} nav={nav} hidePersonId={hidePersonId} compact />)}
     </div>
+  );
+}
+
+function RoundRow({ round, sub, nav }: { round: AidenRound; sub: string; nav: AidenNav }) {
+  return (
+    <button
+      type="button"
+      onClick={() => nav.open({ kind: 'round', initial: round })}
+      className="flex w-full items-center gap-2.5 rounded-md px-2 py-1.5 text-left transition-colors hover:bg-zinc-900"
+    >
+      <span className="h-2 w-2 shrink-0 rounded-full" style={{ backgroundColor: ROUND_COLOR }} />
+      <span className="min-w-0 flex-1">
+        <span className="block truncate text-[12.5px] text-white">{roundName(round)}</span>
+        {sub && <span className="block truncate text-[11px] text-zinc-600">{sub}</span>}
+      </span>
+      <span className="shrink-0 text-[10.5px] text-zinc-600">
+        {[fmtAnnounced(round.announced), round.amount].filter(Boolean).join(', ')}
+      </span>
+    </button>
   );
 }
 
@@ -284,6 +306,22 @@ function FirmDetail({ firm, api, nav }: { firm: AidenFirm; api: UseAidenData; na
       .sort((a, b) => b.happenedAt.localeCompare(a.happenedAt));
   }, [api.data.events, firm.id, people]);
 
+  // The rounds it put money into, and the firms that were in them with it.
+  const rounds = api.index.roundsOf.get(firm.id) ?? [];
+  const shared = useMemo(
+    () =>
+      [...(api.index.sharedWith.get(firm.id) ?? [])]
+        .map(([otherId, list]) => ({ other: api.index.firm.get(otherId), rounds: list }))
+        .filter((x): x is { other: AidenFirm; rounds: AidenRound[] } => Boolean(x.other))
+        .sort((a, b) => b.rounds.length - a.rounds.length || a.other.name.localeCompare(b.other.name)),
+    [api.index, firm.id],
+  );
+  // The rounds it raised itself, when it is a company and not an investor.
+  const raised = useMemo(
+    () => api.data.rounds.filter((r) => roundNameKey(r.company) === roundNameKey(firm.name)).sort(newestRoundFirst),
+    [api.data.rounds, firm.name],
+  );
+
   return (
     <>
       <div className="px-5 pb-4 pt-1">
@@ -322,6 +360,9 @@ function FirmDetail({ firm, api, nav }: { firm: AidenFirm; api: UseAidenData; na
           >
             Add person
           </button>
+          <button type="button" onClick={() => nav.open({ kind: 'round', presetFirmIds: [firm.id] })} className={btnGhost}>
+            Add round
+          </button>
           <button type="button" onClick={() => nav.open({ kind: 'firm', initial: firm })} className={btnGhost}>
             Edit
           </button>
@@ -352,6 +393,80 @@ function FirmDetail({ firm, api, nav }: { firm: AidenFirm; api: UseAidenData; na
           {people.map((p) => <PersonRow key={p.id} person={p} api={api} nav={nav} />)}
         </div>
       </Section>
+
+      {shared.length > 0 && (
+        <Section title="Shared rounds with" count={shared.length}>
+          <div className="flex flex-col gap-0.5">
+            {shared.map(({ other, rounds: list }) => {
+              const staff = api.data.people.filter((p) => p.firmId === other.id);
+              const warmth = warmest(staff);
+              const color = api.index.investedFirms.has(other.id)
+                ? INVESTED_COLOR
+                : warmth ? WARMTH_COLOR[warmth] : '#3f3f46';
+              return (
+                <button
+                  key={other.id}
+                  type="button"
+                  onClick={() => nav.select({ type: 'firm', id: other.id })}
+                  title={staff.length ? staff.map((p) => `${p.name} (${p.warmth})`).join(', ') : 'Nobody logged there yet'}
+                  className="flex w-full items-center gap-2.5 rounded-md px-2 py-1.5 text-left transition-colors hover:bg-zinc-900"
+                >
+                  <span className="h-2 w-2 shrink-0 rounded-[2px]" style={{ backgroundColor: color }} />
+                  <span className="min-w-0 flex-1">
+                    <span className="block truncate text-[12.5px] text-white">{other.name}</span>
+                    <span className="block truncate text-[11px] text-zinc-600">{list.map(roundLabel).join(', ')}</span>
+                  </span>
+                  <span className="shrink-0 text-[10.5px] font-medium" style={{ color: ROUND_COLOR }}>{list.length}</span>
+                </button>
+              );
+            })}
+          </div>
+        </Section>
+      )}
+
+      {(rounds.length > 0 || raised.length === 0) && (
+        <Section
+          title="Rounds it was in"
+          count={rounds.length}
+          action={
+            <button type="button" onClick={() => nav.open({ kind: 'round', presetFirmIds: [firm.id] })} className={smallLink}>
+              + Add round
+            </button>
+          }
+        >
+          {rounds.length === 0 && <p className="text-[12px] text-zinc-600">No rounds logged yet.</p>}
+          <div className="flex flex-col gap-0.5">
+            {rounds.map((r) => {
+              const led = r.firms.some((rf) => rf.firmId === firm.id && rf.role === 'lead');
+              const withFirms = r.firms
+                .filter((rf) => rf.firmId !== firm.id)
+                .map((rf) => api.index.firm.get(rf.firmId)?.name)
+                .filter(Boolean);
+              const sub = [led ? 'Led' : '', withFirms.length ? `with ${withFirms.join(', ')}` : ''].filter(Boolean).join(', ');
+              return <RoundRow key={r.id} round={r} sub={sub} nav={nav} />;
+            })}
+          </div>
+        </Section>
+      )}
+
+      {raised.length > 0 && (
+        <Section
+          title="Rounds it raised"
+          count={raised.length}
+          action={
+            <button type="button" onClick={() => nav.open({ kind: 'round', presetCompany: firm.name })} className={smallLink}>
+              + Add round
+            </button>
+          }
+        >
+          <div className="flex flex-col gap-0.5">
+            {raised.map((r) => {
+              const from = r.firms.map((rf) => api.index.firm.get(rf.firmId)?.name).filter(Boolean);
+              return <RoundRow key={r.id} round={r} sub={from.length ? `from ${from.join(', ')}` : ''} nav={nav} />;
+            })}
+          </div>
+        </Section>
+      )}
 
       <Section title="Events, newest first" count={events.length}>
         <Events events={events} api={api} nav={nav} />

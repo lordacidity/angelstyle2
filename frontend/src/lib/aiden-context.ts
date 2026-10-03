@@ -1,14 +1,16 @@
 // The whole network, written out as text for the model to read.
 //
 // The Aiden chat is only useful if DeepSeek knows everything the log knows:
-// who everyone is, where they sit, how they are tied together, every touch in
-// order, what is owed a follow-up, and what the goals are. This turns a
+// who everyone is, where they sit, how they are tied together, which firms have
+// shared a round, every touch in order, what is owed a follow-up, and what the
+// goals are. This turns a
 // snapshot into that brief. Pure: no DB, no network, safe to import anywhere.
 
 import {
   EVENT_KIND_LABEL, EVENT_ROLE_LABEL, FIRM_KIND_LABEL, LINK_KIND_LABEL,
   type AidenSnapshot,
 } from '@/lib/aiden-types';
+import { coInvestors, fmtAnnounced, roundLabel, roundName } from '@/lib/aiden-rounds';
 
 // Past this the long free-text fields are clipped, oldest events first, so a
 // log that has grown for years still fits in one request.
@@ -38,6 +40,8 @@ function write(snap: AidenSnapshot, bioCap: number, summaryCap: number): string 
     }
   }
 
+  const shared = coInvestors(snap.rounds);
+
   const out: string[] = [];
 
   out.push('## PLACES');
@@ -56,7 +60,14 @@ function write(snap: AidenSnapshot, bioCap: number, summaryCap: number): string 
       f.website,
       staff.length ? `people I know there: ${staff.join(', ')}` : 'nobody logged there yet',
     ].filter(Boolean);
-    out.push(`- ${f.name} (${bits.join('; ')})${f.notes ? `. Notes: ${clip(f.notes, bioCap)}` : ''}`);
+    // Who it has been on a round with: the firms it can introduce, and be introduced by.
+    const co = [...(shared.get(f.id) ?? [])]
+      .sort((a, b) => b[1].length - a[1].length)
+      .map(([otherId, rounds]) => `${firm.get(otherId)?.name ?? 'a firm removed'} (${rounds.map(roundLabel).join(', ')})`);
+    out.push(
+      `- ${f.name} (${bits.join('; ')})${f.notes ? `. Notes: ${clip(f.notes, bioCap)}` : ''}`
+      + `${co.length ? `. Shared rounds with: ${co.join('; ')}` : ''}`,
+    );
   }
 
   out.push('', '## PEOPLE');
@@ -105,6 +116,22 @@ function write(snap: AidenSnapshot, bioCap: number, summaryCap: number): string 
     );
   }
 
+  out.push('', '## ROUNDS (funding rounds, and the firms in the log that were in each; two firms on one round know each other)');
+  if (!snap.rounds.length) out.push('(none yet)');
+  for (const r of snap.rounds) {
+    const firms = r.firms
+      .map((rf) => `${firm.get(rf.firmId)?.name ?? 'a firm removed'}${rf.role === 'lead' ? ' [led]' : ''}`)
+      .join(', ');
+    const bits = [
+      fmtAnnounced(r.announced),
+      r.amount,
+      firms ? `firms in the log: ${firms}` : 'no firm in the log',
+      r.others ? `also in it: ${clip(r.others, 300)}` : '',
+      r.source ? `source: ${r.source}` : '',
+    ].filter(Boolean);
+    out.push(`- ${roundName(r)} (${bits.join('; ')})${r.notes ? `. Notes: ${clip(r.notes, bioCap)}` : ''}`);
+  }
+
   out.push('', '## GOALS');
   if (!snap.goals.length) out.push('(none yet)');
   for (const gl of snap.goals) {
@@ -134,14 +161,18 @@ export function buildAidenSystemPrompt(snap: AidenSnapshot, today: string): stri
       'reaching out to venture capitalists and building a network: cold emails, LinkedIn messages, referral asks, ' +
       'intros, calls, and in-person events.',
     '',
-    'Below is his complete log: every place, firm, person, tie between people, every touch he has logged in ' +
-      'order, his goals, and his own notes. Treat it as the single source of truth about his network.',
+    'Below is his complete log: every place, firm, person, tie between people, the funding rounds firms have ' +
+      'shared, every touch he has logged in order, his goals, and his own notes. Treat it as the single source of ' +
+      'truth about his network.',
     '',
     'How to help:',
     '- Be specific. Name the actual people, firms and dates from the log. Never give generic networking advice.',
     '- When he asks what to do next, rank concrete moves: who to follow up with and why now, which ties could ' +
       'turn into a warm intro (and who should make it), what has gone stale, which follow-ups are overdue.',
     '- Use the ties. If he wants to reach someone, look for a path through people he already knows.',
+    '- Use the shared rounds. Two firms that invested in the same round know each other: when he is warm at one ' +
+      'and cold at the other, the person he knows at the first is the one to ask for the intro, and the round ' +
+      'they shared is the reason to name.',
     '- Tie suggestions back to his goals when they are relevant.',
     '- When he asks for a message, draft it short and in a natural voice, ready to send, referring to what was ' +
       'actually said before.',

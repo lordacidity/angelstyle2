@@ -4,6 +4,13 @@
 // whole stage is a drop target, and a drop starts the short pipeline that walks
 // footage from the desktop to a finished, filed clip.
 //
+// The words on screen, since 2026-10-02: a persona is a person (Blorky), and
+// what a drop here makes is a persona video — one video of them doing
+// something. This file's code and older notes call that video "a persona"
+// (the Intake's `persona*` fields, mode 'persona'), and the person it belongs
+// to its "group". VidsPrep only starts the persona-video run now; the run for
+// loose clips (two files, four, a photo) is still below but nothing starts it.
+//
 //   one video on its own         a persona made of that one clip: name it, give
 //                                it its one context, then trim it three times —
 //                                once each for Start, Top A and Top B
@@ -130,13 +137,16 @@ export interface Intake {
   personaContext: string;
   /** Degen or not, said at setup — the persona is made with it. */
   personaDegen: boolean;
+  /** Whose persona it is: the folder under Persona it is made in, picked at
+   *  setup — see lib/vids-persona-folders. Null files it in none. */
+  personaGroupId: string | null;
   /** A save is going up from outside the editor — a photo being filed. */
   saving: boolean;
 }
 
 const STEPS: Record<IntakeMode, readonly string[]> = {
   clips: ['Folder', 'Name', 'Edit', 'Save'],
-  persona: ['Persona', 'Trim', 'Save'],
+  persona: ['Video', 'Trim', 'Save'],
 };
 
 /** Which of the labels above the run is standing on. */
@@ -184,8 +194,8 @@ function Card({ intake, title, hint, onCancel, children }: {
   return (
     // m-auto rather than justify-center: a card taller than the stage has to
     // scroll from its own top rather than have it cut off.
-    <div className="flex min-h-0 flex-1 flex-col overflow-y-auto p-6">
-      <div className="m-auto w-full max-w-[440px] rounded-xl border border-zinc-800 bg-zinc-950 p-4 shadow-2xl">
+    <div className="flex min-h-0 flex-1 flex-col overflow-y-auto p-3">
+      <div className="m-auto w-full max-w-[440px] rounded-xl border border-zinc-800 bg-zinc-950 p-3 shadow-2xl">
         <div className="mb-3 flex items-start gap-2">
           <div className="min-w-0 flex-1">
             <StepDots intake={intake} />
@@ -233,10 +243,14 @@ interface StageProps {
   onOpenClip: (id: string) => void;
   onChooseFolder: (choice: FolderChoice) => void;
   /** Persona setup is done: its name, the context all three share, the order
-   *  the three files play in, and whether it is degen. */
-  onStartPersona: (name: string, context: VidContext, order: File[], degen: boolean) => void;
-  /** Three files that aren't a persona after all — file them as ordinary clips. */
-  onFileAsClips: () => void;
+   *  the three files play in, whether it is degen, and whose it is (a folder
+   *  under Persona, or null for none). */
+  onStartPersona: (name: string, context: VidContext, order: File[], degen: boolean, groupId: string | null) => void;
+  /** The folders a new persona can be filed in — one per person. */
+  personaGroups: readonly { id: string; name: string }[];
+  /** Three files that aren't a persona video after all — file them as ordinary
+   *  clips. Left out, the setup card doesn't offer it. */
+  onFileAsClips?: () => void;
   /** Context for the clip the run is on — then straight into the editor. The
    *  theme is a Bottom B's alone (see VidTheme); null everywhere else. */
   onContext: (name: string, context: VidContext, theme: VidTheme | null) => void;
@@ -247,8 +261,8 @@ interface StageProps {
 }
 
 export function VidsIntakeStage({
-  intake, choices, onFiles, onOpenClip, onChooseFolder, onStartPersona, onFileAsClips, onContext, onCancel,
-  onResume,
+  intake, choices, onFiles, onOpenClip, onChooseFolder, onStartPersona, personaGroups, onFileAsClips, onContext,
+  onCancel, onResume,
 }: StageProps) {
   const [over, setOver] = useState(false);
 
@@ -293,7 +307,7 @@ export function VidsIntakeStage({
       ) : intake.step === 'folder' ? (
         <FolderStep intake={intake} choices={choices} onChoose={onChooseFolder} onCancel={onCancel} />
       ) : intake.step === 'setup' ? (
-        <PersonaStep intake={intake} onStart={onStartPersona} onFileAsClips={onFileAsClips} onCancel={onCancel} />
+        <PersonaStep intake={intake} groups={personaGroups} onStart={onStartPersona} onFileAsClips={onFileAsClips} onCancel={onCancel} />
       ) : intake.step === 'context' ? (
         <ContextStep
           key={intake.index}
@@ -314,7 +328,7 @@ export function VidsIntakeStage({
 function IdleStage({ over, onFiles }: { over: boolean; onFiles: (files: FileList | File[]) => void }) {
   const [fileEl, setFileEl] = useState<HTMLInputElement | null>(null);
   return (
-    <div className="flex min-h-0 flex-1 flex-col p-6">
+    <div className="flex min-h-0 flex-1 flex-col p-3">
       <input
         ref={setFileEl}
         type="file"
@@ -328,25 +342,23 @@ function IdleStage({ over, onFiles }: { over: boolean; onFiles: (files: FileList
       />
       <div
         onClick={() => fileEl?.click()}
-        className={`flex min-h-0 flex-1 cursor-pointer flex-col items-center justify-center rounded-xl border-2 border-dashed px-8 text-center transition-colors ${
+        className={`flex min-h-0 flex-1 cursor-pointer flex-col items-center justify-center rounded-xl border-2 border-dashed px-4 py-6 text-center transition-colors ${
           over ? 'border-emerald-500 bg-emerald-950/20' : 'border-zinc-800 hover:border-zinc-600 hover:bg-zinc-950/60'
         }`}
       >
         <UploadIcon size={30} className={over ? 'text-emerald-400' : 'text-zinc-600'} />
         <p className="mt-3 text-[14px] font-semibold text-zinc-100">{over ? 'Drop it' : 'Drop footage here'}</p>
         <p className="mt-1 max-w-[420px] text-[11px] leading-relaxed text-zinc-500">
-          Drop <span className="font-semibold text-zinc-300">one</span> and it is a persona made of that clip —
-          name it once, give it one context, then trim it three times, once each for Start, Top A and Top B.
-          Nothing is uploaded until a trim is saved.
+          It becomes a <span className="font-semibold text-zinc-300">persona video</span>: name it, say whose it is,
+          then trim. Drop <span className="font-semibold text-zinc-300">one</span> video and it is trimmed three times —
+          the start, the middle, the end. Nothing is uploaded until a trim is saved.
         </p>
         <p className="mt-0.5 max-w-[420px] text-[11px] leading-relaxed text-zinc-500">
-          Drop <span className="font-semibold text-zinc-300">three</span> and it is a persona from three clips —
-          same one name and one context, a part each.
+          Drop <span className="font-semibold text-zinc-300">three</span> and each is one of those parts.
         </p>
         <p className="mt-4 text-[10px] text-zinc-600">or click to choose files — mp4, mov, webm, mkv</p>
         <p className="mt-6 max-w-[420px] border-t border-zinc-900 pt-4 text-[10px] leading-relaxed text-zinc-600">
-          Rather work piece by piece? Drop straight onto a folder on the left to just file it, or click any clip
-          there to open it here on its own.
+          Dropping onto a persona&rsquo;s name does the same, with that persona already chosen.
         </p>
       </div>
     </div>
@@ -396,15 +408,19 @@ function FolderStep({ intake, choices, onChoose, onCancel }: {
  *  frames don't — and dragging one onto another's place puts it there. From one
  *  file there is no order to settle: the one clip is all three parts, and the
  *  card says so. */
-function PersonaStep({ intake, onStart, onFileAsClips, onCancel }: {
+function PersonaStep({ intake, groups, onStart, onFileAsClips, onCancel }: {
   intake: Intake;
-  onStart: (name: string, context: VidContext, order: File[], degen: boolean) => void;
-  onFileAsClips: () => void;
+  groups: readonly { id: string; name: string }[];
+  onStart: (name: string, context: VidContext, order: File[], degen: boolean, groupId: string | null) => void;
+  onFileAsClips?: () => void;
   onCancel: () => void;
 }) {
   const [name, setName] = useState('');
   const [text, setText] = useState('');
   const [degen, setDegen] = useState<boolean | null>(null);
+  /** Whose it is — the folder it is filed in. It opens on the one the run was
+   *  started with, if any (the folder being looked at on the left). */
+  const [groupId, setGroupId] = useState<string | null>(intake.personaGroupId);
   const [order, setOrder] = useState<File[]>(intake.files);
   /** One video dropped: it fills Start, Top A and Top B by itself, so there is
    *  nothing to put in order and the tiles are one tile. The copies are made
@@ -449,15 +465,17 @@ function PersonaStep({ intake, onStart, onFileAsClips, onCancel }: {
   };
 
   const ready = !!name.trim() && degen !== null;
-  const start = () => { if (ready) onStart(name, { context: text.trim() }, order, degen); };
+  const start = () => {
+    if (ready) onStart(name, { context: text.trim() }, order, degen, groups.some((g) => g.id === groupId) ? groupId : null);
+  };
 
   return (
     <Card
       intake={intake}
-      title={one ? 'One clip — a persona' : 'Three clips — a persona'}
+      title={one ? 'One clip — a persona video' : 'Three clips — a persona video'}
       hint={one
-        ? 'The one clip is the whole persona: it is filed three times, as Start, Top A and Top B, and you trim it to a different stretch each time. All you do to it after this is trim.'
-        : 'Start, Top A and Top B are one performance, so they share a name and one context. All you do to them after this is trim.'}
+        ? 'The one clip is the whole video: it is used three times — the start, the middle and the end — and you trim it to a different stretch each time. All you do to it after this is trim.'
+        : 'The three are one video — its start, its middle and its end — so they share a name and one context. All you do to them after this is trim.'}
       onCancel={onCancel}
     >
       <input
@@ -465,9 +483,27 @@ function PersonaStep({ intake, onStart, onFileAsClips, onCancel }: {
         value={name}
         onChange={(e) => setName(e.target.value)}
         onKeyDown={(e) => { if (e.key === 'Enter') start(); }}
-        placeholder="Persona name"
+        placeholder="Video name — what he is doing"
         className="mb-2.5 w-full rounded border border-zinc-700 bg-black px-2 py-1.5 text-[12px] text-zinc-100 outline-none placeholder:text-zinc-600 focus:border-zinc-400"
       />
+
+      {/* Whose video it is. With no personas yet there is nobody to choose —
+          they are made on the left. */}
+      <p className="mb-1 text-[9px] font-semibold uppercase tracking-wider text-zinc-500">Persona — whose video it is</p>
+      {groups.length > 0 ? (
+        <select
+          value={groupId ?? ''}
+          onChange={(e) => setGroupId(e.target.value || null)}
+          className="mb-2.5 w-full rounded border border-zinc-700 bg-black px-2 py-1.5 text-[11px] text-zinc-100 outline-none focus:border-zinc-400"
+        >
+          <option value="">No persona yet</option>
+          {groups.map((g) => <option key={g.id} value={g.id}>{g.name}</option>)}
+        </select>
+      ) : (
+        <p className="mb-2.5 text-[10px] leading-relaxed text-zinc-600">
+          No personas yet — make one with + New persona on the left, and move this video to it after.
+        </p>
+      )}
 
       <p className="mb-1 text-[9px] font-semibold uppercase tracking-wider text-zinc-500">
         {one ? 'Parts — this clip, three times' : 'Parts — drag them into the order they play'}
@@ -590,16 +626,21 @@ function PersonaStep({ intake, onStart, onFileAsClips, onCancel }: {
       <button
         onClick={start}
         disabled={!ready}
-        title={!name.trim() ? 'Name the persona first' : degen === null ? 'Say whether it is degen first' : undefined}
+        title={!name.trim() ? 'Name the video first' : degen === null ? 'Say whether it is degen first' : undefined}
         className="mt-3 flex w-full items-center justify-center gap-1.5 rounded bg-white py-1.5 text-[11px] font-medium text-black hover:bg-zinc-200 disabled:opacity-30"
       >
         <UploadIcon size={12} /> Start trimming
       </button>
       <p className="mt-1.5 text-center text-[9px] text-zinc-600">
-        Each part is saved to the Persona folder as its trim is ·{' '}
-        <button onClick={onFileAsClips} className="underline decoration-zinc-700 hover:text-zinc-300">
-          {one ? 'not a persona — file it as one clip' : 'not a persona — file them as clips'}
-        </button>
+        Each part is saved as its trim is
+        {onFileAsClips && (
+          <>
+            {' · '}
+            <button onClick={onFileAsClips} className="underline decoration-zinc-700 hover:text-zinc-300">
+              {one ? 'not a persona video — file it as one clip' : 'not a persona video — file them as clips'}
+            </button>
+          </>
+        )}
       </p>
     </Card>
   );
@@ -793,7 +834,7 @@ function DoneStage({ intake, over, onFiles, onCancel }: {
     ? (total > 1 ? `All ${total} clips are` : 'That clip is')
     : `${saved} of ${total} clips are`;
   return (
-    <div className="flex min-h-0 flex-1 flex-col p-6">
+    <div className="flex min-h-0 flex-1 flex-col p-3">
       <input
         ref={setFileEl}
         type="file"
@@ -807,7 +848,7 @@ function DoneStage({ intake, over, onFiles, onCancel }: {
       />
       <div
         onClick={() => fileEl?.click()}
-        className={`flex min-h-0 flex-1 cursor-pointer flex-col items-center justify-center rounded-xl border-2 border-dashed px-8 text-center transition-colors ${
+        className={`flex min-h-0 flex-1 cursor-pointer flex-col items-center justify-center rounded-xl border-2 border-dashed px-4 py-6 text-center transition-colors ${
           over ? 'border-emerald-500 bg-emerald-950/20' : 'border-zinc-800 hover:border-zinc-600'
         }`}
       >
@@ -815,7 +856,7 @@ function DoneStage({ intake, over, onFiles, onCancel }: {
         <p className="mt-3 max-w-[420px] text-[13px] font-semibold text-zinc-100">
           {intake.mode === 'persona'
             ? saved
-              ? `"${intake.personaName}" is built — ${saved === total ? 'all three parts' : `${saved} of ${total} parts`} trimmed and saved.`
+              ? `"${intake.personaName}" is saved — ${saved === total ? 'all three parts' : `${saved} of ${total} parts`} trimmed.`
               : `"${intake.personaName}" was not made — none of its parts were saved.`
             : saved
               ? `${clipsSaved} saved in ${intake.folderName}.`
@@ -824,7 +865,7 @@ function DoneStage({ intake, over, onFiles, onCancel }: {
         </p>
         <p className="mt-1 text-[11px] text-zinc-500">
           {intake.mode === 'persona' && saved
-            ? 'Pick it on the Build page to stack a video.'
+            ? 'It is on the left under its persona, and there to pick in Vids 2 and on the clipper page.'
             : 'Drop more footage to run it again.'}
         </p>
         <button

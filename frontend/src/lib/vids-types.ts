@@ -55,6 +55,8 @@ export function readThemePatch(body: Record<string, unknown>, patch: VidThemePat
 // persona, clip, song and caption look carries the flag, and it is off until
 // someone here turns it on — so the clippers see only what has been signed
 // off, and this app (the admin side) goes on using everything regardless.
+// Personas are the exception since 2026-10-02: a new one is made on offer, and
+// is switched off here if it shouldn't be.
 //
 // Personas and clips are rows, so the flag is a column on each. Songs and
 // caption looks are defined in code rather than in the database (public/audio
@@ -290,9 +292,16 @@ export interface VidPersona {
   startId: string | null;
   topAId: string | null;
   topBId: string | null;
+  /** Whose it is: the folder under Persona it is filed in — Aiden, Baldy,
+   *  Dorky — where every persona of that one person sits together (see
+   *  lib/vids-persona-folders). Null for one nobody has filed yet. A folder
+   *  deleted leaves its personas standing, unfiled (ON DELETE SET NULL). */
+  folderId: string | null;
   /** One context for the bundle — set by right-clicking the persona. */
   context: string;
-  /** On offer to the clippers, all three clips with it — see VidClipable. */
+  /** On offer to the clippers, all three clips with it — see VidClipable. The
+   *  one thing that is on from the start: a persona is made on offer, and is
+   *  switched off on the Clippers page. */
   clipable: boolean;
   /** A degen persona. Said once when it is made (Degen or Not degen, no
    *  default), and switched after from the 💀 beside the trash on its row in
@@ -450,6 +459,9 @@ export interface RecipePick {
    *  side of the restore reads it; a record without it is nudged, which is what
    *  every build before it was. */
   centred?: boolean;
+  /** Played flipped left to right — see SlotPick.mirror. A Vids 2 build rolls
+   *  it for the persona's three clips together; written only when it is on. */
+  mirror?: boolean;
 }
 
 export interface RecipeCaptionLine {

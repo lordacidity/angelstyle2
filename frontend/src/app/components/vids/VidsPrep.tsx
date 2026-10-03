@@ -1,52 +1,48 @@
 'use client';
 
-// VidsPrep — page one of the Vids section, and what the section is mostly for:
-// get footage in, make each clip what you want it to be, and file it.
+// VidsPrep — page one of the Vids section: the personas, and their videos.
 //
-//   Left    the folder rows, and the clips of whichever list is open. Click a
-//           clip to edit it; drag it onto a folder to file it. There is no drop
-//           panel up here any more — everything new comes in through the middle
-//           — but the pane still takes a drop that misses a folder, and files it
-//           in the Inbox.
-//   Right   two pages under one strip:
-//           Upload   the intake stage: the whole middle is a drop target, and
-//                    a drop runs the pipeline in VidsIntake. One video is taken
-//                    to be a persona made of that clip three times, and three at
-//                    once a persona from three; either way it walks name + one
-//                    context → trim each part. Anything else — two files, four,
-//                    a photo — walks folder → context → edit → save. Dropping
-//                    onto a folder on the left still just files footage, and
-//                    clicking a clip still opens it on its own — the pipeline is
-//                    a way through, not the only way in.
-//           Edit     the editor for the open clip — trim, cut, speed, sound,
-//                    save. Opening a clip from anywhere lands here.
-//           A run turns the page for you — Upload while it is asking
-//           something, Edit once it has a clip open — and both stay mounted,
-//           so nothing half-done is lost to a look elsewhere.
+// The words, since they changed on 2026-10-02:
+//   persona         a person — Blorky, Dorky, Aiden. In the library it is a
+//                   folder under the top-level Persona folder
+//                   (lib/vids-persona-folders).
+//   persona video   one video of that person doing something — "Walk In",
+//                   "Chipotle". It is what a build picks and what gets moved
+//                   about here. In code it is still a VidPersona, and it is
+//                   still made of three clips (Start, Top A, Top B), but those
+//                   are its insides: nothing on this page asks you to think
+//                   about them unless you open a video to edit it.
+//
+//   Left    the upload, as a narrow strip: drop one video (it is trimmed three
+//           times, for the three parts) or three (one each), name it, say
+//           whose it is, trim. Under it, whatever is still rendering or going
+//           up.
+//   Right   most of the page, and what the page is for: the personas down its
+//           left edge with a way to make one, and beside them the videos of
+//           whichever persona is pressed, as tiles. A video is moved to its
+//           persona by dragging its tile onto the name, or with the Move to
+//           list on the tile; the ones nobody has attributed yet sit under
+//           "No persona". The pencil renames a persona, the trash deletes it
+//           (its videos stay, under No persona). Right-click a video to rename
+//           it, move it or say what he is doing in it. Dropping footage onto a
+//           persona's name starts the upload with that persona already chosen.
+//           Clicking a video opens its three clips, and clicking one of those
+//           opens it in the editor — the only place the parts show. While a
+//           clip is open (that way, or by a run that is trimming one) the
+//           editor has this whole side, until it is closed.
 //           (What the clippers' app gets is its own page of the section,
 //           beside this one — see VidsClippers.)
 //
-// Nobody shoots a Bottom A, and these days nobody shoots a Bottom B either:
-// Vids 2 renders both screen recordings as it builds and keeps them in the tab
-// rather than filing them. So footage dropped in here is a persona, an End, or a
-// bottom clip somebody wants on the shelf anyway — and a Bottom B is asked one
-// extra thing as it is filed: which way Pauv was on the screen, light or dark
-// (see VidTheme).
+// Videos are made here and in AI Persona ("Make persona video"), and after
+// that they are mostly just used. The Inbox, Bottom B and End folders this
+// page used to list are gone from it — nobody files those by hand any more.
+// They are still in the library, and a build still takes its End from the End
+// folder; they are only not shown here. (VidsIntake still knows how to walk
+// loose clips into a folder; nothing on this page starts that run now.)
 //
-// Right-click says what a piece of footage is showing: a clip's thumbnail opens
-// the context popup for that clip, a persona row (or one of its part tiles) for
-// the whole bundle — a persona's three clips are one performance, so they share
-// one context rather than carrying three.
-//
-// Personas hang off the Persona row as folders of their own: open one and you
-// see its three parts — Start, Top A, Top B — each of which opens in the editor
-// on a click, takes a different clip on a drop, and unlinks on the ×. That way a
-// persona is somewhere you can work rather than three tiles on a card. The row
-// starts closed — press it to see them — since most of the filing done here is
-// bottom clips, and a long persona list pushed the other folders off-screen.
-//
-// Page two (the builder) is where these clips get stacked into a video, so
-// nothing here knows about slots: this page is only ever about one clip at a time.
+// A video being walked in saves its Start and its Top A behind you: Save
+// moves straight on to the next part while that one renders and goes up (the
+// list top left says how far along it is). Only the last part is waited for.
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { DragEvent } from 'react';
@@ -55,230 +51,221 @@ import type {
 } from '@/lib/vids-types';
 import { PERSONA_PARTS, PERSONA_PART_LABEL, isPhoto } from '@/lib/vids-types';
 import { MEDIA_ONLY, isMediaFile, isVideoFile, type VidsLib } from '../../hooks/useVidsLibrary';
-import {
-  PERSONA_FOLDER, PREP_FOLDERS, SLOT_META, VID_DRAG_MIME, folderGroupIds, intakeSpeed,
-  isPersonaFolderName, slotForFolderName,
-} from '@/lib/vidsPlan';
-import { VidsClipEditor, type ContextOwner } from './VidsClipEditor';
+import { PERSONA_FOLDER, intakeSpeed, isPersonaFolderName, slotForFolderName } from '@/lib/vidsPlan';
+import { UNFILED_LABEL, groupPersonas, personaFolders } from '@/lib/vids-persona-folders';
+import { VidsClipEditor, type ClipSaveJob, type ContextOwner } from './VidsClipEditor';
 import { VidsContextDialog, type VidsContextSave } from './VidsContext';
 import {
-  DegenChoice, PERSONA_DROP, VidsIntakeBanner, VidsIntakeStage, hasFiles, hasVid,
+  PERSONA_DROP, VidsIntakeBanner, VidsIntakeStage, hasFiles,
   type FolderChoice, type Intake, type LocalRow,
 } from './VidsIntake';
-import { VidPreview, fmtBytes } from './VidPreview';
+import { VidPreview } from './VidPreview';
 import { fmtTime } from '@/lib/utils';
 import { CloseIcon, SpinnerIcon, TrashIcon, UploadIcon, VideoIcon } from '@/lib/icons';
 
-const sameName = (a: string, b: string) => a.trim().toLowerCase() === b.trim().toLowerCase();
-
-/** Which list the left pane is showing: the unfiled Inbox, one folder group, or
- *  a single persona (`persona:<id>`). */
-const INBOX = '__inbox__';
+/** What the left pane is showing: one persona's videos (`group:<folder id>`,
+ *  or `group:${UNFILED}` for the videos in no persona), or one video opened
+ *  up to its three clips (`persona:<id>`). */
+const GROUP = 'group:';
+const UNFILED = '__unfiled__';
+const groupList = (folderId: string | null) => `${GROUP}${folderId ?? UNFILED}`;
 const personaKey = (id: string) => `persona:${id}`;
 const personaOf = (list: string) => (list.startsWith('persona:') ? list.slice('persona:'.length) : null);
+
+/** A video's tile being dragged onto a persona — its own drag, so nothing that
+ *  takes clips or files mistakes it for one. */
+const VIDEO_DRAG_MIME = 'application/x-pauv-persona';
+const hasVideo = (e: DragEvent) => Array.from(e.dataTransfer.types).includes(VIDEO_DRAG_MIME);
+
+/** A video's part saving behind the editor: rendering, then going up. */
+interface BackSave { id: string; name: string; frac: number; error: string | null }
 
 /** The ids of an intake run's local rows — clips still on the disk, not yet
  *  saved — so the editor's saves and mark edits know where to write. */
 const LOCAL_PREFIX = 'local:';
 const isLocalId = (id: string | null | undefined): id is string => !!id && id.startsWith(LOCAL_PREFIX);
 
-/** The two pages on the right. */
-type Tab = 'upload' | 'edit';
-const TABS: { id: Tab; label: string }[] = [
-  { id: 'upload', label: 'Upload' },
-  { id: 'edit',   label: 'Edit' },
-];
+/** What a video's three clips are called where they are shown: where each
+ *  plays in a build. (PERSONA_PART_LABEL has the library's own names for them —
+ *  Start, Top A, Top B — which is what the clips themselves are named after.) */
+const PART_SAID: Record<PersonaPart, string> = { startId: 'Start', topAId: 'Middle', topBId: 'End' };
 
-function FolderIcon({ open }: { open: boolean }) {
-  return (
-    <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={`shrink-0 ${open ? 'text-amber-300' : 'text-zinc-500'}`}>
-      <path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z" />
-    </svg>
-  );
-}
+/** The folders a run of loose clips could be filed in: none, from this page. */
+const NO_FOLDERS: readonly FolderChoice[] = [];
 
-function InboxIcon({ open }: { open: boolean }) {
-  return (
-    <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={`shrink-0 ${open ? 'text-sky-300' : 'text-zinc-500'}`}>
-      <path d="M22 12h-6l-2 3h-4l-2-3H2" />
-      <path d="M5.45 5.11 2 12v6a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2v-6l-3.45-6.89A2 2 0 0 0 16.76 4H7.24a2 2 0 0 0-1.79 1.11z" />
-    </svg>
-  );
-}
-
-function ListRow({ label, count, selected, icon, indent, tone, title, expanded, onToggle, onSelect, onDrop, onDelete, onContext, degen, onDegen }: {
+/** One persona on the list — a person — with a still of one of their videos
+ *  and how many they have. Pressing it shows the videos below. A video dragged
+ *  onto it becomes theirs; footage dropped on it starts a new video of them. */
+function PersonaRow({ label, count, thumb, selected, title, onSelect, onVideoDrop, onFiles, onRename, onDelete }: {
   label: string;
-  count: number | string;
+  count: number;
+  thumb: string | null;
   selected: boolean;
-  icon: React.ReactNode;
-  indent?: boolean;
-  tone?: 'ok' | 'partial';
-  title?: string;
-  /** Given a toggle, the row grows a chevron and shows this state. Only the
-   *  Persona row has children of its own to show or hide. */
-  expanded?: boolean;
-  onToggle?: () => void;
+  title: string;
   onSelect: () => void;
-  onDrop: (e: DragEvent) => void;
+  onVideoDrop: (personaVideoId: string) => void;
+  /** Left out on the "No persona" row, which is nobody to make a video of. */
+  onFiles?: (files: FileList) => void;
+  onRename?: () => void;
   onDelete?: () => void;
-  /** Right-click — used by persona rows to open their context popup. */
-  onContext?: () => void;
-  /** Persona rows: whether it is degen, and the 💀 beside the trash that
-   *  switches it. Lit it always shows; unlit it shows on hover, like the trash. */
-  degen?: boolean;
-  onDegen?: () => void;
 }) {
   const [over, setOver] = useState(false);
+  const takes = (e: DragEvent) => hasVideo(e) || (!!onFiles && hasFiles(e));
   return (
     <div
-      title={title ?? `${label} — drop clips here to file them`}
+      title={title}
       onClick={onSelect}
-      onContextMenu={onContext ? (e) => { e.preventDefault(); onContext(); } : undefined}
-      // dragenter as well as dragover: both have to be taken for this to win the
-      // drop, otherwise it falls through to the pane behind and the file lands in
-      // the Inbox instead of here.
-      onDragEnter={(e) => {
-        if (!hasVid(e) && !hasFiles(e)) return;
-        e.preventDefault();
-        e.stopPropagation();
-        setOver(true);
-      }}
+      // dragenter as well as dragover: both have to be taken for the row to
+      // win the drop.
+      onDragEnter={(e) => { if (!takes(e)) return; e.preventDefault(); e.stopPropagation(); setOver(true); }}
       onDragOver={(e) => {
-        if (!hasVid(e) && !hasFiles(e)) return;
+        if (!takes(e)) return;
         e.preventDefault();
         e.stopPropagation();
-        e.dataTransfer.dropEffect = hasVid(e) ? 'move' : 'copy';
+        e.dataTransfer.dropEffect = hasVideo(e) ? 'move' : 'copy';
         setOver(true);
       }}
       onDragLeave={() => setOver(false)}
-      onDrop={(e) => { setOver(false); onDrop(e); }}
-      className={`group flex cursor-pointer items-center gap-1.5 rounded-md px-2 text-[11px] ${indent ? 'ml-3' : ''} ${
+      onDrop={(e) => {
+        if (!takes(e)) return;
+        e.preventDefault();
+        e.stopPropagation();
+        setOver(false);
+        const id = e.dataTransfer.getData(VIDEO_DRAG_MIME);
+        if (id) { onVideoDrop(id); return; }
+        if (e.dataTransfer.files.length) onFiles?.(e.dataTransfer.files);
+      }}
+      className={`group flex cursor-pointer items-center gap-2 rounded-md px-2 py-1.5 text-[13px] ${
         over ? 'bg-emerald-900/40 ring-1 ring-emerald-600'
           : selected ? 'bg-zinc-800 text-white' : 'text-zinc-300 hover:bg-zinc-900'
       }`}
     >
-      {onToggle && (
+      <span className={`flex h-7 w-7 shrink-0 items-center justify-center overflow-hidden rounded-full bg-black ${thumb ? '' : 'border border-dashed border-zinc-700'}`}>
+        {thumb && (
+          // eslint-disable-next-line @next/next/no-img-element
+          <img src={thumb} alt="" className="h-full w-full object-cover" draggable={false} />
+        )}
+      </span>
+      <span className="min-w-0 flex-1 truncate font-medium">{label}</span>
+      {onRename && (
         <button
-          onClick={(e) => { e.stopPropagation(); onToggle(); }}
-          title={expanded ? 'Hide what is in here' : 'Show what is in here'}
-          className="-ml-1 shrink-0 p-0.5 text-zinc-500 hover:text-white"
+          onClick={(e) => { e.stopPropagation(); onRename(); }}
+          title="Rename this persona"
+          className="hidden p-0.5 text-zinc-500 hover:text-white group-hover:block"
         >
-          <svg
-            width="9" height="9" viewBox="0 0 24 24" fill="none" stroke="currentColor"
-            strokeWidth="3" strokeLinecap="round" strokeLinejoin="round"
-            className={`transition-transform ${expanded ? '' : '-rotate-90'}`}
-          >
-            <polyline points="6 9 12 15 18 9" />
+          <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+            <path d="M12 20h9" />
+            <path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z" />
           </svg>
-        </button>
-      )}
-      {icon}
-      <span className="min-w-0 flex-1 truncate py-1.5">{label}</span>
-      {onDegen && (
-        <button
-          onClick={(e) => { e.stopPropagation(); onDegen(); }}
-          aria-pressed={!!degen}
-          title={degen ? 'Degen — click to make it not degen' : 'Not degen — click to make it degen'}
-          className={`shrink-0 rounded px-0.5 text-[11px] leading-none transition ${
-            degen
-              ? 'bg-amber-500/25 ring-1 ring-amber-400/80'
-              : 'hidden opacity-40 grayscale hover:opacity-100 hover:grayscale-0 group-hover:block'
-          }`}
-        >
-          💀
         </button>
       )}
       {onDelete && (
         <button
           onClick={(e) => { e.stopPropagation(); onDelete(); }}
-          title="Delete this persona (its clips stay in the folder)"
+          title="Delete this persona (its videos stay, under No persona)"
           className="hidden p-0.5 text-zinc-500 hover:text-red-400 group-hover:block"
         >
           <TrashIcon size={11} />
         </button>
       )}
-      <span className={`text-[10px] ${tone === 'ok' ? 'text-emerald-400' : tone === 'partial' ? 'text-amber-400' : 'text-zinc-600'}`}>
-        {count || ''}
-      </span>
+      <span className="text-[10px] tabular-nums text-zinc-500">{count}</span>
     </div>
   );
 }
 
-function ClipCard({ v, open, onOpen, onDelete, onContext }: {
-  v: VidRow; open: boolean; onOpen: () => void; onDelete: () => void; onContext: () => void;
+/** One persona video, as a tile: its picture, its name, and whose it is — the
+ *  list under the name moves it. Drag it onto a persona to do the same; click
+ *  it to open its three clips; right-click to rename it or say what he is
+ *  doing in it. */
+function VideoCard({ video, thumb, filled, people, onOpen, onMove, onDelete, onDegen, onContext }: {
+  video: VidPersona;
+  thumb: string | null;
+  /** How many of its three clips it has. */
+  filled: number;
+  /** The personas it can be moved to. */
+  people: readonly VidFolder[];
+  onOpen: () => void;
+  onMove: (folderId: string | null) => void;
+  onDelete: () => void;
+  onDegen: () => void;
+  onContext: () => void;
 }) {
+  const mine = people.some((f) => f.id === video.folderId) ? video.folderId ?? '' : '';
   return (
     <div
-      onContextMenu={(e) => { e.preventDefault(); onContext(); }}
       draggable
       onDragStart={(e) => {
-        e.dataTransfer.setData(VID_DRAG_MIME, v.id);
-        e.dataTransfer.effectAllowed = 'copyMove';
+        e.dataTransfer.setData(VIDEO_DRAG_MIME, video.id);
+        e.dataTransfer.effectAllowed = 'move';
       }}
-      className={`group relative overflow-hidden rounded-md border bg-zinc-950 ${
-        open ? 'border-sky-500' : 'border-zinc-800 hover:border-zinc-600'
-      }`}
+      onContextMenu={(e) => { e.preventDefault(); onContext(); }}
+      title={`${video.name}${video.context ? ` — ${video.context}` : ''} — drag it onto a persona to move it, click to open it, right-click to rename it`}
+      className="group relative overflow-hidden rounded-md border border-zinc-800 bg-zinc-950 hover:border-zinc-600"
     >
-      <button
-        onClick={onOpen}
-        title={`${v.name} — click to edit it, drag to file it, right-click to rename it or say what it shows`}
-        className="block h-20 w-full bg-black"
-      >
-        {v.thumbUrl ? (
+      <button onClick={onOpen} className="block h-48 w-full bg-black">
+        {thumb ? (
           // eslint-disable-next-line @next/next/no-img-element
-          <img src={v.thumbUrl} alt="" className="h-full w-full object-contain" draggable={false} />
+          <img src={thumb} alt="" className="h-full w-full object-contain" draggable={false} />
         ) : (
           <span className="flex h-full items-center justify-center text-zinc-700"><VideoIcon size={20} /></span>
         )}
       </button>
-      <div className="px-2 py-1">
-        <p className="truncate text-[10px] text-zinc-200" title={v.name}>{v.name}</p>
-        <p className="text-[9px] text-zinc-500">
-          {isPhoto(v) ? 'Photo' : v.duration != null ? fmtTime(v.duration) : '–:––'} · {fmtBytes(v.sizeBytes)}
-          {/* Which way Pauv was on it, on the clips that were asked — see VidTheme. */}
-          {v.theme && (
-            <span title={`Pauv was in ${v.theme} mode in this recording`}>
-              {' · '}{v.theme === 'light' ? '☀ light' : '🌙 dark'}
-            </span>
-          )}
-        </p>
-        {v.context && (
-          <p className="truncate text-[9px] italic text-sky-300/70" title={v.context}>{v.context}</p>
+      <div className="px-2 py-1.5">
+        <p className="truncate text-[12px] font-medium text-zinc-200">{video.name}</p>
+        <select
+          value={mine}
+          onChange={(e) => onMove(e.target.value || null)}
+          onClick={(e) => e.stopPropagation()}
+          title="Whose video this is"
+          className={`mt-1 w-full rounded border bg-black px-1 py-0.5 text-[10px] outline-none focus:border-zinc-400 ${
+            mine ? 'border-zinc-800 text-zinc-400' : 'border-amber-700/70 text-amber-200'
+          }`}
+        >
+          <option value="">{mine ? 'No persona' : 'Move to…'}</option>
+          {people.map((f) => <option key={f.id} value={f.id}>{f.name}</option>)}
+        </select>
+      </div>
+      <div className="absolute left-1 top-1 flex gap-1">
+        {filled < PERSONA_PARTS.length && (
+          <span title="It is missing a clip — open it to add one" className="rounded bg-black/80 px-1 text-[9px] font-bold text-amber-300">{filled}/3</span>
+        )}
+        {!video.clipable && (
+          <span title="Off for the clippers — switch it on the Clippers page" className="rounded bg-black/80 px-1 text-[9px] text-zinc-400">ours</span>
         )}
       </div>
-      <button
-        onClick={onDelete}
-        title="Delete from the cloud"
-        className="absolute right-1 top-1 hidden rounded bg-black/70 p-1 text-zinc-400 hover:text-red-400 group-hover:block"
-      >
-        <TrashIcon size={12} />
-      </button>
-      {open ? (
-        <span className="absolute left-1 top-1 rounded bg-sky-600/90 px-1 py-px text-[9px] font-medium text-white">Editing</span>
-      ) : v.clipable && (
-        // On offer to the clippers — switched on the Clippers page.
-        <span
-          title="On offer to the clippers — switch it on the Clippers page"
-          className="absolute left-1 top-1 rounded bg-emerald-600/90 px-1 py-px text-[9px] font-medium text-white"
+      <div className="absolute right-1 top-1 flex gap-1">
+        <button
+          onClick={onDegen}
+          aria-pressed={video.degen}
+          title={video.degen ? 'Degen — click to make it not degen' : 'Not degen — click to make it degen'}
+          className={`rounded bg-black/75 px-1 py-0.5 text-[10px] leading-none transition ${
+            video.degen ? 'ring-1 ring-amber-400/80' : 'hidden opacity-60 grayscale hover:opacity-100 hover:grayscale-0 group-hover:block'
+          }`}
         >
-          Clipable
-        </span>
-      )}
+          💀
+        </button>
+        <button
+          onClick={onDelete}
+          title="Delete this video (its footage stays in the cloud)"
+          className="hidden rounded bg-black/75 p-1 text-zinc-400 hover:text-red-400 group-hover:block"
+        >
+          <TrashIcon size={11} />
+        </button>
+      </div>
     </div>
   );
 }
 
-/** One part of an open persona: click to edit that clip, drop to change it. */
-function PartCard({ label, video, open, busy, onOpen, onFiles, onVideoId, onClear, onContext }: {
+/** One of an open video's three clips: click to edit it, drop footage on it to
+ *  replace it. The only place the parts of a video show. */
+function PartCard({ label, video, open, busy, onOpen, onFiles, onContext }: {
   label: string;
   video: VidRow | undefined;
   open: boolean;
   busy: boolean;
   onOpen: () => void;
   onFiles: (files: FileList | File[]) => void;
-  onVideoId: (id: string) => void;
-  onClear: () => void;
-  /** Right-click — the persona's context, since the three parts share one. */
+  /** Right-click — the video's name and context, which its three clips share. */
   onContext: () => void;
 }) {
   const fileRef = useRef<HTMLInputElement>(null);
@@ -287,42 +274,31 @@ function PartCard({ label, video, open, busy, onOpen, onFiles, onVideoId, onClea
   return (
     <div
       title={video
-        ? `${label} — ${video.name} — click to edit it, right-click for the persona's name and context`
-        : `${label} — drop a clip here, or click to choose a file`}
+        ? `${label} — click to edit it, drop footage on it to replace it`
+        : `${label} — drop footage here, or click to choose a file`}
       onContextMenu={(e) => { e.preventDefault(); onContext(); }}
-      draggable={!!video}
-      onDragStart={(e) => {
-        if (!video) return;
-        e.dataTransfer.setData(VID_DRAG_MIME, video.id);
-        e.dataTransfer.effectAllowed = 'copyMove';
-      }}
-      // dragenter as well as dragover: both have to be taken for this to win the
-      // drop, otherwise it falls through to the pane behind and the file lands in
-      // the Inbox instead of here.
       onDragEnter={(e) => {
-        if (!hasVid(e) && !hasFiles(e)) return;
+        if (!hasFiles(e)) return;
         e.preventDefault();
         e.stopPropagation();
         setOver(true);
       }}
       onDragOver={(e) => {
-        if (!hasVid(e) && !hasFiles(e)) return;
+        if (!hasFiles(e)) return;
         e.preventDefault();
         e.stopPropagation();
-        e.dataTransfer.dropEffect = hasVid(e) ? 'move' : 'copy';
+        e.dataTransfer.dropEffect = 'copy';
         setOver(true);
       }}
       onDragLeave={() => setOver(false)}
       onDrop={(e) => {
-        if (!hasVid(e) && !hasFiles(e)) return;
+        if (!hasFiles(e)) return;
         e.preventDefault();
         e.stopPropagation();
         setOver(false);
-        const id = e.dataTransfer.getData(VID_DRAG_MIME);
-        if (id) { onVideoId(id); return; }
         if (e.dataTransfer.files.length) onFiles(e.dataTransfer.files);
       }}
-      className={`group relative overflow-hidden rounded-md border ${
+      className={`relative overflow-hidden rounded-md border ${
         over ? 'border-emerald-500 bg-emerald-950/30'
           : open ? 'border-sky-500 bg-zinc-950'
           : video ? 'border-zinc-800 bg-zinc-950 hover:border-zinc-600'
@@ -341,7 +317,7 @@ function PartCard({ label, video, open, busy, onOpen, onFiles, onVideoId, onClea
       />
       <button
         onClick={() => { if (video) onOpen(); else fileRef.current?.click(); }}
-        className="flex h-20 w-full items-center justify-center bg-black"
+        className="flex h-56 w-full items-center justify-center bg-black"
       >
         {video?.thumbUrl ? (
           // eslint-disable-next-line @next/next/no-img-element
@@ -356,22 +332,11 @@ function PartCard({ label, video, open, busy, onOpen, onFiles, onVideoId, onClea
       </button>
       <div className="flex items-center gap-1 px-2 py-1">
         <span className={`text-[10px] font-semibold ${video ? 'text-zinc-200' : 'text-zinc-500'}`}>{label}</span>
-        <span className="min-w-0 flex-1 truncate text-[9px] text-zinc-600" title={video?.name}>
-          {video ? video.name : 'empty'}
-        </span>
+        <span className="min-w-0 flex-1 truncate text-[9px] text-zinc-600">{video ? '' : 'missing'}</span>
         <span className="shrink-0 font-mono text-[9px] text-zinc-600">
           {video?.duration != null ? fmtTime(video.duration) : ''}
         </span>
       </div>
-      {video && (
-        <button
-          onClick={onClear}
-          title={`Unlink this clip from ${label} — it stays in the Persona folder`}
-          className="absolute right-1 top-1 hidden rounded bg-black/80 p-1 text-zinc-400 hover:text-red-400 group-hover:block"
-        >
-          <CloseIcon size={10} />
-        </button>
-      )}
       {open && (
         <span className="absolute left-1 top-1 rounded bg-sky-600/90 px-1 py-px text-[9px] font-medium text-white">Editing</span>
       )}
@@ -379,46 +344,20 @@ function PartCard({ label, video, open, busy, onOpen, onFiles, onVideoId, onClea
   );
 }
 
-/** The Edit page with nothing open: how to open something. A run that is
- *  asking a question on the Upload page is pointed back to. */
-function EditIdle({ waiting, onUpload }: { waiting: boolean; onUpload: () => void }) {
-  return (
-    <div className="flex min-h-0 flex-1 flex-col p-6">
-      <div className="flex min-h-0 flex-1 flex-col items-center justify-center rounded-xl border-2 border-dashed border-zinc-800 px-8 text-center">
-        <VideoIcon size={30} className="text-zinc-700" />
-        <p className="mt-3 text-[14px] font-semibold text-zinc-100">Nothing open</p>
-        <p className="mt-1 max-w-[420px] text-[11px] leading-relaxed text-zinc-500">
-          {waiting
-            ? 'Your drop is waiting on a question on the Upload page.'
-            : 'Click a clip on the left to open it here — trim it, cut it, change its speed, lay the keys over it, save.'}
-        </p>
-        {waiting ? (
-          <button
-            onClick={onUpload}
-            className="mt-4 rounded bg-white px-3 py-1 text-[11px] font-medium text-black hover:bg-zinc-200"
-          >
-            Back to it
-          </button>
-        ) : (
-          <p className="mt-4 text-[10px] text-zinc-600">New footage goes in on the Upload page.</p>
-        )}
-      </div>
-    </div>
-  );
-}
-
 export function VidsPrep({ lib, active }: { lib: VidsLib; active: boolean }) {
   const [openId, setOpenId] = useState<string | null>(null);
-  const [tab, setTab] = useState<Tab>('upload');
-  const [list, setList] = useState<string>(INBOX);
-  const [paneOver, setPaneOver] = useState(false);
-  // The Persona row is closed until you press it. Naming a new one, or landing
-  // on a persona from anywhere else (a finished intake run, say), forces it open
-  // without anyone having to remember to — hence derived rather than an effect.
-  const [personaOpen, setPersonaOpen] = useState(false);
-  const [newPersona, setNewPersona] = useState<string | null>(null);
+  /** What the personas side is showing — see GROUP. Empty until something is
+   *  pressed: the videos in no persona then, while there are any (they are
+   *  what is waiting to be moved), else the first persona's. */
+  const [list, setList] = useState<string>('');
+  /** A persona being named: a new one (id null), or one being renamed. */
+  const [folderDraft, setFolderDraft] = useState<{ id: string | null; name: string } | null>(null);
+  const folderDraftRef = useRef(folderDraft);
+  useEffect(() => { folderDraftRef.current = folderDraft; }, [folderDraft]);
+  /** The video parts saving behind the editor — see fileLater. */
+  const [backSaves, setBackSaves] = useState<BackSave[]>([]);
   const [busyPart, setBusyPart] = useState<PersonaPart | null>(null);
-  // Which thing the right-click popup is asking about, if it is up.
+  // The video the right-click popup is asking about, if it is up.
   const [ctxTarget, setCtxTarget] = useState<{ kind: 'clip' | 'persona'; id: string } | null>(null);
   // The intake run, if one is going — see the Intake section below. Declared
   // up here because the clip on screen can be one of its local rows.
@@ -430,65 +369,47 @@ export function VidsPrep({ lib, active }: { lib: VidsLib; active: boolean }) {
       ? { ...prev, local: prev.local.map((r) => (r.id === id ? { ...r, ...patch } : r)) }
       : prev));
   }, []);
-  // dragenter/dragleave fire for every child crossed; count them so the
-  // highlight only drops once the pointer truly leaves the pane.
-  const paneDepth = useRef(0);
 
-  // The fixed folders this page works in — Persona, Bottom B, End — each
-  // standing for every same-named top-level folder plus anything nested under
-  // it, so a duplicate folder never strands clips out of sight. (Bottom A is
-  // left out: it is filled by the Build page, not from here.)
-  const groups = useMemo(
-    () => PREP_FOLDERS.map((name) => ({
-      name,
-      canonical: lib.folders
-        .filter((f) => !f.parentId && sameName(f.name, name))
-        .sort((a, b) => a.createdAt.localeCompare(b.createdAt))[0] as VidFolder | undefined,
-      ids: folderGroupIds(lib.folders, name),
-    })),
+  // The library's top-level Persona folder: where a video's clips are filed,
+  // and what the personas — a folder each — sit under. The oldest of that
+  // name, should there be two (see folderGroupIds).
+  const personaFolderId = useMemo(
+    () => lib.folders
+      .filter((f) => !f.parentId && isPersonaFolderName(f.name))
+      .sort((a, b) => a.createdAt.localeCompare(b.createdAt))[0]?.id ?? null,
     [lib.folders],
   );
 
-  const personaGroup = groups.find((g) => isPersonaFolderName(g.name));
-  const personaFolderId = personaGroup?.canonical?.id ?? null;
-
-  const countIn = useMemo(() => {
-    const m = new Map<string, number>();
-    for (const v of lib.videos) {
-      if (!v.folderId) continue;
-      m.set(v.folderId, (m.get(v.folderId) ?? 0) + 1);
-    }
-    return m;
-  }, [lib.videos]);
-
-  const unfiled = useMemo(() => lib.videos.filter((v) => !v.folderId), [lib.videos]);
   const openPersonaId = personaOf(list);
+  /** The video opened up to its three clips, if one is. */
   const openPersona = openPersonaId ? lib.personas.find((p) => p.id === openPersonaId) ?? null : null;
 
-  const shown = useMemo(() => {
-    if (list === INBOX) return unfiled;
-    const g = groups.find((x) => x.name === list);
-    return g ? lib.videos.filter((v) => v.folderId && g.ids.has(v.folderId)) : [];
-  }, [list, unfiled, groups, lib.videos]);
-
-  // The clips filed under Bottom B — the only ones that carry which way Pauv
-  // was, so the only ones asked about it or showing it.
-  const bottomBIds = useMemo(
-    () => groups.find((x) => sameName(x.name, SLOT_META.bottomB.folder))?.ids ?? new Set<string>(),
-    [groups],
-  );
-  const isBottomB = useCallback(
-    (v: VidRow) => !!v.folderId && bottomBIds.has(v.folderId),
-    [bottomBIds],
-  );
-
-  // Clips filed under Persona that this persona isn't already using — what an
-  // open persona offers as swap-ins for its three parts.
-  const personaSpares = useMemo(() => {
-    if (!openPersona || !personaGroup) return [];
-    const mine = new Set(PERSONA_PARTS.map((k) => openPersona[k]).filter(Boolean) as string[]);
-    return lib.videos.filter((v) => v.folderId && personaGroup.ids.has(v.folderId) && !mine.has(v.id));
-  }, [openPersona, personaGroup, lib.videos]);
+  // The personas — a folder each under Persona — every one listed, with or
+  // without videos (an empty one is somewhere to move a video to), and the
+  // videos in none of them last.
+  const personFolders = useMemo(() => personaFolders(lib.folders), [lib.folders]);
+  const personaGroups = useMemo(() => groupPersonas(lib.personas, lib.folders), [lib.personas, lib.folders]);
+  /** Whose videos the lower half is showing: the persona pressed, the one the
+   *  open video belongs to, or — before anything has been pressed — the videos
+   *  in no persona, while there are any. */
+  const shownGroup = useMemo(() => {
+    const keyOf = (g: (typeof personaGroups)[number]) => g.folder?.id ?? UNFILED;
+    const wanted = openPersona
+      ? (personFolders.some((f) => f.id === openPersona.folderId) ? openPersona.folderId! : UNFILED)
+      : list.startsWith(GROUP) ? list.slice(GROUP.length) : null;
+    return personaGroups.find((g) => keyOf(g) === wanted)
+      ?? personaGroups.find((g) => !g.folder)
+      ?? personaGroups[0]
+      ?? null;
+  }, [list, openPersona, personFolders, personaGroups]);
+  /** The still a video goes by: its Start, which is him full screen. */
+  const thumbOf = useCallback((p: VidPersona): string | null => {
+    for (const part of PERSONA_PARTS) {
+      const thumb = lib.videos.find((v) => v.id === p[part])?.thumbUrl;
+      if (thumb) return thumb;
+    }
+    return null;
+  }, [lib.videos]);
 
   const videoById = useCallback(
     (id: string | null | undefined) => (id ? lib.videos.find((v) => v.id === id) : undefined),
@@ -520,59 +441,30 @@ export function VidsPrep({ lib, active }: { lib: VidsLib; active: boolean }) {
   }, [openVideo, personaOfVideo]);
 
   // The editor's panel sends the context alone; the right-click popup can send
-  // a new name with it. Both land on the clip or on the persona the same way.
+  // a new name and a new persona with it. A video's three clips share what is
+  // said of it, so it lands on the video.
   const saveContext = useCallback((target: { kind: 'clip' | 'persona'; id: string }, patch: VidsContextSave) => {
-    if (target.kind === 'persona') void lib.updatePersona(target.id, patch);
-    else if (isLocalId(target.id)) patchLocal(target.id, patch);
-    else void lib.setVideoContext(target.id, patch);
+    if (target.kind === 'persona') { void lib.updatePersona(target.id, patch); return; }
+    // Whose it is belongs to a video; a loose clip has nobody.
+    const { folderId: _folder, ...own } = patch;
+    void _folder;
+    if (isLocalId(target.id)) patchLocal(target.id, own);
+    else void lib.setVideoContext(target.id, own);
   }, [lib, patchLocal]);
 
-  /** Right-clicking a clip that a persona is using asks about the persona. */
-  const askClipContext = useCallback((v: VidRow) => {
-    const persona = personaOfVideo(v.id);
-    setCtxTarget(persona ? { kind: 'persona', id: persona.id } : { kind: 'clip', id: v.id });
-  }, [personaOfVideo]);
-
   // What the popup shows, resolved live so an edit elsewhere can't leave it
-  // sitting on a clip or persona that has since gone.
+  // sitting on a video that has since gone. Only videos are asked about here.
   const ctxDialog = useMemo(() => {
-    if (!ctxTarget) return null;
-    if (ctxTarget.kind === 'persona') {
-      const p = lib.personas.find((x) => x.id === ctxTarget.id);
-      return p && {
-        kind: 'persona' as const,
-        name: p.name,
-        hint: 'Its name, and what it is doing — shared by its Start, Top A and Top B.',
-        value: { context: p.context },
-      };
-    }
-    const v = lib.videos.find((x) => x.id === ctxTarget.id);
-    return v && {
-      kind: 'clip' as const,
-      name: v.name,
-      hint: 'What to call this clip, and what it is showing, in your words.',
-      value: { context: v.context },
-      // Only a Bottom B is asked which way Pauv was; everything else leaves the
-      // row out of the popup entirely.
-      theme: isBottomB(v) ? v.theme : undefined,
+    if (!ctxTarget || ctxTarget.kind !== 'persona') return null;
+    const p = lib.personas.find((x) => x.id === ctxTarget.id);
+    return p && {
+      kind: 'persona' as const,
+      name: p.name,
+      hint: 'What the video is called, whose it is, and what he is doing in it.',
+      value: { context: p.context },
+      folderId: personFolders.some((f) => f.id === p.folderId) ? p.folderId : null,
     };
-  }, [ctxTarget, lib.personas, lib.videos, isBottomB]);
-
-  const dropInto = (folderId: string | null) => (e: DragEvent) => {
-    e.preventDefault();
-    e.stopPropagation();
-    paneDepth.current = 0;
-    setPaneOver(false);
-    const vid = e.dataTransfer.getData(VID_DRAG_MIME);
-    if (vid) { void lib.moveVideo(vid, folderId); return; }
-    if (e.dataTransfer.files.length) void lib.uploadFiles(e.dataTransfer.files, folderId);
-  };
-
-  const confirmDelete = (v: VidRow) => {
-    if (!window.confirm(`Delete "${v.name}" from the cloud for everyone?`)) return;
-    if (v.id === openId) setOpenId(null);
-    void lib.deleteVideo(v);
-  };
+  }, [ctxTarget, lib.personas, personFolders]);
 
   // ── Intake ──
   // Footage dropped on the middle of the page doesn't just land in the Inbox: it
@@ -597,6 +489,15 @@ export function VidsPrep({ lib, active }: { lib: VidsLib; active: boolean }) {
   // be a render behind.
   const intakeRef = useRef<Intake | null>(null);
   useEffect(() => { intakeRef.current = intake; }, [intake]);
+  // The persona whose videos are on screen, for a run started while they are.
+  const openGroupRef = useRef<string | null>(null);
+  useEffect(() => { openGroupRef.current = shownGroup?.folder?.id ?? null; }, [shownGroup]);
+  // A run's saves, one after another: a part saved behind the editor and the
+  // one after it must not both find no persona yet and each make one.
+  const savesRef = useRef<Promise<unknown>>(Promise.resolve());
+  // The persona a run has made, and which run — read by the part saved next,
+  // which can land before the page has rendered the first one's answer.
+  const personaMadeRef = useRef<{ token: number; id: string } | null>(null);
   // Bumped whenever a run starts or stops, so a save from an abandoned one can
   // tell it is no longer the one steering the page.
   const runRef = useRef(0);
@@ -660,50 +561,36 @@ export function VidsPrep({ lib, active }: { lib: VidsLib; active: boolean }) {
     return true;
   }, [endRun]);
 
-  /** Where a run can file footage: the Inbox, or one of the fixed folders with
-   *  the reason it exists said in the words the builder uses — except Bottom
-   *  B, whose own line places it after Bottom A, and Bottom A is not something
-   *  anyone files. Here it is said by what it is instead. */
-  const folderChoices = useMemo<FolderChoice[]>(() => {
-    const out: FolderChoice[] = [{ id: null, name: 'Inbox', hint: 'unfiled — decide later, on the left' }];
-    for (const g of groups) {
-      if (!g.canonical) continue;
-      const slot = slotForFolderName(g.name);
-      out.push({
-        id: g.canonical.id,
-        name: g.name,
-        hint: slot === 'bottomB'
-          ? 'the Pauv recording — bottom half, after the ChatGPT search'
-          : slot ? SLOT_META[slot].hint : 'footage for the three clips a persona is made of',
-      });
-    }
-    return out;
-  }, [groups]);
-
-  const startIntake = useCallback((files: FileList | File[]) => {
+  /** Footage has been dropped: start the run that makes a persona video of it.
+   *  One video is the whole of it — trimmed three times, for the three parts
+   *  — and three are a part each; anything else is not something this page
+   *  files, and says so. `groupId` is the persona it was dropped on, when it
+   *  was dropped on one; otherwise the setup card opens on the persona whose
+   *  videos are on screen, which is most likely whose it is. */
+  const startIntake = useCallback((files: FileList | File[], groupId?: string | null) => {
     const list = Array.from(files).filter(isMediaFile);
     if (list.length === 0) { lib.setError(MEDIA_ONLY); return; }
+    if (!((list.length === PERSONA_DROP || list.length === 1) && list.every(isVideoFile))) {
+      lib.setError('Drop one video, or three, to make a persona video — one is trimmed three times, three are a part each.');
+      return;
+    }
     // A finished run still on screen makes way; a live one never gets here,
     // since the stage takes no drop while it is asking something.
     endRun();
-    // Three files is a persona only when all three are footage: a persona is one
-    // performance, and a photo is never part of one. One file on its own is a
-    // persona too — that clip three times over (see startPersona) — for the
-    // same reason and with the same rule: footage, not a photo.
-    const persona = (list.length === PERSONA_DROP || list.length === 1) && list.every(isVideoFile);
     setIntake({
-      mode: persona ? 'persona' : 'clips',
-      step: persona ? 'setup' : 'folder',
+      mode: 'persona',
+      step: 'setup',
       files: list,
       local: list.map((f) => localRow(f, f.name)),
-      folderId: persona ? personaFolderId : null,
-      folderName: persona ? PERSONA_FOLDER : 'Inbox',
+      folderId: personaFolderId,
+      folderName: PERSONA_FOLDER,
       rows: list.map(() => null),
       index: 0,
       personaId: null,
       personaName: '',
       personaContext: '',
       personaDegen: false,
+      personaGroupId: groupId === undefined ? openGroupRef.current : groupId,
       saving: false,
     });
   }, [lib, personaFolderId, endRun, localRow]);
@@ -725,7 +612,9 @@ export function VidsPrep({ lib, active }: { lib: VidsLib; active: boolean }) {
    *  apart by its file's identity all the way from here to its save: the same
    *  object three times finds the same local row three times, and all three
    *  saves would land on Start. */
-  const startPersona = useCallback((name: string, context: VidContext, order: File[], degen: boolean) => {
+  const startPersona = useCallback((
+    name: string, context: VidContext, order: File[], degen: boolean, groupId: string | null,
+  ) => {
     if (!intake) return;
     const clean = name.trim();
     const parts = order.length === 1
@@ -749,16 +638,10 @@ export function VidsPrep({ lib, active }: { lib: VidsLib; active: boolean }) {
       personaName: clean,
       personaContext: context.context,
       personaDegen: degen,
+      personaGroupId: groupId,
       index: 0,
     });
   }, [intake, personaFolderId, localRow]);
-
-  /** Three files that turn out not to be a persona: nothing has been uploaded
-   *  at that point (nothing ever is until a save), so it just becomes an
-   *  ordinary run. */
-  const fileAsClips = useCallback(() => {
-    setIntake((prev) => (prev ? { ...prev, mode: 'clips', step: 'folder' } : prev));
-  }, []);
 
   /** This clip is done with — on to the next, or the run is over. */
   const advanceIntake = useCallback(() => {
@@ -802,21 +685,14 @@ export function VidsPrep({ lib, active }: { lib: VidsLib; active: boolean }) {
 
   // A run standing on a clip is that clip in the editor, playing off the disk:
   // this is the only thing that opens one on the run's behalf, so the step it
-  // is on and what is on screen can't drift apart. It also turns the page to
-  // wherever the run is — Edit once it has a clip, Upload while it is asking
-  // something — keyed on the step and the clip rather than the whole run, so a
-  // mark or a context typed against the clip doesn't keep pulling you back if
-  // you went to look at something else.
-  const intakeStep = intake?.step ?? null;
+  // is on and what is on screen can't drift apart — and the editor takes the
+  // big side of the page for as long as it has one. Keyed on the step and the
+  // clip rather than the whole run, so a mark or a context typed against the
+  // clip doesn't keep pulling you back if you went to look at something else.
   const intakeClipId = intake?.step === 'edit' ? (intake.local[intake.index]?.id ?? null) : null;
   useEffect(() => {
-    if (!intakeStep) return;
-    if (intakeStep === 'edit') {
-      if (intakeClipId) { setOpenId(intakeClipId); setTab('edit'); }
-      return;
-    }
-    setTab('upload');
-  }, [intakeStep, intakeClipId]);
+    if (intakeClipId) setOpenId(intakeClipId);
+  }, [intakeClipId]);
 
   /** Clicking a clip while a run is going. A run that had a clip open ends
    *  first — you have left it — and asks before dropping anything unsaved; if
@@ -826,18 +702,11 @@ export function VidsPrep({ lib, active }: { lib: VidsLib; active: boolean }) {
     const cur = intakeRef.current;
     if (cur && (cur.step === 'edit' || cur.step === 'done') && !cancelIntake()) return;
     setOpenId(id);
-    if (id) setTab('edit');
   }, [cancelIntake]);
 
-  // ── Personas ──
-  // A part points at an ordinary clip filed under Persona, so attaching one is
-  // "move it there, then point at it" — exactly what the library pane does.
-  const attachVideo = useCallback(async (persona: VidPersona, part: PersonaPart, id: string) => {
-    const row = videoById(id);
-    if (row && row.folderId !== personaFolderId) await lib.moveVideo(id, personaFolderId);
-    await lib.updatePersona(persona.id, { [part]: id });
-  }, [lib, personaFolderId, videoById]);
-
+  // ── A video's clips ──
+  // Only met by opening a video to edit it: footage dropped on one of its
+  // three parts replaces that part.
   const attachFiles = useCallback(async (persona: VidPersona, part: PersonaPart, files: FileList | File[]) => {
     const file = Array.from(files)[0];
     if (!file) return;
@@ -850,32 +719,107 @@ export function VidsPrep({ lib, active }: { lib: VidsLib; active: boolean }) {
     }
   }, [lib, personaFolderId]);
 
-  /** Dropping onto a persona row fills the first part it hasn't got. */
-  const dropOnPersona = (persona: VidPersona) => (e: DragEvent) => {
-    e.preventDefault();
-    e.stopPropagation();
-    const part = PERSONA_PARTS.find((k) => !persona[k]) ?? PERSONA_PARTS[0];
-    const id = e.dataTransfer.getData(VID_DRAG_MIME);
-    if (id) { void attachVideo(persona, part, id); return; }
-    if (e.dataTransfer.files.length) void attachFiles(persona, part, e.dataTransfer.files);
+  // ── Personas ──
+  // A persona is a person, and in the library a folder under Persona — so
+  // making, renaming and deleting one is what it is for any folder. A video
+  // only points at its persona, so deleting a persona leaves its videos
+  // standing, in none.
+
+  /** The persona being named is made, or takes its new name. */
+  const commitFolder = async () => {
+    // Off the ref, and taken from it: Enter and the blur that follows it both
+    // land here, and only the first may find a name to act on.
+    const draft = folderDraftRef.current;
+    folderDraftRef.current = null;
+    setFolderDraft(null);
+    const name = draft?.name.trim();
+    if (!draft || !name) return;
+    if (draft.id) { void lib.renameFolder(draft.id, name); return; }
+    if (!personaFolderId) return;
+    const made = await lib.createFolder(name, personaFolderId);
+    if (made) setList(groupList(made.id));
   };
 
-  /** A new persona is made by saying whether it is degen: the name typed, then
-   *  one of the two pressed. There is no making one without it. */
-  const commitNewPersona = async (degen: boolean) => {
-    const name = (newPersona ?? '').trim();
-    if (!name) return;
-    setNewPersona(null);
-    const p = await lib.createPersona(name, degen);
-    if (p) setList(personaKey(p.id));
+  /** A video goes to a persona — dragged onto the name, or picked from the
+   *  list on its tile — or to none. */
+  const moveVideoTo = (id: string, folderId: string | null) => {
+    const p = lib.personas.find((x) => x.id === id);
+    if (p && (p.folderId ?? null) !== folderId) void lib.updatePersona(id, { folderId });
   };
 
-  /** The 💀 on a persona's row, beside the trash. Making one degen asks first,
-   *  so a stray click can't; taking it back off doesn't need to. */
+  const deletePerson = (folder: VidFolder, holds: number) => {
+    const stay = holds ? ` ${holds === 1 ? 'Its video stays' : `Its ${holds} videos stay`}, under ${UNFILED_LABEL}.` : '';
+    if (!window.confirm(`Delete the persona "${folder.name}"?${stay}`)) return;
+    if (list === groupList(folder.id)) setList('');
+    void lib.deleteFolder(folder.id);
+  };
+
+  /** A video is taken off the list. Its three clips are left in the cloud —
+   *  nothing about a stray click should destroy footage. */
+  const deleteVideo = (p: VidPersona) => {
+    if (!window.confirm(`Delete the video "${p.name}"? It comes off the list; its footage stays in the cloud.`)) return;
+    if (list === personaKey(p.id)) setList(groupList(personFolders.some((f) => f.id === p.folderId) ? p.folderId : null));
+    void lib.deletePersona(p.id);
+  };
+
+  /** The 💀 on a video's tile. Making one degen asks first, so a stray click
+   *  can't; taking it back off doesn't need to. */
   const toggleDegen = (p: VidPersona) => {
     if (!p.degen && !window.confirm(`Make "${p.name}" degen?`)) return;
     void lib.updatePersona(p.id, { degen: !p.degen });
   };
+
+  /** A run's saves take turns — see savesRef. One that fails does not hold up
+   *  the next. */
+  const inTurn = useCallback(<T,>(work: () => Promise<T>): Promise<T> => {
+    const next = savesRef.current.then(work, work);
+    savesRef.current = next.catch(() => {});
+    return next;
+  }, []);
+
+  /** File one of a run's local clips: the bytes up into the folder the run
+   *  chose, and — for a persona — onto the persona, which is made with its
+   *  first part. `run` is the run as it stood when the save was asked for and
+   *  `token` which run that was, since by the time a part saved behind the
+   *  editor lands the page has moved on. `advance` moves the run on when this
+   *  clip is still the one it is standing on. */
+  const fileLocal = useCallback(async (
+    run: Intake, at: number, token: number,
+    blob: Blob | null, name: string, hasSfx: boolean, marks: VidMark[], edit: VidEdit | null, advance: boolean,
+  ) => {
+    // A render goes up with the recording it was made from and the edit that
+    // made it, so the clip can be re-edited from the recording later. The file
+    // as dropped goes up on its own: it is the recording.
+    const file = run.local[at].file;
+    const row = await lib.uploadBlob(blob ?? file, name, run.folderId, {
+      context: run.local[at].context, marks, hasSfx, theme: run.local[at].theme,
+      ...(blob ? { source: file, sourceName: file.name, edit } : {}),
+    });
+    if (!row) throw new Error('Saving failed — see the message on the left.');
+    // The run was called off while this went up. The clip is saved either way —
+    // it was already on its way — but nothing more is done on the run's behalf.
+    if (runRef.current !== token) return;
+
+    if (run.mode === 'persona') {
+      const part = PERSONA_PARTS[at];
+      const made = personaMadeRef.current?.token === token ? personaMadeRef.current.id : null;
+      if (made) {
+        await lib.updatePersona(made, { [part]: row.id });
+      } else {
+        const persona = await lib.createPersona(run.personaName, run.personaDegen, {
+          [part]: row.id, folderId: run.personaGroupId,
+        });
+        if (!persona) throw new Error('The clip is saved, but the persona could not be made — see the message on the left.');
+        personaMadeRef.current = { token, id: persona.id };
+        if (run.personaContext) void lib.updatePersona(persona.id, { context: run.personaContext });
+        setIntake((prev) => (prev ? { ...prev, personaId: persona.id } : prev));
+        setList(personaKey(persona.id));
+      }
+    }
+    setIntake((prev) => (prev ? { ...prev, rows: prev.rows.map((r, n) => (n === at ? row : r)) } : prev));
+    const now = intakeRef.current;
+    if (advance && now?.step === 'edit' && now.index === at) advanceIntake();
+  }, [lib, advanceIntake]);
 
   // Save is what files a clip. For a row the run holds locally, the bytes go up
   // here for the first time — the edit as rendered, or the file as dropped when
@@ -906,37 +850,39 @@ export function VidsPrep({ lib, active }: { lib: VidsLib; active: boolean }) {
     const cur = intakeRef.current;
     const at = cur ? cur.local.findIndex((r) => r.id === videoId) : -1;
     if (!cur || at < 0) throw new Error('This clip is no longer part of a run — drop it again to file it.');
+    // In its turn: behind any part of the same run still saving (fileLater).
     const token = runRef.current;
-    // A render goes up with the recording it was made from and the edit that
-    // made it, so the clip can be re-edited from the recording later. The file
-    // as dropped goes up on its own: it is the recording.
-    const file = cur.local[at].file;
-    const row = await lib.uploadBlob(blob ?? file, name, cur.folderId, {
-      context: cur.local[at].context, marks, hasSfx, theme: cur.local[at].theme,
-      ...(blob ? { source: file, sourceName: file.name, edit } : {}),
-    });
-    if (!row) throw new Error('Saving failed — see the message on the left.');
-    // The run was called off while this went up. The clip is saved either way —
-    // it was already on its way — but nothing more is done on the run's behalf.
-    if (runRef.current !== token) return;
+    await inTurn(() => fileLocal(cur, at, token, blob, name, hasSfx, marks, edit, true));
+  }, [lib, inTurn, fileLocal]);
 
-    if (cur.mode === 'persona') {
-      const part = PERSONA_PARTS[at];
-      const personaId = intakeRef.current?.personaId ?? null;
-      if (personaId) {
-        await lib.updatePersona(personaId, { [part]: row.id });
-      } else {
-        const persona = await lib.createPersona(cur.personaName, cur.personaDegen, { [part]: row.id });
-        if (!persona) throw new Error('The clip is saved, but the persona could not be made — see the message on the left.');
-        if (cur.personaContext) void lib.updatePersona(persona.id, { context: cur.personaContext });
-        setIntake((prev) => (prev ? { ...prev, personaId: persona.id } : prev));
-        setList(personaKey(persona.id));
+  /** Save hands a persona's Start or Top A over instead of waiting on it (the
+   *  editor's onSaveLater): the run goes on to the next part now, and this one
+   *  is rendered and filed behind it, in its turn. The last part is saved the
+   *  ordinary way, waited for — by which time these have landed. One that fails
+   *  says so in the list top left, where it can be tried again. */
+  const fileLater = useCallback((job: ClipSaveJob) => {
+    const cur = intakeRef.current;
+    const at = cur ? cur.local.findIndex((r) => r.id === job.videoId) : -1;
+    if (!cur || at < 0) return;
+    const token = runRef.current;
+    if (cur.step === 'edit' && cur.index === at) advanceIntake();
+    const id = job.videoId;
+    const patch = (p: Partial<BackSave>) => setBackSaves((prev) => prev.map((s) => (s.id === id ? { ...s, ...p } : s)));
+    setBackSaves((prev) => [...prev.filter((s) => s.id !== id), { id, name: job.name, frac: 0, error: null }]);
+    void inTurn(async () => {
+      // The run was called off while this waited: it said nothing more of it
+      // would be saved, so nothing is.
+      if (runRef.current !== token) { setBackSaves((prev) => prev.filter((s) => s.id !== id)); return; }
+      try {
+        const blob = job.render ? await job.render((frac) => patch({ frac })) : null;
+        patch({ frac: 1 });
+        await fileLocal(cur, at, token, blob, job.name, job.hasSfx, job.marks, job.edit, false);
+        setBackSaves((prev) => prev.filter((s) => s.id !== id));
+      } catch (e) {
+        patch({ error: e instanceof Error ? e.message : String(e) });
       }
-    }
-    setIntake((prev) => (prev ? { ...prev, rows: prev.rows.map((r, n) => (n === at ? row : r)) } : prev));
-    const now = intakeRef.current;
-    if (now?.step === 'edit' && now.index === at) advanceIntake();
-  }, [lib, advanceIntake]);
+    });
+  }, [advanceIntake, inTurn, fileLocal]);
 
   // Closing the clip a run has open ends the run — otherwise it would just put
   // the same clip straight back — asking first if clips are still waiting, and
@@ -951,36 +897,33 @@ export function VidsPrep({ lib, active }: { lib: VidsLib; active: boolean }) {
    *  — what the banner, the trim-only editor and the Save label all key off. */
   const run = intake?.step === 'edit' && intake.local[intake.index]?.id === openId ? intake : null;
 
-  /** Whether the Persona row is showing its personas. Pressed open by hand, and
-   *  forced open whenever one of them is what you are looking at or naming. */
-  const personaShown = personaOpen || personaOf(list) !== null || newPersona !== null;
+  /** The box a persona is named in — a new one, or one being renamed. */
+  const folderBox = folderDraft && (
+    <input
+      autoFocus
+      value={folderDraft.name}
+      placeholder="Persona name — Blorky, Dorky, Aiden"
+      maxLength={80}
+      onChange={(e) => setFolderDraft({ ...folderDraft, name: e.target.value })}
+      onKeyDown={(e) => {
+        if (e.key === 'Enter') void commitFolder();
+        if (e.key === 'Escape') setFolderDraft(null);
+      }}
+      onBlur={() => void commitFolder()}
+      className="mt-0.5 w-full rounded border border-zinc-600 bg-black px-2 py-1 text-[12px] text-white outline-none"
+    />
+  );
 
-  /** One line beside the strip saying what the open page is for. */
-  const tabHint = tab === 'upload'
-    ? 'Drop footage in the middle. One clip is a persona made of it three times; three at once are a persona from three.'
-    : (openVideo ? `Editing ${openVideo.name}` : 'Click a clip on the left to open it here.');
+  /** Whose videos are showing: the persona's own key, as the list remembers it. */
+  const shownKey = shownGroup ? groupList(shownGroup.folder?.id ?? null) : '';
+  const shownName = shownGroup ? (shownGroup.folder?.name ?? UNFILED_LABEL) : '';
 
   return (
     <div className="flex min-h-0 flex-1">
-      {/* Left: upload + filing */}
-      <div
-        title={paneOver ? undefined : 'Drop onto a folder to file it there — anywhere else in here goes to the Inbox'}
-        className={`relative flex w-[320px] shrink-0 flex-col border-r transition-colors ${
-          paneOver ? 'border-emerald-700 bg-emerald-950/20' : 'border-zinc-800'
-        }`}
-        onDragEnter={(e) => { if (!hasFiles(e)) return; paneDepth.current++; setPaneOver(true); }}
-        onDragLeave={(e) => {
-          if (!hasFiles(e)) return;
-          paneDepth.current = Math.max(0, paneDepth.current - 1);
-          if (paneDepth.current === 0) setPaneOver(false);
-        }}
-        onDragOver={(e) => {
-          if (!hasFiles(e) && !hasVid(e)) return;
-          e.preventDefault();
-          e.dataTransfer.dropEffect = hasVid(e) ? 'move' : 'copy';
-        }}
-        onDrop={dropInto(null)}
-      >
+      {/* Left: the upload — a narrow strip. The drop target, the few questions
+          a run asks, and whatever is still going up. */}
+      <div className="flex w-[300px] shrink-0 flex-col border-r border-zinc-800">
+        <p className="shrink-0 px-4 pt-3 text-[9px] font-semibold uppercase tracking-wider text-zinc-500">Upload a video</p>
         {lib.error && (
           <div className="mx-2 mt-2 flex items-start gap-2 rounded border border-red-900 bg-red-950/40 px-2 py-1.5 text-[11px] text-red-300">
             <span className="flex-1 break-words">{lib.error}</span>
@@ -988,11 +931,56 @@ export function VidsPrep({ lib, active }: { lib: VidsLib; active: boolean }) {
           </div>
         )}
 
-        {/* Whatever is still going up. The drop panel that used to sit here is
-            gone — the middle of the page is the way footage comes in now, and
-            two drop targets side by side only made you pick one. */}
+        <div className="flex min-h-0 flex-1 flex-col overflow-y-auto">
+          <VidsIntakeStage
+            intake={intake}
+            // No loose clips are filed from this page any more, so the run
+            // that asks for a folder never starts and has none to offer.
+            choices={NO_FOLDERS}
+            onFiles={(files) => startIntake(files)}
+            onOpenClip={openClip}
+            onChooseFolder={chooseFolder}
+            onStartPersona={startPersona}
+            personaGroups={personFolders}
+            onContext={intakeContext}
+            onCancel={cancelIntake}
+          />
+        </div>
+
+        {/* A video's parts saving behind the editor: rendering first, then
+            in the upload list below like anything else going up. */}
+        {backSaves.length > 0 && (
+          <div className="shrink-0 border-t border-zinc-800 p-3">
+            {backSaves.map((s) => (
+              <div key={s.id} className="mb-1.5 last:mb-0">
+                <div className="flex items-center gap-2 text-[10px]">
+                  <span className={`flex-1 truncate ${s.error ? 'text-red-300' : 'text-zinc-300'}`} title={s.error ?? s.name}>{s.name}</span>
+                  <span className="font-mono text-zinc-500">
+                    {s.error ? 'not saved' : s.frac >= 1 ? 'saving' : `rendering ${Math.round(s.frac * 100)}%`}
+                  </span>
+                  {s.error && (
+                    <button
+                      onClick={() => setBackSaves((prev) => prev.filter((x) => x.id !== s.id))}
+                      className="text-zinc-500 hover:text-white"
+                    >
+                      <CloseIcon size={10} />
+                    </button>
+                  )}
+                </div>
+                {s.error ? (
+                  <p className="text-[10px] text-red-400">{s.error} Open the video and drop the footage onto that part to add it.</p>
+                ) : (
+                  <div className="mt-1 h-1 overflow-hidden rounded-full bg-zinc-800">
+                    <div className="h-full bg-sky-400" style={{ width: `${Math.max(4, s.frac * 100)}%` }} />
+                  </div>
+                )}
+              </div>
+            ))}
+          </div>
+        )}
+
         {lib.uploads.length > 0 && (
-          <div className="shrink-0 border-b border-zinc-800 p-3">
+          <div className="shrink-0 border-t border-zinc-800 p-3">
             {lib.uploads.map((u) => (
               <div key={u.id} className="mb-1.5 last:mb-0">
                 <div className="flex items-center gap-2 text-[10px]">
@@ -1015,257 +1003,172 @@ export function VidsPrep({ lib, active }: { lib: VidsLib; active: boolean }) {
             ))}
           </div>
         )}
+      </div>
 
-        {/* Where a finished clip goes */}
-        <div className="max-h-[40%] shrink-0 overflow-y-auto border-y border-zinc-800 px-1.5 py-1.5">
-          <ListRow
-            label="Inbox"
-            count={unfiled.length}
-            selected={list === INBOX}
-            icon={<InboxIcon open={list === INBOX} />}
-            onSelect={() => setList(INBOX)}
-            onDrop={dropInto(null)}
-          />
-          {groups.map((g) => (
-            <div key={g.name}>
-              <ListRow
-                label={g.name}
-                count={[...g.ids].reduce((n, id) => n + (countIn.get(id) ?? 0), 0)}
-                selected={list === g.name}
-                icon={<FolderIcon open={list === g.name} />}
-                expanded={isPersonaFolderName(g.name) ? personaShown : undefined}
-                onToggle={isPersonaFolderName(g.name) ? () => setPersonaOpen((o) => !o) : undefined}
-                /* Pressing the Persona row opens it, and pressing it again once
-                   it is the row you are already on puts it away. Every other
-                   folder just selects. */
-                onSelect={() => {
-                  if (isPersonaFolderName(g.name)) setPersonaOpen(list === g.name ? !personaShown : true);
-                  setList(g.name);
-                }}
-                onDrop={g.canonical ? dropInto(g.canonical.id) : () => {}}
-              />
-              {/* Each persona is a folder of its own under Persona */}
-              {isPersonaFolderName(g.name) && personaShown && (
-                <>
-                  {lib.personas.map((p) => {
-                    const filled = PERSONA_PARTS.filter((k) => p[k]).length;
-                    return (
-                      <ListRow
-                        key={p.id}
-                        label={p.name}
-                        count={`${filled}/3`}
-                        tone={filled === PERSONA_PARTS.length ? 'ok' : 'partial'}
-                        indent
-                        selected={list === personaKey(p.id)}
-                        icon={<FolderIcon open={list === personaKey(p.id)} />}
-                        title={`${p.name}${p.degen ? ' (degen)' : ''}${p.context ? ` — ${p.context}` : ''} — right-click to give it context`}
-                        onSelect={() => setList(personaKey(p.id))}
-                        onDrop={dropOnPersona(p)}
-                        onContext={() => setCtxTarget({ kind: 'persona', id: p.id })}
-                        degen={p.degen}
-                        onDegen={() => toggleDegen(p)}
-                        onDelete={() => {
-                          if (!window.confirm(`Delete persona "${p.name}"? Its clips stay in the Persona folder — nothing is deleted from the cloud.`)) return;
-                          if (list === personaKey(p.id)) setList(PERSONA_FOLDER);
-                          void lib.deletePersona(p.id);
-                        }}
-                      />
-                    );
-                  })}
-                  {newPersona !== null ? (
-                    <div className="ml-3 mt-1 space-y-1">
-                      <input
-                        autoFocus
-                        value={newPersona}
-                        placeholder="Persona name"
-                        onChange={(e) => setNewPersona(e.target.value)}
-                        onKeyDown={(e) => { if (e.key === 'Escape') setNewPersona(null); }}
-                        className="w-full rounded border border-zinc-600 bg-black px-2 py-1 text-[11px] text-white outline-none"
-                      />
-                      <DegenChoice value={null} disabled={!newPersona.trim()} onChange={(d) => void commitNewPersona(d)} />
-                      <button
-                        onClick={() => setNewPersona(null)}
-                        className="px-1 text-[10px] text-zinc-500 hover:text-white"
-                      >
-                        Cancel
-                      </button>
-                    </div>
-                  ) : (
-                    <button
-                      onClick={() => setNewPersona('')}
-                      className="ml-3 px-2 py-1 text-[10px] text-zinc-500 hover:text-white"
-                    >
-                      + New persona
-                    </button>
-                  )}
-                </>
+      {/* Right, and most of the page: the personas and their videos — or, once
+          a clip is open (a run trimming one, or a video's clip clicked), the
+          editor in their place until it is closed. */}
+      <div className="flex min-h-0 min-w-0 flex-1 flex-col">
+        {openVideo && !isPhoto(openVideo) ? (
+          <>
+            {run && (
+              <VidsIntakeBanner intake={run} onSkip={advanceIntake} onCancel={cancelIntake} />
+            )}
+            <VidsClipEditor
+              video={openVideo}
+              onSave={saveEdited}
+              // A video's Start and Top A are saved behind the next part
+              // (fileLater); its last part is waited for.
+              onSaveLater={run?.mode === 'persona' && run.index < run.files.length - 1 ? fileLater : undefined}
+              active={active}
+              onClose={closeEditor}
+              contextOwner={contextOwner}
+              onMarksChange={(marks) => {
+                if (isLocalId(openId)) patchLocal(openId, { marks });
+                else if (openId) void lib.setVideoMarks(openId, marks);
+              }}
+              onContextChange={(patch) => {
+                if (contextOwner) saveContext({ kind: contextOwner.kind, id: contextOwner.id }, patch);
+              }}
+              // A video's clips only get trimmed as they are walked in, and the
+              // run's own Save is what hands over the next one — except Top A,
+              // which loops under the whole bottom sequence in a build. That is
+              // the one place jump cuts have to be made, so it gets Cut and
+              // Auto cut on top of the in / out points. A clip opened on its
+              // own, from a video on the list, gets the whole editor.
+              mode={run?.mode !== 'persona'
+                ? 'full'
+                : PERSONA_PARTS[run.index] === 'topAId' ? 'cut' : 'trim'}
+              startSpeed={run ? intakeSpeed(slotForFolderName(run.folderName)) : undefined}
+              saveLabel={run
+                ? (run.index >= run.files.length - 1 ? 'Save · finish' : 'Save · next clip')
+                : undefined}
+              savingLabel={run ? 'Saving the video…' : undefined}
+            />
+          </>
+        ) : (
+          <div className="flex min-h-0 flex-1">
+            {/* The personas */}
+            <div className="w-[230px] shrink-0 overflow-y-auto border-r border-zinc-800 px-2 py-3">
+              <p className="mb-1.5 px-2 text-[9px] font-semibold uppercase tracking-wider text-zinc-500">Personas</p>
+              {personaGroups.map(({ folder, personas }) => {
+                const key = groupList(folder?.id ?? null);
+                if (folder && folderDraft?.id === folder.id) return <div key={key} className="px-1">{folderBox}</div>;
+                return (
+                  <PersonaRow
+                    key={key}
+                    label={folder?.name ?? UNFILED_LABEL}
+                    count={personas.length}
+                    thumb={folder ? personas.map(thumbOf).find(Boolean) ?? null : null}
+                    selected={shownKey === key}
+                    title={folder
+                      ? `${folder.name} — ${personas.length} video${personas.length === 1 ? '' : 's'} · drag a video here to make it ${folder.name}'s, or drop footage here to make a new one`
+                      : 'Videos that are nobody’s yet — move each to its persona'}
+                    onSelect={() => setList(key)}
+                    onVideoDrop={(id) => moveVideoTo(id, folder?.id ?? null)}
+                    onFiles={folder ? (files) => startIntake(files, folder.id) : undefined}
+                    onRename={folder ? () => setFolderDraft({ id: folder.id, name: folder.name }) : undefined}
+                    onDelete={folder ? () => deletePerson(folder, personas.length) : undefined}
+                  />
+                );
+              })}
+              {folderDraft !== null && folderDraft.id === null ? <div className="px-1">{folderBox}</div> : (
+                <button
+                  onClick={() => setFolderDraft({ id: null, name: '' })}
+                  title="A persona is a person — Blorky, Dorky, Aiden — and holds every video of them"
+                  className="mt-1 w-full rounded-md border border-dashed border-zinc-800 px-2 py-1.5 text-left text-[12px] text-zinc-400 hover:border-zinc-600 hover:text-white"
+                >
+                  + New persona
+                </button>
               )}
             </div>
-          ))}
-        </div>
 
-        {/* What the open list holds */}
-        <div className="min-h-0 flex-1 overflow-y-auto p-2">
-          {openPersona ? (
-            <div>
-              <p className="mb-1.5 text-[10px] text-zinc-500">
-                {openPersona.name} — click a part to edit that clip, drop a clip on it to swap it,
-                right-click for this persona’s context.
-              </p>
-              <div className="space-y-1.5">
-                {PERSONA_PARTS.map((part) => (
-                  <PartCard
-                    key={part}
-                    label={PERSONA_PART_LABEL[part]}
-                    video={videoById(openPersona[part])}
-                    open={!!openPersona[part] && openPersona[part] === openId}
-                    busy={busyPart === part}
-                    onOpen={() => openClip(openPersona[part])}
-                    onFiles={(files) => void attachFiles(openPersona, part, files)}
-                    onVideoId={(id) => void attachVideo(openPersona, part, id)}
-                    onClear={() => void lib.updatePersona(openPersona.id, { [part]: null })}
-                    onContext={() => setCtxTarget({ kind: 'persona', id: openPersona.id })}
-                  />
-                ))}
-              </div>
-
-              {/* Spare footage in the Persona folder — drag one onto a part above
-                  to swap it in without leaving this persona. */}
-              {personaSpares.length > 0 && (
-                <div className="mt-3 border-t border-zinc-800 pt-2">
-                  <p className="mb-1.5 text-[9px] font-semibold uppercase tracking-wider text-zinc-600">
-                    In the Persona folder · {personaSpares.length}
+            {/* The videos of the persona pressed — or one of them, opened up */}
+            <div className="min-w-0 flex-1 overflow-y-auto p-5">
+              {openPersona ? (
+                <div className="max-w-[760px]">
+                  <button onClick={() => setList(shownKey)} className="mb-3 text-[12px] text-zinc-500 hover:text-white">
+                    ← {shownName}
+                  </button>
+                  <div className="mb-1 flex items-center gap-3">
+                    <h2 className="min-w-0 truncate text-[18px] font-semibold text-zinc-100" title={openPersona.name}>{openPersona.name}</h2>
+                    <button
+                      onClick={() => setCtxTarget({ kind: 'persona', id: openPersona.id })}
+                      className="shrink-0 rounded border border-zinc-700 px-2 py-0.5 text-[11px] text-zinc-400 hover:border-zinc-500 hover:text-white"
+                    >
+                      Rename or move
+                    </button>
+                  </div>
+                  <p className="mb-4 text-[12px] leading-relaxed text-zinc-500">
+                    Its three clips, for when one needs editing: click one to open it in the editor, or drop footage on it to replace it.
                   </p>
-                  <div className="grid grid-cols-2 gap-2">
-                    {personaSpares.map((v) => (
-                      <ClipCard
-                        key={v.id}
-                        v={v}
-                        open={v.id === openId}
-                        onOpen={() => openClip(v.id)}
-                        onDelete={() => confirmDelete(v)}
-                        onContext={() => askClipContext(v)}
+                  <div className="grid grid-cols-3 gap-3">
+                    {PERSONA_PARTS.map((part) => (
+                      <PartCard
+                        key={part}
+                        label={PART_SAID[part]}
+                        video={videoById(openPersona[part])}
+                        open={!!openPersona[part] && openPersona[part] === openId}
+                        busy={busyPart === part}
+                        onOpen={() => openClip(openPersona[part])}
+                        onFiles={(files) => void attachFiles(openPersona, part, files)}
+                        onContext={() => setCtxTarget({ kind: 'persona', id: openPersona.id })}
                       />
                     ))}
                   </div>
                 </div>
+              ) : !lib.loaded ? (
+                <div className="flex justify-center py-12 text-zinc-600"><SpinnerIcon size={18} className="animate-spin" /></div>
+              ) : !shownGroup ? (
+                <div className="flex h-full min-h-[160px] flex-col items-center justify-center rounded-xl border-2 border-dashed border-zinc-800 p-6 text-center">
+                  <p className="text-[14px] font-semibold text-zinc-200">No personas yet</p>
+                  <p className="mt-1 text-[12px] leading-relaxed text-zinc-500">Make one with + New persona, then drop a video of them on the left.</p>
+                </div>
+              ) : (
+                <>
+                  <div className="mb-4">
+                    <h2 className="text-[18px] font-semibold text-zinc-100">
+                      {shownName}
+                      <span className="ml-2 text-[12px] font-normal text-zinc-500">
+                        {shownGroup.personas.length} video{shownGroup.personas.length === 1 ? '' : 's'}
+                      </span>
+                    </h2>
+                    {!shownGroup.folder && shownGroup.personas.length > 0 && (
+                      <p className="mt-1 text-[12px] leading-relaxed text-zinc-500">
+                        These are nobody&rsquo;s yet. Move each to its persona: drag it onto a name on the left, or pick from the list under it.
+                      </p>
+                    )}
+                  </div>
+                  {shownGroup.personas.length === 0 ? (
+                    <div className="flex min-h-[160px] flex-col items-center justify-center rounded-xl border-2 border-dashed border-zinc-800 p-6 text-center">
+                      <p className="text-[14px] font-semibold text-zinc-200">No videos of {shownName} yet</p>
+                      <p className="mt-1 text-[12px] leading-relaxed text-zinc-500">
+                        Drop one on the left, make one in AI Persona, or move one here from {UNFILED_LABEL}.
+                      </p>
+                    </div>
+                  ) : (
+                    <div className="grid grid-cols-[repeat(auto-fill,minmax(170px,1fr))] gap-3">
+                      {shownGroup.personas.map((p) => (
+                        <VideoCard
+                          key={p.id}
+                          video={p}
+                          thumb={thumbOf(p)}
+                          filled={PERSONA_PARTS.filter((k) => p[k]).length}
+                          people={personFolders}
+                          onOpen={() => setList(personaKey(p.id))}
+                          onMove={(folderId) => moveVideoTo(p.id, folderId)}
+                          onDelete={() => deleteVideo(p)}
+                          onDegen={() => toggleDegen(p)}
+                          onContext={() => setCtxTarget({ kind: 'persona', id: p.id })}
+                        />
+                      ))}
+                    </div>
+                  )}
+                </>
               )}
             </div>
-          ) : lib.loading && shown.length === 0 ? (
-            <div className="flex justify-center py-8 text-zinc-600"><SpinnerIcon size={16} className="animate-spin" /></div>
-          ) : shown.length === 0 ? (
-            <div className="flex h-full min-h-[100px] flex-col items-center justify-center rounded-md border border-dashed border-zinc-800 p-4 text-center">
-              <p className="text-[11px] text-zinc-400">{list === INBOX ? 'Nothing waiting' : `${list} is empty`}</p>
-              <p className="mt-0.5 text-[10px] leading-relaxed text-zinc-600">
-                {list === INBOX
-                  ? 'Drop footage in the middle of the page, or drag a filed clip back here.'
-                  : 'Drag a clip from the Inbox onto this folder.'}
-              </p>
-            </div>
-          ) : (
-            <div className="grid grid-cols-2 gap-2">
-              {shown.map((v) => (
-                <ClipCard
-                  key={v.id}
-                  v={v}
-                  open={v.id === openId}
-                  onOpen={() => openClip(v.id)}
-                  onDelete={() => confirmDelete(v)}
-                  onContext={() => askClipContext(v)}
-                />
-              ))}
-            </div>
-          )}
-        </div>
-
-      </div>
-
-      {/* Right: two pages under one strip — Upload (the intake stage, and the
-          questions a run asks) and Edit (the open clip). Both stay mounted:
-          switching away from a half-done edit or a half-typed name must not
-          lose it. */}
-      <div className="flex min-h-0 min-w-0 flex-1 flex-col">
-        <div className="flex shrink-0 items-center gap-3 border-b border-zinc-800 px-4 py-2">
-          <div className="flex overflow-hidden rounded-md border border-zinc-700">
-            {TABS.map((t) => (
-              <button
-                key={t.id}
-                onClick={() => setTab(t.id)}
-                className={`px-3 py-1 text-[11px] font-medium transition-colors ${
-                  tab === t.id ? 'bg-zinc-200 text-black' : 'text-zinc-400 hover:bg-zinc-900 hover:text-white'
-                }`}
-              >
-                {t.label}
-              </button>
-            ))}
           </div>
-          <p className="min-w-0 flex-1 truncate text-[10px] text-zinc-500" title={tabHint}>{tabHint}</p>
-        </div>
-
-        <div className="flex min-h-0 flex-1 flex-col" style={{ display: tab === 'upload' ? undefined : 'none' }}>
-          <VidsIntakeStage
-            intake={intake}
-            choices={folderChoices}
-            onFiles={startIntake}
-            onOpenClip={openClip}
-            onChooseFolder={chooseFolder}
-            onStartPersona={startPersona}
-            onFileAsClips={fileAsClips}
-            onContext={intakeContext}
-            onCancel={cancelIntake}
-            onResume={() => setTab('edit')}
-          />
-        </div>
-
-        <div className="flex min-h-0 flex-1 flex-col" style={{ display: tab === 'edit' ? undefined : 'none' }}>
-          {openVideo && !isPhoto(openVideo) ? (
-            <>
-              {run && (
-                <VidsIntakeBanner intake={run} onSkip={advanceIntake} onCancel={cancelIntake} />
-              )}
-              <VidsClipEditor
-                video={openVideo}
-                onSave={saveEdited}
-                active={active && tab === 'edit'}
-                onClose={closeEditor}
-                contextOwner={contextOwner}
-                onMarksChange={(marks) => {
-                  if (isLocalId(openId)) patchLocal(openId, { marks });
-                  else if (openId) void lib.setVideoMarks(openId, marks);
-                }}
-                onContextChange={(patch) => {
-                  if (contextOwner) saveContext({ kind: contextOwner.kind, id: contextOwner.id }, patch);
-                }}
-                // A persona's clips only get trimmed, and the run's own Save is what
-                // hands over the next one — except Top A, which loops under the whole
-                // bottom sequence in a build. That is the one place jump cuts have to
-                // be made, so it gets Cut and Auto cut on top of the in / out points.
-                mode={run?.mode !== 'persona'
-                  ? 'full'
-                  : PERSONA_PARTS[run.index] === 'topAId' ? 'cut' : 'trim'}
-                // A Bottom A or Bottom B being walked in opens at 1.25x — the
-                // nudge every screen recording wants, given once, on the one
-                // pass where the footage is still being made. The save writes
-                // it down beside the recording, so opening that clip again
-                // shows the 1.25x as itself, on the recording, where it can be
-                // taken off — and it never stacks, since every render starts
-                // from the recording. A clip opened on its own (not through
-                // the pipeline) has no run, so it opens as shot, or on whatever
-                // edit it was saved with.
-                startSpeed={run ? intakeSpeed(slotForFolderName(run.folderName)) : undefined}
-                saveLabel={run
-                  ? (run.index >= run.files.length - 1 ? 'Save · finish' : 'Save · next clip')
-                  : undefined}
-                savingLabel={run ? `Saving to ${run.folderName}…` : undefined}
-              />
-            </>
-          ) : (
-            <EditIdle
-              waiting={!!intake && intake.step !== 'edit' && intake.step !== 'done'}
-              onUpload={() => setTab('upload')}
-            />
-          )}
-        </div>
+        )}
       </div>
 
       {openVideo && isPhoto(openVideo) && (
@@ -1278,7 +1181,8 @@ export function VidsPrep({ lib, active }: { lib: VidsLib; active: boolean }) {
           name={ctxDialog.name}
           hint={ctxDialog.hint}
           value={ctxDialog.value}
-          theme={ctxDialog.kind === 'clip' ? ctxDialog.theme : undefined}
+          folders={personFolders.length ? personFolders : undefined}
+          folderId={ctxDialog.folderId}
           onSave={(patch) => saveContext(ctxTarget, patch)}
           onClose={() => setCtxTarget(null)}
         />
