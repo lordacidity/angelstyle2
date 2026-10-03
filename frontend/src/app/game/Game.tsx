@@ -86,9 +86,10 @@ interface Node {
   id: number; x: number; y: number;
   owner: number; troops: number; tier: number; base: boolean;
   prod: number; wall: number; cannon: number; cd: number;
-  /** A standing order: ship everything to that outpost, every few
-   *  seconds, for as long as it stands. Yours only. */
-  route: { to: number } | null; routeT: number;
+  /** A standing order: `pct` of the garrison went when it was set, and
+   *  `pct` of everything that arrives after goes too, every few seconds;
+   *  `keep` is what stays. Yours only. */
+  route: { to: number; pct: number; keep: number } | null; routeT: number;
 }
 interface Edge { a: number; b: number; len: number }
 /** A column on the road. `from`/`to` are the leg it is on; `path` is the
@@ -468,7 +469,13 @@ function step(w: World, dt: number) {
     n.routeT -= dt;
     if (n.routeT > 0) continue;
     n.routeT = ROUTE_EVERY;
-    if (n.troops >= 3) send(w, n.id, n.route.to, 1);
+    // What came in since: that share of it goes, the rest raises the keep.
+    if (n.troops < n.route.keep) { n.route.keep = n.troops; continue; }
+    const fresh = n.troops - n.route.keep;
+    const go = Math.floor(fresh * n.route.pct);
+    if (go < 1) continue;
+    n.route.keep += fresh - go;
+    sendCount(w, n.id, n.route.to, go);
   }
 
   // Columns on the march.
@@ -857,7 +864,11 @@ export default function Game() {
     if (!n) { w.selected = null; w.picking = null; dragRef.current = null; return; }
     if (w.picking !== null) {
       const from = w.nodes[w.picking];
-      if (n.id !== from.id && from.owner === PLAYER) { from.route = { to: n.id }; from.routeT = 0; }
+      if (n.id !== from.id && from.owner === PLAYER) {
+        const pct = sendPctRef.current;
+        send(w, from.id, n.id, pct);
+        from.route = { to: n.id, pct, keep: from.troops }; from.routeT = 2;
+      }
       w.picking = null; dragRef.current = null;
       return;
     }
@@ -1108,7 +1119,7 @@ export default function Game() {
               {ui?.picking ? (
                 <div className="mt-1.5 text-center text-[12px] text-[#ffd166]">Tap where it should auto-send.</div>
               ) : sel.route ? (
-                <div className="mt-1.5 text-center text-[12px] text-[#ffd166]">Auto-sending · double-tap to stop</div>
+                <div className="mt-1.5 text-center text-[12px] text-[#ffd166]">Auto-sending {Math.round(sel.route.pct * 100)}% · double-tap to stop</div>
               ) : (
                 <div className="mt-1.5 text-center text-[12px] text-white/30">Double-tap to auto-send</div>
               )}
