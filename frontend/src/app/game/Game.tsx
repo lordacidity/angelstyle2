@@ -1543,11 +1543,7 @@ export default function Game() {
           <div className="font-black">{run.endless ? 'LONG WAR' : `LEVEL ${run.level}`} <span className="text-white/40">· {clock(ui?.time ?? 0)}</span></div>
           <div className="text-[11px] text-white/45">{ui?.mine ?? 0} vs {ui?.theirs ?? 0} outposts{(ui?.shiftT ?? 0) > 0 ? ` · roads shift in ${fmt(ui?.shiftT ?? 0)}s` : ''}{(ui?.truceT ?? 0) > 0 ? ` · truce ${fmt(ui?.truceT ?? 0)}s` : ''}{(ui?.hillNeed ?? 0) > 0 ? ` · hill ${fmt(ui?.hillT ?? 0)}/${ui?.hillNeed}s` : ''}</div>
         </div>
-        <div className="flex gap-1.5">
-          <button className={`${btn} bg-white/10 px-2.5 py-1.5`} onClick={() => { if (confirm('Restart this level?')) start(run.level, run.endless); }}>↻</button>
-          <button className={`${btn} bg-white/10 px-2.5 py-1.5`} onClick={() => { const steps = [0.5, 1, 2]; speedRef.current = steps[(steps.indexOf(speedRef.current) + 1) % steps.length]; }}>{ui?.speed ?? 1}×</button>
-          <button className={`${btn} bg-white/10 px-2.5 py-1.5`} onClick={() => { pausedRef.current = !pausedRef.current; }}>{ui?.paused ? '▶' : '❚❚'}</button>
-        </div>
+        <button className={`${btn} bg-white/10 px-3 py-1.5`} onClick={() => { if (confirm('Restart this level?')) start(run.level, run.endless); }}>↻</button>
       </div>
       {/* Every troop alive, yours against theirs. */}
       {ui && ui.army.length > 0 && (() => {
@@ -1597,20 +1593,24 @@ export default function Game() {
       <div className="px-3 pb-0.5 pt-1">
         <div className="flex items-center justify-between text-[13px]">
           <div className="leading-tight">
-            <button className={`${btn} mb-0.5 whitespace-nowrap bg-white/10 px-2 py-0.5 text-[11px]`} onClick={() => act((w) => { for (const n of w.nodes) n.route = null; w.picking = null; w.picked = []; })}>Clear autos</button>
+            <button className={`${btn} mb-1 whitespace-nowrap bg-white/10 px-3 py-1.5 text-[13px]`} onClick={() => act((w) => { for (const n of w.nodes) n.route = null; w.picking = null; w.picked = []; })}>Clear autos</button>
             <div className="whitespace-nowrap text-[11px] text-white/40"><b className="text-white/80">+{Math.round(ui?.prodPerMin ?? 0)}</b> troops/min</div>
             <div className="whitespace-nowrap text-[11px] text-white/40"><b className="text-white/80">+{Math.round(ui?.goldPerMin ?? 0)}</b> gold/min</div>
             <div><span className="text-white/40">Gold </span><b className="text-white">{fmt(ui?.gold ?? 0)}</b></div>
           </div>
-          <div className="flex gap-1.5">
+          <div className="flex items-end gap-1.5">
             <button className={`${btn} px-3 py-1.5 ${tab === 'post' ? 'bg-white/20' : 'bg-white/5'}`} onClick={() => setTab('post')}>Outpost</button>
             <button className={`${btn} px-3 py-1.5 ${tab === 'tech' ? 'bg-white/20' : 'bg-white/5'}`} onClick={() => setTab('tech')}>Tech</button>
-            <button className={`${btn} bg-white/10 px-3 py-1.5`} onClick={() => { const steps = [0.25, 0.5, 1]; sendPctRef.current = steps[(steps.indexOf(sendPctRef.current) + 1) % steps.length]; }}>
-              send {Math.round((ui?.sendPct ?? 1) * 100)}%
-            </button>
+            <div className="flex flex-col gap-1">
+              <button className={`${btn} bg-white/10 px-3 py-1 text-[12px]`} onClick={() => { const steps = [0.5, 1, 2]; speedRef.current = steps[(steps.indexOf(speedRef.current) + 1) % steps.length]; }}>{ui?.speed ?? 1}×</button>
+              <button className={`${btn} bg-white/10 px-3 py-1 text-[12px]`} onClick={() => { pausedRef.current = !pausedRef.current; }}>{ui?.paused ? '▶' : '❚❚'}</button>
+              <button className={`${btn} whitespace-nowrap bg-white/10 px-3 py-1.5`} onClick={() => { const steps = [0.25, 0.5, 1]; sendPctRef.current = steps[(steps.indexOf(sendPctRef.current) + 1) % steps.length]; }}>
+                send {Math.round((ui?.sendPct ?? 1) * 100)}%
+              </button>
+            </div>
           </div>
         </div>
-        <div className="mt-1 h-[154px]">
+        <div className="mt-1 h-[184px]">
           {tab === 'tech' ? (
             <div className="grid grid-cols-2 gap-1.5">
               {(Object.keys(TECH) as TechKey[]).map((k) => {
@@ -1651,10 +1651,11 @@ export default function Game() {
                 )}
                 {ui?.picking ? (
                   <button className={`${btn} bg-white/10 px-2.5 py-1`} onClick={() => act((w) => { w.picking = null; w.picked = []; })}>Cancel</button>
-                ) : sel.route ? (
-                  <button className={`${btn} bg-white/10 px-2.5 py-1`} onClick={() => act((w) => { w.nodes[sel.id].route = null; })}>Clear</button>
                 ) : (
-                  <button className={`${btn} bg-white/10 px-2.5 py-1`} onClick={() => act((w) => { w.picking = sel.id; w.pickN = 2; w.picked = []; })}>Split 50/50</button>
+                  <span className="flex gap-1.5">
+                    <button className={`${btn} bg-white/10 px-2.5 py-1`} onClick={() => act((w) => { w.picking = sel.id; w.pickN = 2; w.picked = []; })}>Split 50/50</button>
+                    {sel.route && <button className={`${btn} bg-white/10 px-2.5 py-1`} onClick={() => act((w) => { w.nodes[sel.id].route = null; })}>Clear</button>}
+                  </span>
                 )}
               </div>
               {sel.mine ? (
@@ -1670,13 +1671,11 @@ export default function Game() {
               ) : (
                 <>
                   <div className="grid grid-cols-2 gap-1.5">{upgRows(sel)}</div>
-                  {!sel.base && (
-                    <button disabled={sel.troops < MINE_TROOPS[0]} onClick={() => act((w) => digMine(w, sel.id))}
-                      className={`${btn} mt-1 flex w-full items-center justify-between rounded-xl bg-white/5 px-3 py-1 text-left`}>
-                      <span className="text-[13px]"><b className="text-[#ffd166]">Dig mine</b> <span className="text-white/45">· +{Math.round(MINE_GOLD[1] * 60)} gold/min</span></span>
-                      <span className="text-[12px] text-white/60">{MINE_TROOPS[0]} troops</span>
-                    </button>
-                  )}
+                  <button disabled={sel.base || sel.troops < MINE_TROOPS[0]} onClick={() => act((w) => digMine(w, sel.id))}
+                    className={`${btn} mt-1 flex w-full items-center justify-between rounded-xl bg-white/5 px-3 py-1 text-left`}>
+                    <span className="text-[13px]"><b className="text-[#ffd166]">Dig mine</b> <span className="text-white/45">· +{Math.round(MINE_GOLD[1] * 60)} gold/min</span></span>
+                    <span className="text-[12px] text-white/60">{sel.base ? 'not an HQ' : `${MINE_TROOPS[0]} troops`}</span>
+                  </button>
                 </>
               )}
             </>
