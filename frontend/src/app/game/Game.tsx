@@ -962,7 +962,13 @@ export default function Game() {
       <button key={k} disabled={max || (ui?.gold ?? 0) < cost} onClick={() => act((w) => buyUpgrade(w, n.id, k))}
         className={`${btn} flex flex-col items-start rounded-xl bg-white/5 px-3 py-2 text-left`}>
         <div className="flex w-full items-center justify-between text-[13px]"><b>{u.name}</b><span className="text-white">{max ? 'MAX' : `${cost}g`}</span></div>
-        <div className="text-[11px] text-white/45">{u.desc} · {k === 'tier' ? `size ${n.tier}` : `lv ${lvl}`}</div>
+        <div className="text-[11px] text-white/45">{(() => {
+          // Barracks and Expand: what the next level adds here, a minute.
+          const rate = ui?.selProdPerMin ?? 0;
+          if (k === 'prod') { const gain = max ? 0 : rate * ((1 + 0.35 * (lvl + 1)) / (1 + 0.35 * lvl) - 1); return `${max ? 'MAX' : `+${Math.round(gain)} troops/min`} · lv ${lvl}`; }
+          if (k === 'tier') { const gain = max ? 0 : rate * (TIER_PROD[n.tier] / TIER_PROD[n.tier - 1] - 1); return `${max ? 'MAX' : `+${Math.round(gain)}/min, holds ${Math.round(capOf({ ...n, tier: n.tier + 1 }))}`} · size ${n.tier}`; }
+          return `${u.desc} · lv ${lvl}`;
+        })()}</div>
       </button>
     );
   });
