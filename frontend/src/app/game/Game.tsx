@@ -27,33 +27,42 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 
 const MAP_W = 360;
 const MAP_H = 600;
-const CAMPAIGN_LEVELS = 12;
+const CAMPAIGN_LEVELS = 16;
 const ENDLESS_UNLOCK = 3;
 
 const PLAYER = 1;
-const COLORS: Record<number, string> = { 0: '#4a4a4a', 1: '#ffffff', 2: '#ff3b3b', 3: '#ff8a3b', 4: '#c04bff' };
-const NAMES: Record<number, string> = { 2: 'RED', 3: 'AMBER', 4: 'VIOLET' };
+const COLORS: Record<number, string> = { 0: '#4a4a4a', 1: '#ffffff', 2: '#ff3b3b', 3: '#ff8a3b', 4: '#c04bff', 5: '#2ee6d6' };
+const NAMES: Record<number, string> = { 2: 'RED', 3: 'AMBER', 4: 'VIOLET', 5: 'CYAN' };
 
-const TIER_CAP = [40, 75, 150];
-const TIER_PROD = [1, 1.5, 2.2];
+const TIER_CAP = [40, 75, 150, 260];
+const TIER_PROD = [1, 1.5, 2.2, 3.2];
 const BASE_PROD_PER_S = 0.9;
 
 const UPG = {
-  prod: { name: 'Barracks', cost: [30, 55, 95], desc: '+35% troops/s' },
-  wall: { name: 'Walls', cost: [25, 50, 90], desc: '+25% defence' },
-  cannon: { name: 'Cannon', cost: [45, 80, 130], desc: 'shooter' },
-  tier: { name: 'Expand', cost: [60, 130], desc: 'bigger, faster' },
+  prod: { name: 'Barracks', cost: [30, 55, 95, 240], desc: '+35% troops/s' },
+  wall: { name: 'Walls', cost: [25, 50, 90, 220], desc: '+25% defence' },
+  cannon: { name: 'Cannon', cost: [45, 80, 130, 300], desc: 'shooter' },
+  tier: { name: 'Expand', cost: [60, 130, 340], desc: 'bigger, faster' },
 } as const;
 type UpgKey = keyof typeof UPG;
-const CANNON_DMG = [0, 5, 9, 14];
+const CANNON_DMG = [0, 5, 9, 14, 22];
 const CANNON_RANGE = 130;
 /** A bigger outpost's guns reach further: +20% a size. */
-const cannonRange = (n: Node) => CANNON_RANGE * (1 + 0.2 * (n.tier - 1));
+const cannonRange = (n: Node, w: World) => CANNON_RANGE * (1 + 0.2 * (n.tier - 1)) * (n.owner === PLAYER ? 1 + 0.15 * w.tech.scouts : 1);
 const CANNON_CD = 0.4;
 
+// A mine: an outpost dug out for gold. It breeds nothing and keeps no
+// walls, guns or barracks, only whatever garrison is sent to sit in it.
+// Digging costs the garrison; so does deepening. Gold a second by depth.
+const MINE_GOLD = [0, 1.5, 3, 5];
+/** Troops it takes to dig, then to deepen to 2 and to 3. */
+const MINE_TROOPS = [100, 150, 250];
+
 const TECH = {
-  logistics: { name: 'Logistics', cost: [80], desc: 'columns march 25% faster' },
-  conscription: { name: 'Conscription', cost: [100, 160, 240], desc: '+15% troops/s everywhere' },
+  logistics: { name: 'Logistics', cost: [80, 280], desc: 'columns march 25% faster' },
+  conscription: { name: 'Conscription', cost: [100, 160, 240, 520], desc: '+15% troops/s everywhere' },
+  tithe: { name: 'Tithe', cost: [150, 340], desc: '+20% gold from all ground' },
+  scouts: { name: 'Scouts', cost: [120, 280], desc: 'cannons reach 15% further' },
 } as const;
 type TechKey = keyof typeof TECH;
 
@@ -86,6 +95,8 @@ interface Node {
   id: number; x: number; y: number;
   owner: number; troops: number; tier: number; base: boolean;
   prod: number; wall: number; cannon: number; cd: number;
+  /** 0, or how deep a mine this is (1 to 3). */
+  mine: number;
   /** A standing order: everything goes, every second, split evenly
    *  between these outposts. Yours only. */
   route: { to: number[] } | null; routeT: number;
@@ -101,6 +112,9 @@ interface Rules {
   level: number; endless: boolean; nodeCount: number; enemies: number;
   /** How tall the map is; wider than a screen is scrolled. */
   mapH: number;
+  /** The twists of the later levels. */
+  title?: string;
+  twinHQ?: boolean; mines?: number; fortress?: boolean; playerTier?: number;
   aiInterval: number; sendFrac: number;
   /** How good the generals are: the margin they will attack on (bigger is
    *  bolder), and how often they think to mass for a push (1 is every tick). */
@@ -135,8 +149,8 @@ function rulesFor(level: number, endless: boolean): Rules {
       enemyExtra: 4, enemyGold: 200, neutralBase: 14,
     };
   }
-  const L = level;
-  return {
+  const L = Math.min(12, level);
+  const base: Rules = {
     level, endless, mapH: MAP_H,
     nodeCount: Math.min(18, 9 + L),
     enemies: L >= 10 ? 3 : L >= 5 ? 2 : 1,
@@ -148,6 +162,14 @@ function rulesFor(level: number, endless: boolean): Rules {
     enemyGold: L * 20,
     neutralBase: 6 + L * 2,
   };
+  // Past twelve, the twists.
+  switch (level) {
+    case 13: return { ...base, title: 'TWIN HQ', twinHQ: true, enemyGold: 300 };
+    case 14: return { ...base, title: 'GOLD RUSH', mines: 5, enemyGold: 300, neutralBase: 20 };
+    case 15: return { ...base, title: 'FORTRESS', fortress: true, playerTier: 3, enemyGold: 450 };
+    case 16: return { ...base, title: 'FOUR FRONTS', enemies: 4, nodeCount: 36, mapH: 1200, enemyExtra: 2, enemyGold: 260 };
+    default: return base;
+  }
 }
 
 // Seeded so a level is the same map every attempt: dying to it teaches it.
@@ -176,7 +198,7 @@ function buildWorld(rules: Rules, meta: Record<MetaKey, number>, seedExtra = 0):
     const x = PAD + rnd() * (MAP_W - PAD * 2);
     const y = PAD + rnd() * (rules.mapH - PAD * 2);
     if (nodes.every((n) => Math.hypot(n.x - x, n.y - y) >= MIN_D)) {
-      nodes.push({ id: nodes.length, x, y, owner: 0, troops: 0, tier: 1, base: false, prod: 0, wall: 0, cannon: 0, cd: 0, route: null, routeT: 0 });
+      nodes.push({ id: nodes.length, x, y, owner: 0, troops: 0, tier: 1, base: false, prod: 0, wall: 0, cannon: 0, cd: 0, mine: 0, route: null, routeT: 0 });
     }
   }
   // Edges: nearest pairs first, no crossings, no more than four per outpost,
@@ -211,7 +233,7 @@ function buildWorld(rules: Rules, meta: Record<MetaKey, number>, seedExtra = 0):
   // Bases: yours at the bottom, theirs as far from you as the map allows.
   const byY = [...nodes].sort((p, q) => q.y - p.y);
   const home = byY[Math.floor(rnd() * Math.min(3, byY.length))];
-  home.owner = PLAYER; home.base = true; home.tier = 2; home.troops = 40; home.wall = 1;
+  home.owner = PLAYER; home.base = true; home.tier = rules.playerTier ?? 2; home.troops = 40; home.wall = 1;
   // Hops from home, so no enemy HQ ever sits a march away.
   const hops = new Array(nodes.length).fill(Infinity) as number[];
   hops[home.id] = 0;
@@ -240,6 +262,7 @@ function buildWorld(rules: Rules, meta: Record<MetaKey, number>, seedExtra = 0):
     }
     if (!best) break;
     best.owner = fid; best.base = true; best.tier = 2; best.troops = 40; best.wall = 1;
+    if (rules.fortress) { best.wall = 3; best.cannon = 2; best.tier = 3; }
     taken.add(best.id);
     // A few outposts already theirs, beside the base.
     let extra = rules.enemyExtra;
@@ -258,13 +281,26 @@ function buildWorld(rules: Rules, meta: Record<MetaKey, number>, seedExtra = 0):
     n.troops = Math.round(rules.neutralBase * (0.4 + 1.6 * far) + rnd() * 10);
     if (rnd() < 0.18) n.tier = 2;
   }
+  // Twin HQ: a second one of yours, beside the first.
+  if (rules.twinHQ) {
+    const twin = adj[home.id].map((i) => nodes[i]).filter((n) => n.owner === 0).sort((a, b) => b.y - a.y)[0];
+    if (twin) { twin.owner = PLAYER; twin.base = true; twin.tier = 2; twin.troops = 40; twin.wall = 1; }
+  }
+  // Gold rush: mines already dug, out in the neutral ground, for whoever takes them.
+  if (rules.mines) {
+    const pool = nodes.filter((n) => n.owner === 0 && !adj[n.id].some((i) => nodes[i].base));
+    for (let k = 0; k < rules.mines && pool.length; k++) {
+      const n = pool.splice(Math.floor(rnd() * pool.length), 1)[0];
+      n.mine = 1; n.tier = 1;
+    }
+  }
 
   return {
     rules, nodes, edges, adj, convoys: [], shots: [], factions,
     gold: 40 + META.gold.per * meta.gold, time: 0,
     nextId: 1,
-    tech: { logistics: 0, conscription: 0 }, meta,
-    over: null, flash: { text: rules.endless ? 'THE LONG WAR' : `LEVEL ${rules.level}`, age: 0 }, selected: null, picking: null, pickN: 1, picked: [],
+    tech: { logistics: 0, conscription: 0, tithe: 0, scouts: 0 }, meta,
+    over: null, flash: { text: rules.endless ? 'THE LONG WAR' : rules.title ?? `LEVEL ${rules.level}`, age: 0 }, selected: null, picking: null, pickN: 1, picked: [],
   };
 }
 
@@ -275,11 +311,12 @@ const wallMult = (n: Node) => 1 + 0.25 * n.wall;
 // One formula for everyone. Your tech and Armoury sit on top; the red has
 // neither, only what it builds on the ground.
 const prodOf = (w: World, n: Node) => {
+  if (n.mine) return 0;
   let m = n.owner === PLAYER ? (1 + META.prod.per * w.meta.prod / 100) * (1 + 0.15 * w.tech.conscription) : 1;
   m *= (n.base ? 1.5 : 1) * TIER_PROD[n.tier - 1] * (1 + 0.35 * n.prod);
   return BASE_PROD_PER_S * m;
 };
-const goldOf = (n: Node) => (n.base ? 1.0 : 0.35 + 0.15 * (n.tier - 1));
+const goldOf = (n: Node) => (n.mine ? MINE_GOLD[n.mine] : n.base ? 1.0 : 0.35 + 0.15 * (n.tier - 1));
 const convoySpeed = (w: World, owner: number) =>
   60 * (owner === PLAYER ? (1 + META.speed.per * w.meta.speed / 100) * (1 + 0.25 * w.tech.logistics) : 1);
 const convoyPos = (w: World, c: Convoy) => {
@@ -434,7 +471,7 @@ function aiTick(w: World, f: Faction) {
 // walls and then a cannon where the enemy is closest, barracks and a bigger
 // HQ behind that. One thing a tick, the most urgent it can afford.
 function aiSpend(w: World, f: Faction) {
-  const mine = w.nodes.filter((n) => n.owner === f.id);
+  const mine = w.nodes.filter((n) => n.owner === f.id && !n.mine);
   if (!mine.length) return;
   const threat = (n: Node) => w.adj[n.id].reduce((s, i) => s + (w.nodes[i].owner !== f.id && w.nodes[i].owner !== 0 ? w.nodes[i].troops : 0), 0);
   const front = mine.filter((n) => threat(n) > 0).sort((a, b) => threat(b) - threat(a));
@@ -447,6 +484,10 @@ function aiSpend(w: World, f: Faction) {
   if (hq.tier < 3) wants.push([hq, 'tier']);
   if (front[0] && front[0].cannon < 3) wants.push([front[0], 'cannon']);
   for (const n of mine) if (n.prod < 3) wants.push([n, 'prod']);
+  if (front[0] && front[0].wall < 4) wants.push([front[0], 'wall']);
+  if (hq.tier < 4) wants.push([hq, 'tier']);
+  if (front[0] && front[0].cannon < 4) wants.push([front[0], 'cannon']);
+  if (hq.prod < 4) wants.push([hq, 'prod']);
   for (const [n, k] of wants) {
     const cost = upgradeCost(n, k);
     if (cost === null) continue;
@@ -466,7 +507,7 @@ function step(w: World, dt: number) {
     if (n.owner === 0) continue;
     const cap = capOf(n);
     if (n.troops < cap) n.troops = Math.min(cap, n.troops + prodOf(w, n) * dt);
-    if (n.owner === PLAYER) w.gold += goldOf(n) * dt;
+    if (n.owner === PLAYER) w.gold += goldOf(n) * (1 + 0.2 * w.tech.tithe) * dt;
     else { const f = w.factions.find((x) => x.id === n.owner); if (f) f.gold += goldOf(n) * dt; }
   }
 
@@ -511,7 +552,7 @@ function step(w: World, dt: number) {
     if (!n.cannon || n.owner === 0) continue;
     n.cd -= dt;
     if (n.cd > 0) continue;
-    let target: Convoy | null = null; let td = cannonRange(n);
+    let target: Convoy | null = null; let td = cannonRange(n, w);
     for (const c of w.convoys) {
       if (c.owner === n.owner) continue;
       const p = convoyPos(w, c);
@@ -547,6 +588,18 @@ function step(w: World, dt: number) {
   if (!theirs) w.over = 'win';
 }
 
+/** Dig, or deepen, a mine: the garrison is spent, and so is everything
+ *  built here. What can be dug: an outpost of yours with the troops for it. */
+function mineCost(n: Node): number | null { return n.mine >= 3 ? null : MINE_TROOPS[n.mine]; }
+function digMine(w: World, id: number) {
+  const n = w.nodes[id];
+  if (n.owner !== PLAYER || n.base) return;
+  const need = mineCost(n);
+  if (need === null || n.troops < need) return;
+  n.troops = 0; n.mine++;
+  n.wall = 0; n.cannon = 0; n.prod = 0; n.route = null; n.cd = 0;
+}
+
 /** What the next level of this costs here, or null at the top. */
 function upgradeCost(n: Node, key: UpgKey): number | null {
   const lvl = key === 'tier' ? n.tier - 1 : n[key];
@@ -556,7 +609,7 @@ function upgradeCost(n: Node, key: UpgKey): number | null {
 function applyUpgrade(n: Node, key: UpgKey) { if (key === 'tier') n.tier++; else n[key]++; }
 function buyUpgrade(w: World, id: number, key: UpgKey) {
   const n = w.nodes[id];
-  if (n.owner !== PLAYER) return;
+  if (n.owner !== PLAYER || n.mine) return;
   const cost = upgradeCost(n, key);
   if (cost === null || w.gold < cost) return;
   w.gold -= cost;
@@ -572,7 +625,7 @@ function buyTech(w: World, key: TechKey) {
 
 // ── Drawing ────────────────────────────────────────────────────────────────
 
-const nodeR = (n: Node) => (n.base ? 20 : 13 + n.tier * 2);
+const nodeR = (n: Node) => (n.base ? 17 + n.tier * 1.5 : 12 + n.tier * 2);
 
 function draw(ctx: CanvasRenderingContext2D, w: World, view: { s: number; ox: number; oy: number; midY: number }, drag: { from: number; x: number; y: number; over: number | null } | null) {
   const { s, ox, oy } = view;
@@ -613,7 +666,7 @@ function draw(ctx: CanvasRenderingContext2D, w: World, view: { s: number; ox: nu
     const canTarget = w.picking !== null && w.picking !== n.id;
     if (n.cannon && n.owner !== 0) {
       ctx.strokeStyle = n.owner === PLAYER ? 'rgba(255,255,255,0.12)' : 'rgba(255,59,59,0.14)'; ctx.lineWidth = 1;
-      ctx.beginPath(); ctx.arc(n.x, n.y, cannonRange(n), 0, Math.PI * 2); ctx.stroke();
+      ctx.beginPath(); ctx.arc(n.x, n.y, cannonRange(n, w), 0, Math.PI * 2); ctx.stroke();
     }
     if (canTarget) {
       ctx.strokeStyle = 'rgba(255,255,255,0.5)'; ctx.lineWidth = 2; ctx.setLineDash([3, 4]);
@@ -626,6 +679,11 @@ function draw(ctx: CanvasRenderingContext2D, w: World, view: { s: number; ox: nu
     ctx.beginPath(); ctx.arc(n.x, n.y, r, 0, Math.PI * 2); ctx.fill();
     ctx.strokeStyle = col; ctx.lineWidth = n.base ? 4 : 2.5;
     ctx.beginPath(); ctx.arc(n.x, n.y, r, 0, Math.PI * 2); ctx.stroke();
+    // A mine: a gold ring inside, one notch a depth.
+    if (n.mine) {
+      ctx.strokeStyle = '#ffd166'; ctx.lineWidth = 2;
+      ctx.beginPath(); ctx.arc(n.x, n.y, r - 4, 0, Math.PI * 2); ctx.stroke();
+    }
     // Walls: a solid ring for each level, stacked outward, with four gates.
     for (let k = 0; k < n.wall; k++) {
       ctx.strokeStyle = col; ctx.lineWidth = 2.5;
@@ -644,10 +702,10 @@ function draw(ctx: CanvasRenderingContext2D, w: World, view: { s: number; ox: nu
     ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
     ctx.fillText(String(Math.floor(n.troops)), n.x, n.y + 0.5);
     // Small marks for what is built.
-    if (n.owner !== 0 && (n.prod || n.cannon || n.base)) {
+    if (n.mine || (n.owner !== 0 && (n.prod || n.cannon || n.base))) {
       ctx.font = '600 8px -apple-system, system-ui, sans-serif';
-      ctx.fillStyle = 'rgba(255,255,255,0.65)';
-      const bits = [n.base ? 'HQ' : '', n.prod ? `B${n.prod}` : '', n.cannon ? `C${n.cannon}` : ''].filter(Boolean).join(' ');
+      ctx.fillStyle = n.mine ? '#ffd166' : 'rgba(255,255,255,0.65)';
+      const bits = [n.mine ? `MINE ${n.mine}` : '', n.base ? 'HQ' : '', n.prod ? `B${n.prod}` : '', n.cannon ? `C${n.cannon}` : ''].filter(Boolean).join(' ');
       ctx.fillText(bits, n.x, n.y + r + 11);
     }
   }
@@ -784,7 +842,7 @@ export default function Game() {
       let s = Math.min(r.width / MAP_W, r.height / mapH);
       let oy = (r.height - mapH * s) / 2;
       // Too small to read whole: fill the width instead and scroll it.
-      if (s < 0.55) { s = (r.width / MAP_W) * 0.8; oy = 0; }
+      if (s < 0.42) { s = (r.width / MAP_W) * 0.8; oy = 0; }
       const visibleH = r.height / s;
       maxScrollRef.current = Math.max(0, mapH - visibleH);
       scrollRef.current = Math.max(0, Math.min(maxScrollRef.current, scrollRef.current));
@@ -964,6 +1022,7 @@ export default function Game() {
             <p><b className="text-white/80">Drag</b> from one of your outposts to any other to march. Columns take the shortest road through your ground and fight at the first outpost on it that is not yours, and columns that outnumber the defenders take the ground. <b className="text-white/80">Tap</b> an outpost to build on it, or give it a standing order to keep shipping troops somewhere.</p>
             <p>Outposts breed troops up to their cap. Gold trickles from everything you hold. Spend it on the picked outpost, or on tech for all of them.</p>
             <p>The red plays by your rules: same breeding, same gold, same upgrades bought with it. On the harder levels it starts with more ground and more gold, and its generals are quicker. Clear every red outpost to win.</p>
+            <p>An outpost with 100 troops can be dug into a <b className="text-white/80">mine</b>: it breeds nothing and keeps nothing built, but pays gold, more the deeper it goes. Digging and deepening spend the garrison. Whoever takes a mine keeps it.</p>
             <p className="text-white/30">Walls are inherited by whoever takes the outpost. Cannons are not.</p>
           </div>
         </div>
@@ -1095,7 +1154,7 @@ export default function Game() {
             </button>
           </div>
         </div>
-        <div className="mt-2 h-[168px]">
+        <div className="mt-2 h-[206px]">
           {tab === 'tech' ? (
             <div className="grid grid-cols-2 gap-1.5">
               {(Object.keys(TECH) as TechKey[]).map((k) => {
@@ -1135,9 +1194,30 @@ export default function Game() {
                   <button className={`${btn} bg-white/10 px-2.5 py-1`} onClick={() => act((w) => { w.picking = sel.id; w.pickN = 2; w.picked = []; })}>Split 50/50</button>
                 )}
               </div>
-              <div className="grid grid-cols-2 gap-1.5">{upgRows(sel)}</div>
+              {sel.mine ? (
+                <div className="flex items-center justify-between rounded-xl bg-white/5 px-3 py-2">
+                  <div>
+                    <div className="text-[13px]"><b className="text-[#ffd166]">Mine {sel.mine}</b> <span className="text-white/45">· +{Math.round(MINE_GOLD[sel.mine] * 60)} gold/min</span></div>
+                    <div className="text-[11px] text-white/45">{mineCost(sel) === null ? 'As deep as it goes.' : `Deepen: ${MINE_TROOPS[sel.mine]} troops, spent · +${Math.round((MINE_GOLD[sel.mine + 1] - MINE_GOLD[sel.mine]) * 60)} gold/min`}</div>
+                  </div>
+                  {mineCost(sel) !== null && (
+                    <button disabled={sel.troops < MINE_TROOPS[sel.mine]} onClick={() => act((w) => digMine(w, sel.id))} className={`${btn} bg-[#ffd166] px-3 py-1.5 text-[13px] text-black`}>Deepen</button>
+                  )}
+                </div>
+              ) : (
+                <>
+                  <div className="grid grid-cols-2 gap-1.5">{upgRows(sel)}</div>
+                  {!sel.base && (
+                    <button disabled={sel.troops < MINE_TROOPS[0]} onClick={() => act((w) => digMine(w, sel.id))}
+                      className={`${btn} mt-1.5 flex w-full items-center justify-between rounded-xl bg-white/5 px-3 py-1.5 text-left`}>
+                      <span className="text-[13px]"><b className="text-[#ffd166]">Dig mine</b> <span className="text-white/45">· +{Math.round(MINE_GOLD[1] * 60)} gold/min, breeds nothing</span></span>
+                      <span className="text-[12px] text-white/60">{MINE_TROOPS[0]} troops</span>
+                    </button>
+                  )}
+                </>
+              )}
               <div className="mt-1.5 flex justify-between text-[12px] text-white/50">
-                <span><b className="text-white">+{Math.round(ui?.selProdPerMin ?? 0)}</b> troops/min{sel.troops >= capOf(sel) - 0.5 ? ' (full)' : ''}</span>
+                <span>{sel.mine ? <span className="text-white/40">breeds nothing · garrison it to hold it</span> : <><b className="text-white">+{Math.round(ui?.selProdPerMin ?? 0)}</b> troops/min{sel.troops >= capOf(sel) - 0.5 ? ' (full)' : ''}</>}</span>
                 <span>falls to <b className="text-white">{(ui?.selHold ?? 0) + 1}</b>+</span>
               </div>
             </>
