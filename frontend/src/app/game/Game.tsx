@@ -279,6 +279,20 @@ function segmentsCross(p1: Node, p2: Node, p3: Node, p4: Node) {
   return ((d1 > 0) !== (d2 > 0)) && ((d3 > 0) !== (d4 > 0));
 }
 
+/** Whether a road from a to b would run across some third outpost. A
+ *  column rides its road and fights only what its road meets, so no road
+ *  may pass over an outpost it does not stop at. */
+function roadOverNode(nodes: Node[], a: number, b: number) {
+  const A = nodes[a], B = nodes[b];
+  const dx = B.x - A.x, dy = B.y - A.y, l2 = dx * dx + dy * dy || 1;
+  for (const n of nodes) {
+    if (n.id === a || n.id === b) continue;
+    const t = Math.max(0, Math.min(1, ((n.x - A.x) * dx + (n.y - A.y) * dy) / l2));
+    if (Math.hypot(A.x + t * dx - n.x, A.y + t * dy - n.y) < 34) return true;
+  }
+  return false;
+}
+
 const newNode = (id: number, x: number, y: number): Node =>
   ({ id, x, y, owner: 0, troops: 0, tier: 1, base: false, prod: 0, wall: 0, cannon: 0, cd: 0, mine: 0, loot: 0, gold: 0, hub: false, wallBoost: 0, capBoost: 0, route: null, routeT: 0, auto: {} });
 
@@ -309,7 +323,7 @@ function buildChoke(rules: Rules, rnd: () => number): { nodes: Node[]; edges: Ed
   const deg = new Array(nodes.length).fill(0) as number[];
   const parent = nodes.map((_, i) => i);
   const find = (i: number): number => (parent[i] === i ? i : (parent[i] = find(parent[i])));
-  const crosses = (a: number, b: number) => edges.some((f) => f.a !== a && f.a !== b && f.b !== a && f.b !== b && segmentsCross(nodes[a], nodes[b], nodes[f.a], nodes[f.b]));
+  const crosses = (a: number, b: number) => roadOverNode(nodes, a, b) || edges.some((f) => f.a !== a && f.a !== b && f.b !== a && f.b !== b && segmentsCross(nodes[a], nodes[b], nodes[f.a], nodes[f.b]));
   const pairs: Edge[] = [];
   for (let i = 1; i < nodes.length; i++) for (let j = i + 1; j < nodes.length; j++) {
     if (sector[i] !== sector[j]) continue;
@@ -324,6 +338,7 @@ function buildChoke(rules: Rules, rnd: () => number): { nodes: Node[]; edges: Ed
     if (find(e.a) === find(e.b) || crosses(e.a, e.b)) continue;
     edges.push(e); deg[e.a]++; deg[e.b]++; parent[find(e.a)] = find(e.b);
   }
+  for (const e of pairs) { if (find(e.a) !== find(e.b) && !roadOverNode(nodes, e.a, e.b)) { edges.push(e); parent[find(e.a)] = find(e.b); } }
   for (const e of pairs) { if (find(e.a) !== find(e.b)) { edges.push(e); parent[find(e.a)] = find(e.b); } }
   // One road from each wedge to the hub, from its nearest outpost; the HQ is its farthest.
   const hqs: number[] = [];
@@ -362,7 +377,7 @@ function buildWorld(rules: Rules, meta: Record<MetaKey, number>, seedExtra = 0):
   const parent = nodes.map((_, i) => i);
   const find = (i: number): number => (parent[i] === i ? i : (parent[i] = find(parent[i])));
   const union = (a: number, b: number) => { parent[find(a)] = find(b); };
-  const crosses = (e: Edge) => edges.some((f) => f.a !== e.a && f.a !== e.b && f.b !== e.a && f.b !== e.b && segmentsCross(nodes[e.a], nodes[e.b], nodes[f.a], nodes[f.b]));
+  const crosses = (e: Edge) => roadOverNode(nodes, e.a, e.b) || edges.some((f) => f.a !== e.a && f.a !== e.b && f.b !== e.a && f.b !== e.b && segmentsCross(nodes[e.a], nodes[e.b], nodes[f.a], nodes[f.b]));
   for (const e of pairs) {
     const maxDeg = rules.maxDeg ?? 4;
     if (e.len > 150 || deg[e.a] >= maxDeg || deg[e.b] >= maxDeg || crosses(e)) continue;
@@ -372,6 +387,10 @@ function buildWorld(rules: Rules, meta: Record<MetaKey, number>, seedExtra = 0):
     if (find(e.a) === find(e.b)) continue;
     if (crosses(e)) continue;
     edges.push(e); deg[e.a]++; deg[e.b]++; union(e.a, e.b);
+  }
+  for (const e of pairs) {
+    if (find(e.a) === find(e.b) || roadOverNode(nodes, e.a, e.b)) continue;
+    edges.push(e); union(e.a, e.b);
   }
   for (const e of pairs) {
     if (find(e.a) === find(e.b)) continue;
@@ -774,7 +793,7 @@ function shiftRoads(w: World) {
   if (!gone.length) return;
   const drop = gone[Math.floor(rnd() * gone.length)];
   w.edges.splice(drop, 1);
-  const crosses = (a: number, b: number) => w.edges.some((f) => f.a !== a && f.a !== b && f.b !== a && f.b !== b && segmentsCross(w.nodes[a], w.nodes[b], w.nodes[f.a], w.nodes[f.b]));
+  const crosses = (a: number, b: number) => roadOverNode(w.nodes, a, b) || w.edges.some((f) => f.a !== a && f.a !== b && f.b !== a && f.b !== b && segmentsCross(w.nodes[a], w.nodes[b], w.nodes[f.a], w.nodes[f.b]));
   const maxDeg = w.rules.maxDeg ?? 4;
   for (let tries = 0; tries < 200; tries++) {
     const a = Math.floor(rnd() * w.nodes.length), b = Math.floor(rnd() * w.nodes.length);
