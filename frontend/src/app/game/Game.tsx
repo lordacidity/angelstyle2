@@ -27,7 +27,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 
 const MAP_W = 360;
 const MAP_H = 600;
-const CAMPAIGN_LEVELS = 16;
+const CAMPAIGN_LEVELS = 20;
 const ENDLESS_UNLOCK = 3;
 
 const PLAYER = 1;
@@ -115,6 +115,8 @@ interface Rules {
   /** The twists of the later levels. */
   title?: string;
   twinHQ?: boolean; mines?: number; fortress?: boolean; playerTier?: number;
+  /** Roads an outpost may have at most (4 unless said), and the size every neutral starts at. */
+  maxDeg?: number; neutralTier?: number;
   aiInterval: number; sendFrac: number;
   /** How good the generals are: the margin they will attack on (bigger is
    *  bolder), and how often they think to mass for a push (1 is every tick). */
@@ -149,7 +151,8 @@ function rulesFor(level: number, endless: boolean): Rules {
       enemyExtra: 4, enemyGold: 200, neutralBase: 14,
     };
   }
-  const L = Math.min(12, level);
+  // The twist levels take level ten's generals: the twist is the difficulty.
+  const L = level > 12 ? 10 : level;
   const base: Rules = {
     level, endless, mapH: MAP_H,
     nodeCount: Math.min(18, 9 + L),
@@ -168,6 +171,10 @@ function rulesFor(level: number, endless: boolean): Rules {
     case 14: return { ...base, title: 'GOLD RUSH', mines: 5, enemyGold: 300, neutralBase: 20 };
     case 15: return { ...base, title: 'FORTRESS', fortress: true, playerTier: 3, enemyGold: 450 };
     case 16: return { ...base, title: 'FOUR FRONTS', enemies: 4, nodeCount: 36, mapH: 1200, enemyExtra: 2, enemyGold: 260 };
+    case 17: return { ...base, title: 'DEEP POCKETS', enemyGold: 500, enemyExtra: 1, neutralBase: 18 };
+    case 18: return { ...base, title: 'NARROW ROADS', maxDeg: 3, nodeCount: 22, mapH: 800, enemyGold: 200, enemyExtra: 1 };
+    case 19: return { ...base, title: 'RICH LAND', mines: 6, playerTier: 3, enemyGold: 300, enemyExtra: 1 };
+    case 20: return { ...base, title: 'THE GAUNTLET', enemies: 4, nodeCount: 54, mapH: 1800, twinHQ: true, playerTier: 3, enemyExtra: 3, enemyGold: 600, aiInterval: 1.0, aiMargin: 0.85, aiStageEvery: 1 };
     default: return base;
   }
 }
@@ -215,7 +222,8 @@ function buildWorld(rules: Rules, meta: Record<MetaKey, number>, seedExtra = 0):
   const union = (a: number, b: number) => { parent[find(a)] = find(b); };
   const crosses = (e: Edge) => edges.some((f) => f.a !== e.a && f.a !== e.b && f.b !== e.a && f.b !== e.b && segmentsCross(nodes[e.a], nodes[e.b], nodes[f.a], nodes[f.b]));
   for (const e of pairs) {
-    if (e.len > 150 || deg[e.a] >= 4 || deg[e.b] >= 4 || crosses(e)) continue;
+    const maxDeg = rules.maxDeg ?? 4;
+    if (e.len > 150 || deg[e.a] >= maxDeg || deg[e.b] >= maxDeg || crosses(e)) continue;
     edges.push(e); deg[e.a]++; deg[e.b]++; union(e.a, e.b);
   }
   for (const e of pairs) {
@@ -279,7 +287,7 @@ function buildWorld(rules: Rules, meta: Record<MetaKey, number>, seedExtra = 0):
     if (n.owner !== 0) continue;
     const far = Math.min(1, Math.hypot(n.x - home.x, n.y - home.y) / Math.hypot(MAP_W, MAP_H));
     n.troops = Math.round(rules.neutralBase * (0.4 + 1.6 * far) + rnd() * 10);
-    if (rnd() < 0.18) n.tier = 2;
+    if (rules.neutralTier) n.tier = rules.neutralTier; else if (rnd() < 0.18) n.tier = 2;
   }
   // Twin HQ: a second one of yours, beside the first.
   if (rules.twinHQ) {
@@ -288,10 +296,10 @@ function buildWorld(rules: Rules, meta: Record<MetaKey, number>, seedExtra = 0):
   }
   // Gold rush: mines already dug, out in the neutral ground, for whoever takes them.
   if (rules.mines) {
-    const pool = nodes.filter((n) => n.owner === 0 && !adj[n.id].some((i) => nodes[i].base));
+    const pool = nodes.filter((n) => n.owner === 0 && !adj[n.id].some((i) => nodes[i].base && nodes[i].owner === PLAYER));
     for (let k = 0; k < rules.mines && pool.length; k++) {
       const n = pool.splice(Math.floor(rnd() * pool.length), 1)[0];
-      n.mine = 1; n.tier = 1;
+      n.mine = 1;
     }
   }
 
