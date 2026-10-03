@@ -717,8 +717,10 @@ export default function Game() {
       let dt = Math.min(0.05, elapsed / 1000);
       last = now;
       if (pausedRef.current || document.hidden) dt = 0;
-      const steps = speedRef.current;
-      for (let i = 0; i < steps; i++) step(w, dt);
+      // Slow is a shorter tick; fast is two ticks, so nothing jumps a road.
+      const speed = speedRef.current;
+      if (speed < 1) step(w, dt * speed);
+      else for (let i = 0; i < speed; i++) step(w, dt);
       if (w.over) settle(w);
       ctx.fillStyle = '#000000';
       ctx.fillRect(0, 0, canvas.width, canvas.height);
@@ -907,7 +909,8 @@ export default function Game() {
           <div className="text-[11px] text-white/45">next wave in {fmt(ui?.waveT ?? 0)}s · {ui?.mine ?? 0} vs {ui?.theirs ?? 0}</div>
         </div>
         <div className="flex gap-1.5">
-          <button className={`${btn} bg-white/10 px-2.5 py-1.5`} onClick={() => { speedRef.current = speedRef.current === 1 ? 2 : 1; }}>{ui?.speed ?? 1}×</button>
+          <button className={`${btn} bg-white/10 px-2.5 py-1.5`} onClick={() => { if (confirm('Restart this level?')) start(run.level, run.endless); }}>↻</button>
+          <button className={`${btn} bg-white/10 px-2.5 py-1.5`} onClick={() => { const steps = [0.5, 1, 2]; speedRef.current = steps[(steps.indexOf(speedRef.current) + 1) % steps.length]; }}>{ui?.speed ?? 1}×</button>
           <button className={`${btn} bg-white/10 px-2.5 py-1.5`} onClick={() => { pausedRef.current = !pausedRef.current; }}>{ui?.paused ? '▶' : '❚❚'}</button>
         </div>
       </div>
