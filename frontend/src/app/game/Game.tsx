@@ -417,6 +417,26 @@ function step(w: World, dt: number) {
   w.convoys = w.convoys.filter((c) => c.t < 1);
   for (const c of arrived) reachNode(w, c);
 
+  // Columns that meet on the road fight there: head on, or one catching the
+  // other up. The bigger marches on, short the smaller; equals die together.
+  for (let i = 0; i < w.convoys.length; i++) {
+    const a = w.convoys[i];
+    if (a.n <= 0) continue;
+    for (let j = i + 1; j < w.convoys.length; j++) {
+      const b = w.convoys[j];
+      if (b.n <= 0 || a.owner === b.owner) continue;
+      const sameRoad = (a.from === b.from && a.to === b.to) || (a.from === b.to && a.to === b.from);
+      if (!sameRoad) continue;
+      const pa = convoyPos(w, a), pb = convoyPos(w, b);
+      if (Math.hypot(pa.x - pb.x, pa.y - pb.y) > 9) continue;
+      w.shots.push({ x1: pa.x, y1: pa.y, x2: pb.x, y2: pb.y, age: 0 });
+      const an = a.n, bn = b.n;
+      a.n = an - bn; b.n = bn - an;
+      if (a.n <= 0) break;
+    }
+  }
+  w.convoys = w.convoys.filter((c) => c.n > 0.5);
+
   // Cannons.
   for (const n of w.nodes) {
     if (!n.cannon || n.owner === 0) continue;
