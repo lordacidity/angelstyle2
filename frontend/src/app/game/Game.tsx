@@ -797,6 +797,8 @@ export default function Game() {
   // Fingers on the map while paused: one pans, two pinch.
   const fingersRef = useRef(new Map<number, { x: number; y: number }>());
   const pinchRef = useRef<{ dist: number; zoom: number } | null>(null);
+  // A finger down while paused: a tap if it stays put, a pan if it moves.
+  const pausedTapRef = useRef<{ x: number; y: number; moved: boolean } | null>(null);
   const dragRef = useRef<{ from: number; x: number; y: number; moved: boolean; over: number | null } | null>(null);
   const pausedRef = useRef(false);
   const speedRef = useRef(1);
@@ -968,13 +970,9 @@ export default function Game() {
     fingersRef.current.delete(e.pointerId);
     if (fingersRef.current.size < 2) pinchRef.current = null;
   };
-  const onDown = (e: React.PointerEvent) => {
-    const w = worldRef.current; if (!w || w.over) return;
-    e.currentTarget.setPointerCapture(e.pointerId);
-    if (pausedRef.current) { panDown(e); return; }
-    const p = toMap(e);
-    const n = hit(w, p);
-    if (!n) { w.selected = null; w.picking = null; w.picked = []; dragRef.current = null; return; }
+  // What a tap on an outpost does: picks it, answers an auto-send pick, or
+  // (twice) sets or clears one. Playing or paused.
+  const tapNode = (w: World, n: Node): boolean => {
     if (w.picking !== null) {
       const from = w.nodes[w.picking];
       if (n.id !== from.id && from.owner === PLAYER && !w.picked.includes(n.id)) w.picked.push(n.id);
@@ -983,24 +981,40 @@ export default function Game() {
         shipOrder(w, from);
         w.picking = null; w.picked = [];
       }
-      dragRef.current = null;
-      return;
+      return true;
     }
-    // Double tap on one of yours: set an auto-send (tap the target next), or
-    // clear the one it has.
     const now = performance.now();
     const twice = lastTapRef.current.id === n.id && now - lastTapRef.current.t < 350;
     lastTapRef.current = { id: n.id, t: now };
     if (twice && n.owner === PLAYER) {
       if (n.route) n.route = null; else { w.picking = n.id; w.pickN = 1; w.picked = []; }
-      w.selected = n.id; dragRef.current = null;
-      return;
+      w.selected = n.id;
+      return true;
     }
     w.selected = n.id;
+    return false;
+  };
+  const onDown = (e: React.PointerEvent) => {
+    const w = worldRef.current; if (!w || w.over) return;
+    e.currentTarget.setPointerCapture(e.pointerId);
+    if (pausedRef.current) {
+      panDown(e);
+      pausedTapRef.current = fingersRef.current.size === 1 ? { x: e.clientX, y: e.clientY, moved: false } : null;
+      return;
+    }
+    const p = toMap(e);
+    const n = hit(w, p);
+    if (!n) { w.selected = null; w.picking = null; w.picked = []; dragRef.current = null; return; }
+    if (tapNode(w, n)) { dragRef.current = null; return; }
     dragRef.current = n.owner === PLAYER ? { from: n.id, x: p.x, y: p.y, moved: false, over: null } : null;
   };
   const onMove = (e: React.PointerEvent) => {
-    if (fingersRef.current.size) { panMove(e); return; }
+    if (fingersRef.current.size) {
+      const t = pausedTapRef.current;
+      if (t && Math.hypot(e.clientX - t.x, e.clientY - t.y) > 8) t.moved = true;
+      if (fingersRef.current.size > 1) pausedTapRef.current = null;
+      panMove(e); return;
+    }
     const d = dragRef.current; if (!d) return;
     const p = toMap(e);
     d.x = p.x; d.y = p.y;
@@ -1011,7 +1025,17 @@ export default function Game() {
     d.over = over && over.id !== d.from ? over.id : null;
   };
   const onUp = (e: React.PointerEvent) => {
-    if (fingersRef.current.size) { panUp(e); return; }
+    if (fingersRef.current.size) {
+      panUp(e);
+      // A still finger while paused is a tap on the map, same as playing.
+      const t = pausedTapRef.current; pausedTapRef.current = null;
+      const w = worldRef.current;
+      if (t && !t.moved && w && !w.over) {
+        const n = hit(w, toMap(e));
+        if (n) tapNode(w, n); else { w.selected = null; w.picking = null; w.picked = []; }
+      }
+      return;
+    }
     const d = dragRef.current; dragRef.current = null;
     const w = worldRef.current; if (!w || !d || !d.moved) return;
     const n = hit(w, toMap(e));
