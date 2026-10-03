@@ -475,10 +475,10 @@ function aiTick(w: World, f: Faction) {
     const avail = n.troops * frac;
     let best: Node | null = null; let bestScore = -Infinity;
     for (const m of hostile) {
-      const incoming = w.convoys.filter((c) => c.to === m.id && c.owner === m.owner).reduce((s, c) => s + c.n, 0);
+      const incoming = w.convoys.filter((c) => c.to === m.id && c.owner === m.owner && seesColumn(w, f.id, c)).reduce((s, c) => s + c.n, 0);
       // A canny general counts what the guns on the way will cost.
       const guns = r.aiSmart >= 1 ? w.nodes.filter((g) => g.owner !== f.id && g.cannon && Math.hypot(g.x - m.x, g.y - m.y) < cannonRange(g, w)).reduce((s, g) => s + CANNON_DMG[g.cannon] * 3, 0) : 0;
-      const need = (m.troops + incoming) * wallMult(m) + 1 + guns;
+      const need = (reckon(w, f.id, m) + incoming) * wallMult(m) + 1 + guns;
       if (avail < need * (m.owner === 0 ? 1.1 : 1.25)) continue;
       let score = (m.owner === PLAYER ? 3 : m.owner === 0 ? 1 : 2) + (m.base ? 2.5 : 0) + m.prod * 0.4 - need / avail;
       if (m.owner === PLAYER && m.cannon && r.aiSmart === 0) score += 1;
@@ -487,8 +487,8 @@ function aiTick(w: World, f: Faction) {
     if (best) { send(w, n.id, best.id, frac); continue; }
     // Full and nothing it can take: bleed the weakest of yours anyway.
     if (n.troops >= capOf(n) * 0.95) {
-      const yours = hostile.filter((m) => m.owner === PLAYER).sort((a, b) => a.troops * wallMult(a) - b.troops * wallMult(b));
-      if (yours.length && avail > yours[0].troops * wallMult(yours[0]) * 0.6) { send(w, n.id, yours[0].id, 0.8); continue; }
+      const yours = hostile.filter((m) => m.owner === PLAYER).sort((a, b) => reckon(w, f.id, a) * wallMult(a) - reckon(w, f.id, b) * wallMult(b));
+      if (yours.length && avail > reckon(w, f.id, yours[0]) * wallMult(yours[0]) * 0.6) { send(w, n.id, yours[0].id, 0.8); continue; }
     }
   }
   // Nothing full ever sits idle: an outpost near its cap with nothing to
@@ -516,8 +516,8 @@ function aiTick(w: World, f: Faction) {
     for (const i of ring) for (const j of w.adj[i]) if (w.nodes[j].owner === f.id && j !== m.id) ids.add(j);
     const from = [...ids].map((i) => w.nodes[i]).filter((n) => n.troops >= 10);
     if (!from.length) continue;
-    const incoming = w.convoys.filter((c) => c.to === m.id && c.owner === m.owner).reduce((s, c) => s + c.n, 0);
-    const need = (m.troops + incoming) * wallMult(m) + 1 + (m.cannon ? 15 * m.cannon : 0);
+    const incoming = w.convoys.filter((c) => c.to === m.id && c.owner === m.owner && seesColumn(w, f.id, c)).reduce((s, c) => s + c.n, 0);
+    const need = (reckon(w, f.id, m) + incoming) * wallMult(m) + 1 + (m.cannon ? 15 * m.cannon : 0);
     const avail = from.reduce((s, n) => s + n.troops * frac, 0);
     const ratio = need / avail;
     if (ratio < bestRatio) { bestRatio = ratio; bestT = m; bestFrom = from; }
@@ -541,7 +541,7 @@ function aiSpend(w: World, f: Faction) {
   const held = w.nodes.filter((n) => n.owner === f.id);
   const mine = held.filter((n) => !n.mine);
   if (!mine.length) return;
-  const threat = (n: Node) => w.adj[n.id].reduce((s, i) => s + (w.nodes[i].owner !== f.id && w.nodes[i].owner !== 0 ? w.nodes[i].troops : 0), 0);
+  const threat = (n: Node) => w.adj[n.id].reduce((s, i) => s + (w.nodes[i].owner !== f.id && w.nodes[i].owner !== 0 ? reckon(w, f.id, w.nodes[i]) : 0), 0);
   const front = mine.filter((n) => threat(n) > 0).sort((a, b) => threat(b) - threat(a));
   const hq = mine.find((n) => n.base) ?? mine[0];
   // Mercenaries, when the purse is deep, a front is thin, and not within fifteen seconds of the last.
@@ -630,11 +630,27 @@ function shiftRoads(w: World) {
 }
 
 /** Fog of war: what you can see, your outposts and whatever touches them. */
-function seenByPlayer(w: World): Set<number> | null {
+function seenByPlayer(w: World): Set<number> | null { return seenBy(w, PLAYER); }
+/** Fog of war, for any side: its own outposts and the ones one road off.
+ *  Null when there is no fog. */
+function seenBy(w: World, owner: number): Set<number> | null {
   if (!w.rules.fog) return null;
   const seen = new Set<number>();
-  for (const n of w.nodes) if (n.owner === PLAYER) { seen.add(n.id); for (const j of w.adj[n.id]) seen.add(j); }
+  for (const n of w.nodes) if (n.owner === owner) { seen.add(n.id); for (const j of w.adj[n.id]) seen.add(j); }
   return seen;
+}
+/** The garrison a side reckons an outpost holds. In the fog, nobody's
+ *  numbers show but your own: a neutral is taken for an average one, and a
+ *  held outpost for half full. Walls show, so they are counted as they are. */
+function reckon(w: World, owner: number, m: Node): number {
+  if (!w.rules.fog || m.owner === owner) return m.troops;
+  return m.owner === 0 ? w.rules.neutralBase * 1.2 : capOf(m) * 0.5;
+}
+/** A column a side can see: on a road touching its ground. */
+function seesColumn(w: World, owner: number, c: Convoy): boolean {
+  if (!w.rules.fog || c.owner === owner) return true;
+  const a = w.nodes[c.from].owner === owner, b = w.nodes[c.to].owner === owner;
+  return a || b;
 }
 
 /** Mercenaries: gold for thirty troops, at an outpost of yours. */
@@ -776,6 +792,14 @@ function buyTech(w: World, key: TechKey) {
 
 // ── Drawing ────────────────────────────────────────────────────────────────
 
+// One offscreen canvas for the fog, kept the size of the screen.
+let fogCanvas: HTMLCanvasElement | null = null;
+function fogLayer(wPx: number, hPx: number): HTMLCanvasElement {
+  if (!fogCanvas) fogCanvas = document.createElement('canvas');
+  if (fogCanvas.width !== wPx || fogCanvas.height !== hPx) { fogCanvas.width = wPx; fogCanvas.height = hPx; }
+  return fogCanvas;
+}
+
 const nodeR = (n: Node) => (n.base ? 17 + n.tier * 1.5 : 12 + n.tier * 2);
 
 function draw(ctx: CanvasRenderingContext2D, w: World, view: { s: number; ox: number; oy: number; midY: number }, drag: { from: number; x: number; y: number; over: number | null } | null) {
@@ -784,9 +808,12 @@ function draw(ctx: CanvasRenderingContext2D, w: World, view: { s: number; ox: nu
   ctx.translate(ox, oy);
   ctx.scale(s, s);
 
-  // Edges.
+  const seen = seenByPlayer(w);
+  const own = new Set(w.nodes.filter((n) => n.owner === PLAYER).map((n) => n.id));
+  // Edges. In the fog, only roads that touch your ground.
   ctx.lineCap = 'round';
   for (const e of w.edges) {
+    if (seen && !own.has(e.a) && !own.has(e.b)) continue;
     const a = w.nodes[e.a], b = w.nodes[e.b];
     const sel = w.selected !== null && (e.a === w.selected || e.b === w.selected) && w.nodes[w.selected].owner === PLAYER;
     ctx.strokeStyle = sel ? 'rgba(255,255,255,0.6)' : '#1c1c1c';
@@ -809,11 +836,12 @@ function draw(ctx: CanvasRenderingContext2D, w: World, view: { s: number; ox: nu
     ctx.strokeStyle = `rgba(255,255,255,${1 - sh.age / 0.14})`; ctx.lineWidth = 2;
     ctx.beginPath(); ctx.moveTo(sh.x1, sh.y1); ctx.lineTo(sh.x2, sh.y2); ctx.stroke();
   }
-  const seen = seenByPlayer(w);
-  // Outposts.
+  // Outposts. In the fog, only yours and the ones a road away, and those
+  // keep their numbers to themselves.
   for (const n of w.nodes) {
+    if (seen && !seen.has(n.id)) continue;
     const r = nodeR(n);
-    const hidden = seen !== null && !seen.has(n.id);
+    const hidden = seen !== null && n.owner !== PLAYER;
     const col = COLORS[n.owner];
     const isSel = w.selected === n.id;
     const canTarget = w.picking !== null && w.picking !== n.id;
@@ -889,7 +917,7 @@ function draw(ctx: CanvasRenderingContext2D, w: World, view: { s: number; ox: nu
   }
   // Columns.
   for (const c of w.convoys) {
-    if (seen && c.owner !== PLAYER && !seen.has(c.from) && !seen.has(c.to)) continue;
+    if (seen && c.owner !== PLAYER && !own.has(c.from) && !own.has(c.to)) continue;
     const p = convoyPos(w, c);
     const col = COLORS[c.owner];
     ctx.fillStyle = col;
@@ -898,6 +926,29 @@ function draw(ctx: CanvasRenderingContext2D, w: World, view: { s: number; ox: nu
     ctx.font = '700 9px -apple-system, system-ui, sans-serif';
     ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
     ctx.fillText(String(Math.ceil(c.n)), p.x, p.y + 0.5);
+  }
+  // The fog itself: grey over the whole map, with a soft clearing around
+  // each outpost of yours that reaches just past its neighbours.
+  if (seen) {
+    const fog = fogLayer(ctx.canvas.width, ctx.canvas.height);
+    const fc = fog.getContext('2d')!;
+    fc.setTransform(1, 0, 0, 1, 0, 0);
+    fc.globalCompositeOperation = 'source-over';
+    fc.fillStyle = 'rgba(44,45,52,0.96)';
+    fc.fillRect(0, 0, fog.width, fog.height);
+    fc.setTransform(s, 0, 0, s, ox, oy);
+    fc.globalCompositeOperation = 'destination-out';
+    for (const n of w.nodes) {
+      if (n.owner !== PLAYER) continue;
+      const reach = Math.max(60, ...w.adj[n.id].map((j) => Math.hypot(w.nodes[j].x - n.x, w.nodes[j].y - n.y))) + 30;
+      const g = fc.createRadialGradient(n.x, n.y, reach * 0.55, n.x, n.y, reach);
+      g.addColorStop(0, 'rgba(0,0,0,1)'); g.addColorStop(1, 'rgba(0,0,0,0)');
+      fc.fillStyle = g;
+      fc.beginPath(); fc.arc(n.x, n.y, reach, 0, Math.PI * 2); fc.fill();
+    }
+    ctx.setTransform(1, 0, 0, 1, 0, 0);
+    ctx.drawImage(fog, 0, 0);
+    ctx.setTransform(s, 0, 0, s, ox, oy);
   }
   // Flash.
   if (w.flash) {
@@ -1073,7 +1124,7 @@ export default function Game() {
           selProdPerMin: sel ? prodOf(w, sel) * 60 : 0, selHold: sel ? Math.ceil(sel.troops * wallMult(sel)) : 0,
           prodPerMin: w.nodes.filter((n) => n.owner === PLAYER && n.troops < capOf(n) - 0.5).reduce((t, n) => t + prodOf(w, n) * 60, 0),
           mine: w.nodes.filter((n) => n.owner === PLAYER).length, theirs: w.nodes.filter((n) => n.owner >= 2).length, picking: w.picking !== null, pickN: w.pickN, pickLeft: w.pickN - w.picked.length,
-          mercs: w.rules.mercs ?? 0, selHidden: (() => { const sn = seenByPlayer(w); return !!(sn && sel && !sn.has(sel.id)); })(), shiftT: w.rules.shift ? w.shiftT : 0,
+          mercs: w.rules.mercs ?? 0, selHidden: !!(w.rules.fog && sel && sel.owner !== PLAYER), shiftT: w.rules.shift ? w.shiftT : 0,
           scrollFrac: scrollFracRef.current, viewFrac: viewFracRef.current,
           army: (() => {
             const by = new Map<number, number>();
@@ -1097,8 +1148,9 @@ export default function Game() {
     return { x: ((e.clientX - r.left) * dpr - v.ox) / v.s, y: ((e.clientY - r.top) * dpr - v.oy) / v.s };
   };
   const hit = (w: World, p: { x: number; y: number }) => {
+    const seen = seenByPlayer(w);
     let best: Node | null = null; let bd = 30;
-    for (const n of w.nodes) { const d = Math.hypot(n.x - p.x, n.y - p.y); if (d < bd) { bd = d; best = n; } }
+    for (const n of w.nodes) { if (seen && !seen.has(n.id)) continue; const d = Math.hypot(n.x - p.x, n.y - p.y); if (d < bd) { bd = d; best = n; } }
     return best;
   };
   // Paused: the map is the thing under the fingers. One drags it, two pinch it.
@@ -1425,7 +1477,7 @@ export default function Game() {
             <div className="flex h-full flex-col items-center justify-center text-center text-[13px] text-white/50">
               <div className="font-bold" style={{ color: COLORS[sel.owner] }}>{sel.owner === 0 ? 'NEUTRAL' : NAMES[sel.owner]} {sel.base ? 'HQ' : 'outpost'}</div>
               {ui?.selHidden ? (
-                <div className="text-white/30">Out of sight. Take ground beside it to see in.</div>
+                <div className="text-white/30">Its numbers are in the fog.{sel.wall ? ` Walls ${sel.wall}.` : ''}{sel.cannon ? ` Cannon ${sel.cannon}.` : ''}</div>
               ) : (
                 <>
                   <div>{Math.floor(sel.troops)} troops{sel.wall ? ` · walls ${sel.wall} (×${wallMult(sel).toFixed(1)})` : ''}{sel.cannon ? ` · cannon ${sel.cannon}` : ''}</div>
