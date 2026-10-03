@@ -40,7 +40,7 @@ const BASE_PROD_PER_S = 0.9;
 
 const UPG = {
   prod: { name: 'Barracks', cost: [30, 55, 95], desc: '+35% troops/s' },
-  wall: { name: 'Walls', cost: [25, 50, 90], desc: '+20% defence' },
+  wall: { name: 'Walls', cost: [25, 50, 90], desc: '+25% defence' },
   cannon: { name: 'Cannon', cost: [45, 80, 130], desc: 'shoots passing enemies' },
   tier: { name: 'Expand', cost: [60, 130], desc: 'bigger, faster' },
 } as const;
@@ -255,7 +255,7 @@ function buildWorld(rules: Rules, meta: Record<MetaKey, number>, seedExtra = 0):
 // ── Simulation ─────────────────────────────────────────────────────────────
 
 const capOf = (n: Node) => TIER_CAP[n.tier - 1] * (n.base ? 1.5 : 1);
-const wallMult = (n: Node) => 1 + 0.2 * n.wall;
+const wallMult = (n: Node) => 1 + 0.25 * n.wall;
 // One formula for everyone. Your tech and Armoury sit on top; the red has
 // neither, only what it builds on the ground.
 const prodOf = (w: World, n: Node) => {
@@ -613,7 +613,7 @@ function draw(ctx: CanvasRenderingContext2D, w: World, view: { s: number; ox: nu
     }
     if (canTarget) {
       ctx.strokeStyle = 'rgba(255,255,255,0.5)'; ctx.lineWidth = 2; ctx.setLineDash([3, 4]);
-      ctx.beginPath(); ctx.arc(n.x, n.y, r + 7 + Math.sin(w.time * 6) * 1.5, 0, Math.PI * 2); ctx.stroke();
+      ctx.beginPath(); ctx.arc(n.x, n.y, r + 7 + n.wall * 4.5 + Math.sin(w.time * 6) * 1.5, 0, Math.PI * 2); ctx.stroke();
       ctx.setLineDash([]);
     }
     ctx.fillStyle = '#000000';
@@ -622,14 +622,18 @@ function draw(ctx: CanvasRenderingContext2D, w: World, view: { s: number; ox: nu
     ctx.beginPath(); ctx.arc(n.x, n.y, r, 0, Math.PI * 2); ctx.fill();
     ctx.strokeStyle = col; ctx.lineWidth = n.base ? 4 : 2.5;
     ctx.beginPath(); ctx.arc(n.x, n.y, r, 0, Math.PI * 2); ctx.stroke();
-    if (n.wall) {
-      ctx.strokeStyle = col; ctx.lineWidth = 1.5; ctx.setLineDash([2, 3]);
-      ctx.beginPath(); ctx.arc(n.x, n.y, r + 4 + n.wall, 0, Math.PI * 2); ctx.stroke();
-      ctx.setLineDash([]);
+    // Walls: a solid ring for each level, stacked outward, with four gates.
+    for (let k = 0; k < n.wall; k++) {
+      ctx.strokeStyle = col; ctx.lineWidth = 2.5;
+      const rr = r + 5 + k * 4.5;
+      for (let g = 0; g < 4; g++) {
+        const a0 = g * Math.PI / 2 + 0.12;
+        ctx.beginPath(); ctx.arc(n.x, n.y, rr, a0, a0 + Math.PI / 2 - 0.24); ctx.stroke();
+      }
     }
     if (isSel) {
       ctx.strokeStyle = '#fff'; ctx.lineWidth = 2;
-      ctx.beginPath(); ctx.arc(n.x, n.y, r + 9, 0, Math.PI * 2); ctx.stroke();
+      ctx.beginPath(); ctx.arc(n.x, n.y, r + 9 + n.wall * 4.5, 0, Math.PI * 2); ctx.stroke();
     }
     ctx.fillStyle = n.owner === PLAYER ? '#000' : '#fff';
     ctx.font = `700 ${n.base ? 15 : 13}px -apple-system, system-ui, sans-serif`;
@@ -1011,7 +1015,7 @@ export default function Game() {
           <div className="flex gap-1.5">
             <button className={`${btn} px-3 py-1.5 ${tab === 'post' ? 'bg-white/20' : 'bg-white/5'}`} onClick={() => setTab('post')}>Outpost</button>
             <button className={`${btn} px-3 py-1.5 ${tab === 'tech' ? 'bg-white/20' : 'bg-white/5'}`} onClick={() => setTab('tech')}>Tech</button>
-            <button className={`${btn} bg-white/10 px-3 py-1.5`} onClick={() => { const steps = [0.25, 0.5, 0.75, 1]; sendPctRef.current = steps[(steps.indexOf(sendPctRef.current) + 1) % steps.length]; }}>
+            <button className={`${btn} bg-white/10 px-3 py-1.5`} onClick={() => { const steps = [0.25, 0.5, 1]; sendPctRef.current = steps[(steps.indexOf(sendPctRef.current) + 1) % steps.length]; }}>
               send {Math.round((ui?.sendPct ?? 0.5) * 100)}%
             </button>
           </div>
