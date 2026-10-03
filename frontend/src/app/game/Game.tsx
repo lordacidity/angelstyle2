@@ -130,8 +130,8 @@ interface Node {
   auto: Partial<Record<UpgKey, Auto>>;
 }
 interface Edge { a: number; b: number; len: number }
-/** An upgrade or tech buying itself: the order it was switched on, and
- *  how many levels it is to buy ahead of everything else. */
+/** An upgrade or tech buying itself: the order it was switched on, and 1
+ *  while its next level goes ahead of everything else. */
 interface Auto { order: number; prio: number }
 /** A column on the road. `from`/`to` are the leg it is on; `path` is the
  *  whole route, and `leg` which step of it. */
@@ -1637,8 +1637,8 @@ export default function Game() {
   const sel = ui?.selected ?? null;
   const mineSel = sel?.owner === PLAYER;
   // A card that buys itself: a hold switches auto on or off; the tap that
-  // ends a hold does nothing. A tap on a card already on auto pushes it to
-  // the front of the line, one level a tap; a tap otherwise buys one.
+  // ends a hold does nothing. A tap on a card already on auto makes its
+  // next level the next thing bought; a tap otherwise buys one.
   const hold = (toggle: (w: World) => void, tap: (w: World) => void) => {
     const down = () => { clearTimeout(holdRef.current.t); holdRef.current = { t: setTimeout(() => { holdRef.current.fired = true; act(toggle); }, 450), fired: false }; };
     const up = () => { clearTimeout(holdRef.current.t); };
@@ -1649,14 +1649,14 @@ export default function Game() {
     };
   };
   const autoCls = (auto: Auto | undefined, poor: boolean) => `relative flex flex-col items-start rounded-xl px-3 py-1 text-left ${auto ? 'bg-[#ff4fa3]/15 ring-1 ring-inset ring-[#ff4fa3]/70' : 'bg-white/5'} ${poor && !auto ? 'opacity-30' : ''}`;
-  const autoTag = (auto: Auto | undefined) => auto && <span className="ml-1.5 text-[9px] font-bold tracking-wide text-[#ff4fa3]">AUTO{auto.prio > 0 ? ` ×${auto.prio}` : ''}</span>;
+  const autoTag = (auto: Auto | undefined) => auto && <span className="ml-1.5 text-[9px] font-bold tracking-wide text-[#ff4fa3]">{auto.prio > 0 ? 'AUTO · NEXT' : 'AUTO'}</span>;
   const upgRows = (n: Node) => (Object.keys(UPG) as UpgKey[]).map((k) => {
     const u = UPG[k]; const lvl = k === 'tier' ? n.tier - 1 : n[k];
     const cost = upgradeCost({ tech: { thrift: ui?.tech.thrift ?? 0 } } as unknown as World, n, k);
     const auto = n.auto[k];
     const poor = (ui?.gold ?? 0) < cost;
     return (
-      <button key={k} {...hold((w) => toggleAuto(w, n.id, k), (w) => { const a = w.nodes[n.id].auto[k]; if (a) a.prio++; else if (!poor) buyUpgrade(w, n.id, k); })}
+      <button key={k} {...hold((w) => toggleAuto(w, n.id, k), (w) => { const a = w.nodes[n.id].auto[k]; if (a) a.prio = 1; else if (!poor) buyUpgrade(w, n.id, k); })}
         className={`${btn} ${autoCls(auto, poor)}`}>
         {k === 'prod' && <span className="absolute right-1.5 top-1.5 h-2 w-2 rounded-full bg-[#38e08a]" />}
         <div className="flex w-full items-center justify-between text-[13px]"><b>{u.name}{autoTag(auto)}</b><span className="text-white">{cost}g</span></div>
@@ -1780,7 +1780,7 @@ export default function Game() {
                 const t = TECH[k]; const lvl = ui?.tech[k] ?? 0; const cost = techCost(k, lvl);
                 const auto = ui?.autoTech[k]; const poor = (ui?.gold ?? 0) < cost;
                 return (
-                  <button key={k} {...hold((w) => toggleAutoTech(w, k), (w) => { const a = w.autoTech[k]; if (a) a.prio++; else if (!poor) buyTech(w, k); })}
+                  <button key={k} {...hold((w) => toggleAutoTech(w, k), (w) => { const a = w.autoTech[k]; if (a) a.prio = 1; else if (!poor) buyTech(w, k); })}
                     className={`${btn} ${autoCls(auto, poor)}`}>
                     <div className="flex w-full items-center justify-between text-[13px]"><b>{t.name}{autoTag(auto)}</b><span className="text-white">{cost}g</span></div>
                     <div className="text-[11px] text-white/45">{t.desc} · lv {lvl}</div>
@@ -1791,7 +1791,7 @@ export default function Game() {
           ) : !sel ? (
             <div className="flex h-full flex-col items-center justify-center gap-1 px-2 text-center text-[13px] text-white/35">
               {ui?.blurb && <div className="text-[12px] text-white/60">{ui.blurb}</div>}
-              <div>Drag from one of yours to march. Tap one to build. Hold an upgrade or tech to make it buy itself; tap it again to put it first in line.</div>
+              <div>Drag from one of yours to march. Tap one to build. Hold an upgrade or tech to make it buy itself; tap it again to make it the next buy.</div>
             </div>
           ) : !mineSel ? (
             <div className="flex h-full flex-col items-center justify-center text-center text-[13px] text-white/50">
