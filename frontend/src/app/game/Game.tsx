@@ -27,7 +27,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 
 const MAP_W = 360;
 const MAP_H = 600;
-const CAMPAIGN_LEVELS = 20;
+const CAMPAIGN_LEVELS = 24;
 const ENDLESS_UNLOCK = 3;
 
 const PLAYER = 1;
@@ -45,11 +45,11 @@ const UPG = {
   tier: { name: 'Expand', cost: [60, 130, 340], desc: 'bigger, faster' },
 } as const;
 type UpgKey = keyof typeof UPG;
-const CANNON_DMG = [0, 5, 9, 14, 22];
+const CANNON_DMG = [0, 3, 6, 10, 15];
 const CANNON_RANGE = 130;
 /** A bigger outpost's guns reach further: +20% a size. */
 const cannonRange = (n: Node, w: World) => CANNON_RANGE * (1 + 0.2 * (n.tier - 1)) * (n.owner === PLAYER ? 1 + 0.15 * w.tech.scouts : 1);
-const CANNON_CD = 0.4;
+const CANNON_CD = 0.5;
 
 // A mine: an outpost dug out for gold. It breeds nothing and keeps no
 // walls, guns or barracks, only whatever garrison is sent to sit in it.
@@ -106,7 +106,7 @@ interface Edge { a: number; b: number; len: number }
  *  whole route, and `leg` which step of it. */
 interface Convoy { id: number; owner: number; n: number; from: number; to: number; t: number; dur: number; path: number[]; leg: number }
 interface Shot { x1: number; y1: number; x2: number; y2: number; age: number }
-interface Faction { id: number; tick: number; dead: number; gold: number; buyT: number }
+interface Faction { id: number; tick: number; dead: number; gold: number; buyT: number; mercT: number }
 
 interface Rules {
   level: number; endless: boolean; nodeCount: number; enemies: number;
@@ -117,6 +117,13 @@ interface Rules {
   twinHQ?: boolean; mines?: number; fortress?: boolean; playerTier?: number;
   /** Roads an outpost may have at most (4 unless said), and the size every neutral starts at. */
   maxDeg?: number; neutralTier?: number;
+  /** Fog: only outposts beside yours show their numbers. Mercs: gold for 30
+   *  troops at any outpost of yours. Shift: every so many seconds one road
+   *  goes and another appears. */
+  fog?: boolean; mercs?: number; shift?: number;
+  /** How canny the generals are: 1 pulls out of a lost outpost and shies
+   *  from guns; 2 also rides out to meet columns on the road. */
+  aiSmart: number;
   aiInterval: number; sendFrac: number;
   /** How good the generals are: the margin they will attack on (bigger is
    *  bolder), and how often they think to mass for a push (1 is every tick). */
@@ -141,13 +148,15 @@ interface World {
   picking: number | null;
   /** How many targets the order being pointed at takes, and those tapped so far. */
   pickN: number; picked: number[];
+  /** Shifting sands: seconds to the next shift. */
+  shiftT: number;
 }
 
 function rulesFor(level: number, endless: boolean): Rules {
   if (endless) {
     return {
       level, endless, nodeCount: 90, enemies: 3, mapH: 3200,
-      aiInterval: 1.3, sendFrac: 0.7, aiMargin: 0.8, aiStageEvery: 2,
+      aiInterval: 1.3, sendFrac: 0.7, aiMargin: 0.8, aiStageEvery: 2, aiSmart: 1,
       enemyExtra: 4, enemyGold: 200, neutralBase: 14,
     };
   }
@@ -164,6 +173,7 @@ function rulesFor(level: number, endless: boolean): Rules {
     enemyExtra: Math.min(3, Math.floor(L / 3)),
     enemyGold: L * 20,
     neutralBase: 6 + L * 2,
+    aiSmart: 0,
   };
   // Past twelve, the twists.
   switch (level) {
@@ -173,8 +183,12 @@ function rulesFor(level: number, endless: boolean): Rules {
     case 16: return { ...base, title: 'FOUR FRONTS', enemies: 4, nodeCount: 36, mapH: 1200, enemyExtra: 2, enemyGold: 260 };
     case 17: return { ...base, title: 'DEEP POCKETS', enemyGold: 500, enemyExtra: 1, neutralBase: 18 };
     case 18: return { ...base, title: 'NARROW ROADS', maxDeg: 3, nodeCount: 22, mapH: 800, enemyGold: 200, enemyExtra: 1 };
-    case 19: return { ...base, title: 'RICH LAND', mines: 6, playerTier: 3, enemyGold: 300, enemyExtra: 1 };
-    case 20: return { ...base, title: 'THE GAUNTLET', enemies: 4, nodeCount: 54, mapH: 1800, twinHQ: true, playerTier: 3, enemyExtra: 3, enemyGold: 600, aiInterval: 1.0, aiMargin: 0.85, aiStageEvery: 1 };
+    case 19: return { ...base, title: 'RICH LAND', mines: 6, playerTier: 3, enemyGold: 300, enemyExtra: 1, aiSmart: 1 };
+    case 20: return { ...base, title: 'THE GAUNTLET', enemies: 4, nodeCount: 54, mapH: 1800, twinHQ: true, playerTier: 3, enemyExtra: 3, enemyGold: 600, aiInterval: 1.0, aiMargin: 0.85, aiStageEvery: 1, aiSmart: 1 };
+    case 21: return { ...base, title: 'FOG OF WAR', fog: true, enemyGold: 150, enemyExtra: 1, aiSmart: 1 };
+    case 22: return { ...base, title: 'MERCENARIES', mercs: 60, enemyGold: 300, enemyExtra: 1, aiSmart: 1, aiInterval: 1.1 };
+    case 23: return { ...base, title: 'SHIFTING SANDS', shift: 40, maxDeg: 3, nodeCount: 22, mapH: 800, enemyGold: 350, enemyExtra: 2, aiSmart: 2, aiInterval: 1.0 };
+    case 24: return { ...base, title: 'ALL OF IT', fog: true, mercs: 60, shift: 45, enemies: 4, nodeCount: 48, mapH: 1600, fortress: true, twinHQ: true, playerTier: 3, enemyExtra: 2, enemyGold: 450, aiSmart: 2, aiInterval: 1.0, aiMargin: 0.85, aiStageEvery: 1 };
     default: return base;
   }
 }
@@ -281,7 +295,7 @@ function buildWorld(rules: Rules, meta: Record<MetaKey, number>, seedExtra = 0):
       n.owner = fid; n.troops = 15;
       taken.add(n.id); extra--;
     }
-    factions.push({ id: fid, tick: rnd() * rules.aiInterval, dead: 0, gold: rules.enemyGold, buyT: 3 });
+    factions.push({ id: fid, tick: rnd() * rules.aiInterval, dead: 0, gold: rules.enemyGold, buyT: 3, mercT: -99 });
   }
   for (const n of nodes) {
     if (n.owner !== 0) continue;
@@ -308,7 +322,7 @@ function buildWorld(rules: Rules, meta: Record<MetaKey, number>, seedExtra = 0):
     gold: 40 + META.gold.per * meta.gold, time: 0,
     nextId: 1,
     tech: { logistics: 0, conscription: 0, tithe: 0, scouts: 0 }, meta,
-    over: null, flash: { text: rules.endless ? 'THE LONG WAR' : rules.title ?? `LEVEL ${rules.level}`, age: 0 }, selected: null, picking: null, pickN: 1, picked: [],
+    over: null, flash: { text: rules.endless ? 'THE LONG WAR' : rules.title ?? `LEVEL ${rules.level}`, age: 0 }, selected: null, picking: null, pickN: 1, picked: [], shiftT: rules.shift ?? 0,
   };
 }
 
@@ -384,6 +398,12 @@ function reachNode(w: World, c: Convoy) {
   if (!last && here.owner === c.owner) {
     c.leg++;
     c.from = c.to; c.to = c.path[c.leg + 1]; c.t = 0;
+    // The road ahead may have shifted away: find a new one, or stop here.
+    if (!w.adj[c.from].includes(c.to)) {
+      const again = route(w, c.from, c.path[c.path.length - 1], c.owner);
+      if (!again) { c.to = c.from; arrive(w, c); return; }
+      c.path = again; c.leg = 0; c.to = again[1];
+    }
     c.dur = edgeLen(w, c.from, c.to) / convoySpeed(w, c.owner);
     w.convoys.push(c);
     return;
@@ -419,6 +439,29 @@ function arrive(w: World, c: Convoy) {
 function aiTick(w: World, f: Faction) {
   const r = w.rules;
   const frac = r.sendFrac;
+  // A canny general gets its troops out of an outpost that is about to
+  // fall, to the strongest neighbour of its own, rather than lose them.
+  if (r.aiSmart >= 1) {
+    for (const n of w.nodes) {
+      if (n.owner !== f.id || n.troops < 5) continue;
+      const incoming = w.convoys.filter((c) => c.to === n.id && c.owner !== f.id && c.t > 0.5).reduce((s, c) => s + c.n, 0);
+      if (incoming <= n.troops * wallMult(n) * 1.1) continue;
+      const safe = w.adj[n.id].map((i) => w.nodes[i]).filter((m) => m.owner === f.id).sort((a, b) => b.troops - a.troops)[0];
+      if (safe) send(w, n.id, safe.id, 0.9);
+    }
+  }
+  // A cannier one rides out to meet a column on the road before it arrives,
+  // when it has the men to win that fight and still hold the gate.
+  if (r.aiSmart >= 2) {
+    for (const c of w.convoys) {
+      if (c.owner === f.id) continue;
+      const n = w.nodes[c.to];
+      if (n.owner !== f.id || c.t > 0.6) continue;
+      if (w.convoys.some((d) => d.owner === f.id && d.from === n.id && d.to === c.from)) continue;
+      const needed = Math.ceil(c.n * 1.2) + 1;
+      if (n.troops - needed >= 10) sendCount(w, n.id, c.from, needed);
+    }
+  }
   for (const n of w.nodes) {
     if (n.owner !== f.id || n.troops < 8) continue;
     // Only the HQ acts every tick: an outpost's garrison sits out half of them.
@@ -429,10 +472,12 @@ function aiTick(w: World, f: Faction) {
     let best: Node | null = null; let bestScore = -Infinity;
     for (const m of hostile) {
       const incoming = w.convoys.filter((c) => c.to === m.id && c.owner === m.owner).reduce((s, c) => s + c.n, 0);
-      const need = (m.troops + incoming) * wallMult(m) + 1;
+      // A canny general counts what the guns on the way will cost.
+      const guns = r.aiSmart >= 1 ? w.nodes.filter((g) => g.owner !== f.id && g.cannon && Math.hypot(g.x - m.x, g.y - m.y) < cannonRange(g, w)).reduce((s, g) => s + CANNON_DMG[g.cannon] * 3, 0) : 0;
+      const need = (m.troops + incoming) * wallMult(m) + 1 + guns;
       if (avail < need * 1.25) continue;
       let score = (m.owner === PLAYER ? 3 : m.owner === 0 ? 1 : 2) + (m.base ? 2.5 : 0) + m.prod * 0.4 - need / avail;
-      if (m.owner === PLAYER && m.cannon) score += 1;
+      if (m.owner === PLAYER && m.cannon && r.aiSmart === 0) score += 1;
       if (score > bestScore) { bestScore = score; best = m; }
     }
     if (best) { send(w, n.id, best.id, frac); continue; }
@@ -496,6 +541,11 @@ function aiSpend(w: World, f: Faction) {
   if (hq.tier < 4) wants.push([hq, 'tier']);
   if (front[0] && front[0].cannon < 4) wants.push([front[0], 'cannon']);
   if (hq.prod < 4) wants.push([hq, 'prod']);
+  // Mercenaries, when the purse is deep and a front needs them.
+  // Mercenaries, when the purse is deep, a front is thin, and not within fifteen seconds of the last.
+  if (w.rules.mercs && front[0] && f.gold >= w.rules.mercs * 4 && front[0].troops < capOf(front[0]) * 0.5 && w.time - f.mercT > 15) {
+    f.gold -= w.rules.mercs; front[0].troops += 30; f.mercT = w.time; return;
+  }
   for (const [n, k] of wants) {
     const cost = upgradeCost(n, k);
     if (cost === null) continue;
@@ -505,9 +555,65 @@ function aiSpend(w: World, f: Faction) {
   }
 }
 
+// Shifting sands: one road goes (never one the map would split without)
+// and one appears, somewhere a road could run.
+function shiftRoads(w: World) {
+  const rnd = mulberry32(Math.floor(w.time * 7) + 13);
+  const connectedWithout = (skip: number) => {
+    const seen = new Set<number>([0]);
+    for (const q = [0]; q.length;) {
+      const i = q.shift()!;
+      for (let k = 0; k < w.edges.length; k++) {
+        if (k === skip) continue;
+        const e = w.edges[k];
+        const j = e.a === i ? e.b : e.b === i ? e.a : -1;
+        if (j >= 0 && !seen.has(j)) { seen.add(j); q.push(j); }
+      }
+    }
+    return seen.size === w.nodes.length;
+  };
+  const gone: number[] = [];
+  for (let k = 0; k < w.edges.length; k++) if (connectedWithout(k)) gone.push(k);
+  if (!gone.length) return;
+  const drop = gone[Math.floor(rnd() * gone.length)];
+  w.edges.splice(drop, 1);
+  const crosses = (a: number, b: number) => w.edges.some((f) => f.a !== a && f.a !== b && f.b !== a && f.b !== b && segmentsCross(w.nodes[a], w.nodes[b], w.nodes[f.a], w.nodes[f.b]));
+  const maxDeg = w.rules.maxDeg ?? 4;
+  for (let tries = 0; tries < 200; tries++) {
+    const a = Math.floor(rnd() * w.nodes.length), b = Math.floor(rnd() * w.nodes.length);
+    if (a === b || w.edges.some((e) => (e.a === a && e.b === b) || (e.a === b && e.b === a))) continue;
+    const len = Math.hypot(w.nodes[a].x - w.nodes[b].x, w.nodes[a].y - w.nodes[b].y);
+    if (len > 150 || crosses(a, b)) continue;
+    const deg = (i: number) => w.edges.filter((e) => e.a === i || e.b === i).length;
+    if (deg(a) >= maxDeg || deg(b) >= maxDeg) continue;
+    w.edges.push({ a, b, len });
+    break;
+  }
+  w.adj = w.nodes.map(() => []);
+  for (const e of w.edges) { w.adj[e.a].push(e.b); w.adj[e.b].push(e.a); }
+  w.flash = { text: 'THE ROADS SHIFT', age: 0 };
+}
+
+/** Fog of war: what you can see, your outposts and whatever touches them. */
+function seenByPlayer(w: World): Set<number> | null {
+  if (!w.rules.fog) return null;
+  const seen = new Set<number>();
+  for (const n of w.nodes) if (n.owner === PLAYER) { seen.add(n.id); for (const j of w.adj[n.id]) seen.add(j); }
+  return seen;
+}
+
+/** Mercenaries: gold for thirty troops, at an outpost of yours. */
+function hireMercs(w: World, id: number) {
+  const n = w.nodes[id];
+  const price = w.rules.mercs;
+  if (!price || n.owner !== PLAYER || w.gold < price) return;
+  w.gold -= price; n.troops += 30;
+}
+
 function step(w: World, dt: number) {
   if (w.over) return;
   w.time += dt;
+  if (w.rules.shift) { w.shiftT -= dt; if (w.shiftT <= 0) { w.shiftT = w.rules.shift; shiftRoads(w); } }
   if (w.flash) { w.flash.age += dt; if (w.flash.age > 1.6) w.flash = null; }
 
   // Breeding and gold.
@@ -664,9 +770,11 @@ function draw(ctx: CanvasRenderingContext2D, w: World, view: { s: number; ox: nu
     ctx.strokeStyle = `rgba(255,255,255,${1 - sh.age / 0.14})`; ctx.lineWidth = 2;
     ctx.beginPath(); ctx.moveTo(sh.x1, sh.y1); ctx.lineTo(sh.x2, sh.y2); ctx.stroke();
   }
+  const seen = seenByPlayer(w);
   // Outposts.
   for (const n of w.nodes) {
     const r = nodeR(n);
+    const hidden = seen !== null && !seen.has(n.id);
     const col = COLORS[n.owner];
     const isSel = w.selected === n.id;
     const canTarget = w.picking !== null && w.picking !== n.id;
@@ -713,9 +821,9 @@ function draw(ctx: CanvasRenderingContext2D, w: World, view: { s: number; ox: nu
     if (n.mine && n.owner !== PLAYER) ctx.fillStyle = '#fff';
     ctx.font = `700 ${n.base ? 15 : 13}px -apple-system, system-ui, sans-serif`;
     ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
-    ctx.fillText(String(Math.floor(n.troops)), n.x, n.y + 0.5);
+    ctx.fillText(hidden ? '?' : String(Math.floor(n.troops)), n.x, n.y + 0.5);
     // Small marks for what is built.
-    if (n.mine || (n.owner !== 0 && (n.prod || n.cannon || n.base))) {
+    if (!hidden && (n.mine || (n.owner !== 0 && (n.prod || n.cannon || n.base)))) {
       ctx.font = '600 8px -apple-system, system-ui, sans-serif';
       ctx.fillStyle = n.mine ? '#ffd166' : 'rgba(255,255,255,0.65)';
       const bits = [n.mine ? `MINE ${n.mine}` : '', n.base ? 'HQ' : '', n.prod ? `B${n.prod}` : '', n.cannon ? `C${n.cannon}` : ''].filter(Boolean).join(' ');
@@ -742,6 +850,7 @@ function draw(ctx: CanvasRenderingContext2D, w: World, view: { s: number; ox: nu
   }
   // Columns.
   for (const c of w.convoys) {
+    if (seen && c.owner !== PLAYER && !seen.has(c.from) && !seen.has(c.to)) continue;
     const p = convoyPos(w, c);
     const col = COLORS[c.owner];
     ctx.fillStyle = col;
@@ -772,6 +881,7 @@ interface Ui {
   /** Everything you hold, breeding, a minute (full outposts breed nothing). */
   prodPerMin: number;
   mine: number; theirs: number; picking: boolean; pickN: number; pickLeft: number;
+  mercs: number; selHidden: boolean; shiftT: number;
   /** Whether the map runs past the screen, and which way there is more of it. */
   /** The scrollbar: how far down the map the view is (0..1) and how much of it shows (0..1); 1 means all. */
   scrollFrac: number; viewFrac: number;
@@ -796,9 +906,11 @@ export default function Game() {
   // The camera: how far past the fit it is zoomed (1 is the fit), and the
   // map point under the middle of the screen. Set while paused, kept while
   // playing. Infinity for cy means "the bottom, where home is".
-  const camRef = useRef({ zoom: 1, cx: MAP_W / 2, cy: Infinity });
+  const camRef = useRef({ zoom: 1.3, cx: MAP_W / 2, cy: Infinity });
   // What the scrollbar reads: how far down the view is, and how much it shows.
   const scrollFracRef = useRef(0);
+  // Where the scrollbar was grabbed, and how far down it was then.
+  const barGrabRef = useRef<{ y: number; frac: number } | null>(null);
   const viewFracRef = useRef(1);
   // Fingers on the map while paused: one pans, two pinch.
   const fingersRef = useRef(new Map<number, { x: number; y: number }>());
@@ -807,7 +919,7 @@ export default function Game() {
   const pausedTapRef = useRef<{ x: number; y: number; moved: boolean } | null>(null);
   const dragRef = useRef<{ from: number; x: number; y: number; moved: boolean; over: number | null } | null>(null);
   const pausedRef = useRef(false);
-  const speedRef = useRef(1);
+  const speedRef = useRef(0.5);
   const sendPctRef = useRef(1);
   const settledRef = useRef(false);
   // The last outpost tapped and when: a second tap on it inside 350ms is a double tap.
@@ -823,13 +935,13 @@ export default function Game() {
   const start = useCallback((level: number, endless: boolean) => {
     const s = loadSave();
     worldRef.current = buildWorld(rulesFor(level, endless), s.meta);
-    pausedRef.current = false; speedRef.current = 1; sendPctRef.current = 1; settledRef.current = false;
+    pausedRef.current = false; speedRef.current = 0.5; sendPctRef.current = 1; settledRef.current = false;
     dragRef.current = null;
     setRun({ level, endless });
     setTab('post');
     setScreen('play');
     // Back to the bottom of the map, where home is, at the fit.
-    camRef.current = { zoom: 1, cx: MAP_W / 2, cy: Infinity }; refitRef.current();
+    camRef.current = { zoom: 1.3, cx: MAP_W / 2, cy: Infinity }; refitRef.current();
   }, []);
 
   // When a run ends, bank the scrap once.
@@ -859,6 +971,7 @@ export default function Game() {
     if (!ctx) return;
     const fit = () => {
       const r = wrap.getBoundingClientRect();
+      if (r.width < 1 || r.height < 1) return; // not on screen: nothing to fit to
       const dpr = Math.min(2, window.devicePixelRatio || 1);
       canvas.width = Math.round(r.width * dpr); canvas.height = Math.round(r.height * dpr);
       canvas.style.width = `${r.width}px`; canvas.style.height = `${r.height}px`;
@@ -921,6 +1034,7 @@ export default function Game() {
           selProdPerMin: sel ? prodOf(w, sel) * 60 : 0, selHold: sel ? Math.ceil(sel.troops * wallMult(sel)) : 0,
           prodPerMin: w.nodes.filter((n) => n.owner === PLAYER && n.troops < capOf(n) - 0.5).reduce((t, n) => t + prodOf(w, n) * 60, 0),
           mine: w.nodes.filter((n) => n.owner === PLAYER).length, theirs: w.nodes.filter((n) => n.owner >= 2).length, picking: w.picking !== null, pickN: w.pickN, pickLeft: w.pickN - w.picked.length,
+          mercs: w.rules.mercs ?? 0, selHidden: (() => { const sn = seenByPlayer(w); return !!(sn && sel && !sn.has(sel.id)); })(), shiftT: w.rules.shift ? w.shiftT : 0,
           scrollFrac: scrollFracRef.current, viewFrac: viewFracRef.current,
           army: (() => {
             const by = new Map<number, number>();
@@ -1177,7 +1291,7 @@ export default function Game() {
         <button className={`${btn} bg-white/10 px-3 py-1.5`} onClick={() => { setScreen('menu'); worldRef.current = null; }}>✕</button>
         <div className="text-center">
           <div className="font-black">{run.endless ? 'LONG WAR' : `LEVEL ${run.level}`} <span className="text-white/40">· {clock(ui?.time ?? 0)}</span></div>
-          <div className="text-[11px] text-white/45">{ui?.mine ?? 0} vs {ui?.theirs ?? 0} outposts</div>
+          <div className="text-[11px] text-white/45">{ui?.mine ?? 0} vs {ui?.theirs ?? 0} outposts{(ui?.shiftT ?? 0) > 0 ? ` · roads shift in ${fmt(ui?.shiftT ?? 0)}s` : ''}</div>
         </div>
         <div className="flex gap-1.5">
           <button className={`${btn} bg-white/10 px-2.5 py-1.5`} onClick={() => { if (confirm('Restart this level?')) start(run.level, run.endless); }}>↻</button>
@@ -1209,8 +1323,9 @@ export default function Game() {
         {/* A tall map: a scrollbar down the left, dragged or tapped, the thumb as long as the view is. */}
         {ui && ui.viewFrac < 1 && (
           <div className="absolute bottom-2 left-0 top-2 w-11" style={{ touchAction: 'none' }}
-            onPointerDown={(e) => { e.currentTarget.setPointerCapture(e.pointerId); const r = e.currentTarget.getBoundingClientRect(); const vf = ui.viewFrac; scrollToRef.current(((e.clientY - r.top) / r.height - vf / 2) / (1 - vf)); }}
-            onPointerMove={(e) => { if (e.buttons === 0 && e.pointerType === 'mouse') return; if (!e.currentTarget.hasPointerCapture(e.pointerId)) return; const r = e.currentTarget.getBoundingClientRect(); const vf = ui.viewFrac; scrollToRef.current(((e.clientY - r.top) / r.height - vf / 2) / (1 - vf)); }}>
+            onPointerDown={(e) => { e.currentTarget.setPointerCapture(e.pointerId); barGrabRef.current = { y: e.clientY, frac: ui.scrollFrac }; }}
+            onPointerMove={(e) => { const g = barGrabRef.current; if (!g || !e.currentTarget.hasPointerCapture(e.pointerId)) return; const r = e.currentTarget.getBoundingClientRect(); scrollToRef.current(g.frac + (e.clientY - g.y) / r.height / (1 - ui.viewFrac)); }}
+            onPointerUp={() => { barGrabRef.current = null; }} onPointerCancel={() => { barGrabRef.current = null; }}>
             <div className="absolute bottom-0 left-2 top-0 w-3 rounded-full bg-white/10" />
             <div className="absolute left-2 w-3 rounded-full bg-white/70" style={{ top: `${ui.scrollFrac * (1 - ui.viewFrac) * 100}%`, height: `${ui.viewFrac * 100}%` }} />
           </div>
@@ -1257,14 +1372,27 @@ export default function Game() {
                   </button>
                 );
               })}
+              {(ui?.mercs ?? 0) > 0 && (
+                <button disabled={!mineSel || (ui?.gold ?? 0) < (ui?.mercs ?? 0)} onClick={() => act((w) => { if (sel) hireMercs(w, sel.id); })}
+                  className={`${btn} flex flex-col items-start rounded-xl bg-white/5 px-3 py-1 text-left`}>
+                  <div className="flex w-full items-center justify-between text-[13px]"><b>Mercenaries</b><span className="text-white">{ui?.mercs}g</span></div>
+                  <div className="text-[11px] text-white/45">30 troops at the picked outpost</div>
+                </button>
+              )}
             </div>
           ) : !sel ? (
             <div className="flex h-full items-center justify-center text-center text-[13px] text-white/35">Drag from one of yours to march. Tap one to build.</div>
           ) : !mineSel ? (
             <div className="flex h-full flex-col items-center justify-center text-center text-[13px] text-white/50">
               <div className="font-bold" style={{ color: COLORS[sel.owner] }}>{sel.owner === 0 ? 'NEUTRAL' : NAMES[sel.owner]} {sel.base ? 'HQ' : 'outpost'}</div>
-              <div>{Math.floor(sel.troops)} troops{sel.wall ? ` · walls ${sel.wall} (×${wallMult(sel).toFixed(1)})` : ''}{sel.cannon ? ` · cannon ${sel.cannon}` : ''}</div>
-              <div className="text-white/30">needs more than {Math.ceil(sel.troops * wallMult(sel))} to take</div>
+              {ui?.selHidden ? (
+                <div className="text-white/30">Out of sight. Take ground beside it to see in.</div>
+              ) : (
+                <>
+                  <div>{Math.floor(sel.troops)} troops{sel.wall ? ` · walls ${sel.wall} (×${wallMult(sel).toFixed(1)})` : ''}{sel.cannon ? ` · cannon ${sel.cannon}` : ''}</div>
+                  <div className="text-white/30">needs more than {Math.ceil(sel.troops * wallMult(sel))} to take</div>
+                </>
+              )}
             </div>
           ) : (
             <>
