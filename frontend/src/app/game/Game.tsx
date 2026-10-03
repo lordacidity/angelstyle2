@@ -1072,7 +1072,9 @@ function draw(ctx: CanvasRenderingContext2D, w: World, view: { s: number; ox: nu
     const isSel = w.selected === n.id;
     const canTarget = w.picking !== null && w.picking !== n.id;
     if (n.cannon && n.owner !== 0) {
-      ctx.strokeStyle = n.owner === PLAYER ? 'rgba(255,255,255,0.12)' : 'rgba(255,59,59,0.14)'; ctx.lineWidth = 1;
+      // Faint as a rule; a picked enemy's reach draws solid red.
+      const hot = isSel && n.owner !== PLAYER;
+      ctx.strokeStyle = hot ? '#ff3b3b' : n.owner === PLAYER ? 'rgba(255,255,255,0.12)' : 'rgba(255,59,59,0.14)'; ctx.lineWidth = hot ? 2 : 1;
       ctx.beginPath(); ctx.arc(n.x, n.y, cannonRange(n, w), 0, Math.PI * 2); ctx.stroke();
     }
     if (canTarget) {
