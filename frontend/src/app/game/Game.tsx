@@ -140,6 +140,8 @@ interface Rules {
   mapH: number;
   /** The twists of the later levels. */
   title?: string;
+  /** A line on what this level brings that the last ones did not. */
+  blurb?: string;
   twinHQ?: boolean; mines?: number; fortress?: boolean;
   /** Roads an outpost may have at most (4 unless said), and the size every neutral starts at. */
   maxDeg?: number; neutralTier?: number;
@@ -178,7 +180,7 @@ interface World {
   tech: Record<TechKey, number>;
   meta: Record<MetaKey, number>;
   over: 'win' | 'lose' | null;
-  flash: { text: string; age: number } | null;
+  flash: { text: string; sub?: string; age: number; ttl: number } | null;
   selected: number | null;
   /** The outpost whose standing order is being pointed at, while it is. */
   picking: number | null;
@@ -225,28 +227,28 @@ function rulesFor(level: number, endless: boolean): Rules {
   switch (level) {
     case 1: return { ...base, title: 'FIRST BLOOD' };
     case 2: return { ...base, title: 'THE SPREAD', nodeCount: 13 };
-    case 3: return { ...base, title: 'LOOT', loot: { count: 3, troops: 40 } };
-    case 4: return { ...base, title: 'TRUCE', truce: 90, enemies: 2 };
-    case 5: return { ...base, title: 'GOLD PILES', goldPiles: { count: 3, gold: 80 }, fog: 3 };
-    case 6: return { ...base, title: 'THE CHOKE', choke: true, enemies: 2, nodeCount: 16, mapH: 900 };
-    case 7: return { ...base, title: 'WALLS UP', enemyWalls: 2 };
-    case 8: return { ...base, title: 'THE HILL', choke: true, hill: 60, enemies: 3, nodeCount: 20, mapH: 1000 };
-    case 9: return { ...base, title: 'TWIN HQ', twinHQ: true, enemies: 3, enemyGold: 200 };
-    case 10: return { ...base, title: 'NARROW ROADS', maxDeg: 3, nodeCount: 22, mapH: 800, fog: 3 };
-    case 11: return { ...base, title: 'TRUCE II', truce: 120, loot: { count: 4, troops: 50 }, enemyGold: 250 };
-    case 12: return { ...base, title: 'FORTRESS', fortress: true, enemyGold: 300 };
-    case 13: return { ...base, title: 'GOLD RUSH', mines: 5, enemyGold: 250, neutralBase: 20 };
-    case 14: return { ...base, title: 'DEEP POCKETS', enemyGold: 500, enemyExtra: 1, neutralBase: 18, fog: 2 };
-    case 15: return { ...base, title: 'FOUR FRONTS', enemies: 4, nodeCount: 36, mapH: 1200, enemyExtra: 2, enemyGold: 260 };
-    case 16: return { ...base, title: 'RICH LAND', mines: 6, enemyGold: 300, enemyExtra: 1, fog: 2 };
-    case 17: return { ...base, title: 'THE CHOKE II', choke: true, enemies: 3, fortress: true, hubLoot: 120, nodeCount: 24, mapH: 1100, enemyGold: 300 };
-    case 18: return { ...base, title: 'HEAVY FOG', fog: 1, enemyGold: 150, enemyExtra: 1 };
-    case 19: return { ...base, title: 'SHIFTING SANDS', shift: 40, maxDeg: 3, nodeCount: 22, mapH: 800, enemyGold: 350, enemyExtra: 2 };
-    case 20: return { ...base, title: 'SCRAMBLE', truce: 45, loot: { count: 6, troops: 50 }, goldPiles: { count: 2, gold: 100 }, enemyGold: 300, enemyExtra: 1, fog: 2 };
-    case 21: return { ...base, title: 'THE LONG CHOKE', choke: true, enemies: 4, fog: 2, loot: { count: 2, troops: 60 }, nodeCount: 30, mapH: 1300, enemyGold: 300 };
-    case 22: return { ...base, title: 'THE GAUNTLET', enemies: 4, nodeCount: 54, mapH: 1800, twinHQ: true, enemyExtra: 3, enemyGold: 600, fog: 3 };
-    case 23: return { ...base, title: 'THE HILL II', choke: true, hill: 90, enemies: 4, shift: 45, nodeCount: 28, mapH: 1300, enemyGold: 400, fog: 2 };
-    case 24: return { ...base, title: 'ALL OF IT', fog: 1, shift: 45, enemies: 4, nodeCount: 48, mapH: 1600, fortress: true, twinHQ: true, enemyExtra: 2, enemyGold: 450, aiInterval: 1.0, aiMargin: 0.85, aiStageEvery: 1 };
+    case 3: return { ...base, title: 'LOOT', blurb: 'Grey outposts marked +N hold unclaimed troops. Take one and they join you.', loot: { count: 3, troops: 40 } };
+    case 4: return { ...base, title: 'TRUCE', blurb: 'A truce: for 90 seconds nobody can attack anyone. Grab ground and build.', truce: 90, enemies: 2 };
+    case 5: return { ...base, title: 'GOLD PILES', blurb: 'Outposts marked Ng pay gold the moment you take them. Fog hides anything 3 roads out.', goldPiles: { count: 3, gold: 80 }, fog: 3 };
+    case 6: return { ...base, title: 'THE CHOKE', blurb: 'One hub in the middle, one road into each side\'s land. Hold the hub and you hold the door.', choke: true, enemies: 2, nodeCount: 16, mapH: 900 };
+    case 7: return { ...base, title: 'WALLS UP', blurb: 'The generals open with walls up. Bring more than the garrison times its walls.', enemyWalls: 2 };
+    case 8: return { ...base, title: 'THE HILL', blurb: 'Hold the hub for 60 seconds in all and the level is yours.', choke: true, hill: 60, enemies: 3, nodeCount: 20, mapH: 1000 };
+    case 9: return { ...base, title: 'TWIN HQ', blurb: 'Two HQs each. A side only falls when both are gone.', twinHQ: true, enemies: 3, enemyGold: 200 };
+    case 10: return { ...base, title: 'NARROW ROADS', blurb: 'Three roads at most from any outpost, and fog 3 roads out. Routes are long; plan them.', maxDeg: 3, nodeCount: 22, mapH: 800, fog: 3 };
+    case 11: return { ...base, title: 'TRUCE II', blurb: 'A longer truce, and more loot to race for before it ends.', truce: 120, loot: { count: 4, troops: 50 }, enemyGold: 250 };
+    case 12: return { ...base, title: 'FORTRESS', blurb: 'The generals\' HQs are fortresses: thick walls and a cannon from the start.', fortress: true, enemyGold: 300 };
+    case 13: return { ...base, title: 'GOLD RUSH', blurb: 'Mines. Park 100 troops on an outpost and dig for gold a minute. Deeper mines pay more.', mines: 5, enemyGold: 250, neutralBase: 20 };
+    case 14: return { ...base, title: 'DEEP POCKETS', blurb: 'The generals open rich. Fog 2 roads out: you see your neighbours and theirs, no further.', enemyGold: 500, enemyExtra: 1, neutralBase: 18, fog: 2 };
+    case 15: return { ...base, title: 'FOUR FRONTS', blurb: 'Four generals at once, on a map that goes on. Watch every edge.', enemies: 4, nodeCount: 36, mapH: 1200, enemyExtra: 2, enemyGold: 260 };
+    case 16: return { ...base, title: 'RICH LAND', blurb: 'Six mines on the map. Whoever digs first funds the war.', mines: 6, enemyGold: 300, enemyExtra: 1, fog: 2 };
+    case 17: return { ...base, title: 'THE CHOKE II', blurb: 'A choke with fortress HQs. The hub holds a stash of troops for whoever takes it. The generals now open with tech.', choke: true, enemies: 3, fortress: true, hubLoot: 120, nodeCount: 24, mapH: 1100, enemyGold: 300 };
+    case 18: return { ...base, title: 'HEAVY FOG', blurb: 'Heavy fog: you see only the outposts beside yours. Scouts and guesses from here.', fog: 1, enemyGold: 150, enemyExtra: 1 };
+    case 19: return { ...base, title: 'SHIFTING SANDS', blurb: 'The roads shift every 40 seconds. A safe rear is not safe for long.', shift: 40, maxDeg: 3, nodeCount: 22, mapH: 800, enemyGold: 350, enemyExtra: 2 };
+    case 20: return { ...base, title: 'SCRAMBLE', blurb: 'A short truce, loot and gold scattered everywhere. The race is on from the first second.', truce: 45, loot: { count: 6, troops: 50 }, goldPiles: { count: 2, gold: 100 }, enemyGold: 300, enemyExtra: 1, fog: 2 };
+    case 21: return { ...base, title: 'THE LONG CHOKE', blurb: 'A long choke against four, in fog, with loot in every sector.', choke: true, enemies: 4, fog: 2, loot: { count: 2, troops: 60 }, nodeCount: 30, mapH: 1300, enemyGold: 300 };
+    case 22: return { ...base, title: 'THE GAUNTLET', blurb: 'Four generals, twin HQs each, a huge map. The gauntlet.', enemies: 4, nodeCount: 54, mapH: 1800, twinHQ: true, enemyExtra: 3, enemyGold: 600, fog: 3 };
+    case 23: return { ...base, title: 'THE HILL II', blurb: 'Hold the hub 90 seconds while the roads shift under you.', choke: true, hill: 90, enemies: 4, shift: 45, nodeCount: 28, mapH: 1300, enemyGold: 400, fog: 2 };
+    case 24: return { ...base, title: 'ALL OF IT', blurb: 'Everything at once: heavy fog, shifting roads, four generals, fortresses, twin HQs.', fog: 1, shift: 45, enemies: 4, nodeCount: 48, mapH: 1600, fortress: true, twinHQ: true, enemyExtra: 2, enemyGold: 450, aiInterval: 1.0, aiMargin: 0.85, aiStageEvery: 1 };
     default: return base;
   }
   }
@@ -454,7 +456,7 @@ function buildWorld(rules: Rules, meta: Record<MetaKey, number>, seedExtra = 0):
     gold: 40 + META.gold.per * meta.gold, time: 0,
     nextId: 1,
     tech: { logistics: 0, conscription: 0, tithe: 0, scouts: 0, thrift: 0 }, meta,
-    over: null, flash: { text: rules.endless ? 'THE LONG WAR' : rules.title ?? `LEVEL ${rules.level}`, age: 0 }, selected: null, picking: null, pickN: 1, picked: [], shiftT: rules.shift ?? 0, hillT: 0,
+    over: null, flash: { text: rules.endless ? 'THE LONG WAR' : rules.title ?? `LEVEL ${rules.level}`, sub: rules.blurb, age: 0, ttl: rules.blurb ? 5 : 1.6 }, selected: null, picking: null, pickN: 1, picked: [], shiftT: rules.shift ?? 0, hillT: 0,
   };
 }
 
@@ -585,7 +587,7 @@ function arrive(w: World, c: Convoy) {
     if (was !== 0 && was !== PLAYER && !w.nodes.some((m) => m.owner === was)) {
       const f = w.factions.find((x) => x.id === was);
       if (f) f.dead = w.time;
-      if (c.owner === PLAYER) w.flash = { text: `${NAMES[was]} BROKEN`, age: 0 };
+      if (c.owner === PLAYER) w.flash = { text: `${NAMES[was]} BROKEN`, age: 0, ttl: 1.6 };
     }
   } else {
     n.troops = (def - c.n) / wallMult(n);
@@ -777,7 +779,7 @@ function shiftRoads(w: World) {
   }
   w.adj = w.nodes.map(() => []);
   for (const e of w.edges) { w.adj[e.a].push(e.b); w.adj[e.b].push(e.a); }
-  w.flash = { text: 'THE ROADS SHIFT', age: 0 };
+  w.flash = { text: 'THE ROADS SHIFT', age: 0, ttl: 1.6 };
 }
 
 /** Fog of war: what you can see, your outposts and whatever touches them. */
@@ -817,7 +819,7 @@ function step(w: World, dt: number) {
   if (w.over) return;
   w.time += dt;
   if (w.rules.shift) { w.shiftT -= dt; if (w.shiftT <= 0) { w.shiftT = w.rules.shift; shiftRoads(w); } }
-  if (w.flash) { w.flash.age += dt; if (w.flash.age > 1.6) w.flash = null; }
+  if (w.flash) { w.flash.age += dt; if (w.flash.age > w.flash.ttl) w.flash = null; }
 
   // Breeding and gold.
   for (const n of w.nodes) {
@@ -1125,11 +1127,23 @@ function draw(ctx: CanvasRenderingContext2D, w: World, view: { s: number; ox: nu
   }
   // Flash.
   if (w.flash) {
-    const a = w.flash.age < 0.2 ? w.flash.age / 0.2 : w.flash.age > 1.2 ? Math.max(0, (1.6 - w.flash.age) / 0.4) : 1;
+    const f = w.flash;
+    const a = f.age < 0.2 ? f.age / 0.2 : f.age > f.ttl - 0.4 ? Math.max(0, (f.ttl - f.age) / 0.4) : 1;
     ctx.fillStyle = `rgba(255,255,255,${a})`;
     ctx.font = '800 30px -apple-system, system-ui, sans-serif';
     ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
-    ctx.fillText(w.flash.text, MAP_W / 2, view.midY - 40);
+    ctx.fillText(f.text, MAP_W / 2, view.midY - 40);
+    if (f.sub) {
+      // The blurb, wrapped to the map's width, on a dark band so it reads over the roads.
+      ctx.font = '500 12px -apple-system, system-ui, sans-serif';
+      const words = f.sub.split(' '); const lines: string[] = []; let line = '';
+      for (const wd of words) { const t = line ? `${line} ${wd}` : wd; if (ctx.measureText(t).width > MAP_W - 50 && line) { lines.push(line); line = wd; } else line = t; }
+      if (line) lines.push(line);
+      ctx.fillStyle = `rgba(0,0,0,${a * 0.75})`;
+      ctx.fillRect(18, view.midY - 20, MAP_W - 36, 8 + lines.length * 16);
+      ctx.fillStyle = `rgba(255,255,255,${a * 0.9})`;
+      lines.forEach((l, i) => ctx.fillText(l, MAP_W / 2, view.midY - 8 + i * 16));
+    }
   }
   ctx.restore();
 }
@@ -1145,7 +1159,7 @@ interface Ui {
   prodPerMin: number; goldPerMin: number;
   mine: number; theirs: number; picking: boolean; pickN: number; pickLeft: number;
   selHidden: boolean; shiftT: number;
-  truceT: number; hillT: number; hillNeed: number;
+  truceT: number; hillT: number; hillNeed: number; blurb: string | null;
   /** Whether the map runs past the screen, and which way there is more of it. */
   /** The scrollbar: how far down the map the view is (0..1) and how much of it shows (0..1); 1 means all. */
   scrollFrac: number; viewFrac: number; scrollFracX: number; viewFracX: number;
@@ -1327,7 +1341,7 @@ export default function Game() {
           prodPerMin: w.nodes.filter((n) => n.owner === PLAYER && n.troops < capOf(n) - 0.5).reduce((t, n) => t + prodOf(w, n) * 60, 0),
           goldPerMin: w.nodes.filter((n) => n.owner === PLAYER).reduce((t, n) => t + goldOf(n), 0) * goldMult(w) * 60,
           mine: w.nodes.filter((n) => n.owner === PLAYER).length, theirs: w.nodes.filter((n) => n.owner >= 2).length, picking: w.picking !== null, pickN: w.pickN, pickLeft: w.pickN - w.picked.length,
-          selHidden: !!(w.rules.fog && sel && sel.owner !== PLAYER && !(seenByPlayer(w)?.has(sel.id) && ringOf(w, sel.id) < (w.rules.fog ?? 0))), shiftT: w.rules.shift ? w.shiftT : 0, truceT: w.rules.truce ? Math.max(0, w.rules.truce - w.time) : 0, hillT: w.hillT, hillNeed: w.rules.hill ?? 0,
+          selHidden: !!(w.rules.fog && sel && sel.owner !== PLAYER && !(seenByPlayer(w)?.has(sel.id) && ringOf(w, sel.id) < (w.rules.fog ?? 0))), shiftT: w.rules.shift ? w.shiftT : 0, truceT: w.rules.truce ? Math.max(0, w.rules.truce - w.time) : 0, hillT: w.hillT, hillNeed: w.rules.hill ?? 0, blurb: w.rules.blurb ?? null,
           scrollFrac: scrollFracRef.current, viewFrac: viewFracRef.current, scrollFracX: scrollFracXRef.current, viewFracX: viewFracXRef.current,
           army: (() => {
             const by = new Map<number, number>();
@@ -1684,7 +1698,10 @@ export default function Game() {
               })}
             </div></div>
           ) : !sel ? (
-            <div className="flex h-full items-center justify-center text-center text-[13px] text-white/35">Drag from one of yours to march. Tap one to build.</div>
+            <div className="flex h-full flex-col items-center justify-center gap-1 px-2 text-center text-[13px] text-white/35">
+              {ui?.blurb && <div className="text-[12px] text-white/60">{ui.blurb}</div>}
+              <div>Drag from one of yours to march. Tap one to build.</div>
+            </div>
           ) : !mineSel ? (
             <div className="flex h-full flex-col items-center justify-center text-center text-[13px] text-white/50">
               <div className="font-bold" style={{ color: COLORS[sel.owner] }}>{sel.owner === 0 ? 'NEUTRAL' : NAMES[sel.owner]} {sel.base ? 'HQ' : 'outpost'}</div>
