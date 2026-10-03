@@ -34,21 +34,25 @@ const PLAYER = 1;
 const COLORS: Record<number, string> = { 0: '#4a4a4a', 1: '#ffffff', 2: '#ff3b3b', 3: '#ff8a3b', 4: '#c04bff', 5: '#2ee6d6' };
 const NAMES: Record<number, string> = { 2: 'RED', 3: 'AMBER', 4: 'VIOLET', 5: 'CYAN' };
 
-const TIER_CAP = [40, 75, 150, 260];
-const TIER_PROD = [1, 1.5, 2.2, 3.2];
+// No upgrade has a top: each level costs more than the last, until the
+// next one is out of any reasonable reach. Size: what an outpost holds
+// and how fast it breeds, by size.
+const capAt = (tier: number) => 40 * Math.pow(1.8, tier - 1);
+const prodAt = (tier: number) => Math.pow(1.45, tier - 1);
 const BASE_PROD_PER_S = 0.9;
 
 const UPG = {
-  prod: { name: 'Barracks', cost: [30, 55, 95, 240], desc: '+35% troops/s' },
-  wall: { name: 'Walls', cost: [25, 50, 90, 220], desc: '+25% defence' },
-  cannon: { name: 'Cannon', cost: [45, 80, 130, 300], desc: 'shooter' },
-  tier: { name: 'Expand', cost: [60, 130, 340], desc: 'bigger, faster' },
+  prod: { name: 'Barracks', base: 30, growth: 1.75, desc: '+35% troops/s' },
+  wall: { name: 'Walls', base: 25, growth: 1.8, desc: '+25% defence' },
+  cannon: { name: 'Cannon', base: 45, growth: 1.8, desc: 'shooter' },
+  tier: { name: 'Expand', base: 60, growth: 2.2, desc: 'bigger, faster' },
 } as const;
 type UpgKey = keyof typeof UPG;
-const CANNON_DMG = [0, 3, 6, 10, 15];
+/** A cannon's shot by level: 3, 6, 10, 15, then 5 more a level. */
+const cannonDmg = (lvl: number) => (lvl <= 0 ? 0 : lvl <= 4 ? [3, 6, 10, 15][lvl - 1] : 15 + 5 * (lvl - 4));
 const CANNON_RANGE = 130;
 /** A bigger outpost's guns reach further: +20% a size. */
-const cannonRange = (n: Node, w: World) => CANNON_RANGE * (1 + 0.2 * (n.tier - 1)) * (n.owner === PLAYER ? (1 + 0.15 * w.tech.scouts) * (1 + META.range.per * w.meta.range / 100) : 1);
+const cannonRange = (n: Node, w: World) => CANNON_RANGE * (1 + 0.2 * (n.tier - 1)) * (n.owner === PLAYER ? (1 + 0.12 * w.tech.scouts) * (1 + META.range.per * w.meta.range / 100) : 1);
 const CANNON_CD = 0.5;
 
 // A mine: an outpost dug out for gold. It breeds nothing and keeps no
@@ -59,11 +63,12 @@ const MINE_GOLD = [0, 1.5, 3, 5];
 const MINE_TROOPS = [100, 150, 250];
 
 const TECH = {
-  logistics: { name: 'Logistics', cost: [80, 280], desc: 'march 25% faster' },
-  conscription: { name: 'Conscription', cost: [100, 160, 240, 520], desc: '+15% troops/s' },
-  tithe: { name: 'Tithe', cost: [150, 340], desc: '+20% gold' },
-  scouts: { name: 'Scouts', cost: [120, 280], desc: '+15% cannon range' },
+  logistics: { name: 'Logistics', base: 50, growth: 1.9, desc: '+20% march speed' },
+  conscription: { name: 'Conscription', base: 60, growth: 1.7, desc: '+15% troops/s' },
+  tithe: { name: 'Tithe', base: 70, growth: 1.8, desc: '+15% gold' },
+  scouts: { name: 'Scouts', base: 60, growth: 1.8, desc: '+12% cannon range' },
 } as const;
+const techCost = (key: TechKey, lvl: number) => Math.round(TECH[key].base * Math.pow(TECH[key].growth, lvl));
 type TechKey = keyof typeof TECH;
 
 const META = {
@@ -445,7 +450,7 @@ function buildWorld(rules: Rules, meta: Record<MetaKey, number>, seedExtra = 0):
 
 // ── Simulation ─────────────────────────────────────────────────────────────
 
-const capOf = (n: Node) => TIER_CAP[n.tier - 1] * (n.base ? 1.5 : 1) * (1 + n.capBoost);
+const capOf = (n: Node) => capAt(n.tier) * (n.base ? 1.5 : 1) * (1 + n.capBoost);
 const wallMult = (n: Node) => 1 + (0.25 + n.wallBoost) * n.wall;
 /** Ground changes hands: it takes on the new holder's doctrine. */
 function claim(w: World, n: Node, owner: number) {
@@ -460,16 +465,16 @@ const prodOf = (w: World, n: Node) => {
   let m = n.owner === PLAYER
     ? (1 + META.prod.per * w.meta.prod / 100) * (1 + 0.15 * w.tech.conscription)
     : 1 + 0.15 * (w.factions.find((f) => f.id === n.owner)?.tech.conscription ?? 0);
-  m *= (n.base ? 1.5 : 1) * TIER_PROD[n.tier - 1] * (1 + 0.35 * n.prod);
+  m *= (n.base ? 1.5 : 1) * prodAt(n.tier) * (1 + 0.35 * n.prod);
   return BASE_PROD_PER_S * m;
 };
 /** What your gold is worth: Tithe and the Vaults. */
-const goldMult = (w: World) => (1 + 0.2 * w.tech.tithe) * (1 + META.vault.per * w.meta.vault / 100);
+const goldMult = (w: World) => (1 + 0.15 * w.tech.tithe) * (1 + META.vault.per * w.meta.vault / 100);
 const goldOf = (n: Node) => (n.mine ? MINE_GOLD[n.mine] : n.base ? 1.0 : 0.35 + 0.15 * (n.tier - 1));
 const convoySpeed = (w: World, owner: number) =>
   60 * (owner === PLAYER
-    ? (1 + META.speed.per * w.meta.speed / 100) * (1 + 0.25 * w.tech.logistics)
-    : 1 + 0.25 * (w.factions.find((f) => f.id === owner)?.tech.logistics ?? 0));
+    ? (1 + META.speed.per * w.meta.speed / 100) * (1 + 0.2 * w.tech.logistics)
+    : 1 + 0.2 * (w.factions.find((f) => f.id === owner)?.tech.logistics ?? 0));
 const convoyPos = (w: World, c: Convoy) => {
   const a = w.nodes[c.from], b = w.nodes[c.to];
   return { x: a.x + (b.x - a.x) * c.t, y: a.y + (b.y - a.y) * c.t };
@@ -617,7 +622,7 @@ function aiTick(w: World, f: Faction) {
     for (const m of hostile) {
       const incoming = w.convoys.filter((c) => c.to === m.id && c.owner === m.owner && seesColumn(w, f.id, c)).reduce((s, c) => s + c.n, 0);
       // A canny general counts what the guns on the way will cost.
-      const guns = r.aiSmart >= 1 ? w.nodes.filter((g) => g.owner !== f.id && g.cannon && Math.hypot(g.x - m.x, g.y - m.y) < cannonRange(g, w)).reduce((s, g) => s + CANNON_DMG[g.cannon] * 3, 0) : 0;
+      const guns = r.aiSmart >= 1 ? w.nodes.filter((g) => g.owner !== f.id && g.cannon && Math.hypot(g.x - m.x, g.y - m.y) < cannonRange(g, w)).reduce((s, g) => s + cannonDmg(g.cannon) * 3, 0) : 0;
       const need = (reckon(w, f.id, m) + incoming) * wallMult(m) + 1 + guns;
       if (avail < need * (m.owner === 0 ? 1.1 : 1.25)) continue;
       let score = (m.owner === PLAYER ? 3 : m.owner === 0 ? 1 : 2) + (m.base ? 2.5 : 0) + m.prod * 0.4 - need / avail + (m.hub ? 2 : 0) + (m.loot ? 1.5 : 0) + (m.gold ? 1 : 0);
@@ -692,12 +697,9 @@ function aiSpend(w: World, f: Faction) {
     if (dig) digMineAt(dig);
   }
   // The list, most urgent first: a buy is an upgrade on an outpost or a tech.
-  type Want = { cost: number | null; buy: () => void };
+  type Want = { cost: number; buy: () => void };
   const upg = (n: Node, k: UpgKey): Want => ({ cost: upgradeCost(n, k), buy: () => applyUpgrade(n, k) });
-  const tech = (k: 'conscription' | 'logistics'): Want => {
-    const costs = TECH[k].cost as readonly number[]; const lvl = f.tech[k];
-    return { cost: lvl >= costs.length ? null : costs[lvl], buy: () => { f.tech[k]++; } };
-  };
+  const tech = (k: 'conscription' | 'logistics'): Want => ({ cost: techCost(k, f.tech[k]), buy: () => { f.tech[k]++; } });
   const wants: Want[] = [];
   for (const n of front.slice(0, 2)) if (n.wall < 2) wants.push(upg(n, 'wall'));
   if (hq.prod < 2) wants.push(upg(hq, 'prod'));
@@ -716,10 +718,13 @@ function aiSpend(w: World, f: Faction) {
   for (const n of mine) if (n.prod < 4) wants.push(upg(n, 'prod'));
   if (front[0] && front[0].cannon < 4) wants.push(upg(front[0], 'cannon'));
   for (const n of mine) if (n.tier < 3) wants.push(upg(n, 'tier'));
+  // And on, for as long as the purse allows: the HQ and the front, dearer each time.
+  wants.push(tech('conscription'), upg(hq, 'prod'), upg(hq, 'tier'));
+  if (front[0]) wants.push(upg(front[0], 'wall'), upg(front[0], 'cannon'));
+  wants.push(tech('logistics'));
   // Two buys a tick, in order; it saves for the first thing it cannot afford.
   let bought = 0;
   for (const want of wants) {
-    if (want.cost === null) continue;
     if (f.gold < want.cost) return;
     f.gold -= want.cost; want.buy();
     if (++bought >= 2) return;
@@ -864,7 +869,7 @@ function step(w: World, dt: number) {
       if (d < td) { td = d; target = c; }
     }
     if (!target) continue;
-    const dmg = CANNON_DMG[n.cannon] * (n.owner === PLAYER ? 1 + META.cannon.per * w.meta.cannon / 100 : 1);
+    const dmg = cannonDmg(n.cannon) * (n.owner === PLAYER ? 1 + META.cannon.per * w.meta.cannon / 100 : 1);
     target.n -= dmg;
     const p = convoyPos(w, target);
     w.shots.push({ x1: n.x, y1: n.y, x2: p.x, y2: p.y, age: 0 });
@@ -913,26 +918,24 @@ function digMineAt(n: Node) {
   n.wall = 0; n.cannon = 0; n.prod = 0; n.route = null; n.cd = 0;
 }
 
-/** What the next level of this costs here, or null at the top. */
-function upgradeCost(n: Node, key: UpgKey): number | null {
+/** What the next level of this costs here. There is no top. */
+function upgradeCost(n: Node, key: UpgKey): number {
   const lvl = key === 'tier' ? n.tier - 1 : n[key];
-  const costs = UPG[key].cost as readonly number[];
-  return lvl >= costs.length ? null : costs[lvl];
+  return Math.round(UPG[key].base * Math.pow(UPG[key].growth, lvl));
 }
 function applyUpgrade(n: Node, key: UpgKey) { if (key === 'tier') n.tier++; else n[key]++; }
 function buyUpgrade(w: World, id: number, key: UpgKey) {
   const n = w.nodes[id];
   if (n.owner !== PLAYER || n.mine) return;
   const cost = upgradeCost(n, key);
-  if (cost === null || w.gold < cost) return;
+  if (w.gold < cost) return;
   w.gold -= cost;
   applyUpgrade(n, key);
 }
 function buyTech(w: World, key: TechKey) {
-  const lvl = w.tech[key];
-  const costs = TECH[key].cost as readonly number[];
-  if (lvl >= costs.length || w.gold < costs[lvl]) return;
-  w.gold -= costs[lvl];
+  const cost = techCost(key, w.tech[key]);
+  if (w.gold < cost) return;
+  w.gold -= cost;
   w.tech[key]++;
 }
 
@@ -1518,17 +1521,17 @@ export default function Game() {
   const mineSel = sel?.owner === PLAYER;
   const upgRows = (n: Node) => (Object.keys(UPG) as UpgKey[]).map((k) => {
     const u = UPG[k]; const lvl = k === 'tier' ? n.tier - 1 : n[k];
-    const costs = u.cost as readonly number[]; const max = lvl >= costs.length;
-    const cost = max ? 0 : costs[lvl];
+    const cost = upgradeCost(n, k);
     return (
-      <button key={k} disabled={max || (ui?.gold ?? 0) < cost} onClick={() => act((w) => buyUpgrade(w, n.id, k))}
+      <button key={k} disabled={(ui?.gold ?? 0) < cost} onClick={() => act((w) => buyUpgrade(w, n.id, k))}
         className={`${btn} flex flex-col items-start rounded-xl bg-white/5 px-3 py-1 text-left`}>
-        <div className="flex w-full items-center justify-between text-[13px]"><b>{u.name}</b><span className="text-white">{max ? 'MAX' : `${cost}g`}</span></div>
+        <div className="flex w-full items-center justify-between text-[13px]"><b>{u.name}</b><span className="text-white">{cost}g</span></div>
         <div className="text-[11px] text-white/45">{(() => {
           // Barracks and Expand: what the next level adds here, a minute.
           const rate = ui?.selProdPerMin ?? 0;
-          if (k === 'prod') { const gain = max ? 0 : rate * ((1 + 0.35 * (lvl + 1)) / (1 + 0.35 * lvl) - 1); return `${max ? 'MAX' : `+${Math.round(gain)} troops/min`} · lv ${lvl}`; }
-          if (k === 'tier') { const gain = max ? 0 : rate * (TIER_PROD[n.tier] / TIER_PROD[n.tier - 1] - 1); return `${max ? 'MAX' : `+${Math.round(gain)}/min · holds ${Math.round(capOf({ ...n, tier: n.tier + 1 }))}`} · size ${n.tier}`; }
+          if (k === 'prod') { const gain = rate * ((1 + 0.35 * (lvl + 1)) / (1 + 0.35 * lvl) - 1); return `+${Math.round(gain)} troops/min · lv ${lvl}`; }
+          if (k === 'tier') { const gain = rate * (prodAt(n.tier + 1) / prodAt(n.tier) - 1); return `+${Math.round(gain)}/min · holds ${Math.round(capOf({ ...n, tier: n.tier + 1 }))} · size ${n.tier}`; }
+          if (k === 'cannon') return `${cannonDmg(lvl + 1)} a shot · lv ${lvl}`;
           return `${u.desc} · lv ${lvl}`;
         })()}</div>
       </button>
@@ -1614,12 +1617,12 @@ export default function Game() {
           {tab === 'tech' ? (
             <div className="grid grid-cols-2 gap-1.5">
               {(Object.keys(TECH) as TechKey[]).map((k) => {
-                const t = TECH[k]; const lvl = ui?.tech[k] ?? 0; const costs = t.cost as readonly number[]; const max = lvl >= costs.length; const cost = max ? 0 : costs[lvl];
+                const t = TECH[k]; const lvl = ui?.tech[k] ?? 0; const cost = techCost(k, lvl);
                 return (
-                  <button key={k} disabled={max || (ui?.gold ?? 0) < cost} onClick={() => act((w) => buyTech(w, k))}
+                  <button key={k} disabled={(ui?.gold ?? 0) < cost} onClick={() => act((w) => buyTech(w, k))}
                     className={`${btn} flex flex-col items-start rounded-xl bg-white/5 px-3 py-1 text-left`}>
-                    <div className="flex w-full items-center justify-between text-[13px]"><b>{t.name}</b><span className="text-white">{max ? 'MAX' : `${cost}g`}</span></div>
-                    <div className="text-[11px] text-white/45">{t.desc} · {lvl}/{costs.length}</div>
+                    <div className="flex w-full items-center justify-between text-[13px]"><b>{t.name}</b><span className="text-white">{cost}g</span></div>
+                    <div className="text-[11px] text-white/45">{t.desc} · lv {lvl}</div>
                   </button>
                 );
               })}
