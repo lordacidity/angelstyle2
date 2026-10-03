@@ -760,7 +760,8 @@ interface Ui {
   prodPerMin: number;
   mine: number; theirs: number; picking: boolean; pickN: number; pickLeft: number;
   /** Whether the map runs past the screen, and which way there is more of it. */
-  canUp: boolean; canDown: boolean;
+  /** The scrollbar: how far down the map the view is (0..1) and how much of it shows (0..1); 1 means all. */
+  scrollFrac: number; viewFrac: number;
   /** Every troop on the map and on the road, by faction. */
   army: { owner: number; n: number }[];
 }
@@ -791,6 +792,9 @@ export default function Game() {
   // The last outpost tapped and when: a second tap on it inside 350ms is a double tap.
   const lastTapRef = useRef<{ id: number; t: number }>({ id: -1, t: 0 });
   const scrollByRef = useRef<(dir: number) => void>(() => {});
+  /** Scroll to a fraction of the way down the map. */
+  const scrollToRef = useRef<(frac: number) => void>(() => {});
+  const viewFracRef = useRef(1);
 
   // localStorage is the browser's: read it once mounted, never on the server.
   useEffect(() => { const t = setTimeout(() => setSave(loadSave()), 0); return () => clearTimeout(t); }, []);
@@ -845,6 +849,7 @@ export default function Game() {
       if (s < 0.42) { s = (r.width / MAP_W) * 0.8; oy = 0; }
       const visibleH = r.height / s;
       maxScrollRef.current = Math.max(0, mapH - visibleH);
+      viewFracRef.current = Math.min(1, visibleH / mapH);
       scrollRef.current = Math.max(0, Math.min(maxScrollRef.current, scrollRef.current));
       if (maxScrollRef.current > 0) oy = -scrollRef.current * s;
       const midY = (r.height / 2 - oy) / s;
@@ -858,6 +863,7 @@ export default function Game() {
       scrollRef.current += dir * visibleH * 0.6;
       fit();
     };
+    scrollToRef.current = (frac: number) => { scrollRef.current = Math.max(0, Math.min(1, frac)) * maxScrollRef.current; fit(); };
     const ro = new ResizeObserver(fit);
     ro.observe(wrap);
     let last = performance.now();
@@ -890,7 +896,7 @@ export default function Game() {
           selProdPerMin: sel ? prodOf(w, sel) * 60 : 0, selHold: sel ? Math.ceil(sel.troops * wallMult(sel)) : 0,
           prodPerMin: w.nodes.filter((n) => n.owner === PLAYER && n.troops < capOf(n) - 0.5).reduce((t, n) => t + prodOf(w, n) * 60, 0),
           mine: w.nodes.filter((n) => n.owner === PLAYER).length, theirs: w.nodes.filter((n) => n.owner >= 2).length, picking: w.picking !== null, pickN: w.pickN, pickLeft: w.pickN - w.picked.length,
-          canUp: scrollRef.current > 0.5, canDown: scrollRef.current < maxScroll() - 0.5,
+          scrollFrac: maxScroll() > 0 ? scrollRef.current / maxScroll() : 0, viewFrac: viewFracRef.current,
           army: (() => {
             const by = new Map<number, number>();
             for (const n of w.nodes) if (n.owner !== 0) by.set(n.owner, (by.get(n.owner) ?? 0) + n.troops);
@@ -1120,10 +1126,13 @@ export default function Game() {
       <div ref={wrapRef} className="relative flex-1 min-h-0">
         <canvas ref={canvasRef} className="absolute inset-0 block" style={{ touchAction: 'none' }}
           onPointerDown={onDown} onPointerMove={onMove} onPointerUp={onUp} onPointerCancel={onUp} />
-        {(ui?.canUp || ui?.canDown) && (
-          <div className="absolute left-2 top-2 flex flex-col gap-1.5">
-            <button disabled={!ui?.canUp} className={`${btn} h-11 w-11 bg-white/10 text-lg`} onClick={() => scrollByRef.current(-1)}>▲</button>
-            <button disabled={!ui?.canDown} className={`${btn} h-11 w-11 bg-white/10 text-lg`} onClick={() => scrollByRef.current(1)}>▼</button>
+        {/* A tall map: a scrollbar down the left, dragged or tapped, the thumb as long as the view is. */}
+        {ui && ui.viewFrac < 1 && (
+          <div className="absolute bottom-2 left-0 top-2 w-7" style={{ touchAction: 'none' }}
+            onPointerDown={(e) => { e.currentTarget.setPointerCapture(e.pointerId); const r = e.currentTarget.getBoundingClientRect(); const vf = ui.viewFrac; scrollToRef.current(((e.clientY - r.top) / r.height - vf / 2) / (1 - vf)); }}
+            onPointerMove={(e) => { if (e.buttons === 0 && e.pointerType === 'mouse') return; if (!e.currentTarget.hasPointerCapture(e.pointerId)) return; const r = e.currentTarget.getBoundingClientRect(); const vf = ui.viewFrac; scrollToRef.current(((e.clientY - r.top) / r.height - vf / 2) / (1 - vf)); }}>
+            <div className="absolute bottom-0 left-2.5 top-0 w-1.5 rounded-full bg-white/10" />
+            <div className="absolute left-2.5 w-1.5 rounded-full bg-white/70" style={{ top: `${ui.scrollFrac * (1 - ui.viewFrac) * 100}%`, height: `${ui.viewFrac * 100}%` }} />
           </div>
         )}
         {ui?.over && (
