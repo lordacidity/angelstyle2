@@ -1629,9 +1629,9 @@ export default function Game() {
             </div>
           </div>
         </div>
-        <div className="mt-1 h-[132px] overflow-y-auto" style={{ touchAction: 'pan-y', WebkitOverflowScrolling: 'touch' }}>
+        <div className="mt-1 flex h-[132px] flex-col">
           {tab === 'tech' ? (
-            <div className="grid grid-cols-2 gap-1.5">
+            <div className="min-h-0 flex-1 overflow-y-auto" style={{ touchAction: 'pan-y', WebkitOverflowScrolling: 'touch' }}><div className="grid grid-cols-2 gap-1.5">
               {(Object.keys(TECH) as TechKey[]).map((k) => {
                 const t = TECH[k]; const lvl = ui?.tech[k] ?? 0; const cost = techCost(k, lvl);
                 return (
@@ -1642,7 +1642,7 @@ export default function Game() {
                   </button>
                 );
               })}
-            </div>
+            </div></div>
           ) : !sel ? (
             <div className="flex h-full items-center justify-center text-center text-[13px] text-white/35">Drag from one of yours to march. Tap one to build.</div>
           ) : !mineSel ? (
@@ -1677,6 +1677,7 @@ export default function Game() {
                   </span>
                 )}
               </div>
+              <div className="min-h-0 flex-1 overflow-y-auto" style={{ touchAction: 'pan-y', WebkitOverflowScrolling: 'touch' }}>
               {sel.mine ? (
                 <div className="flex items-center justify-between rounded-xl bg-white/5 px-3 py-2">
                   <div>
@@ -1697,6 +1698,7 @@ export default function Game() {
                   </button>
                 </>
               )}
+              </div>
             </>
           )}
         </div>
