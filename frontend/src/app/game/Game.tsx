@@ -85,7 +85,9 @@ interface Node {
   prod: number; wall: number; cannon: number; cd: number;
 }
 interface Edge { a: number; b: number; len: number }
-interface Convoy { id: number; owner: number; n: number; from: number; to: number; t: number; dur: number }
+/** A column on the road. `from`/`to` are the leg it is on; `path` is the
+ *  whole route, and `leg` which step of it. */
+interface Convoy { id: number; owner: number; n: number; from: number; to: number; t: number; dur: number; path: number[]; leg: number }
 interface Shot { x1: number; y1: number; x2: number; y2: number; age: number }
 interface Faction { id: number; tick: number; dead: number }
 
@@ -261,13 +263,54 @@ const convoyPos = (w: World, c: Convoy) => {
 };
 const edgeLen = (w: World, a: number, b: number) => Math.hypot(w.nodes[a].x - w.nodes[b].x, w.nodes[a].y - w.nodes[b].y);
 
+// The road from one outpost to another: the cheapest way through, with
+// the sender's own ground costing a step and anyone else's costing five, so a
+// column goes round the enemy where it can and through them where it must.
+function route(w: World, from: number, to: number, owner: number): number[] | null {
+  if (from === to) return null;
+  const dist = new Array(w.nodes.length).fill(Infinity) as number[];
+  const prev = new Array(w.nodes.length).fill(-1) as number[];
+  const done = new Array(w.nodes.length).fill(false) as boolean[];
+  dist[from] = 0;
+  for (;;) {
+    let u = -1;
+    for (let i = 0; i < dist.length; i++) if (!done[i] && dist[i] < Infinity && (u < 0 || dist[i] < dist[u])) u = i;
+    if (u < 0 || u === to) break;
+    done[u] = true;
+    for (const v of w.adj[u]) {
+      const c = dist[u] + (w.nodes[v].owner === owner || v === to ? 1 : 5) + edgeLen(w, u, v) / 1000;
+      if (c < dist[v]) { dist[v] = c; prev[v] = u; }
+    }
+  }
+  if (dist[to] === Infinity) return null;
+  const path: number[] = [];
+  for (let v = to; v !== -1; v = prev[v]) path.unshift(v);
+  return path;
+}
+
 function send(w: World, from: number, to: number, frac: number) {
   const n = w.nodes[from];
-  if (!w.adj[from].includes(to)) return;
+  const path = w.adj[from].includes(to) ? [from, to] : route(w, from, to, n.owner);
+  if (!path) return;
   const amount = Math.floor(n.troops * frac);
   if (amount < 1) return;
   n.troops -= amount;
-  w.convoys.push({ id: w.nextId++, owner: n.owner, n: amount, from, to, t: 0, dur: edgeLen(w, from, to) / convoySpeed(w, n.owner) });
+  w.convoys.push({ id: w.nextId++, owner: n.owner, n: amount, from, to: path[1], t: 0, dur: edgeLen(w, from, path[1]) / convoySpeed(w, n.owner), path, leg: 0 });
+}
+
+/** A column at the end of a leg: on through its own ground if the road
+ *  goes on, otherwise it has arrived, and fights if it has to. */
+function reachNode(w: World, c: Convoy) {
+  const here = w.nodes[c.to];
+  const last = c.leg >= c.path.length - 2;
+  if (!last && here.owner === c.owner) {
+    c.leg++;
+    c.from = c.to; c.to = c.path[c.leg + 1]; c.t = 0;
+    c.dur = edgeLen(w, c.from, c.to) / convoySpeed(w, c.owner);
+    w.convoys.push(c);
+    return;
+  }
+  arrive(w, c);
 }
 
 function arrive(w: World, c: Convoy) {
@@ -372,7 +415,7 @@ function step(w: World, dt: number) {
   for (const c of w.convoys) c.t += dt / c.dur;
   const arrived = w.convoys.filter((c) => c.t >= 1);
   w.convoys = w.convoys.filter((c) => c.t < 1);
-  for (const c of arrived) arrive(w, c);
+  for (const c of arrived) reachNode(w, c);
 
   // Cannons.
   for (const n of w.nodes) {
@@ -444,7 +487,7 @@ function buyTech(w: World, key: TechKey) {
 
 const nodeR = (n: Node) => (n.base ? 20 : 13 + n.tier * 2);
 
-function draw(ctx: CanvasRenderingContext2D, w: World, view: { s: number; ox: number; oy: number }, drag: { from: number; x: number; y: number } | null) {
+function draw(ctx: CanvasRenderingContext2D, w: World, view: { s: number; ox: number; oy: number }, drag: { from: number; x: number; y: number; over: number | null } | null) {
   const { s, ox, oy } = view;
   ctx.save();
   ctx.translate(ox, oy);
@@ -462,8 +505,12 @@ function draw(ctx: CanvasRenderingContext2D, w: World, view: { s: number; ox: nu
   // Drag line.
   if (drag) {
     const a = w.nodes[drag.from];
+    const path = drag.over !== null ? route(w, drag.from, drag.over, PLAYER) : null;
     ctx.strokeStyle = 'rgba(255,255,255,0.9)'; ctx.lineWidth = 3; ctx.setLineDash([6, 6]);
-    ctx.beginPath(); ctx.moveTo(a.x, a.y); ctx.lineTo(drag.x, drag.y); ctx.stroke();
+    ctx.beginPath(); ctx.moveTo(a.x, a.y);
+    if (path) for (const i of path.slice(1)) ctx.lineTo(w.nodes[i].x, w.nodes[i].y);
+    else ctx.lineTo(drag.x, drag.y);
+    ctx.stroke();
     ctx.setLineDash([]);
   }
   // Cannon shots.
@@ -476,7 +523,7 @@ function draw(ctx: CanvasRenderingContext2D, w: World, view: { s: number; ox: nu
     const r = nodeR(n);
     const col = COLORS[n.owner];
     const isSel = w.selected === n.id;
-    const canTarget = w.selected !== null && w.selected !== n.id && w.nodes[w.selected].owner === PLAYER && w.adj[w.selected].includes(n.id);
+    const canTarget = w.selected !== null && w.selected !== n.id && w.nodes[w.selected].owner === PLAYER;
     if (n.cannon && n.owner !== 0) {
       ctx.strokeStyle = n.owner === PLAYER ? 'rgba(255,255,255,0.12)' : 'rgba(255,59,59,0.14)'; ctx.lineWidth = 1;
       ctx.beginPath(); ctx.arc(n.x, n.y, CANNON_RANGE, 0, Math.PI * 2); ctx.stroke();
@@ -556,7 +603,7 @@ export default function Game() {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const wrapRef = useRef<HTMLDivElement>(null);
   const viewRef = useRef({ s: 1, ox: 0, oy: 0 });
-  const dragRef = useRef<{ from: number; x: number; y: number; moved: boolean } | null>(null);
+  const dragRef = useRef<{ from: number; x: number; y: number; moved: boolean; over: number | null } | null>(null);
   const pausedRef = useRef(false);
   const speedRef = useRef(1);
   const sendPctRef = useRef(0.5);
@@ -628,7 +675,7 @@ export default function Game() {
       ctx.fillStyle = '#000000';
       ctx.fillRect(0, 0, canvas.width, canvas.height);
       const d = dragRef.current;
-      draw(ctx, w, viewRef.current, d && d.moved ? { from: d.from, x: d.x, y: d.y } : null);
+      draw(ctx, w, viewRef.current, d && d.moved ? { from: d.from, x: d.x, y: d.y, over: d.over } : null);
       uiAcc += elapsed;
       if (uiAcc > 120) {
         uiAcc = 0;
@@ -663,13 +710,13 @@ export default function Game() {
     const p = toMap(e);
     const n = hit(w, p);
     if (!n) { w.selected = null; dragRef.current = null; return; }
-    if (w.selected !== null && w.selected !== n.id && w.nodes[w.selected].owner === PLAYER && w.adj[w.selected].includes(n.id)) {
+    if (w.selected !== null && w.selected !== n.id && w.nodes[w.selected].owner === PLAYER) {
       send(w, w.selected, n.id, sendPctRef.current);
       dragRef.current = null;
       return;
     }
     w.selected = n.id;
-    dragRef.current = n.owner === PLAYER ? { from: n.id, x: p.x, y: p.y, moved: false } : null;
+    dragRef.current = n.owner === PLAYER ? { from: n.id, x: p.x, y: p.y, moved: false, over: null } : null;
   };
   const onMove = (e: React.PointerEvent) => {
     const d = dragRef.current; if (!d) return;
@@ -678,12 +725,18 @@ export default function Game() {
     const w = worldRef.current!;
     const from = w.nodes[d.from];
     if (Math.hypot(p.x - from.x, p.y - from.y) > 18) d.moved = true;
+    const over = hit(w, p);
+    d.over = over && over.id !== d.from ? over.id : null;
   };
   const onUp = (e: React.PointerEvent) => {
     const d = dragRef.current; dragRef.current = null;
     const w = worldRef.current; if (!w || !d || !d.moved) return;
     const n = hit(w, toMap(e));
-    if (n && n.id !== d.from && w.adj[d.from].includes(n.id)) send(w, d.from, n.id, sendPctRef.current);
+    if (n && n.id !== d.from) {
+      send(w, d.from, n.id, sendPctRef.current);
+      // A drag is one gesture: the next one starts clean.
+      w.selected = null;
+    }
   };
 
   const act = (f: (w: World) => void) => { const w = worldRef.current; if (w && !w.over) f(w); };
@@ -737,7 +790,7 @@ export default function Game() {
             {endlessOpen ? 'ENDLESS' : `Endless unlocks after level ${ENDLESS_UNLOCK}`}
           </button>
           <div className="mt-8 space-y-2 text-[13px] leading-snug text-white/50">
-            <p><b className="text-white/80">Tap</b> one of your outposts, then <b className="text-white/80">tap</b> (or drag to) a neighbour to march. Columns that outnumber the defenders take the ground.</p>
+            <p><b className="text-white/80">Tap</b> one of your outposts, then <b className="text-white/80">tap</b> (or drag to) any other to march. Columns take the shortest road through your ground and fight at the first outpost on it that is not yours. Columns that outnumber the defenders take the ground.</p>
             <p>Outposts breed troops up to their cap. Gold trickles from everything you hold. Spend it on the picked outpost, or on tech for all of them.</p>
             <p>Every <b className="text-white/80">wave</b> the red fills up and gets bolder. Stalling is losing. Clear every red outpost to win.</p>
             <p className="text-white/30">Walls are inherited by whoever takes the outpost. Cannons are not.</p>
