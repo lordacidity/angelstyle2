@@ -934,7 +934,7 @@ export default function Game() {
           <div className="flex gap-1.5">
             <button className={`${btn} px-3 py-1.5 ${tab === 'post' ? 'bg-white/20' : 'bg-white/5'}`} onClick={() => setTab('post')}>Outpost</button>
             <button className={`${btn} px-3 py-1.5 ${tab === 'tech' ? 'bg-white/20' : 'bg-white/5'}`} onClick={() => setTab('tech')}>Tech</button>
-            <button className={`${btn} bg-white/10 px-3 py-1.5`} onClick={() => { sendPctRef.current = sendPctRef.current === 0.5 ? 1 : sendPctRef.current === 1 ? 0.25 : 0.5; }}>
+            <button className={`${btn} bg-white/10 px-3 py-1.5`} onClick={() => { const steps = [0.25, 0.5, 0.75, 1]; sendPctRef.current = steps[(steps.indexOf(sendPctRef.current) + 1) % steps.length]; }}>
               send {Math.round((ui?.sendPct ?? 0.5) * 100)}%
             </button>
           </div>
