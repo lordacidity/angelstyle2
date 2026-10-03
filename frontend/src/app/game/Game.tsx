@@ -84,9 +84,9 @@ interface Node {
   id: number; x: number; y: number;
   owner: number; troops: number; tier: number; base: boolean;
   prod: number; wall: number; cannon: number; cd: number;
-  /** A standing order: ship this share of the garrison to that outpost,
+  /** A standing order: ship everything above `keep` to that outpost,
    *  every few seconds, for as long as it stands. Yours only. */
-  route: { to: number; pct: number } | null; routeT: number;
+  route: { to: number; keep: number } | null; routeT: number;
 }
 interface Edge { a: number; b: number; len: number }
 /** A column on the road. `from`/`to` are the leg it is on; `path` is the
@@ -119,6 +119,8 @@ interface World {
   selected: number | null;
   /** The outpost whose standing order is being pointed at, while it is. */
   picking: number | null;
+  /** Which kind of order is being pointed at: all of it, or only what is new. */
+  pickKeep: boolean;
 }
 
 function rulesFor(level: number, endless: boolean): Rules {
@@ -248,7 +250,7 @@ function buildWorld(rules: Rules, meta: Record<MetaKey, number>, seedExtra = 0):
     gold: 40 + META.gold.per * meta.gold, time: 0,
     rounds: 0, nextId: 1,
     tech: { logistics: 0, conscription: 0 }, meta,
-    over: null, flash: { text: rules.endless ? 'ENDLESS' : `LEVEL ${rules.level}`, age: 0 }, selected: null, picking: null,
+    over: null, flash: { text: rules.endless ? 'ENDLESS' : `LEVEL ${rules.level}`, age: 0 }, selected: null, picking: null, pickKeep: false,
   };
 }
 
@@ -297,11 +299,12 @@ function route(w: World, from: number, to: number, owner: number): number[] | nu
   return path;
 }
 
-function send(w: World, from: number, to: number, frac: number) {
+function send(w: World, from: number, to: number, frac: number) { sendCount(w, from, to, Math.floor(w.nodes[from].troops * frac)); }
+function sendCount(w: World, from: number, to: number, amount: number) {
   const n = w.nodes[from];
   const path = w.adj[from].includes(to) ? [from, to] : route(w, from, to, n.owner);
   if (!path) return;
-  const amount = Math.floor(n.troops * frac);
+  amount = Math.min(amount, Math.floor(n.troops));
   if (amount < 1) return;
   n.troops -= amount;
   w.convoys.push({ id: w.nextId++, owner: n.owner, n: amount, from, to: path[1], t: 0, dur: edgeLen(w, from, path[1]) / convoySpeed(w, n.owner), path, leg: 0 });
@@ -468,7 +471,8 @@ function step(w: World, dt: number) {
     n.routeT -= dt;
     if (n.routeT > 0) continue;
     n.routeT = ROUTE_EVERY;
-    if (n.troops * n.route.pct >= 3) send(w, n.id, n.route.to, n.route.pct);
+    const spare = Math.floor(n.troops - n.route.keep);
+    if (spare >= 3) sendCount(w, n.id, n.route.to, spare);
   }
 
   // Columns on the march.
@@ -825,7 +829,7 @@ export default function Game() {
     if (!n) { w.selected = null; w.picking = null; dragRef.current = null; return; }
     if (w.picking !== null) {
       const from = w.nodes[w.picking];
-      if (n.id !== from.id && from.owner === PLAYER) { from.route = { to: n.id, pct: sendPctRef.current }; from.routeT = 0; }
+      if (n.id !== from.id && from.owner === PLAYER) { from.route = { to: n.id, keep: w.pickKeep ? Math.floor(from.troops) : 0 }; from.routeT = 0; }
       w.picking = null; dragRef.current = null;
       return;
     }
@@ -1049,18 +1053,21 @@ export default function Game() {
             <>
               <div className="mb-1.5 flex items-center justify-between rounded-xl bg-white/5 px-3 py-1.5 text-[12px]">
                 {ui?.picking ? (
-                  <span className="text-white">Tap the outpost it should ship to.</span>
+                  <span className="text-white">Tap where to send.</span>
                 ) : sel.route ? (
-                  <span><b>Ships {Math.round(sel.route.pct * 100)}%</b> <span className="text-white/45">down the dotted road, every 2s</span></span>
+                  <span><b>Auto-sending {sel.route.keep > 0 ? `new (keeps ${sel.route.keep})` : 'all'}</b></span>
                 ) : (
-                  <span className="text-white/45">No standing order.</span>
+                  <span className="text-white/45">Auto-send</span>
                 )}
                 {ui?.picking ? (
                   <button className={`${btn} bg-white/10 px-2.5 py-1`} onClick={() => act((w) => { w.picking = null; })}>Cancel</button>
                 ) : sel.route ? (
                   <button className={`${btn} bg-white/10 px-2.5 py-1`} onClick={() => act((w) => { w.nodes[sel.id].route = null; })}>Clear</button>
                 ) : (
-                  <button className={`${btn} bg-white px-2.5 py-1 text-black`} onClick={() => act((w) => { w.picking = sel.id; })}>Auto-send {Math.round((ui?.sendPct ?? 0.5) * 100)}%</button>
+                  <span className="flex gap-1.5">
+                    <button className={`${btn} bg-white px-2.5 py-1 text-black`} onClick={() => act((w) => { w.picking = sel.id; w.pickKeep = true; })}>New only</button>
+                    <button className={`${btn} bg-white px-2.5 py-1 text-black`} onClick={() => act((w) => { w.picking = sel.id; w.pickKeep = false; })}>All</button>
+                  </span>
                 )}
               </div>
               <div className="grid grid-cols-2 gap-1.5">{upgRows(sel)}</div>
