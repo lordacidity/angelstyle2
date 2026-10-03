@@ -560,10 +560,8 @@ function step(w: World, dt: number) {
       if (d < td) { td = d; target = c; }
     }
     if (!target) continue;
-    // A shot takes at most a fifth of the column: guns shred a trickle and
-    // only thin a push.
     const dmg = CANNON_DMG[n.cannon] * (n.owner === PLAYER ? 1 + META.cannon.per * w.meta.cannon / 100 : 1);
-    target.n -= Math.min(dmg, target.n * 0.2);
+    target.n -= dmg;
     const p = convoyPos(w, target);
     w.shots.push({ x1: n.x, y1: n.y, x2: p.x, y2: p.y, age: 0 });
     n.cd = CANNON_CD;
