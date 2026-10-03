@@ -997,13 +997,15 @@ export default function Game() {
   const onDown = (e: React.PointerEvent) => {
     const w = worldRef.current; if (!w || w.over) return;
     e.currentTarget.setPointerCapture(e.pointerId);
-    if (pausedRef.current) {
+    const p = toMap(e);
+    const n = hit(w, p);
+    // Paused: a finger on one of yours still marches (below); anywhere else
+    // it pans, or taps.
+    if (pausedRef.current && !(n && n.owner === PLAYER && fingersRef.current.size === 0)) {
       panDown(e);
       pausedTapRef.current = fingersRef.current.size === 1 ? { x: e.clientX, y: e.clientY, moved: false } : null;
       return;
     }
-    const p = toMap(e);
-    const n = hit(w, p);
     if (!n) { w.selected = null; w.picking = null; w.picked = []; dragRef.current = null; return; }
     if (tapNode(w, n)) { dragRef.current = null; return; }
     dragRef.current = n.owner === PLAYER ? { from: n.id, x: p.x, y: p.y, moved: false, over: null } : null;
