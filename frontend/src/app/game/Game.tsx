@@ -718,7 +718,7 @@ export default function Game() {
   const dragRef = useRef<{ from: number; x: number; y: number; moved: boolean; over: number | null } | null>(null);
   const pausedRef = useRef(false);
   const speedRef = useRef(1);
-  const sendPctRef = useRef(0.5);
+  const sendPctRef = useRef(1);
   const settledRef = useRef(false);
   // The last outpost tapped and when: a second tap on it inside 350ms is a double tap.
   const lastTapRef = useRef<{ id: number; t: number }>({ id: -1, t: 0 });
@@ -730,7 +730,7 @@ export default function Game() {
   const start = useCallback((level: number, endless: boolean) => {
     const s = loadSave();
     worldRef.current = buildWorld(rulesFor(level, endless), s.meta);
-    pausedRef.current = false; speedRef.current = 1; sendPctRef.current = 0.5; settledRef.current = false;
+    pausedRef.current = false; speedRef.current = 1; sendPctRef.current = 1; settledRef.current = false;
     dragRef.current = null;
     setRun({ level, endless });
     setTab('post');
@@ -1076,7 +1076,7 @@ export default function Game() {
             <button className={`${btn} px-3 py-1.5 ${tab === 'post' ? 'bg-white/20' : 'bg-white/5'}`} onClick={() => setTab('post')}>Outpost</button>
             <button className={`${btn} px-3 py-1.5 ${tab === 'tech' ? 'bg-white/20' : 'bg-white/5'}`} onClick={() => setTab('tech')}>Tech</button>
             <button className={`${btn} bg-white/10 px-3 py-1.5`} onClick={() => { const steps = [0.25, 0.5, 1]; sendPctRef.current = steps[(steps.indexOf(sendPctRef.current) + 1) % steps.length]; }}>
-              send {Math.round((ui?.sendPct ?? 0.5) * 100)}%
+              send {Math.round((ui?.sendPct ?? 1) * 100)}%
             </button>
           </div>
         </div>
