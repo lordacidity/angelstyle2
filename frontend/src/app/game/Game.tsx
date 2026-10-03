@@ -126,10 +126,13 @@ interface Node {
   /** A standing order: everything goes, every second, split evenly
    *  between these outposts. Yours only. */
   route: { to: number[] } | null; routeT: number;
-  /** Upgrades set to buy themselves, each with the order it was switched on. Yours only. */
-  auto: Partial<Record<UpgKey, number>>;
+  /** Upgrades set to buy themselves. Yours only. */
+  auto: Partial<Record<UpgKey, Auto>>;
 }
 interface Edge { a: number; b: number; len: number }
+/** An upgrade or tech buying itself: the order it was switched on, and
+ *  how many levels it is to buy ahead of everything else. */
+interface Auto { order: number; prio: number }
 /** A column on the road. `from`/`to` are the leg it is on; `path` is the
  *  whole route, and `leg` which step of it. */
 interface Convoy { id: number; owner: number; n: number; from: number; to: number; t: number; dur: number; path: number[]; leg: number }
@@ -174,8 +177,10 @@ interface Rules {
 
 interface World {
   rules: Rules;
-  /** Counts the auto-upgrades switched on, so ties go to the one set first. */
+  /** Counts the autos switched on, so ties go to the one set first. */
   autoSeq: number;
+  /** Techs set to buy themselves. */
+  autoTech: Partial<Record<TechKey, Auto>>;
   nodes: Node[]; edges: Edge[]; adj: number[][];
   convoys: Convoy[]; shots: Shot[]; factions: Faction[];
   gold: number; time: number;
@@ -459,7 +464,7 @@ function buildWorld(rules: Rules, meta: Record<MetaKey, number>, seedExtra = 0):
     rules, nodes, edges, adj, convoys: [], shots: [], factions,
     gold: 40 + META.gold.per * meta.gold, time: 0,
     nextId: 1,
-    tech: { logistics: 0, conscription: 0, tithe: 0, scouts: 0, thrift: 0 }, meta, autoSeq: 0,
+    tech: { logistics: 0, conscription: 0, tithe: 0, scouts: 0, thrift: 0 }, meta, autoSeq: 0, autoTech: {},
     over: null, flash: null, selected: null, picking: null, pickN: 1, picked: [], shiftT: rules.shift ?? 0, hillT: 0,
   };
 }
@@ -939,24 +944,33 @@ function digMineAt(n: Node) {
 function toggleAuto(w: World, id: number, key: UpgKey) {
   const n = w.nodes[id];
   if (n.owner !== PLAYER || n.mine) return;
-  if (n.auto[key] !== undefined) delete n.auto[key]; else n.auto[key] = ++w.autoSeq;
+  if (n.auto[key]) delete n.auto[key]; else n.auto[key] = { order: ++w.autoSeq, prio: 0 };
 }
-/** The auto-upgrades buy, cheapest first, the earliest set on a tie, as
- *  far as the purse goes. */
+/** Switch a tech's buying itself on or off. */
+function toggleAutoTech(w: World, key: TechKey) {
+  if (w.autoTech[key]) delete w.autoTech[key]; else w.autoTech[key] = { order: ++w.autoSeq, prio: 0 };
+}
+/** The autos buy as far as the purse goes: anything pushed to the front
+ *  first, the one pushed first among those, then the cheapest of the rest,
+ *  the earliest set on a tie. A front-of-the-line buy uses up one push. */
 function autoUpgrade(w: World) {
-  const wants: { n: Node; key: UpgKey; cost: number; order: number }[] = [];
+  type Want = { a: Auto; cost: () => number; buy: () => void; c: number };
+  const wants: Want[] = [];
   for (const n of w.nodes) {
     if (n.owner !== PLAYER || n.mine) continue;
-    for (const key of Object.keys(n.auto) as UpgKey[]) wants.push({ n, key, cost: upgradeCost(w, n, key), order: n.auto[key]! });
+    for (const key of Object.keys(n.auto) as UpgKey[]) wants.push({ a: n.auto[key]!, cost: () => upgradeCost(w, n, key), buy: () => applyUpgrade(n, key), c: 0 });
   }
+  for (const key of Object.keys(w.autoTech) as TechKey[]) wants.push({ a: w.autoTech[key]!, cost: () => techCost(key, w.tech[key]), buy: () => { w.tech[key]++; }, c: 0 });
   if (!wants.length) return;
-  wants.sort((a, b) => a.cost - b.cost || a.order - b.order);
+  for (const x of wants) x.c = x.cost();
+  const rank = (p: Want, q: Want) => (q.a.prio > 0 ? 1 : 0) - (p.a.prio > 0 ? 1 : 0) || (p.a.prio > 0 ? p.a.order - q.a.order : p.c - q.c || p.a.order - q.a.order);
   for (let i = 0; i < 4; i++) {
-    const c = wants[0];
-    if (!c || w.gold < c.cost) return;
-    w.gold -= c.cost; applyUpgrade(c.n, c.key);
-    c.cost = upgradeCost(w, c.n, c.key);
-    wants.sort((a, b) => a.cost - b.cost || a.order - b.order);
+    wants.sort(rank);
+    const x = wants[0];
+    if (!x || w.gold < x.c) return;
+    w.gold -= x.c; x.buy();
+    if (x.a.prio > 0) x.a.prio--;
+    for (const y of wants) y.c = y.cost();
   }
 }
 
@@ -1176,7 +1190,7 @@ function draw(ctx: CanvasRenderingContext2D, w: World, view: { s: number; ox: nu
 
 interface Ui {
   gold: number; time: number; over: 'win' | 'lose' | null; paused: boolean; speed: number;
-  sendPct: number; selected: Node | null; tech: Record<TechKey, number>;
+  sendPct: number; selected: Node | null; tech: Record<TechKey, number>; autoTech: Partial<Record<TechKey, Auto>>;
   /** The picked outpost: troops it breeds a minute, and what it takes to fall. */
   selProdPerMin: number; selHold: number;
   /** Everything you hold, breeding, a minute (full outposts breed nothing), and the gold it pays. */
@@ -1365,7 +1379,7 @@ export default function Game() {
         lastSelRef.current = w.selected;
         setUi({
           gold: w.gold, time: w.time, over: w.over, paused: pausedRef.current, speed: speedRef.current,
-          sendPct: sendPctRef.current, selected: sel, tech: { ...w.tech },
+          sendPct: sendPctRef.current, selected: sel, tech: { ...w.tech }, autoTech: w.autoTech,
           selProdPerMin: sel ? prodOf(w, sel) * 60 : 0, selHold: sel ? Math.ceil(sel.troops * wallMult(sel)) : 0,
           prodPerMin: w.nodes.filter((n) => n.owner === PLAYER && n.troops < capOf(n) - 0.5).reduce((t, n) => t + prodOf(w, n) * 60, 0),
           goldPerMin: w.nodes.filter((n) => n.owner === PLAYER).reduce((t, n) => t + goldOf(n), 0) * goldMult(w) * 60,
@@ -1603,20 +1617,30 @@ export default function Game() {
   // Play.
   const sel = ui?.selected ?? null;
   const mineSel = sel?.owner === PLAYER;
+  // A card that buys itself: a hold switches auto on or off; the tap that
+  // ends a hold does nothing. A tap on a card already on auto pushes it to
+  // the front of the line, one level a tap; a tap otherwise buys one.
+  const hold = (toggle: (w: World) => void, tap: (w: World) => void) => {
+    const down = () => { clearTimeout(holdRef.current.t); holdRef.current = { t: setTimeout(() => { holdRef.current.fired = true; act(toggle); }, 450), fired: false }; };
+    const up = () => { clearTimeout(holdRef.current.t); };
+    return {
+      onPointerDown: down, onPointerUp: up, onPointerLeave: up, onPointerCancel: up,
+      onContextMenu: (e: React.MouseEvent) => e.preventDefault(),
+      onClick: () => { if (holdRef.current.fired) { holdRef.current.fired = false; return; } act(tap); },
+    };
+  };
+  const autoCls = (auto: Auto | undefined, poor: boolean) => `relative flex flex-col items-start rounded-xl px-3 py-1 text-left ${auto ? 'bg-[#ff4fa3]/15 ring-1 ring-inset ring-[#ff4fa3]/70' : 'bg-white/5'} ${poor && !auto ? 'opacity-30' : ''}`;
+  const autoTag = (auto: Auto | undefined) => auto && <span className="ml-1.5 text-[9px] font-bold tracking-wide text-[#ff4fa3]">AUTO{auto.prio > 0 ? ` ×${auto.prio}` : ''}</span>;
   const upgRows = (n: Node) => (Object.keys(UPG) as UpgKey[]).map((k) => {
     const u = UPG[k]; const lvl = k === 'tier' ? n.tier - 1 : n[k];
     const cost = upgradeCost({ tech: { thrift: ui?.tech.thrift ?? 0 } } as unknown as World, n, k);
-    const auto = n.auto[k] !== undefined;
+    const auto = n.auto[k];
     const poor = (ui?.gold ?? 0) < cost;
-    // A tap buys one. A hold switches auto on or off; the tap that ends it buys nothing.
-    const down = () => { clearTimeout(holdRef.current.t); holdRef.current = { t: setTimeout(() => { holdRef.current.fired = true; act((w) => toggleAuto(w, n.id, k)); }, 450), fired: false }; };
-    const up = () => { clearTimeout(holdRef.current.t); };
     return (
-      <button key={k} onPointerDown={down} onPointerUp={up} onPointerLeave={up} onPointerCancel={up} onContextMenu={(e) => e.preventDefault()}
-        onClick={() => { if (holdRef.current.fired) { holdRef.current.fired = false; return; } if (!poor) act((w) => buyUpgrade(w, n.id, k)); }}
-        className={`${btn} relative flex flex-col items-start rounded-xl px-3 py-1 text-left ${auto ? 'bg-[#ff4fa3]/15 ring-1 ring-inset ring-[#ff4fa3]/70' : 'bg-white/5'} ${poor && !auto ? 'opacity-30' : ''}`}>
+      <button key={k} {...hold((w) => toggleAuto(w, n.id, k), (w) => { const a = w.nodes[n.id].auto[k]; if (a) a.prio++; else if (!poor) buyUpgrade(w, n.id, k); })}
+        className={`${btn} ${autoCls(auto, poor)}`}>
         {k === 'prod' && <span className="absolute right-1.5 top-1.5 h-2 w-2 rounded-full bg-[#38e08a]" />}
-        <div className="flex w-full items-center justify-between text-[13px]"><b>{u.name}{auto && <span className="ml-1.5 text-[9px] font-bold tracking-wide text-[#ff4fa3]">AUTO</span>}</b><span className="text-white">{cost}g</span></div>
+        <div className="flex w-full items-center justify-between text-[13px]"><b>{u.name}{autoTag(auto)}</b><span className="text-white">{cost}g</span></div>
         <div className="text-[11px] text-white/45">{(() => {
           // Barracks and Expand: what the next level adds here, a minute.
           const rate = ui?.selProdPerMin ?? 0;
@@ -1669,7 +1693,7 @@ export default function Game() {
         <div className="pointer-events-none absolute inset-x-0 bottom-0 flex items-end justify-between px-3 pb-1.5 text-[13px]">
           <div className="flex flex-col items-start gap-1.5">
             <div className="rounded-md bg-[#000000] px-1 text-[15px] leading-tight"><span className="text-white/40">Gold </span><b className="text-white">{fmt(ui?.gold ?? 0)}</b></div>
-            <button className={`${btn} pointer-events-auto whitespace-nowrap bg-[#1c1c1c] px-3 py-1.5`} onClick={() => act((w) => { for (const n of w.nodes) n.auto = {}; })}>Clear AU</button>
+            <button className={`${btn} pointer-events-auto whitespace-nowrap bg-[#1c1c1c] px-3 py-1.5`} onClick={() => act((w) => { for (const n of w.nodes) n.auto = {}; w.autoTech = {}; })}>Clear AU</button>
             <button className={`${btn} pointer-events-auto whitespace-nowrap bg-[#1c1c1c] px-3 py-1.5`} onClick={() => act((w) => { for (const n of w.nodes) n.route = null; w.picking = null; w.picked = []; })}>Clear AS</button>
           </div>
           <div className="flex flex-col items-end gap-1.5">
@@ -1732,10 +1756,11 @@ export default function Game() {
             <div className="min-h-0 flex-1 overflow-y-auto" style={{ touchAction: 'pan-y', WebkitOverflowScrolling: 'touch' }}><div className="grid grid-cols-2 gap-1.5">
               {(Object.keys(TECH) as TechKey[]).map((k) => {
                 const t = TECH[k]; const lvl = ui?.tech[k] ?? 0; const cost = techCost(k, lvl);
+                const auto = ui?.autoTech[k]; const poor = (ui?.gold ?? 0) < cost;
                 return (
-                  <button key={k} disabled={(ui?.gold ?? 0) < cost} onClick={() => act((w) => buyTech(w, k))}
-                    className={`${btn} flex flex-col items-start rounded-xl bg-white/5 px-3 py-1 text-left`}>
-                    <div className="flex w-full items-center justify-between text-[13px]"><b>{t.name}</b><span className="text-white">{cost}g</span></div>
+                  <button key={k} {...hold((w) => toggleAutoTech(w, k), (w) => { const a = w.autoTech[k]; if (a) a.prio++; else if (!poor) buyTech(w, k); })}
+                    className={`${btn} ${autoCls(auto, poor)}`}>
+                    <div className="flex w-full items-center justify-between text-[13px]"><b>{t.name}{autoTag(auto)}</b><span className="text-white">{cost}g</span></div>
                     <div className="text-[11px] text-white/45">{t.desc} · lv {lvl}</div>
                   </button>
                 );
@@ -1744,7 +1769,7 @@ export default function Game() {
           ) : !sel ? (
             <div className="flex h-full flex-col items-center justify-center gap-1 px-2 text-center text-[13px] text-white/35">
               {ui?.blurb && <div className="text-[12px] text-white/60">{ui.blurb}</div>}
-              <div>Drag from one of yours to march. Tap one to build. Hold an upgrade to make it buy itself.</div>
+              <div>Drag from one of yours to march. Tap one to build. Hold an upgrade or tech to make it buy itself; tap it again to put it first in line.</div>
             </div>
           ) : !mineSel ? (
             <div className="flex h-full flex-col items-center justify-center text-center text-[13px] text-white/50">
