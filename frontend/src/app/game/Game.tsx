@@ -1686,7 +1686,7 @@ export default function Game() {
         </div>
         {/* A tall map: a scrollbar down the left, dragged or tapped, the thumb as long as the view is. */}
         {ui && ui.viewFrac < 1 && (
-          <div className="absolute bottom-14 left-0 top-2 w-11" style={{ touchAction: 'none' }}
+          <div className="absolute bottom-28 left-0 top-2 w-11" style={{ touchAction: 'none' }}
             onPointerDown={(e) => { e.currentTarget.setPointerCapture(e.pointerId); barGrabRef.current = { y: e.clientY, frac: ui.scrollFrac }; }}
             onPointerMove={(e) => { const g = barGrabRef.current; if (!g || !e.currentTarget.hasPointerCapture(e.pointerId)) return; const r = e.currentTarget.getBoundingClientRect(); scrollToRef.current(g.frac + (e.clientY - g.y) / r.height / (1 - ui.viewFrac)); }}
             onPointerUp={() => { barGrabRef.current = null; }} onPointerCancel={() => { barGrabRef.current = null; }}>
