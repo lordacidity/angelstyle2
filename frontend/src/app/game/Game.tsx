@@ -1064,6 +1064,11 @@ function draw(ctx: CanvasRenderingContext2D, w: World, view: { s: number; ox: nu
       const bits = [n.hub ? 'HUB' : '', n.loot ? `+${n.loot}` : '', n.gold ? `${n.gold}g` : '', n.mine ? `MINE ${n.mine}` : '', n.base ? 'HQ' : '', n.prod ? `B${n.prod}` : '', n.cannon ? `C${n.cannon}` : ''].filter(Boolean).join(' ');
       ctx.fillText(bits, n.x, n.y + r + 11);
     }
+    // A green dot at the top right of any of yours whose Barracks you can afford now.
+    if (n.owner === PLAYER && !n.mine && w.gold >= upgradeCost(w, n, 'prod')) {
+      ctx.fillStyle = '#38e08a';
+      ctx.beginPath(); ctx.arc(n.x + r * 0.75, n.y - r * 0.75, 3.5, 0, Math.PI * 2); ctx.fill();
+    }
   }
   // Standing orders, for the picked outpost only: gold for where it ships,
   // green for every outpost shipping to it.
@@ -1560,7 +1565,8 @@ export default function Game() {
     const cost = upgradeCost({ tech: { thrift: ui?.tech.thrift ?? 0 } } as unknown as World, n, k);
     return (
       <button key={k} disabled={(ui?.gold ?? 0) < cost} onClick={() => act((w) => buyUpgrade(w, n.id, k))}
-        className={`${btn} flex flex-col items-start rounded-xl bg-white/5 px-3 py-1 text-left`}>
+        className={`${btn} relative flex flex-col items-start rounded-xl bg-white/5 px-3 py-1 text-left`}>
+        {k === 'prod' && <span className="absolute right-1.5 top-1.5 h-2 w-2 rounded-full bg-[#38e08a]" />}
         <div className="flex w-full items-center justify-between text-[13px]"><b>{u.name}</b><span className="text-white">{cost}g</span></div>
         <div className="text-[11px] text-white/45">{(() => {
           // Barracks and Expand: what the next level adds here, a minute.
