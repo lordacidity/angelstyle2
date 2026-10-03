@@ -47,6 +47,8 @@ const UPG = {
 type UpgKey = keyof typeof UPG;
 const CANNON_DMG = [0, 5, 9, 14];
 const CANNON_RANGE = 130;
+/** A bigger outpost's guns reach further: +20% a size. */
+const cannonRange = (n: Node) => CANNON_RANGE * (1 + 0.2 * (n.tier - 1));
 const CANNON_CD = 0.4;
 
 const TECH = {
@@ -506,7 +508,7 @@ function step(w: World, dt: number) {
     if (!n.cannon || n.owner === 0) continue;
     n.cd -= dt;
     if (n.cd > 0) continue;
-    let target: Convoy | null = null; let td = CANNON_RANGE;
+    let target: Convoy | null = null; let td = cannonRange(n);
     for (const c of w.convoys) {
       if (c.owner === n.owner) continue;
       const p = convoyPos(w, c);
@@ -613,7 +615,7 @@ function draw(ctx: CanvasRenderingContext2D, w: World, view: { s: number; ox: nu
     const canTarget = w.picking !== null && w.picking !== n.id;
     if (n.cannon && n.owner !== 0) {
       ctx.strokeStyle = n.owner === PLAYER ? 'rgba(255,255,255,0.12)' : 'rgba(255,59,59,0.14)'; ctx.lineWidth = 1;
-      ctx.beginPath(); ctx.arc(n.x, n.y, CANNON_RANGE, 0, Math.PI * 2); ctx.stroke();
+      ctx.beginPath(); ctx.arc(n.x, n.y, cannonRange(n), 0, Math.PI * 2); ctx.stroke();
     }
     if (canTarget) {
       ctx.strokeStyle = 'rgba(255,255,255,0.5)'; ctx.lineWidth = 2; ctx.setLineDash([3, 4]);
@@ -966,7 +968,7 @@ export default function Game() {
           // Barracks and Expand: what the next level adds here, a minute.
           const rate = ui?.selProdPerMin ?? 0;
           if (k === 'prod') { const gain = max ? 0 : rate * ((1 + 0.35 * (lvl + 1)) / (1 + 0.35 * lvl) - 1); return `${max ? 'MAX' : `+${Math.round(gain)} troops/min`} · lv ${lvl}`; }
-          if (k === 'tier') { const gain = max ? 0 : rate * (TIER_PROD[n.tier] / TIER_PROD[n.tier - 1] - 1); return `${max ? 'MAX' : `+${Math.round(gain)}/min, holds ${Math.round(capOf({ ...n, tier: n.tier + 1 }))}`} · size ${n.tier}`; }
+          if (k === 'tier') { const gain = max ? 0 : rate * (TIER_PROD[n.tier] / TIER_PROD[n.tier - 1] - 1); return `${max ? 'MAX' : `+${Math.round(gain)}/min, holds ${Math.round(capOf({ ...n, tier: n.tier + 1 }))}, +20% range`} · size ${n.tier}`; }
           return `${u.desc} · lv ${lvl}`;
         })()}</div>
       </button>
