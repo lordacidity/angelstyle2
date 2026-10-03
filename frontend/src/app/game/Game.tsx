@@ -780,10 +780,16 @@ export default function Game() {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const wrapRef = useRef<HTMLDivElement>(null);
   const viewRef = useRef({ s: 1, ox: 0, oy: 0, midY: MAP_H / 2 });
-  // How far down the map the top of the screen is (map px), on a tall map.
-  const scrollRef = useRef(0);
-  const maxScrollRef = useRef(0);
-  const maxScroll = () => maxScrollRef.current;
+  // The camera: how far past the fit it is zoomed (1 is the fit), and the
+  // map point under the middle of the screen. Set while paused, kept while
+  // playing. Infinity for cy means "the bottom, where home is".
+  const camRef = useRef({ zoom: 1, cx: MAP_W / 2, cy: Infinity });
+  // What the scrollbar reads: how far down the view is, and how much it shows.
+  const scrollFracRef = useRef(0);
+  const viewFracRef = useRef(1);
+  // Fingers on the map while paused: one pans, two pinch.
+  const fingersRef = useRef(new Map<number, { x: number; y: number }>());
+  const pinchRef = useRef<{ dist: number; zoom: number } | null>(null);
   const dragRef = useRef<{ from: number; x: number; y: number; moved: boolean; over: number | null } | null>(null);
   const pausedRef = useRef(false);
   const speedRef = useRef(1);
@@ -791,10 +797,10 @@ export default function Game() {
   const settledRef = useRef(false);
   // The last outpost tapped and when: a second tap on it inside 350ms is a double tap.
   const lastTapRef = useRef<{ id: number; t: number }>({ id: -1, t: 0 });
-  const scrollByRef = useRef<(dir: number) => void>(() => {});
   /** Scroll to a fraction of the way down the map. */
   const scrollToRef = useRef<(frac: number) => void>(() => {});
-  const viewFracRef = useRef(1);
+  /** Re-fit the view to the camera. */
+  const refitRef = useRef<() => void>(() => {});
 
   // localStorage is the browser's: read it once mounted, never on the server.
   useEffect(() => { const t = setTimeout(() => setSave(loadSave()), 0); return () => clearTimeout(t); }, []);
@@ -807,8 +813,8 @@ export default function Game() {
     setRun({ level, endless });
     setTab('post');
     setScreen('play');
-    // Back to the bottom of the map, where home is.
-    scrollRef.current = Infinity; scrollByRef.current(0);
+    // Back to the bottom of the map, where home is, at the fit.
+    camRef.current = { zoom: 1, cx: MAP_W / 2, cy: Infinity }; refitRef.current();
   }, []);
 
   // When a run ends, bank the scrap once.
@@ -842,28 +848,32 @@ export default function Game() {
       canvas.width = Math.round(r.width * dpr); canvas.height = Math.round(r.height * dpr);
       canvas.style.width = `${r.width}px`; canvas.style.height = `${r.height}px`;
       const mapH = worldRef.current?.rules.mapH ?? MAP_H;
-      // Fit the map, or fit its width and scroll, when it is taller than that.
-      let s = Math.min(r.width / MAP_W, r.height / mapH);
-      let oy = (r.height - mapH * s) / 2;
-      // Too small to read whole: fill the width instead and scroll it.
-      if (s < 0.42) { s = (r.width / MAP_W) * 0.8; oy = 0; }
-      const visibleH = r.height / s;
-      maxScrollRef.current = Math.max(0, mapH - visibleH);
-      viewFracRef.current = Math.min(1, visibleH / mapH);
-      scrollRef.current = Math.max(0, Math.min(maxScrollRef.current, scrollRef.current));
-      if (maxScrollRef.current > 0) oy = -scrollRef.current * s;
-      const midY = (r.height / 2 - oy) / s;
-      viewRef.current = { s: s * dpr, ox: (r.width - MAP_W * s) / 2 * dpr, oy: oy * dpr, midY };
+      // The fit: the whole map, or its width when the whole would be too
+      // small to read. The camera zooms in from there.
+      let base = Math.min(r.width / MAP_W, r.height / mapH);
+      if (base < 0.42) base = (r.width / MAP_W) * 0.8;
+      const cam = camRef.current;
+      cam.zoom = Math.max(1, Math.min(3, cam.zoom));
+      const s = base * cam.zoom;
+      const visW = r.width / s, visH = r.height / s;
+      // The map never leaves the screen: centred where it is smaller than the
+      // view, and held inside it where it is larger.
+      cam.cx = MAP_W <= visW ? MAP_W / 2 : Math.max(visW / 2, Math.min(MAP_W - visW / 2, cam.cx));
+      cam.cy = mapH <= visH ? mapH / 2 : Math.max(visH / 2, Math.min(mapH - visH / 2, cam.cy));
+      const ox = r.width / 2 - cam.cx * s, oy = r.height / 2 - cam.cy * s;
+      viewFracRef.current = Math.min(1, visH / mapH);
+      scrollFracRef.current = mapH <= visH ? 0 : (cam.cy - visH / 2) / (mapH - visH);
+      viewRef.current = { s: s * dpr, ox: ox * dpr, oy: oy * dpr, midY: cam.cy };
     };
-    scrollRef.current = Infinity; // start at the bottom: home
     fit();
-    scrollByRef.current = (dir: number) => {
+    refitRef.current = fit;
+    scrollToRef.current = (frac: number) => {
       const r = wrap.getBoundingClientRect();
-      const visibleH = r.height / (viewRef.current.s / Math.min(2, window.devicePixelRatio || 1));
-      scrollRef.current += dir * visibleH * 0.6;
+      const mapH = worldRef.current?.rules.mapH ?? MAP_H;
+      const visH = r.height / (viewRef.current.s / Math.min(2, window.devicePixelRatio || 1));
+      camRef.current.cy = visH / 2 + Math.max(0, Math.min(1, frac)) * (mapH - visH);
       fit();
     };
-    scrollToRef.current = (frac: number) => { scrollRef.current = Math.max(0, Math.min(1, frac)) * maxScrollRef.current; fit(); };
     const ro = new ResizeObserver(fit);
     ro.observe(wrap);
     let last = performance.now();
@@ -896,7 +906,7 @@ export default function Game() {
           selProdPerMin: sel ? prodOf(w, sel) * 60 : 0, selHold: sel ? Math.ceil(sel.troops * wallMult(sel)) : 0,
           prodPerMin: w.nodes.filter((n) => n.owner === PLAYER && n.troops < capOf(n) - 0.5).reduce((t, n) => t + prodOf(w, n) * 60, 0),
           mine: w.nodes.filter((n) => n.owner === PLAYER).length, theirs: w.nodes.filter((n) => n.owner >= 2).length, picking: w.picking !== null, pickN: w.pickN, pickLeft: w.pickN - w.picked.length,
-          scrollFrac: maxScroll() > 0 ? scrollRef.current / maxScroll() : 0, viewFrac: viewFracRef.current,
+          scrollFrac: scrollFracRef.current, viewFrac: viewFracRef.current,
           army: (() => {
             const by = new Map<number, number>();
             for (const n of w.nodes) if (n.owner !== 0) by.set(n.owner, (by.get(n.owner) ?? 0) + n.troops);
@@ -923,9 +933,38 @@ export default function Game() {
     for (const n of w.nodes) { const d = Math.hypot(n.x - p.x, n.y - p.y); if (d < bd) { bd = d; best = n; } }
     return best;
   };
+  // Paused: the map is the thing under the fingers. One drags it, two pinch it.
+  const panDown = (e: React.PointerEvent) => {
+    fingersRef.current.set(e.pointerId, { x: e.clientX, y: e.clientY });
+    if (fingersRef.current.size === 2) {
+      const [a, b] = [...fingersRef.current.values()];
+      pinchRef.current = { dist: Math.hypot(a.x - b.x, a.y - b.y), zoom: camRef.current.zoom };
+    }
+  };
+  const panMove = (e: React.PointerEvent) => {
+    const f = fingersRef.current.get(e.pointerId); if (!f) return;
+    const canvas = canvasRef.current!;
+    const sCss = viewRef.current.s / (canvas.width / canvas.getBoundingClientRect().width);
+    if (fingersRef.current.size >= 2 && pinchRef.current) {
+      f.x = e.clientX; f.y = e.clientY;
+      const [a, b] = [...fingersRef.current.values()];
+      const d = Math.hypot(a.x - b.x, a.y - b.y);
+      camRef.current.zoom = pinchRef.current.zoom * (d / Math.max(1, pinchRef.current.dist));
+    } else {
+      camRef.current.cx -= (e.clientX - f.x) / sCss;
+      camRef.current.cy -= (e.clientY - f.y) / sCss;
+      f.x = e.clientX; f.y = e.clientY;
+    }
+    refitRef.current();
+  };
+  const panUp = (e: React.PointerEvent) => {
+    fingersRef.current.delete(e.pointerId);
+    if (fingersRef.current.size < 2) pinchRef.current = null;
+  };
   const onDown = (e: React.PointerEvent) => {
     const w = worldRef.current; if (!w || w.over) return;
     e.currentTarget.setPointerCapture(e.pointerId);
+    if (pausedRef.current) { panDown(e); return; }
     const p = toMap(e);
     const n = hit(w, p);
     if (!n) { w.selected = null; w.picking = null; w.picked = []; dragRef.current = null; return; }
@@ -954,6 +993,7 @@ export default function Game() {
     dragRef.current = n.owner === PLAYER ? { from: n.id, x: p.x, y: p.y, moved: false, over: null } : null;
   };
   const onMove = (e: React.PointerEvent) => {
+    if (fingersRef.current.size) { panMove(e); return; }
     const d = dragRef.current; if (!d) return;
     const p = toMap(e);
     d.x = p.x; d.y = p.y;
@@ -964,6 +1004,7 @@ export default function Game() {
     d.over = over && over.id !== d.from ? over.id : null;
   };
   const onUp = (e: React.PointerEvent) => {
+    if (fingersRef.current.size) { panUp(e); return; }
     const d = dragRef.current; dragRef.current = null;
     const w = worldRef.current; if (!w || !d || !d.moved) return;
     const n = hit(w, toMap(e));
