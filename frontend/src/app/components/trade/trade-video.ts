@@ -32,8 +32,8 @@
 //      them first and other faces after; the pointer circles their card and
 //      clicks it
 //   3. their page: the chart draws itself in
-//   4. the pointer whips around the chart in frantic circles, with the site's
-//      hover: the crosshair, the axis line and dot, the date at the top, the
+//   4. the pointer glides along the chart, across and part way back, with
+//      the site's hover: the crosshair, the axis line and dot, the date at the top, the
 //      price row following the point under it
 //   5. the trade card: the pointer clicks the chosen way, the other, then the
 //      chosen way again, clicks the amount, $10 types in, the fee
@@ -769,15 +769,13 @@ export function createTradeClip(ctx: Ctx, a: TradeAssets, direction: Direction, 
   // The analysis — their page up to the trade card — and the trade — the
   // flips, the amount, Place trade — each run ANALYZE_PACE / TRADE_PACE times
   // their old length: every moment in them sits that much further from the
-  // start of its beat. The loops are laps a second, so the whip over the chart
-  // runs longer at the same frenzy rather than slower. Everything heard and
-  // captioned follows by itself: the keys, the clicks and the beats are all
-  // read off these times.
+  // start of its beat. Everything heard and captioned follows by itself: the
+  // keys, the clicks and the beats are all read off these times.
   const ANALYZE_PACE = 1.5;
   const TRADE_PACE = 1.5;
   const ana = (s: number) => T_PICK + s * ANALYZE_PACE;
   const T_CHART: [number, number] = [ana(0.15), ana(1.05)];
-  // A frantic whip of circles over the chart, then straight to the toggle.
+  // A slow glide along the chart, then over to the toggle.
   const T_CHART_LOOP: [number, number] = [ana(0.95), ana(2.15)];
   const T_TRADE = ana(2.55);
   const trd = (s: number) => s * TRADE_PACE;
@@ -1546,27 +1544,31 @@ export function createTradeClip(ctx: Ctx, a: TradeAssets, direction: Direction, 
     return { x: card0.x + card0.w / 2 + (card0.w / 2 + 18) * Math.cos(ang), y: card0.y + card0.h / 2 + (card0.h / 2 + 12) * Math.sin(ang) };
   };
   const pickPt = { x: card0.x + card0.w / 2 - 10, y: card0.y + imgH * 0.55 };
-  // A crazed squirrel on the chart: about six laps a second with the speed
-  // lurching, the circle snapping between tight and wide, and its centre
-  // darting back and forth along the line. The sizes are kept inside the plot
-  // so the hover never drops (the tremor rides on top).
-  const loopRX = 105;
-  const loopRY = 52;
-  const loopDX = 150;
-  const loopDY = 22;
-  const loopC = (() => {
-    const f = 0.6;
-    const near = VIEW_M.pts[Math.round(f * (VIEW_M.pts.length - 1))].y;
-    const reachY = loopRY * 1.2 + loopDY + 24;
-    return { x: chart.x + f * chart.plotW, y: clamp(near, chart.y + reachY, chart.y + chart.h - reachY) };
-  })();
+  // Reading the chart: the pointer glides along the line, left to right and
+  // part of the way back, riding just over it so the hover follows the price
+  // up and down. Unhurried: one easy sweep and a half, not laps. It stays
+  // inside the plot so the hover never drops.
+  const lineYAt = (x: number) => {
+    const pts = VIEW_M.pts;
+    // Averaged over a short span, so a jump in the line is a slope to the hand.
+    let sum = 0;
+    const N = 9;
+    for (let k = 0; k < N; k++) {
+      const xx = clamp(x + (k / (N - 1) - 0.5) * 40, pts[0].x, pts[pts.length - 1].x);
+      let i = 0;
+      while (i < pts.length - 2 && pts[i + 1].x <= xx) i++;
+      const a = pts[i];
+      const b = pts[i + 1];
+      sum += lerp(a.y, b.y, b.x === a.x ? 0 : clamp((xx - a.x) / (b.x - a.x), 0, 1));
+    }
+    return sum / N;
+  };
   const chartLoopAt = (t: number) => {
-    const u = t - T_CHART_LOOP[0];
-    const ang = -Math.PI / 2 + 2 * Math.PI * (5.8 * u + 0.35 * Math.sin(9.3 * u) + 0.12 * Math.sin(23 * u));
-    const r = 0.85 + 0.35 * Math.sin(7.3 * u + 0.8);
-    const cx = loopC.x + loopDX * (0.75 * Math.sin(3.1 * u + 0.4) + 0.25 * Math.sin(11.3 * u));
-    const cy = loopC.y + loopDY * Math.sin(4.7 * u + 1.3);
-    return { x: cx + loopRX * r * Math.cos(ang), y: cy + loopRY * r * Math.sin(ang) };
+    const u = clamp((t - T_CHART_LOOP[0]) / (T_CHART_LOOP[1] - T_CHART_LOOP[0]), 0, 1);
+    const f = 0.12 + 0.76 * (1 - Math.cos(Math.PI * 1.6 * u)) / 2;
+    const x = chart.x + f * chart.plotW;
+    const y = clamp(lineYAt(x) - 10, chart.y + chart.padT, chart.y + chart.h - chart.padB);
+    return { x, y };
   };
   const togglePt = (d: Direction) => ({ x: inner.x + (d === 'up' ? 1 : 3) * (inner.w / 4), y: tr.y + tr.h / 2 + 2 });
   const amountPt = { x: tcInnerX + tcInnerW - 26, y: amountCY + 4 };
@@ -1632,7 +1634,8 @@ export function createTradeClip(ctx: Ctx, a: TradeAssets, direction: Direction, 
       base = { x: lerp(k0.x, k1.x, e), y: lerp(k0.y, k1.y, e) };
       landed = u >= 1;
     }
-    const amp = t >= TYPING[0] && t < TYPING[1] ? 1 : landed ? 7 : 3.4;
+    const reading = t >= T_CHART_LOOP[0] && t < T_CHART_LOOP[1];
+    const amp = (t >= TYPING[0] && t < TYPING[1]) || reading ? 1 : landed ? 7 : 3.4;
     const f = fidget(t, lerp(0.4, amp, pressCalm(t)));
     return { x: base.x + f.x, y: base.y + f.y };
   };
