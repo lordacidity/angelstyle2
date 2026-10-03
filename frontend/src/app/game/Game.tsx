@@ -1569,6 +1569,12 @@ export default function Game() {
       <div ref={wrapRef} className="relative flex-1 min-h-0">
         <canvas ref={canvasRef} className="absolute inset-0 block" style={{ touchAction: 'none' }}
           onPointerDown={onDown} onPointerMove={onMove} onPointerUp={onUp} onPointerCancel={onUp} />
+        {/* The purse and the rates, in the corner over the map. */}
+        <div className="pointer-events-none absolute right-2 top-1 text-right leading-tight">
+          <div className="text-[15px]"><span className="text-white/40">Gold </span><b className="text-white">{fmt(ui?.gold ?? 0)}</b></div>
+          <div className="text-[11px] text-white/40"><b className="text-white/80">+{Math.round(ui?.goldPerMin ?? 0)}</b> gold/min</div>
+          <div className="text-[11px] text-white/40"><b className="text-white/80">+{Math.round(ui?.prodPerMin ?? 0)}</b> troops/min</div>
+        </div>
         {/* A tall map: a scrollbar down the left, dragged or tapped, the thumb as long as the view is. */}
         {ui && ui.viewFrac < 1 && (
           <div className="absolute bottom-2 left-0 top-2 w-11" style={{ touchAction: 'none' }}
@@ -1593,27 +1599,24 @@ export default function Game() {
           </div>
         )}
       </div>
-      <div className="px-3 pb-0.5 pt-1">
+      <div className="px-3 pb-0 pt-1">
         <div className="flex items-center justify-between text-[13px]">
           <div className="leading-tight">
-            <button className={`${btn} mb-1 whitespace-nowrap bg-white/10 px-3 py-1.5 text-[13px]`} onClick={() => act((w) => { for (const n of w.nodes) n.route = null; w.picking = null; w.picked = []; })}>Clear autos</button>
-            <div className="whitespace-nowrap text-[11px] text-white/40"><b className="text-white/80">+{Math.round(ui?.prodPerMin ?? 0)}</b> troops/min</div>
-            <div className="whitespace-nowrap text-[11px] text-white/40"><b className="text-white/80">+{Math.round(ui?.goldPerMin ?? 0)}</b> gold/min</div>
-            <div><span className="text-white/40">Gold </span><b className="text-white">{fmt(ui?.gold ?? 0)}</b></div>
+            <button className={`${btn} whitespace-nowrap bg-white/10 px-3 py-1.5 text-[13px]`} onClick={() => act((w) => { for (const n of w.nodes) n.route = null; w.picking = null; w.picked = []; })}>Clear autos</button>
           </div>
           <div className="flex items-end gap-1.5">
             <button className={`${btn} px-3 py-1.5 ${tab === 'post' ? 'bg-white/20' : 'bg-white/5'}`} onClick={() => setTab('post')}>Outpost</button>
             <button className={`${btn} px-3 py-1.5 ${tab === 'tech' ? 'bg-white/20' : 'bg-white/5'}`} onClick={() => setTab('tech')}>Tech</button>
             <div className="flex flex-col gap-1">
-              <button className={`${btn} bg-white/10 px-3 py-1 text-[12px]`} onClick={() => { const steps = [0.5, 1, 2]; speedRef.current = steps[(steps.indexOf(speedRef.current) + 1) % steps.length]; }}>{ui?.speed ?? 1}×</button>
-              <button className={`${btn} bg-white/10 px-3 py-1 text-[12px]`} onClick={() => { pausedRef.current = !pausedRef.current; }}>{ui?.paused ? '▶' : '❚❚'}</button>
+              <button className={`${btn} bg-white/10 px-3 py-1.5`} onClick={() => { const steps = [0.5, 1, 2]; speedRef.current = steps[(steps.indexOf(speedRef.current) + 1) % steps.length]; }}>{ui?.speed ?? 1}×</button>
+              <button className={`${btn} bg-white/10 px-3 py-1.5`} onClick={() => { pausedRef.current = !pausedRef.current; }}>{ui?.paused ? '▶' : '❚❚'}</button>
               <button className={`${btn} whitespace-nowrap bg-white/10 px-3 py-1.5`} onClick={() => { const steps = [0.25, 0.5, 1]; sendPctRef.current = steps[(steps.indexOf(sendPctRef.current) + 1) % steps.length]; }}>
                 send {Math.round((ui?.sendPct ?? 1) * 100)}%
               </button>
             </div>
           </div>
         </div>
-        <div className="mt-1 h-[184px]">
+        <div className="mt-1 h-[132px] overflow-y-auto" style={{ touchAction: 'pan-y', WebkitOverflowScrolling: 'touch' }}>
           {tab === 'tech' ? (
             <div className="grid grid-cols-2 gap-1.5">
               {(Object.keys(TECH) as TechKey[]).map((k) => {
