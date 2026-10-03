@@ -1080,7 +1080,7 @@ function draw(ctx: CanvasRenderingContext2D, w: World, view: { s: number; ox: nu
       }
     }
     if (isSel) {
-      ctx.strokeStyle = '#fff'; ctx.lineWidth = 2;
+      ctx.strokeStyle = '#3b82f6'; ctx.lineWidth = 2.5;
       ctx.beginPath(); ctx.arc(n.x, n.y, r + 9 + n.wall * 4.5, 0, Math.PI * 2); ctx.stroke();
     }
     ctx.fillStyle = n.owner === PLAYER || n.mine ? '#000' : '#fff';
