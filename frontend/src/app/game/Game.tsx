@@ -1119,8 +1119,7 @@ export default function Game() {
             </div>
           ) : (
             <>
-              <div className="grid grid-cols-2 gap-1.5">{upgRows(sel)}</div>
-              <div className="mt-1.5 flex items-center justify-between text-[12px]">
+              <div className="mb-1.5 flex items-center justify-between text-[12px]">
                 {ui?.picking ? (
                   <span className="text-[#ffd166]">{ui.pickN === 1 ? 'Tap the outpost to auto-send to.' : ui.pickLeft === 2 ? 'Tap the first outpost.' : 'Tap the second outpost.'}</span>
                 ) : sel.route ? (
@@ -1136,6 +1135,7 @@ export default function Game() {
                   <button className={`${btn} bg-white/10 px-2.5 py-1`} onClick={() => act((w) => { w.picking = sel.id; w.pickN = 2; w.picked = []; })}>Split 50/50</button>
                 )}
               </div>
+              <div className="grid grid-cols-2 gap-1.5">{upgRows(sel)}</div>
               <div className="mt-1.5 flex justify-between text-[12px] text-white/50">
                 <span><b className="text-white">+{Math.round(ui?.selProdPerMin ?? 0)}</b> troops/min{sel.troops >= capOf(sel) - 0.5 ? ' (full)' : ''}</span>
                 <span>falls to <b className="text-white">{(ui?.selHold ?? 0) + 1}</b>+</span>
