@@ -86,9 +86,9 @@ interface Node {
   id: number; x: number; y: number;
   owner: number; troops: number; tier: number; base: boolean;
   prod: number; wall: number; cannon: number; cd: number;
-  /** A standing order: ship everything above `keep` to that outpost,
-   *  every few seconds, for as long as it stands. Yours only. */
-  route: { to: number; keep: number } | null; routeT: number;
+  /** A standing order: ship everything to that outpost, every few
+   *  seconds, for as long as it stands. Yours only. */
+  route: { to: number } | null; routeT: number;
 }
 interface Edge { a: number; b: number; len: number }
 /** A column on the road. `from`/`to` are the leg it is on; `path` is the
@@ -123,8 +123,6 @@ interface World {
   selected: number | null;
   /** The outpost whose standing order is being pointed at, while it is. */
   picking: number | null;
-  /** Which kind of order is being pointed at: all of it, or only what is new. */
-  pickKeep: boolean;
 }
 
 function rulesFor(level: number, endless: boolean): Rules {
@@ -264,7 +262,7 @@ function buildWorld(rules: Rules, meta: Record<MetaKey, number>, seedExtra = 0):
     gold: 40 + META.gold.per * meta.gold, time: 0,
     nextId: 1,
     tech: { logistics: 0, conscription: 0 }, meta,
-    over: null, flash: { text: rules.endless ? 'THE LONG WAR' : `LEVEL ${rules.level}`, age: 0 }, selected: null, picking: null, pickKeep: false,
+    over: null, flash: { text: rules.endless ? 'THE LONG WAR' : `LEVEL ${rules.level}`, age: 0 }, selected: null, picking: null,
   };
 }
 
@@ -470,8 +468,7 @@ function step(w: World, dt: number) {
     n.routeT -= dt;
     if (n.routeT > 0) continue;
     n.routeT = ROUTE_EVERY;
-    const spare = Math.floor(n.troops - n.route.keep);
-    if (spare >= 3) sendCount(w, n.id, n.route.to, spare);
+    if (n.troops >= 3) send(w, n.id, n.route.to, 1);
   }
 
   // Columns on the march.
@@ -645,17 +642,22 @@ function draw(ctx: CanvasRenderingContext2D, w: World, view: { s: number; ox: nu
       ctx.fillText(bits, n.x, n.y + r + 11);
     }
   }
-  // Standing orders: a faint road from the outpost to where it ships.
-  for (const n of w.nodes) {
-    if (!n.route || n.owner !== PLAYER) continue;
-    const path = route(w, n.id, n.route.to, PLAYER);
-    if (!path) continue;
-    ctx.strokeStyle = 'rgba(255,255,255,0.35)'; ctx.lineWidth = 1.5; ctx.setLineDash([2, 5]);
-    ctx.lineDashOffset = -w.time * 20;
-    ctx.beginPath(); ctx.moveTo(n.x, n.y);
-    for (const i of path.slice(1)) ctx.lineTo(w.nodes[i].x, w.nodes[i].y);
-    ctx.stroke();
-    ctx.setLineDash([]); ctx.lineDashOffset = 0;
+  // Standing orders, for the picked outpost only: gold for where it ships,
+  // green for every outpost shipping to it.
+  if (w.selected !== null) {
+    const road = (from: number, to: number, color: string) => {
+      const path = route(w, from, to, PLAYER);
+      if (!path) return;
+      ctx.strokeStyle = color; ctx.lineWidth = 2.5; ctx.setLineDash([3, 6]);
+      ctx.lineDashOffset = -w.time * 24;
+      ctx.beginPath(); ctx.moveTo(w.nodes[from].x, w.nodes[from].y);
+      for (const i of path.slice(1)) ctx.lineTo(w.nodes[i].x, w.nodes[i].y);
+      ctx.stroke();
+      ctx.setLineDash([]); ctx.lineDashOffset = 0;
+    };
+    const s = w.nodes[w.selected];
+    for (const n of w.nodes) if (n.route && n.owner === PLAYER && n.route.to === s.id && n.id !== s.id) road(n.id, s.id, '#38e08a');
+    if (s.route && s.owner === PLAYER) road(s.id, s.route.to, '#ffd166');
   }
   // Columns.
   for (const c of w.convoys) {
@@ -853,7 +855,7 @@ export default function Game() {
     if (!n) { w.selected = null; w.picking = null; dragRef.current = null; return; }
     if (w.picking !== null) {
       const from = w.nodes[w.picking];
-      if (n.id !== from.id && from.owner === PLAYER) { from.route = { to: n.id, keep: w.pickKeep ? Math.floor(from.troops) : 0 }; from.routeT = 0; }
+      if (n.id !== from.id && from.owner === PLAYER) { from.route = { to: n.id }; from.routeT = 0; }
       w.picking = null; dragRef.current = null;
       return;
     }
@@ -1094,7 +1096,7 @@ export default function Game() {
                 {ui?.picking ? (
                   <span className="text-white">Tap where to send.</span>
                 ) : sel.route ? (
-                  <span><b>Auto-sending {sel.route.keep > 0 ? `new (keeps ${sel.route.keep})` : 'all'}</b></span>
+                  <span><b className="text-[#ffd166]">Auto-sending</b></span>
                 ) : (
                   <span className="text-white/45">Auto-send</span>
                 )}
@@ -1103,10 +1105,7 @@ export default function Game() {
                 ) : sel.route ? (
                   <button className={`${btn} bg-white/10 px-2.5 py-1`} onClick={() => act((w) => { w.nodes[sel.id].route = null; })}>Clear</button>
                 ) : (
-                  <span className="flex gap-1.5">
-                    <button className={`${btn} bg-white px-2.5 py-1 text-black`} onClick={() => act((w) => { w.picking = sel.id; w.pickKeep = true; })}>New only</button>
-                    <button className={`${btn} bg-white px-2.5 py-1 text-black`} onClick={() => act((w) => { w.picking = sel.id; w.pickKeep = false; })}>All</button>
-                  </span>
+                  <button className={`${btn} bg-white px-2.5 py-1 text-black`} onClick={() => act((w) => { w.picking = sel.id; })}>Set</button>
                 )}
               </div>
               <div className="grid grid-cols-2 gap-1.5">{upgRows(sel)}</div>
