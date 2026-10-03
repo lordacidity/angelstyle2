@@ -673,16 +673,22 @@ function draw(ctx: CanvasRenderingContext2D, w: World, view: { s: number; ox: nu
       ctx.beginPath(); ctx.arc(n.x, n.y, r + 7 + n.wall * 4.5 + Math.sin(w.time * 6) * 1.5, 0, Math.PI * 2); ctx.stroke();
       ctx.setLineDash([]);
     }
-    ctx.fillStyle = '#000000';
-    ctx.beginPath(); ctx.arc(n.x, n.y, r, 0, Math.PI * 2); ctx.fill();
-    ctx.fillStyle = n.owner === 0 ? '#111111' : n.owner === PLAYER ? (n.route ? '#a3a3a3' : '#ffffff') : col + '33';
-    ctx.beginPath(); ctx.arc(n.x, n.y, r, 0, Math.PI * 2); ctx.fill();
-    ctx.strokeStyle = col; ctx.lineWidth = n.base ? 4 : 2.5;
-    ctx.beginPath(); ctx.arc(n.x, n.y, r, 0, Math.PI * 2); ctx.stroke();
-    // A mine: a gold ring inside, one notch a depth.
     if (n.mine) {
-      ctx.strokeStyle = '#ffd166'; ctx.lineWidth = 2;
-      ctx.beginPath(); ctx.arc(n.x, n.y, r - 4, 0, Math.PI * 2); ctx.stroke();
+      // A mine: a gold square, edged in its owner's colour.
+      const q = r * 0.9;
+      ctx.fillStyle = '#000000';
+      ctx.fillRect(n.x - q, n.y - q, q * 2, q * 2);
+      ctx.fillStyle = n.owner === PLAYER ? (n.route ? '#c9a24f' : '#ffd166') : '#ffd16655';
+      ctx.fillRect(n.x - q, n.y - q, q * 2, q * 2);
+      ctx.strokeStyle = n.owner === PLAYER ? '#ffd166' : col; ctx.lineWidth = 2.5;
+      ctx.strokeRect(n.x - q, n.y - q, q * 2, q * 2);
+    } else {
+      ctx.fillStyle = '#000000';
+      ctx.beginPath(); ctx.arc(n.x, n.y, r, 0, Math.PI * 2); ctx.fill();
+      ctx.fillStyle = n.owner === 0 ? '#111111' : n.owner === PLAYER ? (n.route ? '#a3a3a3' : '#ffffff') : col + '33';
+      ctx.beginPath(); ctx.arc(n.x, n.y, r, 0, Math.PI * 2); ctx.fill();
+      ctx.strokeStyle = col; ctx.lineWidth = n.base ? 4 : 2.5;
+      ctx.beginPath(); ctx.arc(n.x, n.y, r, 0, Math.PI * 2); ctx.stroke();
     }
     // Walls: a solid ring for each level, stacked outward, with four gates.
     for (let k = 0; k < n.wall; k++) {
@@ -697,7 +703,8 @@ function draw(ctx: CanvasRenderingContext2D, w: World, view: { s: number; ox: nu
       ctx.strokeStyle = '#fff'; ctx.lineWidth = 2;
       ctx.beginPath(); ctx.arc(n.x, n.y, r + 9 + n.wall * 4.5, 0, Math.PI * 2); ctx.stroke();
     }
-    ctx.fillStyle = n.owner === PLAYER ? '#000' : '#fff';
+    ctx.fillStyle = n.owner === PLAYER || n.mine ? '#000' : '#fff';
+    if (n.mine && n.owner !== PLAYER) ctx.fillStyle = '#fff';
     ctx.font = `700 ${n.base ? 15 : 13}px -apple-system, system-ui, sans-serif`;
     ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
     ctx.fillText(String(Math.floor(n.troops)), n.x, n.y + 0.5);
@@ -1193,7 +1200,7 @@ export default function Game() {
       <div className="px-3 pb-1 pt-1">
         <div className="flex items-center justify-between text-[13px]">
           <div className="leading-tight">
-            <button className={`${btn} mb-1 bg-white/10 px-2 py-0.5 text-[11px]`} onClick={() => act((w) => { for (const n of w.nodes) n.route = null; w.picking = null; w.picked = []; })}>Clear auto-sends</button>
+            <button className={`${btn} mb-0.5 whitespace-nowrap bg-white/10 px-2 py-0.5 text-[11px]`} onClick={() => act((w) => { for (const n of w.nodes) n.route = null; w.picking = null; w.picked = []; })}>Clear autos</button>
             <div className="text-[11px] text-white/40"><b className="text-white/80">+{Math.round(ui?.prodPerMin ?? 0)}</b> troops/min</div>
             <div><span className="text-white/40">Gold </span><b className="text-white">{fmt(ui?.gold ?? 0)}</b></div>
           </div>
