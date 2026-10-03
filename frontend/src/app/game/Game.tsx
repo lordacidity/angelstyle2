@@ -636,6 +636,8 @@ interface Ui {
   gold: number; wave: number; waveT: number; over: 'win' | 'lose' | null; paused: boolean; speed: number;
   sendPct: number; selected: Node | null; tech: Record<TechKey, number>;
   mine: number; theirs: number; picking: boolean;
+  /** Every troop on the map and on the road, by faction. */
+  army: { owner: number; n: number }[];
 }
 
 const fmt = (n: number) => String(Math.floor(n));
@@ -734,6 +736,12 @@ export default function Game() {
           gold: w.gold, wave: w.wave, waveT: w.waveT, over: w.over, paused: pausedRef.current, speed: speedRef.current,
           sendPct: sendPctRef.current, selected: sel, tech: { ...w.tech },
           mine: w.nodes.filter((n) => n.owner === PLAYER).length, theirs: w.nodes.filter((n) => n.owner >= 2).length, picking: w.picking !== null,
+          army: (() => {
+            const by = new Map<number, number>();
+            for (const n of w.nodes) if (n.owner !== 0) by.set(n.owner, (by.get(n.owner) ?? 0) + n.troops);
+            for (const c of w.convoys) by.set(c.owner, (by.get(c.owner) ?? 0) + c.n);
+            return [...by].map(([owner, n]) => ({ owner, n })).sort((a, b) => a.owner - b.owner);
+          })(),
         });
       }
     };
@@ -914,6 +922,24 @@ export default function Game() {
           <button className={`${btn} bg-white/10 px-2.5 py-1.5`} onClick={() => { pausedRef.current = !pausedRef.current; }}>{ui?.paused ? '▶' : '❚❚'}</button>
         </div>
       </div>
+      {/* Every troop alive, yours against theirs. */}
+      {ui && ui.army.length > 0 && (() => {
+        const total = ui.army.reduce((s, a) => s + a.n, 0) || 1;
+        return (
+          <div className="px-3 pb-1.5">
+            <div className="flex h-[6px] w-full overflow-hidden rounded-full bg-white/10">
+              {ui.army.map((a) => <div key={a.owner} style={{ width: `${(a.n / total) * 100}%`, background: COLORS[a.owner] }} />)}
+            </div>
+            <div className="mt-1 flex justify-between text-[11px]">
+              {ui.army.map((a) => (
+                <span key={a.owner} style={{ color: a.owner === PLAYER ? '#fff' : COLORS[a.owner] }}>
+                  {a.owner === PLAYER ? 'YOU' : NAMES[a.owner]} <b>{fmt(a.n)}</b>
+                </span>
+              ))}
+            </div>
+          </div>
+        );
+      })()}
       <div ref={wrapRef} className="relative flex-1 min-h-0">
         <canvas ref={canvasRef} className="absolute inset-0 block" style={{ touchAction: 'none' }}
           onPointerDown={onDown} onPointerMove={onMove} onPointerUp={onUp} onPointerCancel={onUp} />
