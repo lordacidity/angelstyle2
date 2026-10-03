@@ -83,6 +83,9 @@ interface Node {
   id: number; x: number; y: number;
   owner: number; troops: number; tier: number; base: boolean;
   prod: number; wall: number; cannon: number; cd: number;
+  /** A standing order: ship this share of the garrison to that outpost,
+   *  every few seconds, for as long as it stands. Yours only. */
+  route: { to: number; pct: number } | null; routeT: number;
 }
 interface Edge { a: number; b: number; len: number }
 /** A column on the road. `from`/`to` are the leg it is on; `path` is the
@@ -108,6 +111,8 @@ interface World {
   over: 'win' | 'lose' | null;
   flash: { text: string; age: number } | null;
   selected: number | null;
+  /** The outpost whose standing order is being pointed at, while it is. */
+  picking: number | null;
 }
 
 function rulesFor(level: number, endless: boolean): Rules {
@@ -161,7 +166,7 @@ function buildWorld(rules: Rules, meta: Record<MetaKey, number>, seedExtra = 0):
     const x = PAD + rnd() * (MAP_W - PAD * 2);
     const y = PAD + rnd() * (MAP_H - PAD * 2);
     if (nodes.every((n) => Math.hypot(n.x - x, n.y - y) >= MIN_D)) {
-      nodes.push({ id: nodes.length, x, y, owner: 0, troops: 0, tier: 1, base: false, prod: 0, wall: 0, cannon: 0, cd: 0 });
+      nodes.push({ id: nodes.length, x, y, owner: 0, troops: 0, tier: 1, base: false, prod: 0, wall: 0, cannon: 0, cd: 0, route: null, routeT: 0 });
     }
   }
   // Edges: nearest pairs first, no crossings, no more than four per outpost,
@@ -240,7 +245,7 @@ function buildWorld(rules: Rules, meta: Record<MetaKey, number>, seedExtra = 0):
     gold: 40 + META.gold.per * meta.gold, wave: 0, waveT: rules.waveLen, time: 0,
     surge: 0, nextId: 1,
     tech: { logistics: 0, conscription: 0 }, meta,
-    over: null, flash: { text: rules.endless ? 'ENDLESS' : `LEVEL ${rules.level}`, age: 0 }, selected: null,
+    over: null, flash: { text: rules.endless ? 'ENDLESS' : `LEVEL ${rules.level}`, age: 0 }, selected: null, picking: null,
   };
 }
 
@@ -322,6 +327,7 @@ function arrive(w: World, c: Convoy) {
     n.owner = c.owner;
     n.troops = c.n - def;
     n.cannon = 0; // the guns are spiked as the walls fall
+    n.route = null;
     n.cd = 0;
     if (c.owner === PLAYER) { w.gold += 12; }
     if (was !== 0 && was !== PLAYER && !w.nodes.some((m) => m.owner === was)) {
@@ -409,6 +415,16 @@ function step(w: World, dt: number) {
     const cap = capOf(n);
     if (n.troops < cap) n.troops = Math.min(cap, n.troops + prodOf(w, n) * dt);
     if (n.owner === PLAYER) w.gold += (n.base ? 1.0 : 0.35 + 0.15 * (n.tier - 1)) * dt;
+  }
+
+  // Standing orders.
+  const ROUTE_EVERY = 2;
+  for (const n of w.nodes) {
+    if (!n.route || n.owner !== PLAYER) continue;
+    n.routeT -= dt;
+    if (n.routeT > 0) continue;
+    n.routeT = ROUTE_EVERY;
+    if (n.troops * n.route.pct >= 3) send(w, n.id, n.route.to, n.route.pct);
   }
 
   // Columns on the march.
@@ -543,7 +559,7 @@ function draw(ctx: CanvasRenderingContext2D, w: World, view: { s: number; ox: nu
     const r = nodeR(n);
     const col = COLORS[n.owner];
     const isSel = w.selected === n.id;
-    const canTarget = w.selected !== null && w.selected !== n.id && w.nodes[w.selected].owner === PLAYER;
+    const canTarget = w.picking !== null && w.picking !== n.id;
     if (n.cannon && n.owner !== 0) {
       ctx.strokeStyle = n.owner === PLAYER ? 'rgba(255,255,255,0.12)' : 'rgba(255,59,59,0.14)'; ctx.lineWidth = 1;
       ctx.beginPath(); ctx.arc(n.x, n.y, CANNON_RANGE, 0, Math.PI * 2); ctx.stroke();
@@ -580,6 +596,18 @@ function draw(ctx: CanvasRenderingContext2D, w: World, view: { s: number; ox: nu
       ctx.fillText(bits, n.x, n.y + r + 11);
     }
   }
+  // Standing orders: a faint road from the outpost to where it ships.
+  for (const n of w.nodes) {
+    if (!n.route || n.owner !== PLAYER) continue;
+    const path = route(w, n.id, n.route.to, PLAYER);
+    if (!path) continue;
+    ctx.strokeStyle = 'rgba(255,255,255,0.35)'; ctx.lineWidth = 1.5; ctx.setLineDash([2, 5]);
+    ctx.lineDashOffset = -w.time * 20;
+    ctx.beginPath(); ctx.moveTo(n.x, n.y);
+    for (const i of path.slice(1)) ctx.lineTo(w.nodes[i].x, w.nodes[i].y);
+    ctx.stroke();
+    ctx.setLineDash([]); ctx.lineDashOffset = 0;
+  }
   // Columns.
   for (const c of w.convoys) {
     const p = convoyPos(w, c);
@@ -607,7 +635,7 @@ function draw(ctx: CanvasRenderingContext2D, w: World, view: { s: number; ox: nu
 interface Ui {
   gold: number; wave: number; waveT: number; over: 'win' | 'lose' | null; paused: boolean; speed: number;
   sendPct: number; selected: Node | null; tech: Record<TechKey, number>;
-  mine: number; theirs: number;
+  mine: number; theirs: number; picking: boolean;
 }
 
 const fmt = (n: number) => String(Math.floor(n));
@@ -703,7 +731,7 @@ export default function Game() {
         setUi({
           gold: w.gold, wave: w.wave, waveT: w.waveT, over: w.over, paused: pausedRef.current, speed: speedRef.current,
           sendPct: sendPctRef.current, selected: sel, tech: { ...w.tech },
-          mine: w.nodes.filter((n) => n.owner === PLAYER).length, theirs: w.nodes.filter((n) => n.owner >= 2).length,
+          mine: w.nodes.filter((n) => n.owner === PLAYER).length, theirs: w.nodes.filter((n) => n.owner >= 2).length, picking: w.picking !== null,
         });
       }
     };
@@ -729,10 +757,11 @@ export default function Game() {
     e.currentTarget.setPointerCapture(e.pointerId);
     const p = toMap(e);
     const n = hit(w, p);
-    if (!n) { w.selected = null; dragRef.current = null; return; }
-    if (w.selected !== null && w.selected !== n.id && w.nodes[w.selected].owner === PLAYER) {
-      send(w, w.selected, n.id, sendPctRef.current);
-      dragRef.current = null;
+    if (!n) { w.selected = null; w.picking = null; dragRef.current = null; return; }
+    if (w.picking !== null) {
+      const from = w.nodes[w.picking];
+      if (n.id !== from.id && from.owner === PLAYER) { from.route = { to: n.id, pct: sendPctRef.current }; from.routeT = 0; }
+      w.picking = null; dragRef.current = null;
       return;
     }
     w.selected = n.id;
@@ -810,7 +839,7 @@ export default function Game() {
             {endlessOpen ? 'ENDLESS' : `Endless unlocks after level ${ENDLESS_UNLOCK}`}
           </button>
           <div className="mt-8 space-y-2 text-[13px] leading-snug text-white/50">
-            <p><b className="text-white/80">Tap</b> one of your outposts, then <b className="text-white/80">tap</b> (or drag to) any other to march. Columns take the shortest road through your ground and fight at the first outpost on it that is not yours. Columns that outnumber the defenders take the ground.</p>
+            <p><b className="text-white/80">Drag</b> from one of your outposts to any other to march. Columns take the shortest road through your ground and fight at the first outpost on it that is not yours, and columns that outnumber the defenders take the ground. <b className="text-white/80">Tap</b> an outpost to build on it, or give it a standing order to keep shipping troops somewhere.</p>
             <p>Outposts breed troops up to their cap. Gold trickles from everything you hold. Spend it on the picked outpost, or on tech for all of them.</p>
             <p>Every <b className="text-white/80">wave</b> the red fills up and gets bolder. Stalling is losing. Clear every red outpost to win.</p>
             <p className="text-white/30">Walls are inherited by whoever takes the outpost. Cannons are not.</p>
@@ -910,7 +939,7 @@ export default function Game() {
             </button>
           </div>
         </div>
-        <div className="mt-2 h-[132px]">
+        <div className="mt-2 h-[168px]">
           {tab === 'tech' ? (
             <div className="grid grid-cols-2 gap-1.5">
               {(Object.keys(TECH) as TechKey[]).map((k) => {
@@ -925,7 +954,7 @@ export default function Game() {
               })}
             </div>
           ) : !sel ? (
-            <div className="flex h-full items-center justify-center text-center text-[13px] text-white/35">Tap one of your outposts.</div>
+            <div className="flex h-full items-center justify-center text-center text-[13px] text-white/35">Drag from one of yours to march. Tap one to build.</div>
           ) : !mineSel ? (
             <div className="flex h-full flex-col items-center justify-center text-center text-[13px] text-white/50">
               <div className="font-bold" style={{ color: COLORS[sel.owner] }}>{sel.owner === 0 ? 'NEUTRAL' : NAMES[sel.owner]} {sel.base ? 'HQ' : 'outpost'}</div>
@@ -933,7 +962,25 @@ export default function Game() {
               <div className="text-white/30">needs more than {Math.ceil(sel.troops * wallMult(sel))} to take</div>
             </div>
           ) : (
-            <div className="grid grid-cols-2 gap-1.5">{upgRows(sel)}</div>
+            <>
+              <div className="mb-1.5 flex items-center justify-between rounded-xl bg-white/5 px-3 py-1.5 text-[12px]">
+                {ui?.picking ? (
+                  <span className="text-white">Tap the outpost it should ship to.</span>
+                ) : sel.route ? (
+                  <span><b>Ships {Math.round(sel.route.pct * 100)}%</b> <span className="text-white/45">down the dotted road, every 2s</span></span>
+                ) : (
+                  <span className="text-white/45">No standing order.</span>
+                )}
+                {ui?.picking ? (
+                  <button className={`${btn} bg-white/10 px-2.5 py-1`} onClick={() => act((w) => { w.picking = null; })}>Cancel</button>
+                ) : sel.route ? (
+                  <button className={`${btn} bg-white/10 px-2.5 py-1`} onClick={() => act((w) => { w.nodes[sel.id].route = null; })}>Clear</button>
+                ) : (
+                  <button className={`${btn} bg-white px-2.5 py-1 text-black`} onClick={() => act((w) => { w.picking = sel.id; })}>Auto-send {Math.round((ui?.sendPct ?? 0.5) * 100)}%</button>
+                )}
+              </div>
+              <div className="grid grid-cols-2 gap-1.5">{upgRows(sel)}</div>
+            </>
           )}
         </div>
       </div>
