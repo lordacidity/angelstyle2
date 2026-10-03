@@ -1707,6 +1707,9 @@ export default function Game() {
         <div className={`pointer-events-none absolute right-2 text-right leading-tight ${ui && ui.paused && !ui.over && ui.viewFracX < 1 ? 'top-9' : 'top-1'}`}>
           <div className="text-[11px] text-white/40"><b className="text-white/80">+{Math.round(ui?.goldPerMin ?? 0)}</b> gold/min</div>
           <div className="text-[11px] text-white/40"><b className="text-white/80">+{Math.round(ui?.prodPerMin ?? 0)}</b> troops/min</div>
+          {/* Flat out: five ticks a frame. Again, and back to normal. */}
+          <button className={`${btn} pointer-events-auto mt-1.5 px-3 py-1.5 text-[13px] ${(ui?.speed ?? 1) === 5 ? 'bg-white text-black' : 'bg-[#1c1c1c]'}`}
+            onClick={() => { speedRef.current = speedRef.current === 5 ? 1 : 5; }}>5×</button>
         </div>
         {/* The controls, over the foot of the map. Every button the one height. */}
         <div className="pointer-events-none absolute inset-x-0 bottom-0 flex items-end justify-between px-3 pb-1.5 text-[13px]">
