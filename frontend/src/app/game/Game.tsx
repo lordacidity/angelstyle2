@@ -48,7 +48,7 @@ type UpgKey = keyof typeof UPG;
 const CANNON_DMG = [0, 3, 6, 10, 15];
 const CANNON_RANGE = 130;
 /** A bigger outpost's guns reach further: +20% a size. */
-const cannonRange = (n: Node, w: World) => CANNON_RANGE * (1 + 0.2 * (n.tier - 1)) * (n.owner === PLAYER ? 1 + 0.15 * w.tech.scouts : 1);
+const cannonRange = (n: Node, w: World) => CANNON_RANGE * (1 + 0.2 * (n.tier - 1)) * (n.owner === PLAYER ? (1 + 0.15 * w.tech.scouts) * (1 + META.range.per * w.meta.range / 100) : 1);
 const CANNON_CD = 0.5;
 
 // A mine: an outpost dug out for gold. It breeds nothing and keeps no
@@ -67,10 +67,15 @@ const TECH = {
 type TechKey = keyof typeof TECH;
 
 const META = {
-  prod: { name: 'Drill', cost: [30, 55, 90, 140, 200], desc: '+4% troops/s', unit: '%', per: 4 },
-  speed: { name: 'Boots', cost: [35, 65, 110, 170], desc: '+6% march speed', unit: '%', per: 6 },
-  gold: { name: 'War chest', cost: [25, 50, 85, 130], desc: '+12 starting gold', unit: 'g', per: 12 },
-  cannon: { name: 'Powder', cost: [30, 60, 100, 150], desc: '+12% cannon damage', unit: '%', per: 12 },
+  prod: { name: 'Drill', cost: [40, 75, 120, 180, 260], desc: '+4% troops/s', unit: '%', per: 4 },
+  speed: { name: 'Boots', cost: [45, 85, 140, 210], desc: '+6% march speed', unit: '%', per: 6 },
+  gold: { name: 'War chest', cost: [30, 60, 100, 150], desc: '+12 starting gold', unit: 'g', per: 12 },
+  cannon: { name: 'Powder', cost: [40, 80, 130, 200], desc: '+12% cannon damage', unit: '%', per: 12 },
+  masonry: { name: 'Masonry', cost: [45, 90, 150, 230], desc: 'walls +5% stronger a level', unit: '%', per: 5 },
+  range: { name: 'Spotters', cost: [40, 80, 130, 200], desc: '+8% cannon range', unit: '%', per: 8 },
+  vault: { name: 'Vaults', cost: [40, 75, 120, 180, 260], desc: '+8% gold from all ground', unit: '%', per: 8 },
+  cap: { name: 'Quarters', cost: [45, 90, 150, 230], desc: 'outposts hold +8% more', unit: '%', per: 8 },
+  garrison: { name: 'Garrison', cost: [30, 60, 100, 150], desc: '+10 troops at the start', unit: '', per: 10 },
 } as const;
 type MetaKey = keyof typeof META;
 
@@ -78,7 +83,7 @@ type MetaKey = keyof typeof META;
 
 interface Save { scrap: number; cleared: number; bestTime: number; meta: Record<MetaKey, number> }
 const SAVE_KEY = 'redline.v1';
-const freshSave = (): Save => ({ scrap: 0, cleared: 0, bestTime: 0, meta: { prod: 0, speed: 0, gold: 0, cannon: 0 } });
+const freshSave = (): Save => ({ scrap: 0, cleared: 0, bestTime: 0, meta: { prod: 0, speed: 0, gold: 0, cannon: 0, masonry: 0, range: 0, vault: 0, cap: 0, garrison: 0 } });
 function loadSave(): Save {
   try {
     const raw = localStorage.getItem(SAVE_KEY);
@@ -101,6 +106,8 @@ interface Node {
   loot: number; gold: number;
   /** The one outpost every sector of a choke map meets at. */
   hub: boolean;
+  /** The holder's Armoury, as it bears on this ground: extra wall strength a level, extra capacity. */
+  wallBoost: number; capBoost: number;
   /** A standing order: everything goes, every second, split evenly
    *  between these outposts. Yours only. */
   route: { to: number[] } | null; routeT: number;
@@ -133,8 +140,8 @@ interface Rules {
    *  neutral outposts for whoever takes them; hubLoot sits on the hub. Truce:
    *  nobody can take held ground for this many seconds. */
   choke?: boolean; hill?: number; loot?: { count: number; troops: number }; goldPiles?: { count: number; gold: number }; hubLoot?: number; truce?: number;
-  /** Walls on every enemy outpost. */
-  enemyWalls?: number;
+  /** Walls on every enemy outpost, and tech the generals open with. */
+  enemyWalls?: number; enemyTech?: number;
   /** How canny the generals are: 1 pulls out of a lost outpost and shies
    *  from guns; 2 also rides out to meet columns on the road. */
   aiSmart: number;
@@ -178,7 +185,7 @@ function rulesFor(level: number, endless: boolean): Rules {
   }
   // The generals sharpen with the levels: one to twelve on their own scale,
   // then a notch every four levels. Their canniness climbs in three steps.
-  const L = level <= 12 ? level : 10 + Math.floor((level - 12) / 4);
+  const L = level <= 12 ? level : 11 + Math.floor((level - 12) / 4);
   const base: Rules = {
     level, endless, mapH: MAP_H,
     nodeCount: Math.min(18, 9 + L),
@@ -192,6 +199,14 @@ function rulesFor(level: number, endless: boolean): Rules {
     neutralBase: 6 + L * 2,
     aiSmart: level <= 8 ? 0 : level <= 16 ? 1 : 2,
   };
+  const late = (r: Rules): Rules => {
+    // Past sixteen the purse grows and the generals open with tech of their own.
+    if (level >= 17) r = { ...r, enemyGold: r.enemyGold * 1.5, enemyExtra: Math.min(4, r.enemyExtra + 1), enemyTech: 1 };
+    if (level >= 21) r = { ...r, enemyGold: r.enemyGold * 1.5, enemyTech: 2 };
+    return r;
+  };
+  return late(pick());
+  function pick(): Rules {
   switch (level) {
     case 1: return { ...base, title: 'FIRST BLOOD' };
     case 2: return { ...base, title: 'THE SPREAD', nodeCount: 13 };
@@ -219,6 +234,7 @@ function rulesFor(level: number, endless: boolean): Rules {
     case 24: return { ...base, title: 'ALL OF IT', fog: 1, shift: 45, enemies: 4, nodeCount: 48, mapH: 1600, fortress: true, twinHQ: true, enemyExtra: 2, enemyGold: 450, aiInterval: 1.0, aiMargin: 0.85, aiStageEvery: 1 };
     default: return base;
   }
+  }
 }
 
 // Seeded so a level is the same map every attempt: dying to it teaches it.
@@ -238,7 +254,7 @@ function segmentsCross(p1: Node, p2: Node, p3: Node, p4: Node) {
 }
 
 const newNode = (id: number, x: number, y: number): Node =>
-  ({ id, x, y, owner: 0, troops: 0, tier: 1, base: false, prod: 0, wall: 0, cannon: 0, cd: 0, mine: 0, loot: 0, gold: 0, hub: false, route: null, routeT: 0 });
+  ({ id, x, y, owner: 0, troops: 0, tier: 1, base: false, prod: 0, wall: 0, cannon: 0, cd: 0, mine: 0, loot: 0, gold: 0, hub: false, wallBoost: 0, capBoost: 0, route: null, routeT: 0 });
 
 /** A choke map: one hub in the middle, every side in a wedge of its own
  *  around it, each wedge joined to the hub by a single road and to nothing
@@ -341,7 +357,8 @@ function buildWorld(rules: Rules, meta: Record<MetaKey, number>, seedExtra = 0):
   // Bases: yours at the bottom, theirs as far from you as the map allows.
   const byY = [...nodes].sort((p, q) => q.y - p.y);
   const home = choke ? nodes[choke.hqs[0]] : byY[Math.floor(rnd() * Math.min(3, byY.length))];
-  home.owner = PLAYER; home.base = true; home.tier = 2; home.troops = 40; home.wall = 1;
+  home.owner = PLAYER; home.base = true; home.tier = 2; home.troops = 40 + META.garrison.per * meta.garrison; home.wall = 1;
+  home.wallBoost = META.masonry.per * meta.masonry / 100; home.capBoost = META.cap.per * meta.cap / 100;
   // Hops from home, so no enemy HQ ever sits a march away.
   const hops = new Array(nodes.length).fill(Infinity) as number[];
   hops[home.id] = 0;
@@ -383,7 +400,7 @@ function buildWorld(rules: Rules, meta: Record<MetaKey, number>, seedExtra = 0):
       n.owner = fid; n.troops = 15; n.wall = rules.enemyWalls ?? 0;
       taken.add(n.id); extra--;
     }
-    factions.push({ id: fid, tick: rnd() * rules.aiInterval, dead: 0, gold: rules.enemyGold, buyT: 2, tech: { conscription: 0, logistics: 0 } });
+    factions.push({ id: fid, tick: rnd() * rules.aiInterval, dead: 0, gold: rules.enemyGold, buyT: 2, tech: { conscription: rules.enemyTech ?? 0, logistics: rules.enemyTech ? 1 : 0 } });
   }
   for (const n of nodes) {
     if (n.owner !== 0) continue;
@@ -394,7 +411,7 @@ function buildWorld(rules: Rules, meta: Record<MetaKey, number>, seedExtra = 0):
   // Twin HQ: a second one of yours, beside the first.
   if (rules.twinHQ) {
     const twin = adj[home.id].map((i) => nodes[i]).filter((n) => n.owner === 0).sort((a, b) => b.y - a.y)[0];
-    if (twin) { twin.owner = PLAYER; twin.base = true; twin.tier = 2; twin.troops = 40; twin.wall = 1; }
+    if (twin) { twin.owner = PLAYER; twin.base = true; twin.tier = 2; twin.troops = 40; twin.wall = 1; twin.wallBoost = home.wallBoost; twin.capBoost = home.capBoost; }
   }
   // The hub: a big neutral garrison, and loot if the level says so.
   if (choke) { nodes[0].troops = Math.round(rules.neutralBase * 2.5); nodes[0].tier = 2; nodes[0].loot = rules.hubLoot ?? 0; }
@@ -428,8 +445,14 @@ function buildWorld(rules: Rules, meta: Record<MetaKey, number>, seedExtra = 0):
 
 // ── Simulation ─────────────────────────────────────────────────────────────
 
-const capOf = (n: Node) => TIER_CAP[n.tier - 1] * (n.base ? 1.5 : 1);
-const wallMult = (n: Node) => 1 + 0.25 * n.wall;
+const capOf = (n: Node) => TIER_CAP[n.tier - 1] * (n.base ? 1.5 : 1) * (1 + n.capBoost);
+const wallMult = (n: Node) => 1 + (0.25 + n.wallBoost) * n.wall;
+/** Ground changes hands: it takes on the new holder's doctrine. */
+function claim(w: World, n: Node, owner: number) {
+  n.owner = owner;
+  n.wallBoost = owner === PLAYER ? META.masonry.per * w.meta.masonry / 100 : 0;
+  n.capBoost = owner === PLAYER ? META.cap.per * w.meta.cap / 100 : 0;
+}
 // One formula for everyone. Your tech and Armoury sit on top; the red has
 // neither, only what it builds on the ground.
 const prodOf = (w: World, n: Node) => {
@@ -440,6 +463,8 @@ const prodOf = (w: World, n: Node) => {
   m *= (n.base ? 1.5 : 1) * TIER_PROD[n.tier - 1] * (1 + 0.35 * n.prod);
   return BASE_PROD_PER_S * m;
 };
+/** What your gold is worth: Tithe and the Vaults. */
+const goldMult = (w: World) => (1 + 0.2 * w.tech.tithe) * (1 + META.vault.per * w.meta.vault / 100);
 const goldOf = (n: Node) => (n.mine ? MINE_GOLD[n.mine] : n.base ? 1.0 : 0.35 + 0.15 * (n.tier - 1));
 const convoySpeed = (w: World, owner: number) =>
   60 * (owner === PLAYER
@@ -530,7 +555,7 @@ function arrive(w: World, c: Convoy) {
   const def = n.troops * wallMult(n);
   if (c.n > def) {
     const was = n.owner;
-    n.owner = c.owner;
+    claim(w, n, c.owner);
     n.troops = c.n - def;
     // Loot: the soldiers here join the taker; a pile of gold is theirs too.
     if (n.loot) { n.troops += n.loot; n.loot = 0; }
@@ -784,7 +809,7 @@ function step(w: World, dt: number) {
     if (n.owner === 0) continue;
     const cap = capOf(n);
     if (n.troops < cap) n.troops = Math.min(cap, n.troops + prodOf(w, n) * dt);
-    if (n.owner === PLAYER) w.gold += goldOf(n) * (1 + 0.2 * w.tech.tithe) * dt;
+    if (n.owner === PLAYER) w.gold += goldOf(n) * goldMult(w) * dt;
     else { const f = w.factions.find((x) => x.id === n.owner); if (f) f.gold += goldOf(n) * dt; }
   }
 
@@ -1096,8 +1121,8 @@ interface Ui {
   sendPct: number; selected: Node | null; tech: Record<TechKey, number>;
   /** The picked outpost: troops it breeds a minute, and what it takes to fall. */
   selProdPerMin: number; selHold: number;
-  /** Everything you hold, breeding, a minute (full outposts breed nothing). */
-  prodPerMin: number;
+  /** Everything you hold, breeding, a minute (full outposts breed nothing), and the gold it pays. */
+  prodPerMin: number; goldPerMin: number;
   mine: number; theirs: number; picking: boolean; pickN: number; pickLeft: number;
   selHidden: boolean; shiftT: number;
   truceT: number; hillT: number; hillNeed: number;
@@ -1116,6 +1141,8 @@ export default function Game() {
   const [screen, setScreen] = useState<'menu' | 'armoury' | 'play'>('menu');
   const [ui, setUi] = useState<Ui | null>(null);
   const [tab, setTab] = useState<'post' | 'tech'>('post');
+  // Which outpost the panel last showed, so a new pick flips it back to Outpost.
+  const lastSelRef = useRef<number | null>(null);
   const [run, setRun] = useState<{ level: number; endless: boolean }>({ level: 1, endless: false });
 
   const worldRef = useRef<World | null>(null);
@@ -1169,14 +1196,14 @@ export default function Game() {
     settledRef.current = true;
     const s = loadSave();
     if (w.rules.endless) {
-      s.scrap += w.over === 'win' ? 150 : Math.min(30, Math.floor(w.time / 20));
+      s.scrap += w.over === 'win' ? 120 : Math.min(20, Math.floor(w.time / 30));
       if (w.over === 'win') s.bestTime = s.bestTime ? Math.min(s.bestTime, Math.floor(w.time)) : Math.floor(w.time);
     } else if (w.over === 'win') {
       const first = s.cleared < w.rules.level;
-      s.scrap += (15 + w.rules.level * 6) * (first ? 2 : 1);
+      s.scrap += Math.round((10 + w.rules.level * 4) * (first ? 1.5 : 1));
       s.cleared = Math.max(s.cleared, w.rules.level);
     } else {
-      s.scrap += Math.min(10, Math.floor(w.time / 30));
+      s.scrap += Math.min(6, Math.floor(w.time / 45));
     }
     storeSave(s); setSave(s);
   }, []);
@@ -1247,11 +1274,14 @@ export default function Game() {
       if (uiAcc > 120) {
         uiAcc = 0;
         const sel = w.selected !== null ? { ...w.nodes[w.selected] } : null;
+        if (w.selected !== null && w.selected !== lastSelRef.current) setTab('post');
+        lastSelRef.current = w.selected;
         setUi({
           gold: w.gold, time: w.time, over: w.over, paused: pausedRef.current, speed: speedRef.current,
           sendPct: sendPctRef.current, selected: sel, tech: { ...w.tech },
           selProdPerMin: sel ? prodOf(w, sel) * 60 : 0, selHold: sel ? Math.ceil(sel.troops * wallMult(sel)) : 0,
           prodPerMin: w.nodes.filter((n) => n.owner === PLAYER && n.troops < capOf(n) - 0.5).reduce((t, n) => t + prodOf(w, n) * 60, 0),
+          goldPerMin: w.nodes.filter((n) => n.owner === PLAYER).reduce((t, n) => t + goldOf(n), 0) * goldMult(w) * 60,
           mine: w.nodes.filter((n) => n.owner === PLAYER).length, theirs: w.nodes.filter((n) => n.owner >= 2).length, picking: w.picking !== null, pickN: w.pickN, pickLeft: w.pickN - w.picked.length,
           selHidden: !!(w.rules.fog && sel && sel.owner !== PLAYER && !(seenByPlayer(w)?.has(sel.id) && ringOf(w, sel.id) < (w.rules.fog ?? 0))), shiftT: w.rules.shift ? w.shiftT : 0, truceT: w.rules.truce ? Math.max(0, w.rules.truce - w.time) : 0, hillT: w.hillT, hillNeed: w.rules.hill ?? 0,
           scrollFrac: scrollFracRef.current, viewFrac: viewFracRef.current,
@@ -1568,7 +1598,8 @@ export default function Game() {
         <div className="flex items-center justify-between text-[13px]">
           <div className="leading-tight">
             <button className={`${btn} mb-0.5 whitespace-nowrap bg-white/10 px-2 py-0.5 text-[11px]`} onClick={() => act((w) => { for (const n of w.nodes) n.route = null; w.picking = null; w.picked = []; })}>Clear autos</button>
-            <div className="text-[11px] text-white/40"><b className="text-white/80">+{Math.round(ui?.prodPerMin ?? 0)}</b> troops/min</div>
+            <div className="whitespace-nowrap text-[11px] text-white/40"><b className="text-white/80">+{Math.round(ui?.prodPerMin ?? 0)}</b> troops/min</div>
+            <div className="whitespace-nowrap text-[11px] text-white/40"><b className="text-white/80">+{Math.round(ui?.goldPerMin ?? 0)}</b> gold/min</div>
             <div><span className="text-white/40">Gold </span><b className="text-white">{fmt(ui?.gold ?? 0)}</b></div>
           </div>
           <div className="flex gap-1.5">
