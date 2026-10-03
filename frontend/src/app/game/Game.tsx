@@ -1590,16 +1590,16 @@ export default function Game() {
         {/* The controls, over the foot of the map. Every button the one height. */}
         <div className="pointer-events-none absolute inset-x-0 bottom-0 flex items-end justify-between px-3 pb-1.5 text-[13px]">
           <div className="flex flex-col items-start gap-1.5">
-            <div className="text-[15px] leading-none"><span className="text-white/40">Gold </span><b className="text-white">{fmt(ui?.gold ?? 0)}</b></div>
-            <button className={`${btn} pointer-events-auto whitespace-nowrap bg-white/10 px-3 py-1.5`} onClick={() => act((w) => { for (const n of w.nodes) n.route = null; w.picking = null; w.picked = []; })}>Clear autos</button>
+            <div className="rounded-md bg-[#000000] px-1 text-[15px] leading-tight"><span className="text-white/40">Gold </span><b className="text-white">{fmt(ui?.gold ?? 0)}</b></div>
+            <button className={`${btn} pointer-events-auto whitespace-nowrap bg-[#1c1c1c] px-3 py-1.5`} onClick={() => act((w) => { for (const n of w.nodes) n.route = null; w.picking = null; w.picked = []; })}>Clear autos</button>
           </div>
           <div className="flex flex-col items-end gap-1.5">
-            <button className={`${btn} pointer-events-auto bg-white/10 px-3 py-1.5`} onClick={() => { const steps = [0.5, 1, 2]; speedRef.current = steps[(steps.indexOf(speedRef.current) + 1) % steps.length]; }}>{ui?.speed ?? 1}×</button>
-            <button className={`${btn} pointer-events-auto bg-white/10 px-3 py-1.5`} onClick={() => { pausedRef.current = !pausedRef.current; }}>{ui?.paused ? '▶' : '❚❚'}</button>
+            <button className={`${btn} pointer-events-auto bg-[#1c1c1c] px-3 py-1.5`} onClick={() => { const steps = [0.5, 1, 2]; speedRef.current = steps[(steps.indexOf(speedRef.current) + 1) % steps.length]; }}>{ui?.speed ?? 1}×</button>
+            <button className={`${btn} pointer-events-auto bg-[#1c1c1c] px-3 py-1.5`} onClick={() => { pausedRef.current = !pausedRef.current; }}>{ui?.paused ? '▶' : '❚❚'}</button>
             <div className="flex gap-1.5">
-              <button className={`${btn} pointer-events-auto px-3 py-1.5 ${tab === 'post' ? 'bg-white/20' : 'bg-white/5'}`} onClick={() => setTab('post')}>Outpost</button>
-              <button className={`${btn} pointer-events-auto px-3 py-1.5 ${tab === 'tech' ? 'bg-white/20' : 'bg-white/5'}`} onClick={() => setTab('tech')}>Tech</button>
-              <button className={`${btn} pointer-events-auto whitespace-nowrap bg-white/10 px-3 py-1.5`} onClick={() => { const steps = [0.25, 0.5, 1]; sendPctRef.current = steps[(steps.indexOf(sendPctRef.current) + 1) % steps.length]; }}>
+              <button className={`${btn} pointer-events-auto px-3 py-1.5 ${tab === 'post' ? 'bg-[#333333]' : 'bg-[#1c1c1c]'}`} onClick={() => setTab('post')}>Outpost</button>
+              <button className={`${btn} pointer-events-auto px-3 py-1.5 ${tab === 'tech' ? 'bg-[#333333]' : 'bg-[#1c1c1c]'}`} onClick={() => setTab('tech')}>Tech</button>
+              <button className={`${btn} pointer-events-auto whitespace-nowrap bg-[#1c1c1c] px-3 py-1.5`} onClick={() => { const steps = [0.25, 0.5, 1]; sendPctRef.current = steps[(steps.indexOf(sendPctRef.current) + 1) % steps.length]; }}>
                 send {Math.round((ui?.sendPct ?? 1) * 100)}%
               </button>
             </div>
