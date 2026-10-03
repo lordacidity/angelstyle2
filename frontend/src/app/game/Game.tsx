@@ -51,7 +51,7 @@ type UpgKey = keyof typeof UPG;
 const cannonDmg = (lvl: number) => (lvl <= 0 ? 0 : lvl <= 4 ? [3, 6, 10, 15][lvl - 1] : 15 + 5 * (lvl - 4));
 const CANNON_RANGE = 130;
 /** A bigger outpost's guns reach further: +20% a size. */
-const cannonRange = (n: Node, w: World) => CANNON_RANGE * (1 + 0.2 * (n.tier - 1)) * (n.owner === PLAYER ? (1 + 0.12 * w.tech.scouts) * (1 + META.range.per * w.meta.range / 100) : 1);
+const cannonRange = (n: Node, w: World) => CANNON_RANGE * (1 + 0.2 * (n.tier - 1)) * (n.owner === PLAYER ? (1 + 0.15 * w.tech.scouts) * (1 + META.range.per * w.meta.range / 100) : 1);
 const CANNON_CD = 0.5;
 
 // A mine: an outpost dug out for gold. It breeds nothing and keeps no
@@ -62,11 +62,11 @@ const MINE_GOLD = [0, 1.5, 3, 5];
 const MINE_TROOPS = [100, 150, 250];
 
 const TECH = {
-  logistics: { name: 'Logistics', base: 50, growth: 1.9, desc: '+20% march speed' },
-  conscription: { name: 'Conscription', base: 60, growth: 1.7, desc: '+15% troops/s' },
-  tithe: { name: 'Tithe', base: 70, growth: 1.8, desc: '+15% gold' },
-  scouts: { name: 'Scouts', base: 60, growth: 1.8, desc: '+12% cannon range' },
-  thrift: { name: 'Thrift', base: 80, growth: 1.9, desc: '-7% upgrade cost' },
+  logistics: { name: 'Logistics', base: 80, growth: 1.9, desc: '+25% march speed' },
+  conscription: { name: 'Conscription', base: 100, growth: 1.7, desc: '+15% troops/s' },
+  tithe: { name: 'Tithe', base: 150, growth: 1.8, desc: '+20% gold' },
+  scouts: { name: 'Scouts', base: 120, growth: 1.8, desc: '+15% cannon range' },
+  thrift: { name: 'Thrift', base: 140, growth: 1.9, desc: '-7% upgrade cost' },
 } as const;
 const techCost = (key: TechKey, lvl: number) => Math.round(TECH[key].base * Math.pow(TECH[key].growth, lvl));
 type TechKey = keyof typeof TECH;
@@ -479,12 +479,12 @@ const prodOf = (w: World, n: Node) => {
   return BASE_PROD_PER_S * m;
 };
 /** What your gold is worth: Tithe and the Vaults. */
-const goldMult = (w: World) => (1 + 0.15 * w.tech.tithe) * (1 + META.vault.per * w.meta.vault / 100);
+const goldMult = (w: World) => (1 + 0.2 * w.tech.tithe) * (1 + META.vault.per * w.meta.vault / 100);
 const goldOf = (n: Node) => (n.mine ? MINE_GOLD[n.mine] : n.base ? 1.0 : 0.35 + 0.15 * (n.tier - 1));
 const convoySpeed = (w: World, owner: number) =>
   60 * (owner === PLAYER
-    ? (1 + META.speed.per * w.meta.speed / 100) * (1 + 0.2 * w.tech.logistics)
-    : 1 + 0.2 * (w.factions.find((f) => f.id === owner)?.tech.logistics ?? 0));
+    ? (1 + META.speed.per * w.meta.speed / 100) * (1 + 0.25 * w.tech.logistics)
+    : 1 + 0.25 * (w.factions.find((f) => f.id === owner)?.tech.logistics ?? 0));
 const convoyPos = (w: World, c: Convoy) => {
   const a = w.nodes[c.from], b = w.nodes[c.to];
   return { x: a.x + (b.x - a.x) * c.t, y: a.y + (b.y - a.y) * c.t };
