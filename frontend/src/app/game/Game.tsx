@@ -30,7 +30,7 @@ const CAMPAIGN_LEVELS = 12;
 const ENDLESS_UNLOCK = 3;
 
 const PLAYER = 1;
-const COLORS: Record<number, string> = { 0: '#5b6170', 1: '#38e08a', 2: '#ff4a57', 3: '#ff9f3f', 4: '#b36cff' };
+const COLORS: Record<number, string> = { 0: '#4a4a4a', 1: '#ffffff', 2: '#ff3b3b', 3: '#ff8a3b', 4: '#c04bff' };
 const NAMES: Record<number, string> = { 2: 'RED', 3: 'AMBER', 4: 'VIOLET' };
 
 const TIER_CAP = [40, 70, 120];
@@ -455,20 +455,20 @@ function draw(ctx: CanvasRenderingContext2D, w: World, view: { s: number; ox: nu
   for (const e of w.edges) {
     const a = w.nodes[e.a], b = w.nodes[e.b];
     const sel = w.selected !== null && (e.a === w.selected || e.b === w.selected) && w.nodes[w.selected].owner === PLAYER;
-    ctx.strokeStyle = sel ? 'rgba(56,224,138,0.55)' : '#23242c';
+    ctx.strokeStyle = sel ? 'rgba(255,255,255,0.6)' : '#1c1c1c';
     ctx.lineWidth = sel ? 3 : 2;
     ctx.beginPath(); ctx.moveTo(a.x, a.y); ctx.lineTo(b.x, b.y); ctx.stroke();
   }
   // Drag line.
   if (drag) {
     const a = w.nodes[drag.from];
-    ctx.strokeStyle = 'rgba(56,224,138,0.9)'; ctx.lineWidth = 3; ctx.setLineDash([6, 6]);
+    ctx.strokeStyle = 'rgba(255,255,255,0.9)'; ctx.lineWidth = 3; ctx.setLineDash([6, 6]);
     ctx.beginPath(); ctx.moveTo(a.x, a.y); ctx.lineTo(drag.x, drag.y); ctx.stroke();
     ctx.setLineDash([]);
   }
   // Cannon shots.
   for (const sh of w.shots) {
-    ctx.strokeStyle = `rgba(255,230,120,${1 - sh.age / 0.14})`; ctx.lineWidth = 2;
+    ctx.strokeStyle = `rgba(255,255,255,${1 - sh.age / 0.14})`; ctx.lineWidth = 2;
     ctx.beginPath(); ctx.moveTo(sh.x1, sh.y1); ctx.lineTo(sh.x2, sh.y2); ctx.stroke();
   }
   // Outposts.
@@ -478,17 +478,17 @@ function draw(ctx: CanvasRenderingContext2D, w: World, view: { s: number; ox: nu
     const isSel = w.selected === n.id;
     const canTarget = w.selected !== null && w.selected !== n.id && w.nodes[w.selected].owner === PLAYER && w.adj[w.selected].includes(n.id);
     if (n.cannon && n.owner !== 0) {
-      ctx.strokeStyle = n.owner === PLAYER ? 'rgba(255,230,120,0.18)' : 'rgba(255,74,87,0.14)'; ctx.lineWidth = 1;
+      ctx.strokeStyle = n.owner === PLAYER ? 'rgba(255,255,255,0.12)' : 'rgba(255,59,59,0.14)'; ctx.lineWidth = 1;
       ctx.beginPath(); ctx.arc(n.x, n.y, CANNON_RANGE, 0, Math.PI * 2); ctx.stroke();
     }
     if (canTarget) {
-      ctx.strokeStyle = 'rgba(56,224,138,0.5)'; ctx.lineWidth = 2; ctx.setLineDash([3, 4]);
+      ctx.strokeStyle = 'rgba(255,255,255,0.5)'; ctx.lineWidth = 2; ctx.setLineDash([3, 4]);
       ctx.beginPath(); ctx.arc(n.x, n.y, r + 7 + Math.sin(w.time * 6) * 1.5, 0, Math.PI * 2); ctx.stroke();
       ctx.setLineDash([]);
     }
-    ctx.fillStyle = '#0a0a0c';
+    ctx.fillStyle = '#000000';
     ctx.beginPath(); ctx.arc(n.x, n.y, r, 0, Math.PI * 2); ctx.fill();
-    ctx.fillStyle = n.owner === 0 ? '#1c1d24' : col + '33';
+    ctx.fillStyle = n.owner === 0 ? '#111111' : n.owner === PLAYER ? '#ffffff' : col + '33';
     ctx.beginPath(); ctx.arc(n.x, n.y, r, 0, Math.PI * 2); ctx.fill();
     ctx.strokeStyle = col; ctx.lineWidth = n.base ? 4 : 2.5;
     ctx.beginPath(); ctx.arc(n.x, n.y, r, 0, Math.PI * 2); ctx.stroke();
@@ -501,7 +501,7 @@ function draw(ctx: CanvasRenderingContext2D, w: World, view: { s: number; ox: nu
       ctx.strokeStyle = '#fff'; ctx.lineWidth = 2;
       ctx.beginPath(); ctx.arc(n.x, n.y, r + 9, 0, Math.PI * 2); ctx.stroke();
     }
-    ctx.fillStyle = '#fff';
+    ctx.fillStyle = n.owner === PLAYER ? '#000' : '#fff';
     ctx.font = `700 ${n.base ? 15 : 13}px -apple-system, system-ui, sans-serif`;
     ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
     ctx.fillText(String(Math.floor(n.troops)), n.x, n.y + 0.5);
@@ -519,7 +519,7 @@ function draw(ctx: CanvasRenderingContext2D, w: World, view: { s: number; ox: nu
     const col = COLORS[c.owner];
     ctx.fillStyle = col;
     ctx.beginPath(); ctx.arc(p.x, p.y, 7, 0, Math.PI * 2); ctx.fill();
-    ctx.fillStyle = '#0a0a0c';
+    ctx.fillStyle = '#000';
     ctx.font = '700 9px -apple-system, system-ui, sans-serif';
     ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
     ctx.fillText(String(Math.ceil(c.n)), p.x, p.y + 0.5);
@@ -625,7 +625,7 @@ export default function Game() {
       const steps = speedRef.current;
       for (let i = 0; i < steps; i++) step(w, dt);
       if (w.over) settle(w);
-      ctx.fillStyle = '#0a0a0c';
+      ctx.fillStyle = '#000000';
       ctx.fillRect(0, 0, canvas.width, canvas.height);
       const d = dragRef.current;
       draw(ctx, w, viewRef.current, d && d.moved ? { from: d.from, x: d.x, y: d.y } : null);
@@ -699,7 +699,7 @@ export default function Game() {
 
   // ── Screens ──────────────────────────────────────────────────────────────
 
-  const shell = 'fixed inset-0 bg-[#0a0a0c] text-white select-none overflow-hidden flex flex-col';
+  const shell = 'fixed inset-0 bg-[#000000] text-white select-none overflow-hidden flex flex-col';
   const shellStyle: React.CSSProperties = {
     paddingTop: 'env(safe-area-inset-top)', paddingBottom: 'env(safe-area-inset-bottom)',
     WebkitTouchCallout: 'none', WebkitUserSelect: 'none', touchAction: 'manipulation', overscrollBehavior: 'none',
@@ -712,7 +712,7 @@ export default function Game() {
     return (
       <div className={shell} style={shellStyle}>
         <div className="flex-1 overflow-y-auto px-5 py-6">
-          <div className="text-4xl font-black tracking-tight text-[#ff4a57]">REDLINE</div>
+          <div className="text-4xl font-black tracking-tight text-[#ff3b3b]">REDLINE</div>
           <div className="text-sm text-white/50 mt-1">Hold the line. Then take theirs.</div>
           <div className="mt-5 flex items-center justify-between rounded-2xl bg-white/5 px-4 py-3">
             <div><div className="text-[11px] uppercase tracking-wider text-white/40">Scrap</div><div className="text-xl font-bold">{save.scrap}</div></div>
@@ -726,14 +726,14 @@ export default function Game() {
               const done = L <= save.cleared;
               return (
                 <button key={L} disabled={locked} onClick={() => start(L, false)}
-                  className={`${btn} aspect-square text-lg ${done ? 'bg-[#38e08a]/20 text-[#38e08a]' : 'bg-white/10'}`}>
+                  className={`${btn} aspect-square text-lg ${done ? 'bg-white text-black' : 'bg-white/10'}`}>
                   {locked ? '·' : L}
                 </button>
               );
             })}
           </div>
           <button disabled={!endlessOpen} onClick={() => start(1, true)}
-            className={`${btn} mt-6 w-full bg-[#ff4a57] py-4 text-lg text-black`}>
+            className={`${btn} mt-6 w-full bg-white py-4 text-lg text-black`}>
             {endlessOpen ? 'ENDLESS' : `Endless unlocks after level ${ENDLESS_UNLOCK}`}
           </button>
           <div className="mt-8 space-y-2 text-[13px] leading-snug text-white/50">
@@ -767,7 +767,7 @@ export default function Game() {
                     <div className="font-bold">{m.name} <span className="text-white/40 font-normal">{lvl}/{m.cost.length}</span></div>
                     <div className="text-xs text-white/50">{m.desc} · now +{m.per * lvl}{m.unit}</div>
                   </div>
-                  <button disabled={max || save.scrap < cost} onClick={() => buyMeta(k)} className={`${btn} bg-[#38e08a] px-4 py-2 text-sm text-black`}>
+                  <button disabled={max || save.scrap < cost} onClick={() => buyMeta(k)} className={`${btn} bg-white px-4 py-2 text-sm text-black`}>
                     {max ? 'MAX' : `${cost}`}
                   </button>
                 </div>
@@ -790,7 +790,7 @@ export default function Game() {
     return (
       <button key={k} disabled={max || (ui?.gold ?? 0) < cost} onClick={() => act((w) => buyUpgrade(w, n.id, k))}
         className={`${btn} flex flex-col items-start rounded-xl bg-white/5 px-3 py-2 text-left`}>
-        <div className="flex w-full items-center justify-between text-[13px]"><b>{u.name}</b><span className="text-[#ffd166]">{max ? 'MAX' : `${cost}g`}</span></div>
+        <div className="flex w-full items-center justify-between text-[13px]"><b>{u.name}</b><span className="text-white">{max ? 'MAX' : `${cost}g`}</span></div>
         <div className="text-[11px] text-white/45">{u.desc} · {k === 'tier' ? `size ${n.tier}` : `lv ${lvl}`}</div>
       </button>
     );
@@ -814,13 +814,13 @@ export default function Game() {
           onPointerDown={onDown} onPointerMove={onMove} onPointerUp={onUp} onPointerCancel={onUp} />
         {ui?.over && (
           <div className="absolute inset-0 flex flex-col items-center justify-center bg-black/70 px-8 text-center">
-            <div className={`text-5xl font-black ${ui.over === 'win' ? 'text-[#38e08a]' : 'text-[#ff4a57]'}`}>{ui.over === 'win' ? 'HELD' : 'OVERRUN'}</div>
+            <div className={`text-5xl font-black ${ui.over === 'win' ? 'text-white' : 'text-[#ff3b3b]'}`}>{ui.over === 'win' ? 'HELD' : 'OVERRUN'}</div>
             <div className="mt-2 text-white/60">{run.endless ? `Survived ${ui.wave} waves.` : ui.over === 'win' ? `Level ${run.level} cleared on wave ${ui.wave}.` : `Fell on wave ${ui.wave}.`}</div>
             <div className="mt-6 flex gap-3">
               <button className={`${btn} bg-white/10 px-5 py-3`} onClick={() => { setScreen('menu'); worldRef.current = null; }}>Menu</button>
               <button className={`${btn} bg-white px-5 py-3 text-black`} onClick={() => start(run.level, run.endless)}>{ui.over === 'win' ? 'Again' : 'Retry'}</button>
               {ui.over === 'win' && !run.endless && run.level < CAMPAIGN_LEVELS && (
-                <button className={`${btn} bg-[#38e08a] px-5 py-3 text-black`} onClick={() => start(run.level + 1, false)}>Next</button>
+                <button className={`${btn} bg-white px-5 py-3 text-black`} onClick={() => start(run.level + 1, false)}>Next</button>
               )}
             </div>
           </div>
@@ -828,7 +828,7 @@ export default function Game() {
       </div>
       <div className="px-3 pb-2 pt-1">
         <div className="flex items-center justify-between text-[13px]">
-          <div><span className="text-white/40">Gold </span><b className="text-[#ffd166]">{fmt(ui?.gold ?? 0)}</b></div>
+          <div><span className="text-white/40">Gold </span><b className="text-white">{fmt(ui?.gold ?? 0)}</b></div>
           <div className="flex gap-1.5">
             <button className={`${btn} px-3 py-1.5 ${tab === 'post' ? 'bg-white/20' : 'bg-white/5'}`} onClick={() => setTab('post')}>Outpost</button>
             <button className={`${btn} px-3 py-1.5 ${tab === 'tech' ? 'bg-white/20' : 'bg-white/5'}`} onClick={() => setTab('tech')}>Tech</button>
@@ -845,7 +845,7 @@ export default function Game() {
                 return (
                   <button key={k} disabled={max || (ui?.gold ?? 0) < cost} onClick={() => act((w) => buyTech(w, k))}
                     className={`${btn} flex flex-col items-start rounded-xl bg-white/5 px-3 py-2 text-left`}>
-                    <div className="flex w-full items-center justify-between text-[13px]"><b>{t.name}</b><span className="text-[#ffd166]">{max ? 'MAX' : `${cost}g`}</span></div>
+                    <div className="flex w-full items-center justify-between text-[13px]"><b>{t.name}</b><span className="text-white">{max ? 'MAX' : `${cost}g`}</span></div>
                     <div className="text-[11px] text-white/45">{t.desc} · {lvl}/{costs.length}</div>
                   </button>
                 );

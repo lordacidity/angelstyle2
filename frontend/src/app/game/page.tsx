@@ -20,7 +20,7 @@ export const viewport: Viewport = {
   maximumScale: 1,
   userScalable: false,
   viewportFit: 'cover',
-  themeColor: '#0a0a0c',
+  themeColor: '#000000',
 };
 
 export default async function GamePage({ searchParams }: { searchParams: Promise<Record<string, string | string[] | undefined>> }) {
