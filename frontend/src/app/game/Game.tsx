@@ -1243,11 +1243,11 @@ export default function Game() {
       // The map never leaves the screen: centred where it is smaller than the
       // view, and held inside it where it is larger.
       cam.cx = MAP_W <= visW ? MAP_W / 2 : Math.max(visW / 2, Math.min(MAP_W - visW / 2, cam.cx));
-      // A fresh run opens on home, four fifths of the way down the screen,
+      // A fresh run opens on home, seven tenths of the way down the screen,
       // whichever map it is and wherever the map put it.
       if (cam.cy === Infinity) {
         const home = worldRef.current?.nodes.find((n) => n.base && n.owner === 1);
-        if (home) cam.cy = home.y - visH * 0.3;
+        if (home) cam.cy = home.y - visH * 0.2;
       }
       cam.cy = mapH <= visH ? mapH / 2 : Math.max(visH / 2, Math.min(mapH - visH / 2, cam.cy));
       const ox = r.width / 2 - cam.cx * s, oy = r.height / 2 - cam.cy * s;
@@ -1588,9 +1588,24 @@ export default function Game() {
           <div className="text-[11px] text-white/40"><b className="text-white/80">+{Math.round(ui?.goldPerMin ?? 0)}</b> gold/min</div>
           <div className="text-[11px] text-white/40"><b className="text-white/80">+{Math.round(ui?.prodPerMin ?? 0)}</b> troops/min</div>
         </div>
+        {/* The controls, over the foot of the map. Every button the one height. */}
+        <div className="pointer-events-none absolute inset-x-0 bottom-0 flex items-end justify-between px-3 pb-1.5 text-[13px]">
+          <button className={`${btn} pointer-events-auto whitespace-nowrap bg-white/10 px-3 py-1.5`} onClick={() => act((w) => { for (const n of w.nodes) n.route = null; w.picking = null; w.picked = []; })}>Clear autos</button>
+          <div className="flex flex-col items-end gap-1.5">
+            <button className={`${btn} pointer-events-auto bg-white/10 px-3 py-1.5`} onClick={() => { const steps = [0.5, 1, 2]; speedRef.current = steps[(steps.indexOf(speedRef.current) + 1) % steps.length]; }}>{ui?.speed ?? 1}×</button>
+            <button className={`${btn} pointer-events-auto bg-white/10 px-3 py-1.5`} onClick={() => { pausedRef.current = !pausedRef.current; }}>{ui?.paused ? '▶' : '❚❚'}</button>
+            <div className="flex gap-1.5">
+              <button className={`${btn} pointer-events-auto px-3 py-1.5 ${tab === 'post' ? 'bg-white/20' : 'bg-white/5'}`} onClick={() => setTab('post')}>Outpost</button>
+              <button className={`${btn} pointer-events-auto px-3 py-1.5 ${tab === 'tech' ? 'bg-white/20' : 'bg-white/5'}`} onClick={() => setTab('tech')}>Tech</button>
+              <button className={`${btn} pointer-events-auto whitespace-nowrap bg-white/10 px-3 py-1.5`} onClick={() => { const steps = [0.25, 0.5, 1]; sendPctRef.current = steps[(steps.indexOf(sendPctRef.current) + 1) % steps.length]; }}>
+                send {Math.round((ui?.sendPct ?? 1) * 100)}%
+              </button>
+            </div>
+          </div>
+        </div>
         {/* A tall map: a scrollbar down the left, dragged or tapped, the thumb as long as the view is. */}
         {ui && ui.viewFrac < 1 && (
-          <div className="absolute bottom-2 left-0 top-2 w-11" style={{ touchAction: 'none' }}
+          <div className="absolute bottom-14 left-0 top-2 w-11" style={{ touchAction: 'none' }}
             onPointerDown={(e) => { e.currentTarget.setPointerCapture(e.pointerId); barGrabRef.current = { y: e.clientY, frac: ui.scrollFrac }; }}
             onPointerMove={(e) => { const g = barGrabRef.current; if (!g || !e.currentTarget.hasPointerCapture(e.pointerId)) return; const r = e.currentTarget.getBoundingClientRect(); scrollToRef.current(g.frac + (e.clientY - g.y) / r.height / (1 - ui.viewFrac)); }}
             onPointerUp={() => { barGrabRef.current = null; }} onPointerCancel={() => { barGrabRef.current = null; }}>
@@ -1613,23 +1628,7 @@ export default function Game() {
         )}
       </div>
       <div className="px-3 pb-0 pt-1">
-        <div className="flex items-center justify-between text-[13px]">
-          <div className="leading-tight">
-            <button className={`${btn} whitespace-nowrap bg-white/10 px-3 py-1.5 text-[13px]`} onClick={() => act((w) => { for (const n of w.nodes) n.route = null; w.picking = null; w.picked = []; })}>Clear autos</button>
-          </div>
-          <div className="flex items-end gap-1.5">
-            <button className={`${btn} px-3 py-1.5 ${tab === 'post' ? 'bg-white/20' : 'bg-white/5'}`} onClick={() => setTab('post')}>Outpost</button>
-            <button className={`${btn} px-3 py-1.5 ${tab === 'tech' ? 'bg-white/20' : 'bg-white/5'}`} onClick={() => setTab('tech')}>Tech</button>
-            <div className="flex flex-col gap-1">
-              <button className={`${btn} bg-white/10 px-3 py-1.5`} onClick={() => { const steps = [0.5, 1, 2]; speedRef.current = steps[(steps.indexOf(speedRef.current) + 1) % steps.length]; }}>{ui?.speed ?? 1}×</button>
-              <button className={`${btn} bg-white/10 px-3 py-1.5`} onClick={() => { pausedRef.current = !pausedRef.current; }}>{ui?.paused ? '▶' : '❚❚'}</button>
-              <button className={`${btn} whitespace-nowrap bg-white/10 px-3 py-1.5`} onClick={() => { const steps = [0.25, 0.5, 1]; sendPctRef.current = steps[(steps.indexOf(sendPctRef.current) + 1) % steps.length]; }}>
-                send {Math.round((ui?.sendPct ?? 1) * 100)}%
-              </button>
-            </div>
-          </div>
-        </div>
-        <div className="mt-1 flex h-[132px] flex-col">
+        <div className="flex h-[132px] flex-col">
           {tab === 'tech' ? (
             <div className="min-h-0 flex-1 overflow-y-auto" style={{ touchAction: 'pan-y', WebkitOverflowScrolling: 'touch' }}><div className="grid grid-cols-2 gap-1.5">
               {(Object.keys(TECH) as TechKey[]).map((k) => {
@@ -1669,11 +1668,11 @@ export default function Game() {
                   </span>
                 )}
                 {ui?.picking ? (
-                  <button className={`${btn} bg-white/10 px-2.5 py-1`} onClick={() => act((w) => { w.picking = null; w.picked = []; })}>Cancel</button>
+                  <button className={`${btn} bg-white/10 px-3 py-1.5 text-[13px]`} onClick={() => act((w) => { w.picking = null; w.picked = []; })}>Cancel</button>
                 ) : (
                   <span className="flex gap-1.5">
-                    <button className={`${btn} bg-white/10 px-2.5 py-1`} onClick={() => act((w) => { w.picking = sel.id; w.pickN = 2; w.picked = []; })}>Split 50/50</button>
-                    {sel.route && <button className={`${btn} bg-white/10 px-2.5 py-1`} onClick={() => act((w) => { w.nodes[sel.id].route = null; })}>Clear</button>}
+                    <button className={`${btn} bg-white/10 px-3 py-1.5 text-[13px]`} onClick={() => act((w) => { w.picking = sel.id; w.pickN = 2; w.picked = []; })}>Split 50/50</button>
+                    {sel.route && <button className={`${btn} bg-white/10 px-3 py-1.5 text-[13px]`} onClick={() => act((w) => { w.nodes[sel.id].route = null; })}>Clear</button>}
                   </span>
                 )}
               </div>
