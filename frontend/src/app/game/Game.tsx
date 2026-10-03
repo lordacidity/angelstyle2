@@ -1138,7 +1138,7 @@ interface Ui {
   truceT: number; hillT: number; hillNeed: number;
   /** Whether the map runs past the screen, and which way there is more of it. */
   /** The scrollbar: how far down the map the view is (0..1) and how much of it shows (0..1); 1 means all. */
-  scrollFrac: number; viewFrac: number;
+  scrollFrac: number; viewFrac: number; scrollFracX: number; viewFracX: number;
   /** Every troop on the map and on the road, by faction. */
   army: { owner: number; n: number }[];
 }
@@ -1168,6 +1168,10 @@ export default function Game() {
   // Where the scrollbar was grabbed, and how far down it was then.
   const barGrabRef = useRef<{ y: number; frac: number } | null>(null);
   const viewFracRef = useRef(1);
+  // The same across: how far right the view is, and how much of the width it shows.
+  const scrollFracXRef = useRef(0);
+  const viewFracXRef = useRef(1);
+  const barGrabXRef = useRef<{ x: number; frac: number } | null>(null);
   // Fingers on the map while paused: one pans, two pinch.
   const fingersRef = useRef(new Map<number, { x: number; y: number }>());
   const pinchRef = useRef<{ dist: number; zoom: number } | null>(null);
@@ -1182,6 +1186,8 @@ export default function Game() {
   const lastTapRef = useRef<{ id: number; t: number }>({ id: -1, t: 0 });
   /** Scroll to a fraction of the way down the map. */
   const scrollToRef = useRef<(frac: number) => void>(() => {});
+  /** Scroll to a fraction of the way across the map. */
+  const scrollToXRef = useRef<(frac: number) => void>(() => {});
   /** Re-fit the view to the camera. */
   const refitRef = useRef<() => void>(() => {});
 
@@ -1243,16 +1249,21 @@ export default function Game() {
       // The map never leaves the screen: centred where it is smaller than the
       // view, and held inside it where it is larger.
       cam.cx = MAP_W <= visW ? MAP_W / 2 : Math.max(visW / 2, Math.min(MAP_W - visW / 2, cam.cx));
-      // A fresh run opens on home, seven tenths of the way down the screen,
+      // A fresh run opens on home, three fifths of the way down the screen,
       // whichever map it is and wherever the map put it.
       if (cam.cy === Infinity) {
         const home = worldRef.current?.nodes.find((n) => n.base && n.owner === 1);
-        if (home) cam.cy = home.y - visH * 0.2;
+        if (home) cam.cy = home.y - visH * 0.1;
       }
-      cam.cy = mapH <= visH ? mapH / 2 : Math.max(visH / 2, Math.min(mapH - visH / 2, cam.cy));
+      // Room below the map, so home at the map's foot can still sit well up
+      // the screen, clear of the controls.
+      const spanH = mapH + visH * 0.3;
+      cam.cy = spanH <= visH ? mapH / 2 : Math.max(visH / 2, Math.min(spanH - visH / 2, cam.cy));
       const ox = r.width / 2 - cam.cx * s, oy = r.height / 2 - cam.cy * s;
-      viewFracRef.current = Math.min(1, visH / mapH);
-      scrollFracRef.current = mapH <= visH ? 0 : (cam.cy - visH / 2) / (mapH - visH);
+      viewFracRef.current = Math.min(1, visH / spanH);
+      scrollFracRef.current = spanH <= visH ? 0 : (cam.cy - visH / 2) / (spanH - visH);
+      viewFracXRef.current = Math.min(1, visW / MAP_W);
+      scrollFracXRef.current = MAP_W <= visW ? 0 : (cam.cx - visW / 2) / (MAP_W - visW);
       viewRef.current = { s: s * dpr, ox: ox * dpr, oy: oy * dpr, midY: cam.cy };
     };
     fit();
@@ -1261,7 +1272,14 @@ export default function Game() {
       const r = wrap.getBoundingClientRect();
       const mapH = worldRef.current?.rules.mapH ?? MAP_H;
       const visH = r.height / (viewRef.current.s / Math.min(2, window.devicePixelRatio || 1));
-      camRef.current.cy = visH / 2 + Math.max(0, Math.min(1, frac)) * (mapH - visH);
+      const spanH = mapH + visH * 0.3;
+      camRef.current.cy = visH / 2 + Math.max(0, Math.min(1, frac)) * (spanH - visH);
+      fit();
+    };
+    scrollToXRef.current = (frac: number) => {
+      const r = wrap.getBoundingClientRect();
+      const visW = r.width / (viewRef.current.s / Math.min(2, window.devicePixelRatio || 1));
+      camRef.current.cx = visW / 2 + Math.max(0, Math.min(1, frac)) * (MAP_W - visW);
       fit();
     };
     const ro = new ResizeObserver(fit);
@@ -1300,7 +1318,7 @@ export default function Game() {
           goldPerMin: w.nodes.filter((n) => n.owner === PLAYER).reduce((t, n) => t + goldOf(n), 0) * goldMult(w) * 60,
           mine: w.nodes.filter((n) => n.owner === PLAYER).length, theirs: w.nodes.filter((n) => n.owner >= 2).length, picking: w.picking !== null, pickN: w.pickN, pickLeft: w.pickN - w.picked.length,
           selHidden: !!(w.rules.fog && sel && sel.owner !== PLAYER && !(seenByPlayer(w)?.has(sel.id) && ringOf(w, sel.id) < (w.rules.fog ?? 0))), shiftT: w.rules.shift ? w.shiftT : 0, truceT: w.rules.truce ? Math.max(0, w.rules.truce - w.time) : 0, hillT: w.hillT, hillNeed: w.rules.hill ?? 0,
-          scrollFrac: scrollFracRef.current, viewFrac: viewFracRef.current,
+          scrollFrac: scrollFracRef.current, viewFrac: viewFracRef.current, scrollFracX: scrollFracXRef.current, viewFracX: viewFracXRef.current,
           army: (() => {
             const by = new Map<number, number>();
             for (const n of w.nodes) if (n.owner !== 0) by.set(n.owner, (by.get(n.owner) ?? 0) + n.troops);
@@ -1583,7 +1601,7 @@ export default function Game() {
         <canvas ref={canvasRef} className="absolute inset-0 block" style={{ touchAction: 'none' }}
           onPointerDown={onDown} onPointerMove={onMove} onPointerUp={onUp} onPointerCancel={onUp} />
         {/* The purse and the rates, in the corner over the map. */}
-        <div className="pointer-events-none absolute right-2 top-1 text-right leading-tight">
+        <div className={`pointer-events-none absolute right-2 text-right leading-tight ${ui && ui.paused && !ui.over && ui.viewFracX < 1 ? 'top-9' : 'top-1'}`}>
           <div className="text-[11px] text-white/40"><b className="text-white/80">+{Math.round(ui?.goldPerMin ?? 0)}</b> gold/min</div>
           <div className="text-[11px] text-white/40"><b className="text-white/80">+{Math.round(ui?.prodPerMin ?? 0)}</b> troops/min</div>
         </div>
@@ -1613,6 +1631,16 @@ export default function Game() {
             onPointerUp={() => { barGrabRef.current = null; }} onPointerCancel={() => { barGrabRef.current = null; }}>
             <div className="absolute bottom-0 left-2 top-0 w-3 rounded-full bg-white/10" />
             <div className="absolute left-2 w-3 rounded-full bg-white/70" style={{ top: `${ui.scrollFrac * (1 - ui.viewFrac) * 100}%`, height: `${ui.viewFrac * 100}%` }} />
+          </div>
+        )}
+        {/* Zoomed in and paused: a scrollbar along the top too, for side to side. */}
+        {ui && ui.paused && !ui.over && ui.viewFracX < 1 && (
+          <div className="absolute left-14 right-2 top-0 h-9" style={{ touchAction: 'none' }}
+            onPointerDown={(e) => { e.currentTarget.setPointerCapture(e.pointerId); barGrabXRef.current = { x: e.clientX, frac: ui.scrollFracX }; }}
+            onPointerMove={(e) => { const g = barGrabXRef.current; if (!g || !e.currentTarget.hasPointerCapture(e.pointerId)) return; const r = e.currentTarget.getBoundingClientRect(); scrollToXRef.current(g.frac + (e.clientX - g.x) / r.width / (1 - ui.viewFracX)); }}
+            onPointerUp={() => { barGrabXRef.current = null; }} onPointerCancel={() => { barGrabXRef.current = null; }}>
+            <div className="absolute left-0 right-0 top-2 h-3 rounded-full bg-white/10" />
+            <div className="absolute top-2 h-3 rounded-full bg-white/70" style={{ left: `${ui.scrollFracX * (1 - ui.viewFracX) * 100}%`, width: `${ui.viewFracX * 100}%` }} />
           </div>
         )}
         {ui?.over && (
