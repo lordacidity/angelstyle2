@@ -1119,13 +1119,13 @@ export default function Game() {
     const cost = max ? 0 : costs[lvl];
     return (
       <button key={k} disabled={max || (ui?.gold ?? 0) < cost} onClick={() => act((w) => buyUpgrade(w, n.id, k))}
-        className={`${btn} flex flex-col items-start rounded-xl bg-white/5 px-3 py-2 text-left`}>
+        className={`${btn} flex flex-col items-start rounded-xl bg-white/5 px-3 py-1.5 text-left`}>
         <div className="flex w-full items-center justify-between text-[13px]"><b>{u.name}</b><span className="text-white">{max ? 'MAX' : `${cost}g`}</span></div>
         <div className="text-[11px] text-white/45">{(() => {
           // Barracks and Expand: what the next level adds here, a minute.
           const rate = ui?.selProdPerMin ?? 0;
           if (k === 'prod') { const gain = max ? 0 : rate * ((1 + 0.35 * (lvl + 1)) / (1 + 0.35 * lvl) - 1); return `${max ? 'MAX' : `+${Math.round(gain)} troops/min`} · lv ${lvl}`; }
-          if (k === 'tier') { const gain = max ? 0 : rate * (TIER_PROD[n.tier] / TIER_PROD[n.tier - 1] - 1); return `${max ? 'MAX' : `+${Math.round(gain)}/min, holds ${Math.round(capOf({ ...n, tier: n.tier + 1 }))}, +20% range`} · size ${n.tier}`; }
+          if (k === 'tier') { const gain = max ? 0 : rate * (TIER_PROD[n.tier] / TIER_PROD[n.tier - 1] - 1); return `${max ? 'MAX' : `+${Math.round(gain)}/min · holds ${Math.round(capOf({ ...n, tier: n.tier + 1 }))}`} · size ${n.tier}`; }
           return `${u.desc} · lv ${lvl}`;
         })()}</div>
       </button>
@@ -1190,7 +1190,7 @@ export default function Game() {
           </div>
         )}
       </div>
-      <div className="px-3 pb-2 pt-1">
+      <div className="px-3 pb-1 pt-1">
         <div className="flex items-center justify-between text-[13px]">
           <div className="leading-tight">
             <div className="text-[11px] text-white/40"><b className="text-white/80">+{Math.round(ui?.prodPerMin ?? 0)}</b> troops/min</div>
@@ -1204,14 +1204,14 @@ export default function Game() {
             </button>
           </div>
         </div>
-        <div className="mt-2 h-[206px]">
+        <div className="mt-1.5 h-[166px]">
           {tab === 'tech' ? (
             <div className="grid grid-cols-2 gap-1.5">
               {(Object.keys(TECH) as TechKey[]).map((k) => {
                 const t = TECH[k]; const lvl = ui?.tech[k] ?? 0; const costs = t.cost as readonly number[]; const max = lvl >= costs.length; const cost = max ? 0 : costs[lvl];
                 return (
                   <button key={k} disabled={max || (ui?.gold ?? 0) < cost} onClick={() => act((w) => buyTech(w, k))}
-                    className={`${btn} flex flex-col items-start rounded-xl bg-white/5 px-3 py-2 text-left`}>
+                    className={`${btn} flex flex-col items-start rounded-xl bg-white/5 px-3 py-1.5 text-left`}>
                     <div className="flex w-full items-center justify-between text-[13px]"><b>{t.name}</b><span className="text-white">{max ? 'MAX' : `${cost}g`}</span></div>
                     <div className="text-[11px] text-white/45">{t.desc} · {lvl}/{costs.length}</div>
                   </button>
@@ -1230,11 +1230,12 @@ export default function Game() {
             <>
               <div className="mb-1.5 flex items-center justify-between text-[12px]">
                 {ui?.picking ? (
-                  <span className="text-[#ffd166]">{ui.pickN === 1 ? 'Tap the outpost to auto-send to.' : ui.pickLeft === 2 ? 'Tap the first outpost.' : 'Tap the second outpost.'}</span>
-                ) : sel.route ? (
-                  <span className="text-[#ffd166]">Auto-sending{sel.route.to.length > 1 ? ', split 50/50' : ''} · double-tap to stop</span>
+                  <span className="text-[#ffd166]">{ui.pickN === 1 ? 'Tap the target.' : ui.pickLeft === 2 ? 'Tap the first target.' : 'Tap the second.'}</span>
                 ) : (
-                  <span className="text-white/30">Double-tap to auto-send</span>
+                  <span className="text-white/50">
+                    {sel.mine ? <span className="text-white/40">breeds nothing</span> : <><b className="text-white">+{Math.round(ui?.selProdPerMin ?? 0)}</b> troops/min{sel.troops >= capOf(sel) - 0.5 ? ' (full)' : ''}</>}
+                    <span className="text-white/25"> · </span>falls to <b className="text-white">{(ui?.selHold ?? 0) + 1}</b>+
+                  </span>
                 )}
                 {ui?.picking ? (
                   <button className={`${btn} bg-white/10 px-2.5 py-1`} onClick={() => act((w) => { w.picking = null; w.picked = []; })}>Cancel</button>
@@ -1260,16 +1261,12 @@ export default function Game() {
                   {!sel.base && (
                     <button disabled={sel.troops < MINE_TROOPS[0]} onClick={() => act((w) => digMine(w, sel.id))}
                       className={`${btn} mt-1.5 flex w-full items-center justify-between rounded-xl bg-white/5 px-3 py-1.5 text-left`}>
-                      <span className="text-[13px]"><b className="text-[#ffd166]">Dig mine</b> <span className="text-white/45">· +{Math.round(MINE_GOLD[1] * 60)} gold/min, breeds nothing</span></span>
+                      <span className="text-[13px]"><b className="text-[#ffd166]">Dig mine</b> <span className="text-white/45">· +{Math.round(MINE_GOLD[1] * 60)} gold/min</span></span>
                       <span className="text-[12px] text-white/60">{MINE_TROOPS[0]} troops</span>
                     </button>
                   )}
                 </>
               )}
-              <div className="mt-1.5 flex justify-between text-[12px] text-white/50">
-                <span>{sel.mine ? <span className="text-white/40">breeds nothing · garrison it to hold it</span> : <><b className="text-white">+{Math.round(ui?.selProdPerMin ?? 0)}</b> troops/min{sel.troops >= capOf(sel) - 0.5 ? ' (full)' : ''}</>}</span>
-                <span>falls to <b className="text-white">{(ui?.selHold ?? 0) + 1}</b>+</span>
-              </div>
             </>
           )}
         </div>
