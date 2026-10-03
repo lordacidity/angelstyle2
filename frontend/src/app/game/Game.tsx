@@ -41,7 +41,7 @@ const BASE_PROD_PER_S = 0.9;
 const UPG = {
   prod: { name: 'Barracks', cost: [30, 55, 95], desc: '+35% troops/s' },
   wall: { name: 'Walls', cost: [25, 50, 90], desc: '+25% defence' },
-  cannon: { name: 'Cannon', cost: [45, 80, 130], desc: 'shoots passing enemies' },
+  cannon: { name: 'Cannon', cost: [45, 80, 130], desc: 'shooter' },
   tier: { name: 'Expand', cost: [60, 130], desc: 'bigger, faster' },
 } as const;
 type UpgKey = keyof typeof UPG;
@@ -686,6 +686,8 @@ function draw(ctx: CanvasRenderingContext2D, w: World, view: { s: number; ox: nu
 interface Ui {
   gold: number; time: number; rounds: number; over: 'win' | 'lose' | null; paused: boolean; speed: number;
   sendPct: number; selected: Node | null; tech: Record<TechKey, number>;
+  /** The picked outpost: troops it breeds a minute, and what it takes to fall. */
+  selProdPerMin: number; selHold: number;
   mine: number; theirs: number; picking: boolean;
   /** Every troop on the map and on the road, by faction. */
   army: { owner: number; n: number }[];
@@ -787,6 +789,7 @@ export default function Game() {
         setUi({
           gold: w.gold, time: w.time, rounds: w.rounds, over: w.over, paused: pausedRef.current, speed: speedRef.current,
           sendPct: sendPctRef.current, selected: sel, tech: { ...w.tech },
+          selProdPerMin: sel ? prodOf(w, sel) * 60 : 0, selHold: sel ? Math.ceil(sel.troops * wallMult(sel)) : 0,
           mine: w.nodes.filter((n) => n.owner === PLAYER).length, theirs: w.nodes.filter((n) => n.owner >= 2).length, picking: w.picking !== null,
           army: (() => {
             const by = new Map<number, number>();
@@ -1020,7 +1023,7 @@ export default function Game() {
             </button>
           </div>
         </div>
-        <div className="mt-2 h-[168px]">
+        <div className="mt-2 h-[186px]">
           {tab === 'tech' ? (
             <div className="grid grid-cols-2 gap-1.5">
               {(Object.keys(TECH) as TechKey[]).map((k) => {
@@ -1061,6 +1064,10 @@ export default function Game() {
                 )}
               </div>
               <div className="grid grid-cols-2 gap-1.5">{upgRows(sel)}</div>
+              <div className="mt-1.5 flex justify-between text-[12px] text-white/50">
+                <span><b className="text-white">+{Math.round(ui?.selProdPerMin ?? 0)}</b> troops/min{sel.troops >= capOf(sel) - 0.5 ? ' (full)' : ''}</span>
+                <span>falls to <b className="text-white">{(ui?.selHold ?? 0) + 1}</b>+</span>
+              </div>
             </>
           )}
         </div>
