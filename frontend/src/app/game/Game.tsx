@@ -86,10 +86,9 @@ interface Node {
   id: number; x: number; y: number;
   owner: number; troops: number; tier: number; base: boolean;
   prod: number; wall: number; cannon: number; cd: number;
-  /** A standing order: `pct` of the garrison went when it was set, and
-   *  `pct` of everything that arrives after goes too, every few seconds;
-   *  `keep` is what stays. Yours only. */
-  route: { to: number; pct: number; keep: number } | null; routeT: number;
+  /** A standing order: everything goes, every few seconds, split evenly
+   *  between these outposts. Yours only. */
+  route: { to: number[] } | null; routeT: number;
 }
 interface Edge { a: number; b: number; len: number }
 /** A column on the road. `from`/`to` are the leg it is on; `path` is the
@@ -124,6 +123,8 @@ interface World {
   selected: number | null;
   /** The outpost whose standing order is being pointed at, while it is. */
   picking: number | null;
+  /** How many targets the order being pointed at takes, and those tapped so far. */
+  pickN: number; picked: number[];
 }
 
 function rulesFor(level: number, endless: boolean): Rules {
@@ -263,7 +264,7 @@ function buildWorld(rules: Rules, meta: Record<MetaKey, number>, seedExtra = 0):
     gold: 40 + META.gold.per * meta.gold, time: 0,
     nextId: 1,
     tech: { logistics: 0, conscription: 0 }, meta,
-    over: null, flash: { text: rules.endless ? 'THE LONG WAR' : `LEVEL ${rules.level}`, age: 0 }, selected: null, picking: null,
+    over: null, flash: { text: rules.endless ? 'THE LONG WAR' : `LEVEL ${rules.level}`, age: 0 }, selected: null, picking: null, pickN: 1, picked: [],
   };
 }
 
@@ -312,6 +313,13 @@ function route(w: World, from: number, to: number, owner: number): number[] | nu
   return path;
 }
 
+/** A standing order's shipment: the whole garrison, split evenly. */
+function shipOrder(w: World, n: Node) {
+  if (!n.route) return;
+  const each = Math.floor(n.troops / n.route.to.length);
+  if (each < 1) return;
+  for (const to of n.route.to) sendCount(w, n.id, to, each);
+}
 function send(w: World, from: number, to: number, frac: number) { sendCount(w, from, to, Math.floor(w.nodes[from].troops * frac)); }
 function sendCount(w: World, from: number, to: number, amount: number) {
   const n = w.nodes[from];
@@ -469,13 +477,7 @@ function step(w: World, dt: number) {
     n.routeT -= dt;
     if (n.routeT > 0) continue;
     n.routeT = ROUTE_EVERY;
-    // What came in since: that share of it goes, the rest raises the keep.
-    if (n.troops < n.route.keep) { n.route.keep = n.troops; continue; }
-    const fresh = n.troops - n.route.keep;
-    const go = Math.floor(fresh * n.route.pct);
-    if (go < 1) continue;
-    n.route.keep += fresh - go;
-    sendCount(w, n.id, n.route.to, go);
+    shipOrder(w, n);
   }
 
   // Columns on the march.
@@ -663,8 +665,9 @@ function draw(ctx: CanvasRenderingContext2D, w: World, view: { s: number; ox: nu
       ctx.setLineDash([]); ctx.lineDashOffset = 0;
     };
     const s = w.nodes[w.selected];
-    for (const n of w.nodes) if (n.route && n.owner === PLAYER && n.route.to === s.id && n.id !== s.id) road(n.id, s.id, '#38e08a');
-    if (s.route && s.owner === PLAYER) road(s.id, s.route.to, '#ffd166');
+    for (const n of w.nodes) if (n.route && n.owner === PLAYER && n.route.to.includes(s.id) && n.id !== s.id) road(n.id, s.id, '#38e08a');
+    if (s.route && s.owner === PLAYER) for (const to of s.route.to) road(s.id, to, '#ffd166');
+    if (w.picking === s.id) for (const to of w.picked) road(s.id, to, '#ffd166');
   }
   // Columns.
   for (const c of w.convoys) {
@@ -697,7 +700,7 @@ interface Ui {
   selProdPerMin: number; selHold: number;
   /** Everything you hold, breeding, a minute (full outposts breed nothing). */
   prodPerMin: number;
-  mine: number; theirs: number; picking: boolean;
+  mine: number; theirs: number; picking: boolean; pickN: number; pickLeft: number;
   /** Whether the map runs past the screen, and which way there is more of it. */
   canUp: boolean; canDown: boolean;
   /** Every troop on the map and on the road, by faction. */
@@ -828,7 +831,7 @@ export default function Game() {
           sendPct: sendPctRef.current, selected: sel, tech: { ...w.tech },
           selProdPerMin: sel ? prodOf(w, sel) * 60 : 0, selHold: sel ? Math.ceil(sel.troops * wallMult(sel)) : 0,
           prodPerMin: w.nodes.filter((n) => n.owner === PLAYER && n.troops < capOf(n) - 0.5).reduce((t, n) => t + prodOf(w, n) * 60, 0),
-          mine: w.nodes.filter((n) => n.owner === PLAYER).length, theirs: w.nodes.filter((n) => n.owner >= 2).length, picking: w.picking !== null,
+          mine: w.nodes.filter((n) => n.owner === PLAYER).length, theirs: w.nodes.filter((n) => n.owner >= 2).length, picking: w.picking !== null, pickN: w.pickN, pickLeft: w.pickN - w.picked.length,
           canUp: scrollRef.current > 0.5, canDown: scrollRef.current < maxScroll() - 0.5,
           army: (() => {
             const by = new Map<number, number>();
@@ -861,15 +864,16 @@ export default function Game() {
     e.currentTarget.setPointerCapture(e.pointerId);
     const p = toMap(e);
     const n = hit(w, p);
-    if (!n) { w.selected = null; w.picking = null; dragRef.current = null; return; }
+    if (!n) { w.selected = null; w.picking = null; w.picked = []; dragRef.current = null; return; }
     if (w.picking !== null) {
       const from = w.nodes[w.picking];
-      if (n.id !== from.id && from.owner === PLAYER) {
-        const pct = sendPctRef.current;
-        send(w, from.id, n.id, pct);
-        from.route = { to: n.id, pct, keep: from.troops }; from.routeT = 2;
+      if (n.id !== from.id && from.owner === PLAYER && !w.picked.includes(n.id)) w.picked.push(n.id);
+      if (w.picked.length >= w.pickN) {
+        from.route = { to: [...w.picked] }; from.routeT = 2;
+        shipOrder(w, from);
+        w.picking = null; w.picked = [];
       }
-      w.picking = null; dragRef.current = null;
+      dragRef.current = null;
       return;
     }
     // Double tap on one of yours: set an auto-send (tap the target next), or
@@ -878,7 +882,7 @@ export default function Game() {
     const twice = lastTapRef.current.id === n.id && now - lastTapRef.current.t < 350;
     lastTapRef.current = { id: n.id, t: now };
     if (twice && n.owner === PLAYER) {
-      if (n.route) n.route = null; else w.picking = n.id;
+      if (n.route) n.route = null; else { w.picking = n.id; w.pickN = 1; w.picked = []; }
       w.selected = n.id; dragRef.current = null;
       return;
     }
@@ -1116,13 +1120,22 @@ export default function Game() {
           ) : (
             <>
               <div className="grid grid-cols-2 gap-1.5">{upgRows(sel)}</div>
-              {ui?.picking ? (
-                <div className="mt-1.5 text-center text-[12px] text-[#ffd166]">Tap where it should auto-send.</div>
-              ) : sel.route ? (
-                <div className="mt-1.5 text-center text-[12px] text-[#ffd166]">Auto-sending {Math.round(sel.route.pct * 100)}% · double-tap to stop</div>
-              ) : (
-                <div className="mt-1.5 text-center text-[12px] text-white/30">Double-tap to auto-send</div>
-              )}
+              <div className="mt-1.5 flex items-center justify-between text-[12px]">
+                {ui?.picking ? (
+                  <span className="text-[#ffd166]">{ui.pickN === 1 ? 'Tap the outpost to auto-send to.' : ui.pickLeft === 2 ? 'Tap the first outpost.' : 'Tap the second outpost.'}</span>
+                ) : sel.route ? (
+                  <span className="text-[#ffd166]">Auto-sending{sel.route.to.length > 1 ? ', split 50/50' : ''} · double-tap to stop</span>
+                ) : (
+                  <span className="text-white/30">Double-tap to auto-send</span>
+                )}
+                {ui?.picking ? (
+                  <button className={`${btn} bg-white/10 px-2.5 py-1`} onClick={() => act((w) => { w.picking = null; w.picked = []; })}>Cancel</button>
+                ) : sel.route ? (
+                  <button className={`${btn} bg-white/10 px-2.5 py-1`} onClick={() => act((w) => { w.nodes[sel.id].route = null; })}>Clear</button>
+                ) : (
+                  <button className={`${btn} bg-white/10 px-2.5 py-1`} onClick={() => act((w) => { w.picking = sel.id; w.pickN = 2; w.picked = []; })}>Split 50/50</button>
+                )}
+              </div>
               <div className="mt-1.5 flex justify-between text-[12px] text-white/50">
                 <span><b className="text-white">+{Math.round(ui?.selProdPerMin ?? 0)}</b> troops/min{sel.troops >= capOf(sel) - 0.5 ? ' (full)' : ''}</span>
                 <span>falls to <b className="text-white">{(ui?.selHold ?? 0) + 1}</b>+</span>
