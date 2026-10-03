@@ -44,9 +44,9 @@ const UPG = {
   tier: { name: 'Expand', cost: [60, 130], desc: 'bigger, faster' },
 } as const;
 type UpgKey = keyof typeof UPG;
-const CANNON_DMG = [0, 3, 5, 8];
-const CANNON_RANGE = 110;
-const CANNON_CD = 0.5;
+const CANNON_DMG = [0, 5, 9, 14];
+const CANNON_RANGE = 130;
+const CANNON_CD = 0.4;
 
 const TECH = {
   logistics: { name: 'Logistics', cost: [80], desc: 'columns march 25% faster' },
@@ -467,7 +467,7 @@ function step(w: World, dt: number) {
       if (d < td) { td = d; target = c; }
     }
     if (!target) continue;
-    const dmg = CANNON_DMG[n.cannon] * (n.owner === PLAYER ? 1 + META.cannon.per * w.meta.cannon / 100 : 0.8);
+    const dmg = CANNON_DMG[n.cannon] * (n.owner === PLAYER ? 1 + META.cannon.per * w.meta.cannon / 100 : 0.55);
     target.n -= dmg;
     const p = convoyPos(w, target);
     w.shots.push({ x1: n.x, y1: n.y, x2: p.x, y2: p.y, age: 0 });
