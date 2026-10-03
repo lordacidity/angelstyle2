@@ -1155,10 +1155,16 @@ function draw(ctx: CanvasRenderingContext2D, w: World, view: { s: number; ox: nu
       ctx.stroke();
       ctx.setLineDash([]); ctx.lineDashOffset = 0;
     };
+    // The outpost at the far end rings in the same colour, so the line's end is plain.
+    const mark = (id: number, color: string) => {
+      const n = w.nodes[id];
+      ctx.strokeStyle = color; ctx.lineWidth = 3;
+      ctx.beginPath(); ctx.arc(n.x, n.y, nodeR(n) + 4, 0, Math.PI * 2); ctx.stroke();
+    };
     const s = w.nodes[w.selected];
-    for (const n of w.nodes) if (n.route && n.owner === PLAYER && n.route.to.includes(s.id) && n.id !== s.id) road(n.id, s.id, '#38e08a');
-    if (s.route && s.owner === PLAYER) for (const to of s.route.to) road(s.id, to, '#ffd166');
-    if (w.picking === s.id) for (const to of w.picked) road(s.id, to, '#ffd166');
+    for (const n of w.nodes) if (n.route && n.owner === PLAYER && n.route.to.includes(s.id) && n.id !== s.id) { road(n.id, s.id, '#38e08a'); mark(n.id, '#38e08a'); }
+    if (s.route && s.owner === PLAYER) for (const to of s.route.to) { road(s.id, to, '#ffd166'); mark(to, '#ffd166'); }
+    if (w.picking === s.id) for (const to of w.picked) { road(s.id, to, '#ffd166'); mark(to, '#ffd166'); }
   }
   // Columns.
   for (const c of w.convoys) {
