@@ -106,7 +106,7 @@ interface Edge { a: number; b: number; len: number }
  *  whole route, and `leg` which step of it. */
 interface Convoy { id: number; owner: number; n: number; from: number; to: number; t: number; dur: number; path: number[]; leg: number }
 interface Shot { x1: number; y1: number; x2: number; y2: number; age: number }
-interface Faction { id: number; tick: number; dead: number; gold: number; buyT: number; mercT: number }
+interface Faction { id: number; tick: number; dead: number; gold: number; buyT: number; mercT: number; tech: { conscription: number; logistics: number } }
 
 interface Rules {
   level: number; endless: boolean; nodeCount: number; enemies: number;
@@ -295,7 +295,7 @@ function buildWorld(rules: Rules, meta: Record<MetaKey, number>, seedExtra = 0):
       n.owner = fid; n.troops = 15;
       taken.add(n.id); extra--;
     }
-    factions.push({ id: fid, tick: rnd() * rules.aiInterval, dead: 0, gold: rules.enemyGold, buyT: 3, mercT: -99 });
+    factions.push({ id: fid, tick: rnd() * rules.aiInterval, dead: 0, gold: rules.enemyGold, buyT: 2, mercT: -99, tech: { conscription: 0, logistics: 0 } });
   }
   for (const n of nodes) {
     if (n.owner !== 0) continue;
@@ -334,13 +334,17 @@ const wallMult = (n: Node) => 1 + 0.25 * n.wall;
 // neither, only what it builds on the ground.
 const prodOf = (w: World, n: Node) => {
   if (n.mine) return 0;
-  let m = n.owner === PLAYER ? (1 + META.prod.per * w.meta.prod / 100) * (1 + 0.15 * w.tech.conscription) : 1;
+  let m = n.owner === PLAYER
+    ? (1 + META.prod.per * w.meta.prod / 100) * (1 + 0.15 * w.tech.conscription)
+    : 1 + 0.15 * (w.factions.find((f) => f.id === n.owner)?.tech.conscription ?? 0);
   m *= (n.base ? 1.5 : 1) * TIER_PROD[n.tier - 1] * (1 + 0.35 * n.prod);
   return BASE_PROD_PER_S * m;
 };
 const goldOf = (n: Node) => (n.mine ? MINE_GOLD[n.mine] : n.base ? 1.0 : 0.35 + 0.15 * (n.tier - 1));
 const convoySpeed = (w: World, owner: number) =>
-  60 * (owner === PLAYER ? (1 + META.speed.per * w.meta.speed / 100) * (1 + 0.25 * w.tech.logistics) : 1);
+  60 * (owner === PLAYER
+    ? (1 + META.speed.per * w.meta.speed / 100) * (1 + 0.25 * w.tech.logistics)
+    : 1 + 0.25 * (w.factions.find((f) => f.id === owner)?.tech.logistics ?? 0));
 const convoyPos = (w: World, c: Convoy) => {
   const a = w.nodes[c.from], b = w.nodes[c.to];
   return { x: a.x + (b.x - a.x) * c.t, y: a.y + (b.y - a.y) * c.t };
@@ -475,7 +479,7 @@ function aiTick(w: World, f: Faction) {
       // A canny general counts what the guns on the way will cost.
       const guns = r.aiSmart >= 1 ? w.nodes.filter((g) => g.owner !== f.id && g.cannon && Math.hypot(g.x - m.x, g.y - m.y) < cannonRange(g, w)).reduce((s, g) => s + CANNON_DMG[g.cannon] * 3, 0) : 0;
       const need = (m.troops + incoming) * wallMult(m) + 1 + guns;
-      if (avail < need * 1.25) continue;
+      if (avail < need * (m.owner === 0 ? 1.1 : 1.25)) continue;
       let score = (m.owner === PLAYER ? 3 : m.owner === 0 ? 1 : 2) + (m.base ? 2.5 : 0) + m.prod * 0.4 - need / avail;
       if (m.owner === PLAYER && m.cannon && r.aiSmart === 0) score += 1;
       if (score > bestScore) { bestScore = score; best = m; }
@@ -486,6 +490,16 @@ function aiTick(w: World, f: Faction) {
       const yours = hostile.filter((m) => m.owner === PLAYER).sort((a, b) => a.troops * wallMult(a) - b.troops * wallMult(b));
       if (yours.length && avail > yours[0].troops * wallMult(yours[0]) * 0.6) { send(w, n.id, yours[0].id, 0.8); continue; }
     }
+  }
+  // Nothing full ever sits idle: an outpost near its cap with nothing to
+  // take ships most of itself, by road, to the thinnest outpost of its that
+  // touches the enemy or the unclaimed ground. Its production never stalls.
+  const fronts = w.nodes.filter((n) => n.owner === f.id && w.adj[n.id].some((i) => w.nodes[i].owner !== f.id));
+  for (const n of w.nodes) {
+    if (n.owner !== f.id || n.mine || n.troops < capOf(n) * 0.8) continue;
+    if (fronts.includes(n)) continue;
+    const to = fronts.filter((m) => m.id !== n.id).sort((a, b) => a.troops - b.troops)[0];
+    if (to) send(w, n.id, to.id, 0.7);
   }
   // Nothing falls to one column: the general picks the target that is
   // nearest to falling, stages for it — every outpost of its that touches
@@ -524,34 +538,55 @@ function aiTick(w: World, f: Faction) {
 // walls and then a cannon where the enemy is closest, barracks and a bigger
 // HQ behind that. One thing a tick, the most urgent it can afford.
 function aiSpend(w: World, f: Faction) {
-  const mine = w.nodes.filter((n) => n.owner === f.id && !n.mine);
+  const held = w.nodes.filter((n) => n.owner === f.id);
+  const mine = held.filter((n) => !n.mine);
   if (!mine.length) return;
   const threat = (n: Node) => w.adj[n.id].reduce((s, i) => s + (w.nodes[i].owner !== f.id && w.nodes[i].owner !== 0 ? w.nodes[i].troops : 0), 0);
   const front = mine.filter((n) => threat(n) > 0).sort((a, b) => threat(b) - threat(a));
   const hq = mine.find((n) => n.base) ?? mine[0];
-  const wants: [Node, UpgKey][] = [];
-  for (const n of front.slice(0, 2)) { if (n.wall < 2) wants.push([n, 'wall']); }
-  if (front[0] && front[0].cannon < 1) wants.push([front[0], 'cannon']);
-  if (hq.prod < 2) wants.push([hq, 'prod']);
-  if (front[0] && front[0].wall < 3) wants.push([front[0], 'wall']);
-  if (hq.tier < 3) wants.push([hq, 'tier']);
-  if (front[0] && front[0].cannon < 3) wants.push([front[0], 'cannon']);
-  for (const n of mine) if (n.prod < 3) wants.push([n, 'prod']);
-  if (front[0] && front[0].wall < 4) wants.push([front[0], 'wall']);
-  if (hq.tier < 4) wants.push([hq, 'tier']);
-  if (front[0] && front[0].cannon < 4) wants.push([front[0], 'cannon']);
-  if (hq.prod < 4) wants.push([hq, 'prod']);
-  // Mercenaries, when the purse is deep and a front needs them.
   // Mercenaries, when the purse is deep, a front is thin, and not within fifteen seconds of the last.
   if (w.rules.mercs && front[0] && f.gold >= w.rules.mercs * 4 && front[0].troops < capOf(front[0]) * 0.5 && w.time - f.mercT > 15) {
-    f.gold -= w.rules.mercs; front[0].troops += 30; f.mercT = w.time; return;
+    f.gold -= w.rules.mercs; front[0].troops += 30; f.mercT = w.time;
   }
-  for (const [n, k] of wants) {
-    const cost = upgradeCost(n, k);
-    if (cost === null) continue;
-    if (f.gold < cost) return; // the most urgent thing it cannot yet afford: save for it
-    f.gold -= cost; applyUpgrade(n, k);
-    return;
+  // A mine in the rear, once there is a rear: one for every four outposts.
+  const rear = held.filter((n) => !n.base && !n.mine && !w.adj[n.id].some((i) => w.nodes[i].owner !== f.id));
+  const minesHeld = held.filter((n) => n.mine).length;
+  if (held.length >= 4 && minesHeld < Math.floor(held.length / 4)) {
+    const dig = rear.filter((n) => n.troops >= MINE_TROOPS[0]).sort((a, b) => b.troops - a.troops)[0];
+    if (dig) digMineAt(dig);
+  }
+  // The list, most urgent first: a buy is an upgrade on an outpost or a tech.
+  type Want = { cost: number | null; buy: () => void };
+  const upg = (n: Node, k: UpgKey): Want => ({ cost: upgradeCost(n, k), buy: () => applyUpgrade(n, k) });
+  const tech = (k: 'conscription' | 'logistics'): Want => {
+    const costs = TECH[k].cost as readonly number[]; const lvl = f.tech[k];
+    return { cost: lvl >= costs.length ? null : costs[lvl], buy: () => { f.tech[k]++; } };
+  };
+  const wants: Want[] = [];
+  for (const n of front.slice(0, 2)) if (n.wall < 2) wants.push(upg(n, 'wall'));
+  if (hq.prod < 2) wants.push(upg(hq, 'prod'));
+  if (front[0] && front[0].cannon < 1) wants.push(upg(front[0], 'cannon'));
+  if (held.length >= 3) wants.push(tech('conscription'));
+  if (hq.tier < 3) wants.push(upg(hq, 'tier'));
+  for (const n of mine) if (n.prod < 2) wants.push(upg(n, 'prod'));
+  if (front[0] && front[0].wall < 3) wants.push(upg(front[0], 'wall'));
+  if (held.length >= 4) wants.push(tech('logistics'));
+  if (front[0] && front[0].cannon < 2) wants.push(upg(front[0], 'cannon'));
+  for (const n of mine) if (n.prod < 3) wants.push(upg(n, 'prod'));
+  if (held.length >= 5) wants.push(tech('conscription'));
+  if (hq.tier < 4) wants.push(upg(hq, 'tier'));
+  if (front[0] && front[0].cannon < 3) wants.push(upg(front[0], 'cannon'));
+  if (front[0] && front[0].wall < 4) wants.push(upg(front[0], 'wall'));
+  for (const n of mine) if (n.prod < 4) wants.push(upg(n, 'prod'));
+  if (front[0] && front[0].cannon < 4) wants.push(upg(front[0], 'cannon'));
+  for (const n of mine) if (n.tier < 3) wants.push(upg(n, 'tier'));
+  // Two buys a tick, in order; it saves for the first thing it cannot afford.
+  let bought = 0;
+  for (const want of wants) {
+    if (want.cost === null) continue;
+    if (f.gold < want.cost) return;
+    f.gold -= want.cost; want.buy();
+    if (++bought >= 2) return;
   }
 }
 
@@ -690,7 +725,7 @@ function step(w: World, dt: number) {
     f.tick -= dt;
     if (f.tick <= 0) { aiTick(w, f); f.tick = w.rules.aiInterval; }
     f.buyT -= dt;
-    if (f.buyT <= 0) { aiSpend(w, f); f.buyT = 3; }
+    if (f.buyT <= 0) { aiSpend(w, f); f.buyT = 2; }
   }
 
   // The end.
@@ -705,7 +740,11 @@ function step(w: World, dt: number) {
 function mineCost(n: Node): number | null { return n.mine >= 3 ? null : MINE_TROOPS[n.mine]; }
 function digMine(w: World, id: number) {
   const n = w.nodes[id];
-  if (n.owner !== PLAYER || n.base) return;
+  if (n.owner !== PLAYER) return;
+  digMineAt(n);
+}
+function digMineAt(n: Node) {
+  if (n.base) return;
   const need = mineCost(n);
   if (need === null || n.troops < need) return;
   n.troops -= need; n.mine++;
