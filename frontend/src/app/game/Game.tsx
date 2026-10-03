@@ -1572,7 +1572,7 @@ export default function Game() {
             <div className="mt-1 flex justify-between text-[11px]">
               {ui.army.map((a) => (
                 <span key={a.owner} style={{ color: a.owner === PLAYER ? '#fff' : COLORS[a.owner] }}>
-                  {a.owner === PLAYER ? 'YOU' : NAMES[a.owner]} <b>{fmt(a.n)}</b>
+                  {a.owner === PLAYER ? 'YOU' : NAMES[a.owner]} <b>{fmt(a.n)}</b> <span className="text-[9px] opacity-60">{Math.round((a.n / total) * 100)}%</span>
                 </span>
               ))}
             </div>
@@ -1584,13 +1584,15 @@ export default function Game() {
           onPointerDown={onDown} onPointerMove={onMove} onPointerUp={onUp} onPointerCancel={onUp} />
         {/* The purse and the rates, in the corner over the map. */}
         <div className="pointer-events-none absolute right-2 top-1 text-right leading-tight">
-          <div className="text-[15px]"><span className="text-white/40">Gold </span><b className="text-white">{fmt(ui?.gold ?? 0)}</b></div>
           <div className="text-[11px] text-white/40"><b className="text-white/80">+{Math.round(ui?.goldPerMin ?? 0)}</b> gold/min</div>
           <div className="text-[11px] text-white/40"><b className="text-white/80">+{Math.round(ui?.prodPerMin ?? 0)}</b> troops/min</div>
         </div>
         {/* The controls, over the foot of the map. Every button the one height. */}
         <div className="pointer-events-none absolute inset-x-0 bottom-0 flex items-end justify-between px-3 pb-1.5 text-[13px]">
-          <button className={`${btn} pointer-events-auto whitespace-nowrap bg-white/10 px-3 py-1.5`} onClick={() => act((w) => { for (const n of w.nodes) n.route = null; w.picking = null; w.picked = []; })}>Clear autos</button>
+          <div className="flex flex-col items-start gap-1.5">
+            <div className="text-[15px] leading-none"><span className="text-white/40">Gold </span><b className="text-white">{fmt(ui?.gold ?? 0)}</b></div>
+            <button className={`${btn} pointer-events-auto whitespace-nowrap bg-white/10 px-3 py-1.5`} onClick={() => act((w) => { for (const n of w.nodes) n.route = null; w.picking = null; w.picked = []; })}>Clear autos</button>
+          </div>
           <div className="flex flex-col items-end gap-1.5">
             <button className={`${btn} pointer-events-auto bg-white/10 px-3 py-1.5`} onClick={() => { const steps = [0.5, 1, 2]; speedRef.current = steps[(steps.indexOf(speedRef.current) + 1) % steps.length]; }}>{ui?.speed ?? 1}×</button>
             <button className={`${btn} pointer-events-auto bg-white/10 px-3 py-1.5`} onClick={() => { pausedRef.current = !pausedRef.current; }}>{ui?.paused ? '▶' : '❚❚'}</button>
