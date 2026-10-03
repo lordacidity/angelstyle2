@@ -83,6 +83,13 @@ const META = {
   garrison: { name: 'Garrison', cost: [30, 60, 100, 150], desc: '+10 troops at the start', unit: '', per: 10 },
 } as const;
 type MetaKey = keyof typeof META;
+/** What the next level of an Armoury line costs. The listed prices first;
+ *  past the list, no top: each level half again the last. */
+const metaCost = (key: MetaKey, lvl: number) => {
+  const costs = META[key].cost as readonly number[];
+  if (lvl < costs.length) return costs[lvl];
+  return Math.round(costs[costs.length - 1] * Math.pow(1.5, lvl - costs.length + 1));
+};
 
 // ── Save ───────────────────────────────────────────────────────────────────
 
@@ -1432,9 +1439,9 @@ export default function Game() {
   const buyMeta = (key: MetaKey) => {
     const s = loadSave();
     const lvl = s.meta[key];
-    const costs = META[key].cost as readonly number[];
-    if (lvl >= costs.length || s.scrap < costs[lvl]) return;
-    s.scrap -= costs[lvl]; s.meta[key]++;
+    const cost = metaCost(key, lvl);
+    if (s.scrap < cost) return;
+    s.scrap -= cost; s.meta[key]++;
     storeSave(s); setSave(s);
   };
 
@@ -1501,16 +1508,16 @@ export default function Game() {
           <div className="text-sm text-white/50 mt-1">Permanent. Paid in scrap from every run, won or lost.</div>
           <div className="mt-4 space-y-2">
             {(Object.keys(META) as MetaKey[]).map((k) => {
-              const m = META[k]; const lvl = save.meta[k]; const max = lvl >= m.cost.length;
-              const cost = max ? 0 : m.cost[lvl];
+              const m = META[k]; const lvl = save.meta[k];
+              const cost = metaCost(k, lvl);
               return (
                 <div key={k} className="flex items-center justify-between rounded-2xl bg-white/5 px-4 py-3">
                   <div>
-                    <div className="font-bold">{m.name} <span className="text-white/40 font-normal">{lvl}/{m.cost.length}</span></div>
+                    <div className="font-bold">{m.name} <span className="text-white/40 font-normal">lv {lvl}</span></div>
                     <div className="text-xs text-white/50">{m.desc} · now +{m.per * lvl}{m.unit}</div>
                   </div>
-                  <button disabled={max || save.scrap < cost} onClick={() => buyMeta(k)} className={`${btn} bg-white px-4 py-2 text-sm text-black`}>
-                    {max ? 'MAX' : `${cost}`}
+                  <button disabled={save.scrap < cost} onClick={() => buyMeta(k)} className={`${btn} bg-white px-4 py-2 text-sm text-black`}>
+                    {cost}
                   </button>
                 </div>
               );
