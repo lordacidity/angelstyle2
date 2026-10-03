@@ -97,6 +97,10 @@ interface Node {
   prod: number; wall: number; cannon: number; cd: number;
   /** 0, or how deep a mine this is (1 to 3). */
   mine: number;
+  /** Loot: soldiers who join whoever takes this, and a pile of gold for them. */
+  loot: number; gold: number;
+  /** The one outpost every sector of a choke map meets at. */
+  hub: boolean;
   /** A standing order: everything goes, every second, split evenly
    *  between these outposts. Yours only. */
   route: { to: number[] } | null; routeT: number;
@@ -121,6 +125,13 @@ interface Rules {
    *  troops at any outpost of yours. Shift: every so many seconds one road
    *  goes and another appears. */
   fog?: boolean; mercs?: number; shift?: number;
+  /** Choke: every side in its own sector, all of them meeting at one hub.
+   *  Hill: hold the hub this many seconds to win. Loot and gold piles sit on
+   *  neutral outposts for whoever takes them; hubLoot sits on the hub. Truce:
+   *  nobody can take held ground for this many seconds. */
+  choke?: boolean; hill?: number; loot?: { count: number; troops: number }; goldPiles?: { count: number; gold: number }; hubLoot?: number; truce?: number;
+  /** Gold you open with, and walls on every enemy outpost. */
+  playerGold?: number; enemyWalls?: number;
   /** How canny the generals are: 1 pulls out of a lost outpost and shies
    *  from guns; 2 also rides out to meet columns on the road. */
   aiSmart: number;
@@ -150,6 +161,8 @@ interface World {
   pickN: number; picked: number[];
   /** Shifting sands: seconds to the next shift. */
   shiftT: number;
+  /** The hill: how long you have held the hub, without a break. */
+  hillT: number;
 }
 
 function rulesFor(level: number, endless: boolean): Rules {
@@ -160,12 +173,13 @@ function rulesFor(level: number, endless: boolean): Rules {
       enemyExtra: 4, enemyGold: 200, neutralBase: 14,
     };
   }
-  // The twist levels take level ten's generals: the twist is the difficulty.
-  const L = level > 12 ? 10 : level;
+  // The generals sharpen with the levels: one to twelve on their own scale,
+  // then a notch every four levels. Their canniness climbs in three steps.
+  const L = level <= 12 ? level : 10 + Math.floor((level - 12) / 4);
   const base: Rules = {
     level, endless, mapH: MAP_H,
     nodeCount: Math.min(18, 9 + L),
-    enemies: L >= 10 ? 3 : L >= 5 ? 2 : 1,
+    enemies: level >= 10 ? 3 : level >= 5 ? 2 : 1,
     aiInterval: Math.max(1.0, 3.3 - L * 0.2),
     sendFrac: Math.min(0.8, 0.5 + L * 0.025),
     aiMargin: Math.min(0.85, 0.45 + L * 0.035),
@@ -173,22 +187,33 @@ function rulesFor(level: number, endless: boolean): Rules {
     enemyExtra: Math.min(3, Math.floor(L / 3)),
     enemyGold: L * 20,
     neutralBase: 6 + L * 2,
-    aiSmart: 0,
+    aiSmart: level <= 8 ? 0 : level <= 16 ? 1 : 2,
   };
-  // Past twelve, the twists.
   switch (level) {
-    case 13: return { ...base, title: 'TWIN HQ', twinHQ: true, enemyGold: 300 };
-    case 14: return { ...base, title: 'GOLD RUSH', mines: 5, enemyGold: 300, neutralBase: 20 };
-    case 15: return { ...base, title: 'FORTRESS', fortress: true, playerTier: 3, enemyGold: 450 };
-    case 16: return { ...base, title: 'FOUR FRONTS', enemies: 4, nodeCount: 36, mapH: 1200, enemyExtra: 2, enemyGold: 260 };
-    case 17: return { ...base, title: 'DEEP POCKETS', enemyGold: 500, enemyExtra: 1, neutralBase: 18 };
-    case 18: return { ...base, title: 'NARROW ROADS', maxDeg: 3, nodeCount: 22, mapH: 800, enemyGold: 200, enemyExtra: 1 };
-    case 19: return { ...base, title: 'RICH LAND', mines: 6, playerTier: 3, enemyGold: 300, enemyExtra: 1, aiSmart: 1 };
-    case 20: return { ...base, title: 'THE GAUNTLET', enemies: 4, nodeCount: 54, mapH: 1800, twinHQ: true, playerTier: 3, enemyExtra: 3, enemyGold: 600, aiInterval: 1.0, aiMargin: 0.85, aiStageEvery: 1, aiSmart: 1 };
-    case 21: return { ...base, title: 'FOG OF WAR', fog: true, enemyGold: 150, enemyExtra: 1, aiSmart: 1 };
-    case 22: return { ...base, title: 'MERCENARIES', mercs: 60, enemyGold: 300, enemyExtra: 1, aiSmart: 1, aiInterval: 1.1 };
-    case 23: return { ...base, title: 'SHIFTING SANDS', shift: 40, maxDeg: 3, nodeCount: 22, mapH: 800, enemyGold: 350, enemyExtra: 2, aiSmart: 2, aiInterval: 1.0 };
-    case 24: return { ...base, title: 'ALL OF IT', fog: true, mercs: 60, shift: 45, enemies: 4, nodeCount: 48, mapH: 1600, fortress: true, twinHQ: true, playerTier: 3, enemyExtra: 2, enemyGold: 450, aiSmart: 2, aiInterval: 1.0, aiMargin: 0.85, aiStageEvery: 1 };
+    case 1: return { ...base, title: 'FIRST BLOOD' };
+    case 2: return { ...base, title: 'THE SPREAD', nodeCount: 13 };
+    case 3: return { ...base, title: 'LOOT', loot: { count: 3, troops: 40 } };
+    case 4: return { ...base, title: 'TRUCE', truce: 90, enemies: 2 };
+    case 5: return { ...base, title: 'GOLD PILES', goldPiles: { count: 3, gold: 80 } };
+    case 6: return { ...base, title: 'THE CHOKE', choke: true, enemies: 2, nodeCount: 16, mapH: 900 };
+    case 7: return { ...base, title: 'WALLS UP', enemyWalls: 2, playerGold: 100 };
+    case 8: return { ...base, title: 'THE HILL', choke: true, hill: 60, enemies: 3, nodeCount: 20, mapH: 1000 };
+    case 9: return { ...base, title: 'TWIN HQ', twinHQ: true, enemies: 3, enemyGold: 200 };
+    case 10: return { ...base, title: 'NARROW ROADS', maxDeg: 3, nodeCount: 22, mapH: 800 };
+    case 11: return { ...base, title: 'TRUCE II', truce: 120, loot: { count: 4, troops: 50 }, enemyGold: 250 };
+    case 12: return { ...base, title: 'FORTRESS', fortress: true, playerTier: 3, enemyGold: 300 };
+    case 13: return { ...base, title: 'GOLD RUSH', mines: 5, enemyGold: 250, neutralBase: 20 };
+    case 14: return { ...base, title: 'DEEP POCKETS', enemyGold: 500, enemyExtra: 1, neutralBase: 18 };
+    case 15: return { ...base, title: 'FOUR FRONTS', enemies: 4, nodeCount: 36, mapH: 1200, enemyExtra: 2, enemyGold: 260 };
+    case 16: return { ...base, title: 'RICH LAND', mines: 6, playerTier: 3, enemyGold: 300, enemyExtra: 1 };
+    case 17: return { ...base, title: 'THE CHOKE II', choke: true, enemies: 3, fortress: true, hubLoot: 120, nodeCount: 24, mapH: 1100, enemyGold: 300 };
+    case 18: return { ...base, title: 'FOG OF WAR', fog: true, enemyGold: 150, enemyExtra: 1 };
+    case 19: return { ...base, title: 'SHIFTING SANDS', shift: 40, maxDeg: 3, nodeCount: 22, mapH: 800, enemyGold: 350, enemyExtra: 2 };
+    case 20: return { ...base, title: 'MERCENARIES', mercs: 60, truce: 60, enemyGold: 300, enemyExtra: 1 };
+    case 21: return { ...base, title: 'THE LONG CHOKE', choke: true, enemies: 4, fog: true, loot: { count: 2, troops: 60 }, nodeCount: 30, mapH: 1300, enemyGold: 300 };
+    case 22: return { ...base, title: 'THE GAUNTLET', enemies: 4, nodeCount: 54, mapH: 1800, twinHQ: true, playerTier: 3, enemyExtra: 3, enemyGold: 600 };
+    case 23: return { ...base, title: 'THE HILL II', choke: true, hill: 90, enemies: 4, shift: 45, mercs: 60, nodeCount: 28, mapH: 1300, enemyGold: 400 };
+    case 24: return { ...base, title: 'ALL OF IT', fog: true, mercs: 60, shift: 45, enemies: 4, nodeCount: 48, mapH: 1600, fortress: true, twinHQ: true, playerTier: 3, enemyExtra: 2, enemyGold: 450, aiInterval: 1.0, aiMargin: 0.85, aiStageEvery: 1 };
     default: return base;
   }
 }
@@ -209,27 +234,85 @@ function segmentsCross(p1: Node, p2: Node, p3: Node, p4: Node) {
   return ((d1 > 0) !== (d2 > 0)) && ((d3 > 0) !== (d4 > 0));
 }
 
+const newNode = (id: number, x: number, y: number): Node =>
+  ({ id, x, y, owner: 0, troops: 0, tier: 1, base: false, prod: 0, wall: 0, cannon: 0, cd: 0, mine: 0, loot: 0, gold: 0, hub: false, route: null, routeT: 0 });
+
+/** A choke map: one hub in the middle, every side in a wedge of its own
+ *  around it, each wedge joined to the hub by a single road and to nothing
+ *  else. Returns the sectors' HQs, yours first. */
+function buildChoke(rules: Rules, rnd: () => number): { nodes: Node[]; edges: Edge[]; hqs: number[] } {
+  const k = rules.enemies + 1;
+  const cx = MAP_W / 2, cy = rules.mapH / 2;
+  const nodes: Node[] = [newNode(0, cx, cy)];
+  nodes[0].hub = true;
+  const R = 200;
+  const xs = (MAP_W / 2 - 36) / R, ys = (rules.mapH / 2 - 40) / R;
+  const sector: number[] = [-1];
+  const per = Math.floor((rules.nodeCount - 1) / k);
+  for (let i = 0; i < k; i++) {
+    const theta = Math.PI / 2 + (2 * Math.PI * i) / k;
+    let tries = 0, made = 0;
+    while (made < per && tries++ < 6000) {
+      const a = theta + (rnd() - 0.5) * (2 * Math.PI / k) * 0.78;
+      const r = 80 + rnd() * (R - 80);
+      const x = cx + r * Math.cos(a) * xs, y = cy + r * Math.sin(a) * ys;
+      if (nodes.every((n) => Math.hypot(n.x - x, n.y - y) >= 52)) { nodes.push(newNode(nodes.length, x, y)); sector.push(i); made++; }
+    }
+  }
+  // Roads inside each wedge, nearest first, no crossings; a tree if need be.
+  const edges: Edge[] = [];
+  const deg = new Array(nodes.length).fill(0) as number[];
+  const parent = nodes.map((_, i) => i);
+  const find = (i: number): number => (parent[i] === i ? i : (parent[i] = find(parent[i])));
+  const crosses = (a: number, b: number) => edges.some((f) => f.a !== a && f.a !== b && f.b !== a && f.b !== b && segmentsCross(nodes[a], nodes[b], nodes[f.a], nodes[f.b]));
+  const pairs: Edge[] = [];
+  for (let i = 1; i < nodes.length; i++) for (let j = i + 1; j < nodes.length; j++) {
+    if (sector[i] !== sector[j]) continue;
+    pairs.push({ a: i, b: j, len: Math.hypot(nodes[i].x - nodes[j].x, nodes[i].y - nodes[j].y) });
+  }
+  pairs.sort((p, q) => p.len - q.len);
+  for (const e of pairs) {
+    if (e.len > 150 || deg[e.a] >= 3 || deg[e.b] >= 3 || crosses(e.a, e.b)) continue;
+    edges.push(e); deg[e.a]++; deg[e.b]++; parent[find(e.a)] = find(e.b);
+  }
+  for (const e of pairs) {
+    if (find(e.a) === find(e.b) || crosses(e.a, e.b)) continue;
+    edges.push(e); deg[e.a]++; deg[e.b]++; parent[find(e.a)] = find(e.b);
+  }
+  for (const e of pairs) { if (find(e.a) !== find(e.b)) { edges.push(e); parent[find(e.a)] = find(e.b); } }
+  // One road from each wedge to the hub, from its nearest outpost; the HQ is its farthest.
+  const hqs: number[] = [];
+  for (let i = 0; i < k; i++) {
+    const mine = nodes.filter((n) => sector[n.id] === i);
+    if (!mine.length) continue;
+    const near = mine.reduce((p, n) => (Math.hypot(n.x - cx, n.y - cy) < Math.hypot(p.x - cx, p.y - cy) ? n : p));
+    edges.push({ a: 0, b: near.id, len: Math.hypot(near.x - cx, near.y - cy) });
+    const far = mine.reduce((p, n) => (Math.hypot(n.x - cx, n.y - cy) > Math.hypot(p.x - cx, p.y - cy) ? n : p));
+    hqs.push(far.id);
+  }
+  return { nodes, edges, hqs };
+}
+
 function buildWorld(rules: Rules, meta: Record<MetaKey, number>, seedExtra = 0): World {
   const rnd = mulberry32(rules.level * 7919 + (rules.endless ? 104729 : 0) + seedExtra);
-  const nodes: Node[] = [];
+  const choke = rules.choke ? buildChoke(rules, rnd) : null;
+  const nodes: Node[] = choke ? choke.nodes : [];
   const PAD = 34;
   const MIN_D = 74;
   let tries = 0;
-  while (nodes.length < rules.nodeCount && tries++ < 40000) {
+  while (!choke && nodes.length < rules.nodeCount && tries++ < 40000) {
     const x = PAD + rnd() * (MAP_W - PAD * 2);
     const y = PAD + rnd() * (rules.mapH - PAD * 2);
-    if (nodes.every((n) => Math.hypot(n.x - x, n.y - y) >= MIN_D)) {
-      nodes.push({ id: nodes.length, x, y, owner: 0, troops: 0, tier: 1, base: false, prod: 0, wall: 0, cannon: 0, cd: 0, mine: 0, route: null, routeT: 0 });
-    }
+    if (nodes.every((n) => Math.hypot(n.x - x, n.y - y) >= MIN_D)) nodes.push(newNode(nodes.length, x, y));
   }
   // Edges: nearest pairs first, no crossings, no more than four per outpost,
   // then whatever a spanning tree still needs so nothing is cut off.
   const pairs: Edge[] = [];
-  for (let i = 0; i < nodes.length; i++) for (let j = i + 1; j < nodes.length; j++) {
+  if (!choke) for (let i = 0; i < nodes.length; i++) for (let j = i + 1; j < nodes.length; j++) {
     pairs.push({ a: i, b: j, len: Math.hypot(nodes[i].x - nodes[j].x, nodes[i].y - nodes[j].y) });
   }
   pairs.sort((p, q) => p.len - q.len);
-  const edges: Edge[] = [];
+  const edges: Edge[] = choke ? choke.edges : [];
   const deg = new Array(nodes.length).fill(0) as number[];
   const parent = nodes.map((_, i) => i);
   const find = (i: number): number => (parent[i] === i ? i : (parent[i] = find(parent[i])));
@@ -254,7 +337,7 @@ function buildWorld(rules: Rules, meta: Record<MetaKey, number>, seedExtra = 0):
 
   // Bases: yours at the bottom, theirs as far from you as the map allows.
   const byY = [...nodes].sort((p, q) => q.y - p.y);
-  const home = byY[Math.floor(rnd() * Math.min(3, byY.length))];
+  const home = choke ? nodes[choke.hqs[0]] : byY[Math.floor(rnd() * Math.min(3, byY.length))];
   home.owner = PLAYER; home.base = true; home.tier = rules.playerTier ?? 2; home.troops = 40; home.wall = 1;
   // Hops from home, so no enemy HQ ever sits a march away.
   const hops = new Array(nodes.length).fill(Infinity) as number[];
@@ -266,7 +349,9 @@ function buildWorld(rules: Rules, meta: Record<MetaKey, number>, seedExtra = 0):
   for (let f = 0; f < rules.enemies; f++) {
     const fid = 2 + f;
     let best: Node | null = null; let bestD = -Infinity;
-    if (rules.endless) {
+    if (choke) {
+      best = nodes[choke.hqs[f + 1]] ?? null;
+    } else if (rules.endless) {
       // The long war: each HQ sits higher up the map than the last.
       const want = rules.mapH * (0.62 - 0.28 * f);
       for (const n of nodes) {
@@ -292,7 +377,7 @@ function buildWorld(rules: Rules, meta: Record<MetaKey, number>, seedExtra = 0):
       if (extra <= 0) break;
       const n = nodes[nb];
       if (taken.has(n.id) || n.owner !== 0) continue;
-      n.owner = fid; n.troops = 15;
+      n.owner = fid; n.troops = 15; n.wall = rules.enemyWalls ?? 0;
       taken.add(n.id); extra--;
     }
     factions.push({ id: fid, tick: rnd() * rules.aiInterval, dead: 0, gold: rules.enemyGold, buyT: 2, mercT: -99, tech: { conscription: 0, logistics: 0 } });
@@ -308,6 +393,18 @@ function buildWorld(rules: Rules, meta: Record<MetaKey, number>, seedExtra = 0):
     const twin = adj[home.id].map((i) => nodes[i]).filter((n) => n.owner === 0).sort((a, b) => b.y - a.y)[0];
     if (twin) { twin.owner = PLAYER; twin.base = true; twin.tier = 2; twin.troops = 40; twin.wall = 1; }
   }
+  // The hub: a big neutral garrison, and loot if the level says so.
+  if (choke) { nodes[0].troops = Math.round(rules.neutralBase * 2.5); nodes[0].tier = 2; nodes[0].loot = rules.hubLoot ?? 0; }
+  // Loot and gold piles: on neutral outposts away from every HQ.
+  const farFromHQs = () => nodes.filter((n) => n.owner === 0 && !n.hub && !adj[n.id].some((i) => nodes[i].base));
+  if (rules.loot) {
+    const pool = farFromHQs();
+    for (let k = 0; k < rules.loot.count && pool.length; k++) pool.splice(Math.floor(rnd() * pool.length), 1)[0].loot = rules.loot.troops;
+  }
+  if (rules.goldPiles) {
+    const pool = farFromHQs().filter((n) => !n.loot);
+    for (let k = 0; k < rules.goldPiles.count && pool.length; k++) pool.splice(Math.floor(rnd() * pool.length), 1)[0].gold = rules.goldPiles.gold;
+  }
   // Gold rush: mines already dug, out in the neutral ground, for whoever takes them.
   if (rules.mines) {
     const pool = nodes.filter((n) => n.owner === 0 && !adj[n.id].some((i) => nodes[i].base && nodes[i].owner === PLAYER));
@@ -319,10 +416,10 @@ function buildWorld(rules: Rules, meta: Record<MetaKey, number>, seedExtra = 0):
 
   return {
     rules, nodes, edges, adj, convoys: [], shots: [], factions,
-    gold: 40 + META.gold.per * meta.gold, time: 0,
+    gold: (rules.playerGold ?? 40) + META.gold.per * meta.gold, time: 0,
     nextId: 1,
     tech: { logistics: 0, conscription: 0, tithe: 0, scouts: 0 }, meta,
-    over: null, flash: { text: rules.endless ? 'THE LONG WAR' : rules.title ?? `LEVEL ${rules.level}`, age: 0 }, selected: null, picking: null, pickN: 1, picked: [], shiftT: rules.shift ?? 0,
+    over: null, flash: { text: rules.endless ? 'THE LONG WAR' : rules.title ?? `LEVEL ${rules.level}`, age: 0 }, selected: null, picking: null, pickN: 1, picked: [], shiftT: rules.shift ?? 0, hillT: 0,
   };
 }
 
@@ -415,14 +512,29 @@ function reachNode(w: World, c: Convoy) {
   arrive(w, c);
 }
 
+const truceOn = (w: World) => !!w.rules.truce && w.time < w.rules.truce;
+
 function arrive(w: World, c: Convoy) {
   const n = w.nodes[c.to];
   if (n.owner === c.owner) { n.troops += c.n; return; }
+  // A truce: held ground cannot be taken; the column turns round.
+  if (truceOn(w) && n.owner !== 0) {
+    const back = w.nodes[c.from];
+    if (back.id === n.id) return;
+    w.convoys.push({ ...c, id: w.nextId++, from: n.id, to: back.id, t: 0, dur: edgeLen(w, n.id, back.id) / convoySpeed(w, c.owner), path: [n.id, back.id], leg: 0 });
+    return;
+  }
   const def = n.troops * wallMult(n);
   if (c.n > def) {
     const was = n.owner;
     n.owner = c.owner;
     n.troops = c.n - def;
+    // Loot: the soldiers here join the taker; a pile of gold is theirs too.
+    if (n.loot) { n.troops += n.loot; n.loot = 0; }
+    if (n.gold) {
+      if (c.owner === PLAYER) w.gold += n.gold; else { const f = w.factions.find((x) => x.id === c.owner); if (f) f.gold += n.gold; }
+      n.gold = 0;
+    }
     n.cannon = 0; // the guns are spiked as the walls fall
     n.route = null;
     n.cd = 0;
@@ -456,7 +568,7 @@ function aiTick(w: World, f: Faction) {
   }
   // A cannier one rides out to meet a column on the road before it arrives,
   // when it has the men to win that fight and still hold the gate.
-  if (r.aiSmart >= 2) {
+  if (r.aiSmart >= 2 && !truceOn(w)) {
     for (const c of w.convoys) {
       if (c.owner === f.id) continue;
       const n = w.nodes[c.to];
@@ -471,7 +583,7 @@ function aiTick(w: World, f: Faction) {
     // Only the HQ acts every tick: an outpost's garrison sits out half of them.
     if (!n.base && ((n.id * 7 + Math.floor(w.time / w.rules.aiInterval)) & 1)) continue;
     const nbs = w.adj[n.id].map((i) => w.nodes[i]);
-    const hostile = nbs.filter((m) => m.owner !== f.id);
+    const hostile = nbs.filter((m) => m.owner !== f.id && (!truceOn(w) || m.owner === 0));
     const avail = n.troops * frac;
     let best: Node | null = null; let bestScore = -Infinity;
     for (const m of hostile) {
@@ -480,7 +592,7 @@ function aiTick(w: World, f: Faction) {
       const guns = r.aiSmart >= 1 ? w.nodes.filter((g) => g.owner !== f.id && g.cannon && Math.hypot(g.x - m.x, g.y - m.y) < cannonRange(g, w)).reduce((s, g) => s + CANNON_DMG[g.cannon] * 3, 0) : 0;
       const need = (reckon(w, f.id, m) + incoming) * wallMult(m) + 1 + guns;
       if (avail < need * (m.owner === 0 ? 1.1 : 1.25)) continue;
-      let score = (m.owner === PLAYER ? 3 : m.owner === 0 ? 1 : 2) + (m.base ? 2.5 : 0) + m.prod * 0.4 - need / avail;
+      let score = (m.owner === PLAYER ? 3 : m.owner === 0 ? 1 : 2) + (m.base ? 2.5 : 0) + m.prod * 0.4 - need / avail + (m.hub ? 2 : 0) + (m.loot ? 1.5 : 0) + (m.gold ? 1 : 0);
       if (m.owner === PLAYER && m.cannon && r.aiSmart === 0) score += 1;
       if (score > bestScore) { bestScore = score; best = m; }
     }
@@ -509,7 +621,7 @@ function aiTick(w: World, f: Faction) {
   // for the next.
   let bestT: Node | null = null; let bestRatio = Infinity; let bestFrom: Node[] = [];
   for (const m of w.nodes) {
-    if (m.owner === f.id) continue;
+    if (m.owner === f.id || (truceOn(w) && m.owner !== 0)) continue;
     const ring = w.adj[m.id].filter((i) => w.nodes[i].owner === f.id);
     if (!ring.length) continue;
     const ids = new Set<number>(ring);
@@ -694,7 +806,9 @@ function step(w: World, dt: number) {
 
   // Columns that meet on the road fight there: head on, or one catching the
   // other up. The bigger marches on, short the smaller; equals die together.
+  // Not under a truce.
   for (let i = 0; i < w.convoys.length; i++) {
+    if (truceOn(w)) break;
     const a = w.convoys[i];
     if (a.n <= 0) continue;
     for (let j = i + 1; j < w.convoys.length; j++) {
@@ -712,9 +826,9 @@ function step(w: World, dt: number) {
   }
   w.convoys = w.convoys.filter((c) => c.n > 0.5);
 
-  // Cannons.
+  // Cannons. Silent under a truce.
   for (const n of w.nodes) {
-    if (!n.cannon || n.owner === 0) continue;
+    if (!n.cannon || n.owner === 0 || truceOn(w)) continue;
     n.cd -= dt;
     if (n.cd > 0) continue;
     let target: Convoy | null = null; let td = cannonRange(n, w);
@@ -742,6 +856,13 @@ function step(w: World, dt: number) {
     if (f.tick <= 0) { aiTick(w, f); f.tick = w.rules.aiInterval; }
     f.buyT -= dt;
     if (f.buyT <= 0) { aiSpend(w, f); f.buyT = 2; }
+  }
+
+  // The hill: hold the hub, unbroken, for the time the level asks.
+  if (w.rules.hill) {
+    const hub = w.nodes.find((n) => n.hub);
+    w.hillT = hub && hub.owner === PLAYER ? w.hillT + dt : 0;
+    if (w.hillT >= w.rules.hill) { w.over = 'win'; return; }
   }
 
   // The end.
@@ -854,6 +975,12 @@ function draw(ctx: CanvasRenderingContext2D, w: World, view: { s: number; ox: nu
       ctx.beginPath(); ctx.arc(n.x, n.y, r + 7 + n.wall * 4.5 + Math.sin(w.time * 6) * 1.5, 0, Math.PI * 2); ctx.stroke();
       ctx.setLineDash([]);
     }
+    // The hub: a wide dashed ring round the one outpost everyone wants.
+    if (n.hub) {
+      ctx.strokeStyle = 'rgba(255,255,255,0.45)'; ctx.lineWidth = 2; ctx.setLineDash([5, 5]);
+      ctx.beginPath(); ctx.arc(n.x, n.y, r + 14, 0, Math.PI * 2); ctx.stroke();
+      ctx.setLineDash([]);
+    }
     if (n.mine) {
       // A mine: a gold square, edged in its owner's colour.
       const q = r * 0.9;
@@ -890,10 +1017,11 @@ function draw(ctx: CanvasRenderingContext2D, w: World, view: { s: number; ox: nu
     ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
     ctx.fillText(hidden ? '?' : String(Math.floor(n.troops)), n.x, n.y + 0.5);
     // Small marks for what is built.
-    if (!hidden && (n.mine || (n.owner !== 0 && (n.prod || n.cannon || n.base)))) {
+    if (!hidden && (n.mine || n.loot || n.gold || n.hub || (n.owner !== 0 && (n.prod || n.cannon || n.base)))) {
       ctx.font = '600 8px -apple-system, system-ui, sans-serif';
       ctx.fillStyle = n.mine ? '#ffd166' : 'rgba(255,255,255,0.65)';
-      const bits = [n.mine ? `MINE ${n.mine}` : '', n.base ? 'HQ' : '', n.prod ? `B${n.prod}` : '', n.cannon ? `C${n.cannon}` : ''].filter(Boolean).join(' ');
+      ctx.fillStyle = n.mine || n.gold ? '#ffd166' : n.loot ? '#38e08a' : 'rgba(255,255,255,0.65)';
+      const bits = [n.hub ? 'HUB' : '', n.loot ? `+${n.loot}` : '', n.gold ? `${n.gold}g` : '', n.mine ? `MINE ${n.mine}` : '', n.base ? 'HQ' : '', n.prod ? `B${n.prod}` : '', n.cannon ? `C${n.cannon}` : ''].filter(Boolean).join(' ');
       ctx.fillText(bits, n.x, n.y + r + 11);
     }
   }
@@ -972,6 +1100,7 @@ interface Ui {
   prodPerMin: number;
   mine: number; theirs: number; picking: boolean; pickN: number; pickLeft: number;
   mercs: number; selHidden: boolean; shiftT: number;
+  truceT: number; hillT: number; hillNeed: number;
   /** Whether the map runs past the screen, and which way there is more of it. */
   /** The scrollbar: how far down the map the view is (0..1) and how much of it shows (0..1); 1 means all. */
   scrollFrac: number; viewFrac: number;
@@ -1124,7 +1253,7 @@ export default function Game() {
           selProdPerMin: sel ? prodOf(w, sel) * 60 : 0, selHold: sel ? Math.ceil(sel.troops * wallMult(sel)) : 0,
           prodPerMin: w.nodes.filter((n) => n.owner === PLAYER && n.troops < capOf(n) - 0.5).reduce((t, n) => t + prodOf(w, n) * 60, 0),
           mine: w.nodes.filter((n) => n.owner === PLAYER).length, theirs: w.nodes.filter((n) => n.owner >= 2).length, picking: w.picking !== null, pickN: w.pickN, pickLeft: w.pickN - w.picked.length,
-          mercs: w.rules.mercs ?? 0, selHidden: !!(w.rules.fog && sel && sel.owner !== PLAYER), shiftT: w.rules.shift ? w.shiftT : 0,
+          mercs: w.rules.mercs ?? 0, selHidden: !!(w.rules.fog && sel && sel.owner !== PLAYER), shiftT: w.rules.shift ? w.shiftT : 0, truceT: w.rules.truce ? Math.max(0, w.rules.truce - w.time) : 0, hillT: w.hillT, hillNeed: w.rules.hill ?? 0,
           scrollFrac: scrollFracRef.current, viewFrac: viewFracRef.current,
           army: (() => {
             const by = new Map<number, number>();
@@ -1382,7 +1511,7 @@ export default function Game() {
         <button className={`${btn} bg-white/10 px-3 py-1.5`} onClick={() => { setScreen('menu'); worldRef.current = null; }}>✕</button>
         <div className="text-center">
           <div className="font-black">{run.endless ? 'LONG WAR' : `LEVEL ${run.level}`} <span className="text-white/40">· {clock(ui?.time ?? 0)}</span></div>
-          <div className="text-[11px] text-white/45">{ui?.mine ?? 0} vs {ui?.theirs ?? 0} outposts{(ui?.shiftT ?? 0) > 0 ? ` · roads shift in ${fmt(ui?.shiftT ?? 0)}s` : ''}</div>
+          <div className="text-[11px] text-white/45">{ui?.mine ?? 0} vs {ui?.theirs ?? 0} outposts{(ui?.shiftT ?? 0) > 0 ? ` · roads shift in ${fmt(ui?.shiftT ?? 0)}s` : ''}{(ui?.truceT ?? 0) > 0 ? ` · truce ${fmt(ui?.truceT ?? 0)}s` : ''}{(ui?.hillNeed ?? 0) > 0 ? ` · hill ${fmt(ui?.hillT ?? 0)}/${ui?.hillNeed}s` : ''}</div>
         </div>
         <div className="flex gap-1.5">
           <button className={`${btn} bg-white/10 px-2.5 py-1.5`} onClick={() => { if (confirm('Restart this level?')) start(run.level, run.endless); }}>↻</button>
@@ -1424,7 +1553,7 @@ export default function Game() {
         {ui?.over && (
           <div className="absolute inset-0 flex flex-col items-center justify-center bg-black/70 px-8 text-center">
             <div className={`text-5xl font-black ${ui.over === 'win' ? 'text-white' : 'text-[#ff3b3b]'}`}>{ui.over === 'win' ? 'HELD' : 'OVERRUN'}</div>
-            <div className="mt-2 text-white/60">{ui.over === 'win' ? `${run.endless ? 'The long war won' : `Level ${run.level} cleared`} in ${clock(ui.time)}.` : `Fell at ${clock(ui.time)}.`}</div>
+            <div className="mt-2 text-white/60">{ui.over === 'win' ? `${run.endless ? 'The long war won' : (ui.hillNeed ? 'The hill held' : `Level ${run.level} cleared`)} in ${clock(ui.time)}.` : `Fell at ${clock(ui.time)}.`}</div>
             <div className="mt-6 flex gap-3">
               <button className={`${btn} bg-white/10 px-5 py-3`} onClick={() => { setScreen('menu'); worldRef.current = null; }}>Menu</button>
               <button className={`${btn} bg-white px-5 py-3 text-black`} onClick={() => start(run.level, run.endless)}>{ui.over === 'win' ? 'Again' : 'Retry'}</button>
