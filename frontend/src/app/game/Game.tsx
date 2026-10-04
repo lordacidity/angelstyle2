@@ -31,7 +31,14 @@ const CAMPAIGN_LEVELS = 24;
 const ENDLESS_UNLOCK = 3;
 
 const PLAYER = 1;
-const COLORS: Record<number, string> = { 0: '#4a4a4a', 1: '#ffffff', 2: '#ff3b3b', 3: '#ff8a3b', 4: '#c04bff', 5: '#2ee6d6' };
+const DEFAULT_COLORS: Record<number, string> = { 0: '#4a4a4a', 1: '#ffffff', 2: '#ff3b3b', 3: '#ff8a3b', 4: '#c04bff', 5: '#2ee6d6' };
+// Colour-blind mode: a palette that stays apart under the common kinds of
+// colour blindness (Okabe and Ito's), and a shape for each general besides.
+const CB_COLORS: Record<number, string> = { 0: '#4a4a4a', 1: '#ffffff', 2: '#d55e00', 3: '#f0e442', 4: '#56b4e9', 5: '#009e73' };
+const GLYPHS: Record<number, string> = { 2: '▲', 3: '■', 4: '◆', 5: '✕' };
+let COLORS = DEFAULT_COLORS;
+let colorBlind = false;
+function setColorBlind(on: boolean) { colorBlind = on; COLORS = on ? CB_COLORS : DEFAULT_COLORS; }
 const NAMES: Record<number, string> = { 2: 'RED', 3: 'AMBER', 4: 'VIOLET', 5: 'CYAN' };
 
 // No upgrade has a top: each level costs more than the last, until the
@@ -96,9 +103,9 @@ const metaCost = (key: MetaKey, lvl: number) => {
 
 // ── Save ───────────────────────────────────────────────────────────────────
 
-interface Save { scrap: number; cleared: number; bestTime: number; meta: Record<MetaKey, number> }
+interface Save { scrap: number; cleared: number; bestTime: number; meta: Record<MetaKey, number>; cb: boolean }
 const SAVE_KEY = 'redline.v1';
-const freshSave = (): Save => ({ scrap: 0, cleared: 0, bestTime: 0, meta: { prod: 0, speed: 0, gold: 0, cannon: 0, masonry: 0, range: 0, vault: 0, cap: 0, garrison: 0 } });
+const freshSave = (): Save => ({ scrap: 0, cleared: 0, bestTime: 0, cb: false, meta: { prod: 0, speed: 0, gold: 0, cannon: 0, masonry: 0, range: 0, vault: 0, cap: 0, garrison: 0 } });
 function loadSave(): Save {
   try {
     const raw = localStorage.getItem(SAVE_KEY);
@@ -1130,6 +1137,12 @@ function draw(ctx: CanvasRenderingContext2D, w: World, view: { s: number; ox: nu
     ctx.font = `700 ${n.base ? 15 : 13}px -apple-system, system-ui, sans-serif`;
     ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
     ctx.fillText(hidden ? '?' : String(Math.floor(n.troops)), n.x, n.y + 0.5);
+    if (colorBlind && n.owner >= 2) {
+      // The general's shape, over the top of the outpost.
+      ctx.font = '700 11px -apple-system, system-ui, sans-serif';
+      ctx.fillStyle = '#000'; ctx.beginPath(); ctx.arc(n.x, n.y - r - 1, 8, 0, Math.PI * 2); ctx.fill();
+      ctx.fillStyle = col; ctx.fillText(GLYPHS[n.owner], n.x, n.y - r);
+    }
     // Small marks for what is built.
     if (!hidden && (n.mine || n.loot || n.gold || n.hub || (n.owner !== 0 && (n.prod || n.cannon || n.base)))) {
       ctx.font = '600 8px -apple-system, system-ui, sans-serif';
@@ -1292,7 +1305,7 @@ export default function Game() {
   const refitRef = useRef<() => void>(() => {});
 
   // localStorage is the browser's: read it once mounted, never on the server.
-  useEffect(() => { const t = setTimeout(() => setSave(loadSave()), 0); return () => clearTimeout(t); }, []);
+  useEffect(() => { const t = setTimeout(() => { const s = loadSave(); setColorBlind(s.cb); setSave(s); }, 0); return () => clearTimeout(t); }, []);
 
   const start = useCallback((level: number, endless: boolean) => {
     const s = loadSave();
@@ -1584,7 +1597,10 @@ export default function Game() {
           <div className="mt-5 flex items-center justify-between rounded-2xl bg-white/5 px-4 py-3">
             <div><div className="text-[11px] uppercase tracking-wider text-white/40">Scrap</div><div className="text-xl font-bold">{save.scrap}</div></div>
             <div className="text-right"><div className="text-[11px] uppercase tracking-wider text-white/40">Long war best</div><div className="text-xl font-bold">{save.bestTime ? clock(save.bestTime) : '—'}</div></div>
-            <button className={`${btn} bg-white/10 px-4 py-2 text-sm`} onClick={() => setScreen('armoury')}>Armoury</button>
+            <div className="flex flex-col gap-1.5">
+              <button className={`${btn} bg-white/10 px-4 py-2 text-sm`} onClick={() => setScreen('armoury')}>Armoury</button>
+              <button className={`${btn} px-4 py-2 text-[12px] ${save.cb ? 'bg-white text-black' : 'bg-white/10'}`} onClick={() => { const s = { ...loadSave(), cb: !save.cb }; storeSave(s); setSave(s); setColorBlind(s.cb); }}>{save.cb ? 'Colour-blind: on' : 'Colour-blind'}</button>
+            </div>
           </div>
           <div className="mt-6 text-[11px] uppercase tracking-wider text-white/40">Campaign</div>
           <div className="mt-2 grid grid-cols-4 gap-2">
@@ -1708,7 +1724,7 @@ export default function Game() {
             <div className="mt-1 flex justify-between text-[11px]">
               {ui.army.map((a) => (
                 <span key={a.owner} className="inline-flex items-center gap-1" style={{ color: a.owner === PLAYER ? '#fff' : COLORS[a.owner] }}>
-                  {a.owner === PLAYER ? 'YOU' : <span className="inline-block h-2.5 w-2.5 rounded-full" style={{ background: COLORS[a.owner] }} />}
+                  {a.owner === PLAYER ? 'YOU' : colorBlind ? <span className="text-[12px] leading-none">{GLYPHS[a.owner]}</span> : <span className="inline-block h-2.5 w-2.5 rounded-full" style={{ background: COLORS[a.owner] }} />}
                   <b>{fmt(a.n)}</b> <span className="text-[9px] opacity-60">{Math.round((a.n / total) * 100)}%</span>
                 </span>
               ))}
