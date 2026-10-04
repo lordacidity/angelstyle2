@@ -1707,8 +1707,9 @@ export default function Game() {
             </div>
             <div className="mt-1 flex justify-between text-[11px]">
               {ui.army.map((a) => (
-                <span key={a.owner} style={{ color: a.owner === PLAYER ? '#fff' : COLORS[a.owner] }}>
-                  {a.owner === PLAYER ? 'YOU' : NAMES[a.owner]} <b>{fmt(a.n)}</b> <span className="text-[9px] opacity-60">{Math.round((a.n / total) * 100)}%</span>
+                <span key={a.owner} className="inline-flex items-center gap-1" style={{ color: a.owner === PLAYER ? '#fff' : COLORS[a.owner] }}>
+                  {a.owner === PLAYER ? 'YOU' : <span className="inline-block h-2.5 w-2.5 rounded-full" style={{ background: COLORS[a.owner] }} />}
+                  <b>{fmt(a.n)}</b> <span className="text-[9px] opacity-60">{Math.round((a.n / total) * 100)}%</span>
                 </span>
               ))}
             </div>
