@@ -976,9 +976,9 @@ function toggleAuto(w: World, id: number, key: UpgKey) {
 function toggleAutoTech(w: World, key: TechKey) {
   if (w.autoTech[key]) delete w.autoTech[key]; else w.autoTech[key] = { order: ++w.autoSeq, prio: 0 };
 }
-/** The autos buy as far as the purse goes: anything pushed to the front
- *  first, the one pushed first among those, then the cheapest of the rest,
- *  the earliest set on a tie. A front-of-the-line buy uses up one push. */
+/** The autos buy as far as the purse goes: anything marked next first,
+ *  then the rest; cheapest first within each, the earliest set on a tie.
+ *  A buy clears the mark. */
 function autoUpgrade(w: World) {
   type Want = { a: Auto; cost: () => number; buy: () => void; c: number };
   const wants: Want[] = [];
@@ -989,7 +989,7 @@ function autoUpgrade(w: World) {
   for (const key of Object.keys(w.autoTech) as TechKey[]) wants.push({ a: w.autoTech[key]!, cost: () => techCost(key, w.tech[key]), buy: () => { w.tech[key]++; }, c: 0 });
   if (!wants.length) return;
   for (const x of wants) x.c = x.cost();
-  const rank = (p: Want, q: Want) => (q.a.prio > 0 ? 1 : 0) - (p.a.prio > 0 ? 1 : 0) || (p.a.prio > 0 ? p.a.order - q.a.order : p.c - q.c || p.a.order - q.a.order);
+  const rank = (p: Want, q: Want) => (q.a.prio > 0 ? 1 : 0) - (p.a.prio > 0 ? 1 : 0) || p.c - q.c || p.a.order - q.a.order;
   for (let i = 0; i < 4; i++) {
     wants.sort(rank);
     const x = wants[0];
