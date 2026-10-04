@@ -18,9 +18,9 @@ function sb(): SupabaseClient {
   return client;
 }
 
-export interface Peer { id: string; name: string; host: boolean; joined: number }
+export interface Peer { id: string; name: string; host: boolean; joined: number; meta?: Record<string, number> }
 export type Msg =
-  | { ev: 'start'; mode: 'team' | 'against'; seed: number; players: { id: string; name: string }[] }
+  | { ev: 'start'; mode: 'team' | 'against'; seed: number; players: { id: string; name: string; meta?: Record<string, number> }[] }
   | { ev: 'act'; p: number; seq: number; a: unknown }
   | { ev: 'snap'; snap: unknown; acked: Record<number, number> }
   | { ev: 'end'; why: string };
@@ -43,15 +43,15 @@ export class Room {
   onMsg: (m: Msg) => void = () => {};
   onState: (s: Room['state']) => void = () => {};
 
-  constructor(code: string, name: string, host: boolean) {
+  constructor(code: string, name: string, host: boolean, meta: Record<string, number>) {
     this.code = code.toUpperCase();
-    this.me = { id: Math.random().toString(36).slice(2, 10), name, host, joined: Date.now() };
+    this.me = { id: Math.random().toString(36).slice(2, 10), name, host, joined: Date.now(), meta };
     this.ch = sb().channel(`redline-${this.code}`, { config: { broadcast: { self: false }, presence: { key: this.me.id } } });
     this.ch
       .on('presence', { event: 'sync' }, () => {
         const st = this.ch.presenceState<Peer>();
         const list: Peer[] = [];
-        for (const k of Object.keys(st)) { const p = st[k][0]; if (p) list.push({ id: p.id, name: p.name, host: p.host, joined: p.joined }); }
+        for (const k of Object.keys(st)) { const p = st[k][0]; if (p) list.push({ id: p.id, name: p.name, host: p.host, joined: p.joined, meta: p.meta }); }
         list.sort((a, b) => (b.host ? 1 : 0) - (a.host ? 1 : 0) || a.joined - b.joined);
         this.peers = list;
         this.onPeers(list);

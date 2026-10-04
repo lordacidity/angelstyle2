@@ -189,12 +189,23 @@ interface Rules {
   enemyExtra: number; enemyGold: number; neutralBase: number;
   /** A room: how many humans play, and whether as one side or every one for itself. */
   humans?: number; mp?: 'team' | 'against';
+  /** How much stronger the generals' breeding and gold grow each minute (0.05 is 5% a minute). */
+  escalate?: number;
+  /** How much harder the unclaimed ground is held the farther up the map it sits (a team room). */
+  neutralRamp?: number;
+  /** How fast everyone breeds, against the usual (1): a long game runs slow. */
+  tempo?: number;
 }
+/** In a team room the generals take no unclaimed ground past the middle of
+ *  the map: the lower half is the humans' to win, and the fight comes to them. */
+const keepsOut = (w: World, m: Node) => w.rules.mp === 'team' && m.owner === 0 && m.y > w.rules.mapH * 0.5;
+/** How far the generals have grown: 1 at the start, more every minute where the level says so. */
+const generalsMult = (w: World) => 1 + (w.rules.escalate ?? 0) * (w.time / 60);
 
 const isHuman = (w: World, o: number) => o in w.econ;
 const econ = (w: World, o: number) => w.econ[o];
 /** Whether two sides leave each other be: a side and itself, and in a team room every human with every other. */
-const isAlly = (w: World, a: number, b: number) => a === b || (!!w.mp && w.mp.mode === 'team' && isHuman(w, a) && isHuman(w, b));
+const isAlly = (w: World, a: number, b: number) => a === b || (!!w.mp && w.mp.mode === 'team' && a !== 0 && b !== 0 && isHuman(w, a) === isHuman(w, b));
 /** Gold to whoever: a human's purse or a general's. */
 function addGold(w: World, owner: number, amt: number) {
   if (isHuman(w, owner)) w.econ[owner].gold += amt;
@@ -220,8 +231,9 @@ function rulesForMp(mode: 'team' | 'against', humans: number): Rules {
   };
   return {
     level: 101, endless: false, humans, mp: mode, nodeCount: 24 + 16 * humans, enemies: humans, mapH: 1200 + 500 * humans,
-    aiInterval: 1.2, sendFrac: 0.7, aiMargin: 0.8, aiStageEvery: 1, aiSmart: 2, enemyExtra: 3, enemyGold: 300 + 100 * humans, neutralBase: 16, enemyTech: 1,
-    title: 'TEAM', blurb: 'All of you, one side, against the generals at the far end. You cannot hurt each other: a march onto a friend\'s outpost joins it. Pick one of yours to give it to a friend.',
+    aiInterval: 1.2, sendFrac: 0.7, aiMargin: 0.8, aiStageEvery: 1, aiSmart: 2, enemyExtra: 0, enemyGold: 250 + 75 * humans, neutralBase: 20, enemyTech: 1,
+    fortress: true, enemyWalls: 1, fog: 3, truce: 90, escalate: 0.02, mines: 2 + humans, neutralRamp: 14, tempo: 0.35,
+    title: 'TEAM', blurb: 'All of you, one side. The generals hold the top of the map, fortified, with tech from the start, and they grow 2% stronger every minute. Everyone breeds slowly here: it is a long war, and the ground gets harder to take the farther up you go. They never come past the middle on their own: you go to them. You cannot hurt each other: a march onto a friend\'s outpost joins it, you share eyes in the fog, and you can give a friend an outpost. A minute and a half of truce to dig in. Your Armouries count.',
   };
 }
 
@@ -404,13 +416,14 @@ function buildChoke(rules: Rules, rnd: () => number): { nodes: Node[]; edges: Ed
   return { nodes, edges, hqs };
 }
 
-function buildWorld(rules: Rules, meta: Record<MetaKey, number>, seedExtra = 0): World {
+function buildWorld(rules: Rules, meta: Record<MetaKey, number>, seedExtra = 0, metas: Record<number, Record<MetaKey, number>> = {}): World {
   const rnd = mulberry32(rules.level * 7919 + (rules.endless ? 104729 : 0) + seedExtra);
-  // Every human side's purse. In a room nobody brings an Armoury: fair is fair.
+  // Every human side's purse. A team brings its Armouries, each seat its own;
+  // against each other nobody does: fair is fair.
   const H = rules.humans ?? 1;
   const econ: Record<number, Econ> = {};
   for (let h = 1; h <= H; h++) {
-    const m = rules.mp ? freshSave().meta : meta;
+    const m = rules.mp === 'against' ? freshSave().meta : rules.mp === 'team' ? (metas[h] ?? freshSave().meta) : meta;
     econ[h] = { gold: 40 + META.gold.per * m.gold, tech: { logistics: 0, conscription: 0, tithe: 0, scouts: 0, thrift: 0 }, autoTech: {}, meta: m, autoSeq: 0 };
   }
   const choke = rules.choke ? buildChoke(rules, rnd) : null;
@@ -539,10 +552,20 @@ function buildWorld(rules: Rules, meta: Record<MetaKey, number>, seedExtra = 0):
     }
     factions.push({ id: fid, tick: rnd() * rules.aiInterval, dead: 0, gold: rules.enemyGold, buyT: 2, tech: { conscription: rules.enemyTech ?? 0, logistics: rules.enemyTech ? 1 : 0 } });
   }
+  // A team room: the generals already hold the top of the map, split
+  // between them, and the ground between is held hard.
+  if (rules.mp === 'team') {
+    const hqs = factions.map((f) => nodes.find((n) => n.base && n.owner === f.id)!);
+    for (const n of nodes) {
+      if (n.owner !== 0 || n.y > rules.mapH * 0.25 || !hqs.length) continue;
+      const near = hqs.reduce((a, b) => (Math.hypot(a.x - n.x, a.y - n.y) < Math.hypot(b.x - n.x, b.y - n.y) ? a : b));
+      n.owner = near.owner; n.troops = 40; n.wall = rules.enemyWalls ?? 0;
+    }
+  }
   for (const n of nodes) {
     if (n.owner !== 0) continue;
-    const far = Math.min(1, Math.hypot(n.x - home.x, n.y - home.y) / Math.hypot(MAP_W, MAP_H));
-    n.troops = Math.round(rules.neutralBase * (0.4 + 1.6 * far) + rnd() * 10);
+    const far = Math.min(1, Math.hypot(n.x - home.x, n.y - home.y) / Math.hypot(MAP_W, rules.mp === 'team' ? rules.mapH : MAP_H));
+    n.troops = Math.round(rules.neutralBase * (rules.neutralRamp ? 1 + rules.neutralRamp * far : 0.4 + 1.6 * far) + rnd() * (rules.neutralRamp ? 20 : 10));
     if (rules.neutralTier) n.tier = rules.neutralTier; else if (rnd() < 0.18) n.tier = 2;
   }
   // Twin HQ: a second one of yours, beside the first.
@@ -595,12 +618,12 @@ const prodOf = (w: World, n: Node) => {
   if (n.mine) return 0;
   let m = isHuman(w, n.owner)
     ? (1 + META.prod.per * econ(w, n.owner).meta.prod / 100) * (1 + 0.15 * econ(w, n.owner).tech.conscription)
-    : 1 + 0.15 * (w.factions.find((f) => f.id === n.owner)?.tech.conscription ?? 0);
+    : (1 + 0.15 * (w.factions.find((f) => f.id === n.owner)?.tech.conscription ?? 0)) * generalsMult(w);
   m *= (n.base ? 1.5 : 1) * (1 + 0.35 * n.prod);
-  return BASE_PROD_PER_S * m;
+  return BASE_PROD_PER_S * (w.rules.tempo ?? 1) * m;
 };
 /** What your gold is worth: Tithe and the Vaults. */
-const goldMult = (w: World, owner: number) => (isHuman(w, owner) ? (1 + 0.2 * econ(w, owner).tech.tithe) * (1 + META.vault.per * econ(w, owner).meta.vault / 100) : 1);
+const goldMult = (w: World, owner: number) => (isHuman(w, owner) ? (1 + 0.2 * econ(w, owner).tech.tithe) * (1 + META.vault.per * econ(w, owner).meta.vault / 100) : generalsMult(w));
 const goldOf = (n: Node) => (n.mine ? MINE_GOLD[n.mine] : n.base ? 1.0 : 0.35 + 0.25 * (n.tier - 1));
 const convoySpeed = (w: World, owner: number) =>
   60 * (isHuman(w, owner)
@@ -726,7 +749,7 @@ function aiTick(w: World, f: Faction) {
   if (r.aiSmart >= 1) {
     for (const n of w.nodes) {
       if (n.owner !== f.id || n.troops < 5) continue;
-      const incoming = w.convoys.filter((c) => c.to === n.id && c.owner !== f.id && c.t > 0.5).reduce((s, c) => s + c.n, 0);
+      const incoming = w.convoys.filter((c) => c.to === n.id && !isAlly(w, c.owner, f.id) && c.t > 0.5).reduce((s, c) => s + c.n, 0);
       if (incoming <= n.troops * wallMult(n) * 1.1) continue;
       const safe = w.adj[n.id].map((i) => w.nodes[i]).filter((m) => m.owner === f.id).sort((a, b) => b.troops - a.troops)[0];
       if (safe) send(w, n.id, safe.id, 0.9);
@@ -736,7 +759,7 @@ function aiTick(w: World, f: Faction) {
   // when it has the men to win that fight and still hold the gate.
   if (r.aiSmart >= 2 && !truceOn(w)) {
     for (const c of w.convoys) {
-      if (c.owner === f.id) continue;
+      if (isAlly(w, c.owner, f.id)) continue;
       const n = w.nodes[c.to];
       if (n.owner !== f.id || c.t > 0.6) continue;
       if (w.convoys.some((d) => d.owner === f.id && d.from === n.id && d.to === c.from)) continue;
@@ -749,13 +772,13 @@ function aiTick(w: World, f: Faction) {
     // Only the HQ acts every tick: an outpost's garrison sits out half of them.
     if (!n.base && ((n.id * 7 + Math.floor(w.time / w.rules.aiInterval)) & 1)) continue;
     const nbs = w.adj[n.id].map((i) => w.nodes[i]);
-    const hostile = nbs.filter((m) => m.owner !== f.id && (!truceOn(w) || m.owner === 0));
+    const hostile = nbs.filter((m) => !isAlly(w, m.owner, f.id) && (!truceOn(w) || m.owner === 0) && !keepsOut(w, m));
     const avail = n.troops * frac;
     let best: Node | null = null; let bestScore = -Infinity;
     for (const m of hostile) {
       const incoming = w.convoys.filter((c) => c.to === m.id && c.owner === m.owner && seesColumn(w, f.id, c)).reduce((s, c) => s + c.n, 0);
       // A canny general counts what the guns on the way will cost.
-      const guns = r.aiSmart >= 1 ? w.nodes.filter((g) => g.owner !== f.id && g.cannon && Math.hypot(g.x - m.x, g.y - m.y) < cannonRange(g, w)).reduce((s, g) => s + cannonDmg(g.cannon) * 3, 0) : 0;
+      const guns = r.aiSmart >= 1 ? w.nodes.filter((g) => !isAlly(w, g.owner, f.id) && g.cannon && Math.hypot(g.x - m.x, g.y - m.y) < cannonRange(g, w)).reduce((s, g) => s + cannonDmg(g.cannon) * 3, 0) : 0;
       const need = (reckon(w, f.id, m) + incoming) * wallMult(m) + 1 + guns;
       if (avail < need * (m.owner === 0 ? 1.1 : 1.25)) continue;
       let score = (isHuman(w, m.owner) ? 3 : m.owner === 0 ? 1 : 2) + (m.base ? 2.5 : 0) + m.prod * 0.4 - need / avail + (m.hub ? 2 : 0) + (m.loot ? 1.5 : 0) + (m.gold ? 1 : 0);
@@ -772,7 +795,7 @@ function aiTick(w: World, f: Faction) {
   // Nothing full ever sits idle: an outpost near its cap with nothing to
   // take ships most of itself, by road, to the thinnest outpost of its that
   // touches the enemy or the unclaimed ground. Its production never stalls.
-  const fronts = w.nodes.filter((n) => n.owner === f.id && w.adj[n.id].some((i) => w.nodes[i].owner !== f.id));
+  const fronts = w.nodes.filter((n) => n.owner === f.id && w.adj[n.id].some((i) => !isAlly(w, w.nodes[i].owner, f.id)));
   for (const n of w.nodes) {
     if (n.owner !== f.id || n.mine || n.troops < capOf(n) * 0.8) continue;
     if (fronts.includes(n)) continue;
@@ -787,7 +810,7 @@ function aiTick(w: World, f: Faction) {
   // for the next.
   let bestT: Node | null = null; let bestRatio = Infinity; let bestFrom: Node[] = [];
   for (const m of w.nodes) {
-    if (m.owner === f.id || (truceOn(w) && m.owner !== 0)) continue;
+    if (isAlly(w, m.owner, f.id) || (truceOn(w) && m.owner !== 0) || keepsOut(w, m)) continue;
     const ring = w.adj[m.id].filter((i) => w.nodes[i].owner === f.id);
     if (!ring.length) continue;
     const ids = new Set<number>(ring);
@@ -807,7 +830,7 @@ function aiTick(w: World, f: Faction) {
   if (!stage) return;
   for (const n of w.nodes) {
     if (n.owner !== f.id || n.id === stage.id || n.troops < 12) continue;
-    if (w.adj[n.id].some((i) => w.nodes[i].owner !== f.id && w.nodes[i].owner !== 0)) continue; // it holds a front
+    if (w.adj[n.id].some((i) => !isAlly(w, w.nodes[i].owner, f.id) && w.nodes[i].owner !== 0)) continue; // it holds a front
     send(w, n.id, stage.id, 0.7);
   }
 }
@@ -819,11 +842,11 @@ function aiSpend(w: World, f: Faction) {
   const held = w.nodes.filter((n) => n.owner === f.id);
   const mine = held.filter((n) => !n.mine);
   if (!mine.length) return;
-  const threat = (n: Node) => w.adj[n.id].reduce((s, i) => s + (w.nodes[i].owner !== f.id && w.nodes[i].owner !== 0 ? reckon(w, f.id, w.nodes[i]) : 0), 0);
+  const threat = (n: Node) => w.adj[n.id].reduce((s, i) => s + (!isAlly(w, w.nodes[i].owner, f.id) && w.nodes[i].owner !== 0 ? reckon(w, f.id, w.nodes[i]) : 0), 0);
   const front = mine.filter((n) => threat(n) > 0).sort((a, b) => threat(b) - threat(a));
   const hq = mine.find((n) => n.base) ?? mine[0];
   // A mine in the rear, once there is a rear: one for every four outposts.
-  const rear = held.filter((n) => !n.base && !n.mine && !w.adj[n.id].some((i) => w.nodes[i].owner !== f.id));
+  const rear = held.filter((n) => !n.base && !n.mine && !w.adj[n.id].some((i) => !isAlly(w, w.nodes[i].owner, f.id)));
   const minesHeld = held.filter((n) => n.mine).length;
   if (held.length >= 4 && minesHeld < Math.floor(held.length / 4)) {
     const dig = rear.filter((n) => n.troops >= MINE_TROOPS[0]).sort((a, b) => b.troops - a.troops)[0];
@@ -1411,7 +1434,7 @@ interface Ui {
   prodPerMin: number; goldPerMin: number;
   mine: number; theirs: number; picking: boolean; pickN: number; pickLeft: number;
   selHidden: boolean; shiftT: number;
-  truceT: number; hillT: number; hillNeed: number; blurb: string | null; title: string | null;
+  truceT: number; hillT: number; hillNeed: number; blurb: string | null; title: string | null; generals: number;
   /** Whether the map runs past the screen, and which way there is more of it. */
   /** The scrollbar: how far down the map the view is (0..1) and how much of it shows (0..1); 1 means all. */
   scrollFrac: number; viewFrac: number; scrollFracX: number; viewFracX: number;
@@ -1498,13 +1521,15 @@ export default function Game() {
   }, []);
 
   /** A room's game begins: the same world on every phone, from the host's seed. */
-  const startMp = useCallback((mode: 'team' | 'against', seed: number, players: { id: string; name: string }[]) => {
+  const startMp = useCallback((mode: 'team' | 'against', seed: number, players: { id: string; name: string; meta?: Record<MetaKey, number> }[]) => {
     const r = roomRef.current; if (!r) return;
     const seat = players.findIndex((x) => x.id === r.room.me.id) + 1;
     if (seat < 1) return;
     ME = seat;
     r.seat = seat; r.players = players; r.seq = 0; r.pending = []; r.acked = {}; r.snapAt = 0;
-    const w = buildWorld(rulesForMp(mode, players.length), freshSave().meta, seed);
+    const metas: Record<number, Record<MetaKey, number>> = {};
+    players.forEach((x, i) => { metas[i + 1] = { ...freshSave().meta, ...(x.meta ?? {}) }; });
+    const w = buildWorld(rulesForMp(mode, players.length), freshSave().meta, seed, metas);
     if (w.mp) players.forEach((x, i) => { w.mp!.names[i + 1] = x.name; });
     worldRef.current = w;
     // A room runs at the slow speed, never paused: four phones share one clock.
@@ -1522,7 +1547,7 @@ export default function Game() {
     const name = (myName.trim() || 'Player').slice(0, 12);
     try { localStorage.setItem('redline.name', name); } catch { /* private mode */ }
     roomRef.current?.room.leave();
-    const room = new Room(code, name, host);
+    const room = new Room(code, name, host, loadSave().meta);
     roomRef.current = { room, seat: 0, host, seq: 0, pending: [], acked: {}, snapAt: 0, players: [] };
     setLobby({ code: room.code, meId: room.me.id, host, mode, peers: [], state: 'joining', err: null });
     room.onState = (st) => setLobby((l) => (l ? { ...l, state: st, err: st === 'error' ? 'Could not reach the room. Check the signal and try again.' : l.err } : l));
@@ -1683,7 +1708,7 @@ export default function Game() {
           prodPerMin: w.nodes.filter((n) => n.owner === ME && n.troops < capOf(n) - 0.5).reduce((t, n) => t + prodOf(w, n) * 60, 0),
           goldPerMin: w.nodes.filter((n) => n.owner === ME).reduce((t, n) => t + goldOf(n), 0) * goldMult(w, ME) * 60,
           mine: w.nodes.filter((n) => n.owner === ME).length, theirs: w.nodes.filter((n) => n.owner !== 0 && !isAlly(w, n.owner, ME)).length, picking: w.picking !== null, pickN: w.pickN, pickLeft: w.pickN - w.picked.length,
-          selHidden: !!(w.rules.fog && sel && !isAlly(w, sel.owner, ME) && !(seenByPlayer(w)?.has(sel.id) && ringOf(w, sel.id) < (w.rules.fog ?? 0))), shiftT: w.rules.shift ? w.shiftT : 0, truceT: w.rules.truce ? Math.max(0, w.rules.truce - w.time) : 0, hillT: w.hillT, hillNeed: w.rules.hill ?? 0, blurb: w.rules.blurb ?? null, title: w.rules.title ?? null,
+          selHidden: !!(w.rules.fog && sel && !isAlly(w, sel.owner, ME) && !(seenByPlayer(w)?.has(sel.id) && ringOf(w, sel.id) < (w.rules.fog ?? 0))), shiftT: w.rules.shift ? w.shiftT : 0, truceT: w.rules.truce ? Math.max(0, w.rules.truce - w.time) : 0, hillT: w.hillT, hillNeed: w.rules.hill ?? 0, blurb: w.rules.blurb ?? null, title: w.rules.title ?? null, generals: generalsMult(w),
           scrollFrac: scrollFracRef.current, viewFrac: viewFracRef.current, scrollFracX: scrollFracXRef.current, viewFracX: viewFracXRef.current,
           army: (() => {
             const by = new Map<number, number>();
@@ -1891,7 +1916,7 @@ export default function Game() {
     const canStart = !!l && l.host && l.peers.length >= 2 && l.peers.length <= 4 && l.state === 'open';
     const startRoom = () => {
       const r = roomRef.current; if (!r || !l) return;
-      const players = l.peers.slice(0, 4).map((p) => ({ id: p.id, name: p.name }));
+      const players = l.peers.slice(0, 4).map((p) => ({ id: p.id, name: p.name, meta: p.meta }));
       const seed = Math.floor(Math.random() * 1e9);
       r.room.send({ ev: 'start', mode: l.mode, seed, players });
       startMp(l.mode, seed, players);
@@ -2037,7 +2062,7 @@ export default function Game() {
         <button className={`${btn} bg-white/10 px-3 py-1.5`} onClick={() => { leaveRoom(); setScreen('menu'); worldRef.current = null; }}>✕</button>
         <div className="text-center">
           <div className="font-black">{run.mp ? run.mp.toUpperCase() : run.endless ? 'LONG WAR' : `LEVEL ${run.level}`} <span className="text-white/40">· {clock(ui?.time ?? 0)}</span></div>
-          <div className="text-[11px] text-white/45">{ui?.mine ?? 0} vs {ui?.theirs ?? 0} outposts{(ui?.shiftT ?? 0) > 0 ? ` · roads shift in ${fmt(ui?.shiftT ?? 0)}s` : ''}{(ui?.truceT ?? 0) > 0 ? ` · truce ${fmt(ui?.truceT ?? 0)}s` : ''}{(ui?.hillNeed ?? 0) > 0 ? ` · hill ${fmt(ui?.hillT ?? 0)}/${ui?.hillNeed}s` : ''}</div>
+          <div className="text-[11px] text-white/45">{ui?.mine ?? 0} vs {ui?.theirs ?? 0} outposts{(ui?.shiftT ?? 0) > 0 ? ` · roads shift in ${fmt(ui?.shiftT ?? 0)}s` : ''}{(ui?.truceT ?? 0) > 0 ? ` · truce ${fmt(ui?.truceT ?? 0)}s` : ''}{(ui?.hillNeed ?? 0) > 0 ? ` · hill ${fmt(ui?.hillT ?? 0)}/${ui?.hillNeed}s` : ''}{(ui?.generals ?? 1) > 1.005 ? ` · generals +${Math.round(((ui?.generals ?? 1) - 1) * 100)}%` : ''}</div>
         </div>
         <button className={`${btn} bg-white/10 px-3 py-1.5`} onClick={() => { if (confirm('Restart this level?')) start(run.level, run.endless); }}>↻</button>
       </div>
