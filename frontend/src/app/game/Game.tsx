@@ -1199,6 +1199,62 @@ function applyAction(w: World, p: number, a: Action) {
   }
 }
 
+// ── Designs ────────────────────────────────────────────────────────────────
+// A level of your own: outposts placed by hand, roads drawn between them,
+// each outpost's owner and what sits on it, and the level's twists.
+
+interface DNode { x: number; y: number; owner: number; troops: number; tier: number; wall: number; cannon: number; mine: number; loot: number; gold: number; base: boolean; hub: boolean }
+interface Design {
+  name: string; mapH: number; nodes: DNode[]; edges: [number, number][];
+  fog: number; truce: number; shift: number; hill: number;
+  /** How canny and how rich the generals are: a campaign level's generals, 1 to 24. */
+  difficulty: number;
+}
+const DESIGNS_KEY = 'redline.designs';
+const freshDesign = (): Design => ({ name: 'My level', mapH: 900, nodes: [], edges: [], fog: 0, truce: 0, shift: 0, hill: 0, difficulty: 6 });
+const freshDNode = (x: number, y: number): DNode => ({ x, y, owner: 0, troops: 15, tier: 1, wall: 0, cannon: 0, mine: 0, loot: 0, gold: 0, base: false, hub: false });
+function loadDesigns(): Design[] { try { return (JSON.parse(localStorage.getItem(DESIGNS_KEY) ?? '[]') as Design[]).filter((d) => d && Array.isArray(d.nodes)); } catch { return []; } }
+function storeDesigns(ds: Design[]) { try { localStorage.setItem(DESIGNS_KEY, JSON.stringify(ds)); } catch { /* private mode */ } }
+
+/** What is wrong with a design, if anything, in a line. */
+function designFault(d: Design): string | null {
+  if (!d.nodes.some((n) => n.base && n.owner === 1)) return 'You need an HQ of your own: pick an outpost, set it to You, and make it an HQ.';
+  const generals = new Set(d.nodes.filter((n) => n.owner >= 2).map((n) => n.owner));
+  for (const g of generals) if (!d.nodes.some((n) => n.base && n.owner === g)) return `${NAMES[g] ?? `General ${g}`} holds ground but has no HQ.`;
+  if (!generals.size && !d.hill) return 'Nothing to fight: give a general an HQ, or set a hill to hold.';
+  if (d.hill && !d.nodes.some((n) => n.hub)) return 'A hill needs a hub: pick an outpost and make it the hub.';
+  const seen = new Set<number>([0]); const q = [0]; const adj = d.nodes.map(() => [] as number[]);
+  for (const [a, b] of d.edges) { adj[a]?.push(b); adj[b]?.push(a); }
+  while (q.length) { const u = q.shift()!; for (const v of adj[u]) if (!seen.has(v)) { seen.add(v); q.push(v); } }
+  if (d.nodes.length && seen.size !== d.nodes.length) return 'Some outposts have no road to the rest. Draw roads until everything joins up.';
+  return null;
+}
+
+/** The world a design makes. The generals play by the campaign level the design names. */
+function buildCustom(d: Design, meta: Record<MetaKey, number>): World {
+  const base = rulesFor(Math.max(1, Math.min(CAMPAIGN_LEVELS, d.difficulty)), false);
+  const generals = [...new Set(d.nodes.filter((n) => n.owner >= 2).map((n) => n.owner))].sort((a, b) => a - b);
+  const rules: Rules = {
+    ...base, level: 200, nodeCount: d.nodes.length, enemies: generals.length, mapH: d.mapH, title: d.name.toUpperCase(),
+    fog: d.fog || undefined, truce: d.truce || undefined, shift: d.shift || undefined, hill: d.hill || undefined,
+    twinHQ: false, mines: 0, fortress: false, choke: false, loot: undefined, goldPiles: undefined, hubLoot: 0, blurb: undefined,
+    enemyGold: base.enemyGold, enemyTech: base.enemyTech,
+  };
+  const nodes: Node[] = d.nodes.map((n, i) => ({ ...newNode(i, n.x, n.y), owner: n.owner, troops: n.troops, tier: n.tier, wall: n.wall, cannon: n.cannon, mine: n.mine, loot: n.loot, gold: n.gold, base: n.base, hub: n.hub }));
+  const edges: Edge[] = d.edges.filter(([a, b]) => nodes[a] && nodes[b] && a !== b).map(([a, b]) => ({ a, b, len: Math.hypot(nodes[a].x - nodes[b].x, nodes[a].y - nodes[b].y) }));
+  const adj: number[][] = nodes.map(() => []);
+  for (const e of edges) { adj[e.a].push(e.b); adj[e.b].push(e.a); }
+  const econ: Record<number, Econ> = { 1: { gold: 40 + META.gold.per * meta.gold, tech: { logistics: 0, conscription: 0, tithe: 0, scouts: 0, thrift: 0 }, autoTech: {}, meta, autoSeq: 0 } };
+  for (const n of nodes) if (n.owner === 1) { n.wallBoost = META.masonry.per * meta.masonry / 100; n.capBoost = META.cap.per * meta.cap / 100; if (n.base) n.troops += META.garrison.per * meta.garrison; }
+  const rnd = mulberry32(d.nodes.length * 31 + 7);
+  const factions: Faction[] = generals.map((fid) => ({ id: fid, tick: rnd() * rules.aiInterval, dead: 0, gold: rules.enemyGold, buyT: 2, tech: { conscription: rules.enemyTech ?? 0, logistics: rules.enemyTech ? 1 : 0 } }));
+  return {
+    rules, nodes, edges, adj, convoys: [], shots: [], factions,
+    econ, mp: null, time: 0, nextId: 1,
+    over: null, flash: null, selected: null, picking: null, pickN: 1, picked: [], shiftT: rules.shift ?? 0, hillT: 0,
+  };
+}
+
 // ── Snapshots ──────────────────────────────────────────────────────────────
 // The host's whole world, once a second, small: only what moves. The map
 // itself never changes in a room (no shifting roads there).
@@ -1456,9 +1512,170 @@ interface Ui {
 const fmt = (n: number) => String(Math.floor(n));
 const clock = (s: number) => `${Math.floor(s / 60)}:${String(Math.floor(s % 60)).padStart(2, '0')}`;
 
+const btn = 'rounded-xl font-bold active:scale-95 transition-transform disabled:opacity-30';
+
+/** The level designer: a map to tap on, a tool row, and the picked outpost's dials. */
+function Editor({ design, onChange, onPlay, onBack }: { design: Design; onChange: (d: Design) => void; onPlay: () => void; onBack: () => void }) {
+  const [tool, setTool] = useState<'place' | 'road' | 'move' | 'erase'>('place');
+  const [sel, setSel] = useState<number | null>(null);
+  const [roadFrom, setRoadFrom] = useState<number | null>(null);
+  const [note, setNote] = useState<string | null>(null);
+  const canvasRef = useRef<HTMLCanvasElement>(null);
+  const scrollRef = useRef<HTMLDivElement>(null);
+  // A finger on the map: where it landed, what it landed on, and whether it has moved since.
+  const touchRef = useRef<{ x: number; y: number; cx: number; cy: number; id: number; moved: boolean } | null>(null);
+  const d = design;
+  const set = (patch: Partial<Design>) => onChange({ ...d, ...patch });
+  const setNode = (i: number, patch: Partial<DNode>) => onChange({ ...d, nodes: d.nodes.map((n, k) => (k === i ? { ...n, ...patch } : n)) });
+  const say = (t: string) => { setNote(t); setTimeout(() => setNote(null), 1800); };
+
+  // The map, drawn as the game would draw it, scaled to the width.
+  useEffect(() => {
+    const c = canvasRef.current; if (!c) return;
+    const ctx = c.getContext('2d'); if (!ctx) return;
+    const cssW = c.clientWidth || 360; const dpr = Math.min(2, window.devicePixelRatio || 1);
+    const s = cssW / MAP_W;
+    c.width = Math.round(cssW * dpr); c.height = Math.round(d.mapH * s * dpr); c.style.height = `${d.mapH * s}px`;
+    const w = buildCustom({ ...d, fog: 0 }, freshSave().meta);
+    w.selected = sel;
+    ctx.fillStyle = '#000'; ctx.fillRect(0, 0, c.width, c.height);
+    draw(ctx, w, { s: s * dpr, ox: 0, oy: 0, midY: d.mapH / 2 }, null);
+    // The road being drawn, from its first end.
+    if (roadFrom !== null && d.nodes[roadFrom]) {
+      ctx.save(); ctx.scale(s * dpr, s * dpr);
+      ctx.strokeStyle = '#3b82f6'; ctx.lineWidth = 3; ctx.setLineDash([4, 6]);
+      ctx.beginPath(); ctx.arc(d.nodes[roadFrom].x, d.nodes[roadFrom].y, 26, 0, Math.PI * 2); ctx.stroke();
+      ctx.restore();
+    }
+  }, [d, sel, roadFrom]);
+
+  const toMap = (e: React.PointerEvent) => {
+    const c = canvasRef.current!; const r = c.getBoundingClientRect();
+    const s = r.width / MAP_W;
+    return { x: (e.clientX - r.left) / s, y: (e.clientY - r.top) / s };
+  };
+  const hitAt = (p: { x: number; y: number }) => { let best = -1, bd = 28; d.nodes.forEach((n, i) => { const k = Math.hypot(n.x - p.x, n.y - p.y); if (k < bd) { bd = k; best = i; } }); return best; };
+  const roadAt = (p: { x: number; y: number }) => {
+    let best = -1, bd = 10;
+    d.edges.forEach(([a, b], i) => {
+      const A = d.nodes[a], B = d.nodes[b]; if (!A || !B) return;
+      const dx = B.x - A.x, dy = B.y - A.y, l2 = dx * dx + dy * dy || 1;
+      const t = Math.max(0, Math.min(1, ((p.x - A.x) * dx + (p.y - A.y) * dy) / l2));
+      const k = Math.hypot(A.x + t * dx - p.x, A.y + t * dy - p.y);
+      if (k < bd) { bd = k; best = i; }
+    });
+    return best;
+  };
+  const onDown = (e: React.PointerEvent) => {
+    const p = toMap(e);
+    touchRef.current = { x: p.x, y: p.y, cx: e.clientX, cy: e.clientY, id: hitAt(p), moved: false };
+    e.currentTarget.setPointerCapture(e.pointerId);
+  };
+  // A still finger is a tap; a moving one drags an outpost (Move) or scrolls the map.
+  const onMove = (e: React.PointerEvent) => {
+    const t = touchRef.current; if (!t) return;
+    if (!t.moved && Math.hypot(e.clientX - t.cx, e.clientY - t.cy) < 8) return;
+    t.moved = true;
+    if (tool === 'move' && t.id >= 0) {
+      const p = toMap(e);
+      setNode(t.id, { x: Math.max(24, Math.min(MAP_W - 24, p.x)), y: Math.max(24, Math.min(d.mapH - 24, p.y)) });
+      return;
+    }
+    const sc = scrollRef.current; if (sc) sc.scrollTop -= e.clientY - t.cy;
+    t.cx = e.clientX; t.cy = e.clientY;
+  };
+  const onUp = () => {
+    const t = touchRef.current; touchRef.current = null;
+    if (!t || t.moved) return;
+    tapAt({ x: t.x, y: t.y }, t.id);
+  };
+  const tapAt = (p: { x: number; y: number }, i: number) => {
+    if (tool === 'move') { if (i >= 0) setSel(i); return; }
+    if (tool === 'erase') {
+      if (i >= 0) { onChange({ ...d, nodes: d.nodes.filter((_, k) => k !== i), edges: d.edges.filter(([a, b]) => a !== i && b !== i).map(([a, b]) => [a > i ? a - 1 : a, b > i ? b - 1 : b] as [number, number]) }); setSel(null); return; }
+      const r = roadAt(p); if (r >= 0) onChange({ ...d, edges: d.edges.filter((_, k) => k !== r) });
+      return;
+    }
+    if (tool === 'road') {
+      if (i < 0) { setRoadFrom(null); return; }
+      if (roadFrom === null || roadFrom === i) { setRoadFrom(i); return; }
+      const a = roadFrom, b = i; setRoadFrom(null);
+      if (d.edges.some(([x, y]) => (x === a && y === b) || (x === b && y === a))) { say('That road is there already.'); return; }
+      const probe = d.nodes.map((n, k) => ({ ...newNode(k, n.x, n.y) }));
+      if (roadOverNode(probe, a, b)) { say('That road would run across another outpost.'); return; }
+      onChange({ ...d, edges: [...d.edges, [a, b]] });
+      return;
+    }
+    // place: an empty spot gets an outpost; an outpost gets picked.
+    if (i >= 0) { setSel(i); return; }
+    if (d.nodes.some((n) => Math.hypot(n.x - p.x, n.y - p.y) < 50)) { say('Too close to another outpost.'); return; }
+    const x = Math.max(24, Math.min(MAP_W - 24, p.x)), y = Math.max(24, Math.min(d.mapH - 24, p.y));
+    onChange({ ...d, nodes: [...d.nodes, freshDNode(x, y)] }); setSel(d.nodes.length);
+  };
+
+  const n = sel !== null ? d.nodes[sel] : null;
+  const dial = (label: string, value: string | number, dec: () => void, inc: () => void) => (
+    <div key={label} className="flex items-center justify-between rounded-xl bg-white/5 px-3 py-1.5 text-[13px]">
+      <span className="text-white/60">{label}</span>
+      <span className="flex items-center gap-2"><button className={`${btn} h-8 w-8 bg-white/10`} onClick={dec}>−</button><b className="min-w-[48px] text-center">{value}</b><button className={`${btn} h-8 w-8 bg-white/10`} onClick={inc}>+</button></span>
+    </div>
+  );
+  const ownerName = (o: number) => (o === 0 ? 'Neutral' : o === 1 ? 'You' : NAMES[o] ?? `Side ${o}`);
+  const fault = designFault(d);
+  const tools: { k: typeof tool; t: string }[] = [{ k: 'place', t: 'Outpost' }, { k: 'road', t: 'Road' }, { k: 'move', t: 'Move' }, { k: 'erase', t: 'Erase' }];
+  return (
+    <>
+      <div className="flex items-center justify-between gap-2 px-3 py-2">
+        <button className={`${btn} bg-white/10 px-3 py-2 text-sm`} onClick={onBack}>Save</button>
+        <input value={d.name} onChange={(e) => set({ name: e.target.value.slice(0, 18) })} className="min-w-0 flex-1 rounded-xl bg-white/10 px-3 py-2 text-center text-sm font-bold outline-none" />
+        <button disabled={!!fault} className={`${btn} bg-white px-3 py-2 text-sm text-black`} onClick={onPlay}>Play</button>
+      </div>
+      <div className="flex gap-1.5 px-3 pb-2">
+        {tools.map((x) => <button key={x.k} className={`${btn} flex-1 py-2 text-[13px] ${tool === x.k ? 'bg-white text-black' : 'bg-white/10'}`} onClick={() => { setTool(x.k); setRoadFrom(null); }}>{x.t}</button>)}
+      </div>
+      <div ref={scrollRef} className="relative min-h-0 flex-1 overflow-y-auto" style={{ touchAction: 'none' }}>
+        <canvas ref={canvasRef} className="block w-full" style={{ touchAction: 'none' }} onPointerDown={onDown} onPointerMove={onMove} onPointerUp={onUp} onPointerCancel={onUp} />
+        {note && <div className="pointer-events-none sticky bottom-2 mx-auto w-fit rounded-xl bg-white px-3 py-1.5 text-[12px] text-black">{note}</div>}
+      </div>
+      <div className="max-h-[44%] overflow-y-auto px-3 pb-2 pt-1" style={{ touchAction: 'pan-y' }}>
+        {fault && <div className="mb-1.5 text-[12px] text-[#ffd166]">{fault}</div>}
+        {!fault && <div className="mb-1.5 text-[12px] text-white/40">{tool === 'place' ? 'Tap empty ground for an outpost, an outpost to set it up.' : tool === 'road' ? 'Tap one outpost, then another.' : tool === 'move' ? 'Drag an outpost. Drag empty ground to scroll.' : 'Tap an outpost or a road.'}</div>}
+        {n ? (
+          <div className="space-y-1">
+            <div className="flex items-center justify-between text-[13px]"><b>Outpost {sel! + 1}</b><button className={`${btn} bg-white/10 px-2.5 py-1 text-[12px]`} onClick={() => setSel(null)}>Level settings</button></div>
+            {dial('Owner', ownerName(n.owner), () => setNode(sel!, { owner: (n.owner + 5) % 6 }), () => setNode(sel!, { owner: (n.owner + 1) % 6 }))}
+            {dial('HQ', n.base ? 'yes' : 'no', () => setNode(sel!, { base: false }), () => setNode(sel!, { base: true }))}
+            {dial('Troops', n.troops, () => setNode(sel!, { troops: Math.max(0, n.troops - (n.troops > 50 ? 10 : 5)) }), () => setNode(sel!, { troops: n.troops + (n.troops >= 50 ? 10 : 5) }))}
+            {dial('Size', n.tier, () => setNode(sel!, { tier: Math.max(1, n.tier - 1) }), () => setNode(sel!, { tier: Math.min(6, n.tier + 1) }))}
+            {dial('Walls', n.wall, () => setNode(sel!, { wall: Math.max(0, n.wall - 1) }), () => setNode(sel!, { wall: Math.min(8, n.wall + 1) }))}
+            {dial('Cannon', n.cannon, () => setNode(sel!, { cannon: Math.max(0, n.cannon - 1) }), () => setNode(sel!, { cannon: Math.min(8, n.cannon + 1) }))}
+            {dial('Mine', n.mine, () => setNode(sel!, { mine: Math.max(0, n.mine - 1) }), () => setNode(sel!, { mine: Math.min(3, n.mine + 1) }))}
+            {dial('Loot troops', n.loot, () => setNode(sel!, { loot: Math.max(0, n.loot - 10) }), () => setNode(sel!, { loot: n.loot + 10 }))}
+            {dial('Gold pile', n.gold, () => setNode(sel!, { gold: Math.max(0, n.gold - 20) }), () => setNode(sel!, { gold: n.gold + 20 }))}
+            {dial('Hub', n.hub ? 'yes' : 'no', () => setNode(sel!, { hub: false }), () => onChange({ ...d, nodes: d.nodes.map((m, k) => ({ ...m, hub: k === sel })) }))}
+          </div>
+        ) : (
+          <div className="space-y-1">
+            {dial('Map height', d.mapH, () => set({ mapH: Math.max(600, d.mapH - 150) }), () => set({ mapH: Math.min(3200, d.mapH + 150) }))}
+            {dial('Generals like level', d.difficulty, () => set({ difficulty: Math.max(1, d.difficulty - 1) }), () => set({ difficulty: Math.min(CAMPAIGN_LEVELS, d.difficulty + 1) }))}
+            {dial('Fog (roads out)', d.fog || 'off', () => set({ fog: Math.max(0, d.fog - 1) }), () => set({ fog: Math.min(4, d.fog + 1) }))}
+            {dial('Truce (s)', d.truce || 'off', () => set({ truce: Math.max(0, d.truce - 15) }), () => set({ truce: Math.min(300, d.truce + 15) }))}
+            {dial('Roads shift (s)', d.shift || 'off', () => set({ shift: Math.max(0, d.shift - 15) }), () => set({ shift: Math.min(300, d.shift + 15) }))}
+            {dial('Hill to hold (s)', d.hill || 'off', () => set({ hill: Math.max(0, d.hill - 15) }), () => set({ hill: Math.min(300, d.hill + 15) }))}
+            <div className="pt-1 text-[11px] text-white/35">Owners cycle Neutral, You, Red, Amber, Violet, Cyan. Every side with ground needs an HQ. The hill needs a hub.</div>
+          </div>
+        )}
+      </div>
+    </>
+  );
+}
+
 export default function Game() {
   const [save, setSave] = useState<Save>(freshSave);
-  const [screen, setScreen] = useState<'menu' | 'armoury' | 'play' | 'room'>('menu');
+  const [screen, setScreen] = useState<'menu' | 'armoury' | 'play' | 'room' | 'designs' | 'design'>('menu');
+  const [designs, setDesigns] = useState<Design[]>([]);
+  const [design, setDesign] = useState<Design | null>(null);
+  const customRef = useRef<Design | null>(null);
   // The room this phone is in, while it is: the wire, the seat, and the
   // orders it has given that the host has not yet shown back.
   const roomRef = useRef<{ room: Room; seat: number; host: boolean; seq: number; seed: number; pending: { seq: number; a: Action }[]; acked: Record<number, number>; snapAt: number; players: { id: string; name: string; meta?: Record<MetaKey, number> }[] } | null>(null);
@@ -1472,7 +1689,7 @@ export default function Game() {
   const [intro, setIntro] = useState(false);
   // Which outpost the panel last showed, so a new pick flips it back to Outpost.
   const lastSelRef = useRef<number | null>(null);
-  const [run, setRun] = useState<{ level: number; endless: boolean; mp: 'team' | 'against' | null }>({ level: 1, endless: false, mp: null });
+  const [run, setRun] = useState<{ level: number; endless: boolean; mp: 'team' | 'against' | null; custom: string | null }>({ level: 1, endless: false, mp: null, custom: null });
 
   const worldRef = useRef<World | null>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
@@ -1522,10 +1739,25 @@ export default function Game() {
     pausedRef.current = true; speedRef.current = 0.5; sendPctRef.current = 1; settledRef.current = false;
     setIntro(true);
     dragRef.current = null;
-    setRun({ level, endless, mp: null });
+    setRun({ level, endless, mp: null, custom: null });
     setTab('post');
     setScreen('play');
     // Back onto home, near the bottom of the screen, at the fit.
+    camRef.current = { zoom: 1.3, cx: MAP_W / 2, cy: Infinity }; refitRef.current();
+  }, []);
+
+  /** A level of your own. */
+  const startCustom = useCallback((d: Design) => {
+    const s = loadSave();
+    ME = 1;
+    customRef.current = d;
+    worldRef.current = buildCustom(d, s.meta);
+    pausedRef.current = true; speedRef.current = 0.5; sendPctRef.current = 1; settledRef.current = false;
+    setIntro(true);
+    dragRef.current = null;
+    setRun({ level: 0, endless: false, mp: null, custom: d.name });
+    setTab('post');
+    setScreen('play');
     camRef.current = { zoom: 1.3, cx: MAP_W / 2, cy: Infinity }; refitRef.current();
   }, []);
 
@@ -1545,7 +1777,7 @@ export default function Game() {
     pausedRef.current = false; speedRef.current = 0.5; sendPctRef.current = 1; settledRef.current = false;
     setIntro(true); setHostGone(false);
     dragRef.current = null;
-    setRun({ level: tier, endless: false, mp: mode });
+    setRun({ level: tier, endless: false, mp: mode, custom: null });
     setTab('post');
     setScreen('play');
     camRef.current = { zoom: 1.3, cx: MAP_W / 2, cy: Infinity }; refitRef.current();
@@ -1663,7 +1895,9 @@ export default function Game() {
     if (settledRef.current) return;
     settledRef.current = true;
     const s = loadSave();
-    if (w.mp) {
+    if (w.rules.level === 200) {
+      // A level of your own pays nothing: it is yours to make as easy as you like.
+    } else if (w.mp) {
       if (resultFor(w, ME) === 'win') {
         s.scrap += w.mp.mode === 'team' ? 20 + 15 * w.rules.level : 30;
         if (w.mp.mode === 'team') s.teamBest = Math.max(s.teamBest, w.rules.level);
@@ -1937,7 +2171,6 @@ export default function Game() {
     WebkitTouchCallout: 'none', WebkitUserSelect: 'none', touchAction: 'manipulation', overscrollBehavior: 'none',
     fontFamily: '-apple-system, system-ui, sans-serif',
   };
-  const btn = 'rounded-xl font-bold active:scale-95 transition-transform disabled:opacity-30';
 
   if (screen === 'menu') {
     const endlessOpen = save.cleared >= ENDLESS_UNLOCK;
@@ -1973,6 +2206,7 @@ export default function Game() {
             {endlessOpen ? 'THE LONG WAR' : `The Long War unlocks after level ${ENDLESS_UNLOCK}`}
           </button>
           <button onClick={() => setScreen('room')} className={`${btn} mt-2 w-full bg-white/10 py-4 text-lg`}>WITH FRIENDS</button>
+          <button onClick={() => { setDesigns(loadDesigns()); setScreen('designs'); }} className={`${btn} mt-2 w-full bg-white/10 py-4 text-lg`}>DESIGN A LEVEL</button>
           <div className="mt-8 space-y-2 text-[13px] leading-snug text-white/50">
             <p><b className="text-white/80">Drag</b> from one of your outposts to any other to march. Columns take the shortest road through your ground and fight at the first outpost on it that is not yours, and columns that outnumber the defenders take the ground. <b className="text-white/80">Tap</b> an outpost to build on it, or give it a standing order to keep shipping troops somewhere.</p>
             <p>Outposts breed troops up to their cap. Gold trickles from everything you hold. Spend it on the picked outpost, or on tech for all of them.</p>
@@ -1981,6 +2215,48 @@ export default function Game() {
             <p className="text-white/30">Walls are inherited by whoever takes the outpost. Cannons are not.</p>
           </div>
         </div>
+      </div>
+    );
+  }
+
+  if (screen === 'designs') {
+    return (
+      <div className={shell} style={shellStyle}>
+        <div className="flex items-center justify-between px-5 py-4">
+          <button className={`${btn} bg-white/10 px-4 py-2 text-sm`} onClick={() => setScreen('menu')}>Back</button>
+          <button className={`${btn} bg-white px-4 py-2 text-sm text-black`} onClick={() => { setDesign(freshDesign()); setScreen('design'); }}>New level</button>
+        </div>
+        <div className="flex-1 overflow-y-auto px-5 pb-6">
+          <div className="text-2xl font-black">Your levels</div>
+          <div className="mt-1 text-sm text-white/50">Place outposts, draw roads, set who holds what, and play it. Saved on this phone. They pay no scrap.</div>
+          <div className="mt-4 space-y-2">
+            {designs.length === 0 && <div className="text-sm text-white/40">None yet.</div>}
+            {designs.map((x, i) => (
+              <div key={i} className="flex items-center justify-between rounded-2xl bg-white/5 px-4 py-3">
+                <div><div className="font-bold">{x.name}</div><div className="text-xs text-white/50">{x.nodes.length} outposts · {x.edges.length} roads{designFault(x) ? ' · unfinished' : ''}</div></div>
+                <div className="flex gap-1.5">
+                  <button className={`${btn} bg-white/10 px-3 py-2 text-sm`} onClick={() => { setDesign(x); setScreen('design'); }}>Edit</button>
+                  <button className={`${btn} bg-white/10 px-3 py-2 text-sm`} onClick={() => { if (confirm(`Delete ${x.name}?`)) { const ds = designs.filter((_, k) => k !== i); storeDesigns(ds); setDesigns(ds); } }}>Delete</button>
+                  <button disabled={!!designFault(x)} className={`${btn} bg-white px-3 py-2 text-sm text-black`} onClick={() => startCustom(x)}>Play</button>
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  if (screen === 'design' && design) {
+    const saveDesign = () => {
+      const ds = loadDesigns();
+      const i = ds.findIndex((x) => x.name === design.name);
+      if (i >= 0) ds[i] = design; else ds.push(design);
+      storeDesigns(ds); setDesigns(ds);
+    };
+    return (
+      <div className={shell} style={shellStyle}>
+        <Editor design={design} onChange={setDesign} onBack={() => { saveDesign(); setScreen('designs'); }} onPlay={() => { saveDesign(); startCustom(design); }} />
       </div>
     );
   }
@@ -2145,9 +2421,9 @@ export default function Game() {
   return (
     <div className={shell} style={shellStyle}>
       <div className="flex items-center justify-between px-3 pt-2 pb-1 text-[13px]">
-        <button className={`${btn} bg-white/10 px-3 py-1.5`} onClick={() => { leaveRoom(); setScreen('menu'); worldRef.current = null; }}>✕</button>
+        <button className={`${btn} bg-white/10 px-3 py-1.5`} onClick={() => { leaveRoom(); setScreen(run.custom ? 'designs' : 'menu'); worldRef.current = null; }}>✕</button>
         <div className="text-center">
-          <div className="font-black">{run.mp === 'team' ? `TEAM ${run.level}` : run.mp ? run.mp.toUpperCase() : run.endless ? 'LONG WAR' : `LEVEL ${run.level}`} <span className="text-white/40">· {clock(ui?.time ?? 0)}</span></div>
+          <div className="font-black">{run.custom ? run.custom.toUpperCase() : run.mp === 'team' ? `TEAM ${run.level}` : run.mp ? run.mp.toUpperCase() : run.endless ? 'LONG WAR' : `LEVEL ${run.level}`} <span className="text-white/40">· {clock(ui?.time ?? 0)}</span></div>
           <div className="text-[11px] text-white/45">{lobby && run.mp ? <span className="text-white/70">room <b className="tracking-widest">{lobby.code}</b> · </span> : ''}{ui?.mine ?? 0} vs {ui?.theirs ?? 0} outposts{(ui?.shiftT ?? 0) > 0 ? ` · roads shift in ${fmt(ui?.shiftT ?? 0)}s` : ''}{(ui?.truceT ?? 0) > 0 ? ` · truce ${fmt(ui?.truceT ?? 0)}s` : ''}{(ui?.hillNeed ?? 0) > 0 ? ` · hill ${fmt(ui?.hillT ?? 0)}/${ui?.hillNeed}s` : ''}{(ui?.generals ?? 1) > 1.005 ? ` · generals +${Math.round(((ui?.generals ?? 1) - 1) * 100)}%` : ''}</div>
         </div>
         <button className={`${btn} bg-white/10 px-3 py-1.5`} onClick={() => { if (confirm('Restart this level?')) start(run.level, run.endless); }}>↻</button>
@@ -2244,11 +2520,11 @@ export default function Game() {
         {ui?.over && (
           <div className="absolute inset-0 flex flex-col items-center justify-center bg-black/70 px-8 text-center">
             <div className={`text-5xl font-black ${ui.over === 'win' ? 'text-white' : 'text-[#ff3b3b]'}`}>{ui.over === 'win' ? 'HELD' : 'OVERRUN'}</div>
-            <div className="mt-2 text-white/60">{ui.over === 'win' ? `${run.mp === 'team' ? `Team ${run.level} cleared` : run.mp === 'against' ? 'Last one standing' : run.endless ? 'The long war won' : (ui.hillNeed ? 'The hill held' : `Level ${run.level} cleared`)} in ${clock(ui.time)}.` : `Fell at ${clock(ui.time)}.`}</div>
+            <div className="mt-2 text-white/60">{ui.over === 'win' ? `${run.custom ? `${run.custom} cleared` : run.mp === 'team' ? `Team ${run.level} cleared` : run.mp === 'against' ? 'Last one standing' : run.endless ? 'The long war won' : (ui.hillNeed ? 'The hill held' : `Level ${run.level} cleared`)} in ${clock(ui.time)}.` : `Fell at ${clock(ui.time)}.`}</div>
             {run.mp && !lobby?.host && <div className="mt-3 text-sm text-white/50">The host picks what comes next. Stay here.</div>}
             <div className="mt-6 flex gap-3">
               <button className={`${btn} bg-white/10 px-5 py-3`} onClick={() => { leaveRoom(); setScreen('menu'); worldRef.current = null; }}>Menu</button>
-              {!run.mp && <button className={`${btn} bg-white px-5 py-3 text-black`} onClick={() => start(run.level, run.endless)}>{ui.over === 'win' ? 'Again' : 'Retry'}</button>}
+              {!run.mp && <button className={`${btn} bg-white px-5 py-3 text-black`} onClick={() => (run.custom && customRef.current ? startCustom(customRef.current) : start(run.level, run.endless))}>{ui.over === 'win' ? 'Again' : 'Retry'}</button>}
               {run.mp === 'team' && lobby?.host && (
                 <>
                   <button className={`${btn} bg-white/10 px-5 py-3`} onClick={() => againMp(run.level)}>Again</button>
@@ -2256,7 +2532,7 @@ export default function Game() {
                 </>
               )}
               {run.mp === 'against' && lobby?.host && <button className={`${btn} bg-white px-5 py-3 text-black`} onClick={() => againMp(1)}>Again</button>}
-              {ui.over === 'win' && !run.endless && !run.mp && run.level < CAMPAIGN_LEVELS && (
+              {ui.over === 'win' && !run.endless && !run.mp && !run.custom && run.level < CAMPAIGN_LEVELS && (
                 <button className={`${btn} bg-white px-5 py-3 text-black`} onClick={() => start(run.level + 1, false)}>Next</button>
               )}
             </div>
