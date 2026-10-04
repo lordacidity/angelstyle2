@@ -1751,8 +1751,8 @@ export default function Game() {
             <button className={`${btn} pointer-events-auto whitespace-nowrap bg-[#1c1c1c] px-3 py-1.5`} onClick={() => act((w) => { for (const n of w.nodes) n.route = null; w.picking = null; w.picked = []; })}>Clear AS</button>
           </div>
           <div className="flex flex-col items-end gap-1.5">
-            <button className={`${btn} pointer-events-auto bg-[#1c1c1c] px-3 py-1.5`} onClick={() => { const steps = [0.5, 1, 2]; speedRef.current = steps[(steps.indexOf(speedRef.current) + 1) % steps.length]; }}>{ui?.speed ?? 1}×</button>
-            <button className={`${btn} pointer-events-auto bg-[#1c1c1c] px-3 py-1.5`} onClick={() => { pausedRef.current = !pausedRef.current; }}>{ui?.paused ? '▶' : '❚❚'}</button>
+            <button className={`${btn} pointer-events-auto min-w-[64px] bg-[#1c1c1c] px-4 py-2.5 text-[15px]`} onClick={() => { const steps = [0.5, 1, 2]; speedRef.current = steps[(steps.indexOf(speedRef.current) + 1) % steps.length]; }}>{ui?.speed ?? 1}×</button>
+            <button className={`${btn} pointer-events-auto min-w-[64px] bg-[#1c1c1c] px-4 py-2.5 text-[15px]`} onClick={() => { pausedRef.current = !pausedRef.current; }}>{ui?.paused ? '▶' : '❚❚'}</button>
             <div className="flex gap-1.5">
               <button className={`${btn} pointer-events-auto px-3 py-1.5 ${tab === 'post' ? 'bg-[#333333]' : 'bg-[#1c1c1c]'}`} onClick={() => setTab('post')}>Outpost</button>
               <button className={`${btn} pointer-events-auto px-3 py-1.5 ${tab === 'tech' ? 'bg-[#333333]' : 'bg-[#1c1c1c]'}`} onClick={() => setTab('tech')}>Tech</button>
