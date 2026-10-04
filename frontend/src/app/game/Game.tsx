@@ -195,6 +195,8 @@ interface Rules {
   neutralRamp?: number;
   /** How fast everyone breeds, against the usual (1): a long game runs slow. */
   tempo?: number;
+  /** A team room: how much of the map the generals hold from the start, and the garrison on each of those outposts. */
+  generalsShare?: number; generalsGarrison?: number;
 }
 /** In a team room the generals take no unclaimed ground past the middle of
  *  the map: the lower half is the humans' to win, and the fight comes to them. */
@@ -223,17 +225,24 @@ function resultFor(w: World, me: number): 'win' | 'lose' | null {
 
 /** A room's rules. Team: one big map, the generals at the far end, as many
  *  as there are humans. Against: a map for as many sides as humans, nobody else. */
-function rulesForMp(mode: 'team' | 'against', humans: number): Rules {
+const TEAM_TIERS = 8;
+function rulesForMp(mode: 'team' | 'against', humans: number, tier = 1): Rules {
   if (mode === 'against') return {
     level: 100, endless: false, humans, mp: mode, nodeCount: 12 + 7 * humans, enemies: 0, mapH: 700 + 300 * (humans - 1),
     aiInterval: 2, sendFrac: 0.6, aiMargin: 0.6, aiStageEvery: 3, aiSmart: 0, enemyExtra: 0, enemyGold: 0, neutralBase: 12,
     title: 'AGAINST', blurb: 'Every one of you for yourself. The last side standing drinks for free.',
   };
+  // Team: a ladder. Each tier the generals are more, richer, better walled
+  // and teched, hold more of the map, grow faster, and give less truce.
+  const t = Math.max(0, Math.min(TEAM_TIERS, tier) - 1);
+  const generals = Math.min(8 - humans, humans + Math.floor((t + 1) / 2));
   return {
-    level: 101, endless: false, humans, mp: mode, nodeCount: 24 + 16 * humans, enemies: humans, mapH: 1200 + 500 * humans,
-    aiInterval: 1.2, sendFrac: 0.7, aiMargin: 0.8, aiStageEvery: 1, aiSmart: 2, enemyExtra: 0, enemyGold: 250 + 75 * humans, neutralBase: 20, enemyTech: 1,
-    fortress: true, enemyWalls: 1, fog: 3, truce: 90, escalate: 0.02, mines: 2 + humans, neutralRamp: 14, tempo: 0.35,
-    title: 'TEAM', blurb: 'All of you, one side. The generals hold the top of the map, fortified, with tech from the start, and they grow 2% stronger every minute. Everyone breeds slowly here: it is a long war, and the ground gets harder to take the farther up you go. They never come past the middle on their own: you go to them. You cannot hurt each other: a march onto a friend\'s outpost joins it, you share eyes in the fog, and you can give a friend an outpost. A minute and a half of truce to dig in. Your Armouries count.',
+    level: t + 1, endless: false, humans, mp: mode, nodeCount: 24 + 16 * humans, enemies: generals, mapH: 1200 + 500 * humans,
+    aiInterval: Math.max(0.8, 1.2 - 0.05 * t), sendFrac: 0.7, aiMargin: Math.min(0.92, 0.8 + 0.02 * t), aiStageEvery: 1, aiSmart: 2, enemyExtra: 0,
+    enemyGold: Math.round((250 + 75 * humans) * (1 + 0.5 * t)), neutralBase: 20 + 4 * t, enemyTech: 1 + Math.floor(t / 2),
+    fortress: true, enemyWalls: 1 + Math.floor(t / 2), fog: 3, truce: Math.max(30, 90 - 10 * t), escalate: 0.02 + 0.01 * t, mines: 2 + humans,
+    neutralRamp: 14 + 3 * t, tempo: 0.35, generalsShare: 0.25 + 0.04 * t, generalsGarrison: 40 + 25 * t,
+    title: `TEAM ${t + 1}`, blurb: `Team ${t + 1} of ${TEAM_TIERS}. ${generals} generals hold the top ${Math.round((0.25 + 0.04 * t) * 100)}% of the map, fortified, with tech, and grow ${2 + t}% stronger every minute. They never come past the middle on their own: you go to them. A march onto a friend's outpost joins it, you share eyes, and you can give a friend an outpost. ${Math.max(30, 90 - 10 * t)}s of truce. Your Armouries count.`,
   };
 }
 
@@ -557,9 +566,9 @@ function buildWorld(rules: Rules, meta: Record<MetaKey, number>, seedExtra = 0, 
   if (rules.mp === 'team') {
     const hqs = factions.map((f) => nodes.find((n) => n.base && n.owner === f.id)!);
     for (const n of nodes) {
-      if (n.owner !== 0 || n.y > rules.mapH * 0.25 || !hqs.length) continue;
+      if (n.owner !== 0 || n.y > rules.mapH * (rules.generalsShare ?? 0.25) || !hqs.length) continue;
       const near = hqs.reduce((a, b) => (Math.hypot(a.x - n.x, a.y - n.y) < Math.hypot(b.x - n.x, b.y - n.y) ? a : b));
-      n.owner = near.owner; n.troops = 40; n.wall = rules.enemyWalls ?? 0;
+      n.owner = near.owner; n.troops = rules.generalsGarrison ?? 40; n.wall = rules.enemyWalls ?? 0;
     }
   }
   for (const n of nodes) {
@@ -1453,7 +1462,7 @@ export default function Game() {
   // The room this phone is in, while it is: the wire, the seat, and the
   // orders it has given that the host has not yet shown back.
   const roomRef = useRef<{ room: Room; seat: number; host: boolean; seq: number; pending: { seq: number; a: Action }[]; acked: Record<number, number>; snapAt: number; players: { id: string; name: string }[] } | null>(null);
-  const [lobby, setLobby] = useState<{ code: string; meId: string; host: boolean; mode: 'team' | 'against'; peers: Peer[]; state: string; err: string | null } | null>(null);
+  const [lobby, setLobby] = useState<{ code: string; meId: string; host: boolean; mode: 'team' | 'against'; tier: number; peers: Peer[]; state: string; err: string | null } | null>(null);
   const [myName, setMyName] = useState('');
   const [joinCode, setJoinCode] = useState('');
   const [hostGone, setHostGone] = useState(false);
@@ -1521,7 +1530,7 @@ export default function Game() {
   }, []);
 
   /** A room's game begins: the same world on every phone, from the host's seed. */
-  const startMp = useCallback((mode: 'team' | 'against', seed: number, players: { id: string; name: string; meta?: Record<MetaKey, number> }[]) => {
+  const startMp = useCallback((mode: 'team' | 'against', seed: number, players: { id: string; name: string; meta?: Record<MetaKey, number> }[], tier = 1) => {
     const r = roomRef.current; if (!r) return;
     const seat = players.findIndex((x) => x.id === r.room.me.id) + 1;
     if (seat < 1) return;
@@ -1529,14 +1538,14 @@ export default function Game() {
     r.seat = seat; r.players = players; r.seq = 0; r.pending = []; r.acked = {}; r.snapAt = 0;
     const metas: Record<number, Record<MetaKey, number>> = {};
     players.forEach((x, i) => { metas[i + 1] = { ...freshSave().meta, ...(x.meta ?? {}) }; });
-    const w = buildWorld(rulesForMp(mode, players.length), freshSave().meta, seed, metas);
+    const w = buildWorld(rulesForMp(mode, players.length, tier), freshSave().meta, seed, metas);
     if (w.mp) players.forEach((x, i) => { w.mp!.names[i + 1] = x.name; });
     worldRef.current = w;
     // A room runs at the slow speed, never paused: four phones share one clock.
     pausedRef.current = false; speedRef.current = 0.5; sendPctRef.current = 1; settledRef.current = false;
     setIntro(true); setHostGone(false);
     dragRef.current = null;
-    setRun({ level: 0, endless: false, mp: mode });
+    setRun({ level: tier, endless: false, mp: mode });
     setTab('post');
     setScreen('play');
     camRef.current = { zoom: 1.3, cx: MAP_W / 2, cy: Infinity }; refitRef.current();
@@ -1549,7 +1558,7 @@ export default function Game() {
     roomRef.current?.room.leave();
     const room = new Room(code, name, host, loadSave().meta);
     roomRef.current = { room, seat: 0, host, seq: 0, pending: [], acked: {}, snapAt: 0, players: [] };
-    setLobby({ code: room.code, meId: room.me.id, host, mode, peers: [], state: 'joining', err: null });
+    setLobby({ code: room.code, meId: room.me.id, host, mode, tier: 1, peers: [], state: 'joining', err: null });
     room.onState = (st) => setLobby((l) => (l ? { ...l, state: st, err: st === 'error' ? 'Could not reach the room. Check the signal and try again.' : l.err } : l));
     room.onPeers = (peers) => {
       setLobby((l) => (l ? { ...l, peers } : l));
@@ -1559,7 +1568,7 @@ export default function Game() {
     };
     room.onMsg = (m) => {
       const r = roomRef.current; if (!r) return;
-      if (m.ev === 'start') { startMp(m.mode, m.seed, m.players); return; }
+      if (m.ev === 'start') { startMp(m.mode, m.seed, m.players, m.tier ?? 1); return; }
       const w = worldRef.current; if (!w) return;
       if (m.ev === 'act' && r.host) {
         applyAction(w, m.p, m.a as Action);
@@ -1595,7 +1604,7 @@ export default function Game() {
     settledRef.current = true;
     const s = loadSave();
     if (w.mp) {
-      if (resultFor(w, ME) === 'win') s.scrap += 30;
+      if (resultFor(w, ME) === 'win') s.scrap += w.mp.mode === 'team' ? 20 + 15 * w.rules.level : 30;
     } else if (w.rules.endless) {
       s.scrap += w.over === 'win' ? 120 : Math.min(20, Math.floor(w.time / 30));
       if (w.over === 'win') s.bestTime = s.bestTime ? Math.min(s.bestTime, Math.floor(w.time)) : Math.floor(w.time);
@@ -1918,8 +1927,8 @@ export default function Game() {
       const r = roomRef.current; if (!r || !l) return;
       const players = l.peers.slice(0, 4).map((p) => ({ id: p.id, name: p.name, meta: p.meta }));
       const seed = Math.floor(Math.random() * 1e9);
-      r.room.send({ ev: 'start', mode: l.mode, seed, players });
-      startMp(l.mode, seed, players);
+      r.room.send({ ev: 'start', mode: l.mode, seed, players, tier: l.tier });
+      startMp(l.mode, seed, players, l.tier);
     };
     return (
       <div className={shell} style={shellStyle}>
@@ -1960,6 +1969,18 @@ export default function Game() {
                 <div className="text-5xl font-black tracking-[0.25em]">{l.code}</div>
                 {l.host && <div className="mt-1 text-sm text-black/60">{l.mode === 'team' ? 'Team: all of you against the generals' : 'Against: every one for themselves'}</div>}
               </div>
+              {l.host && l.mode === 'team' && (
+                <>
+                  <div className="mt-4 text-[11px] uppercase tracking-wider text-white/40">Team level · {l.tier} of {TEAM_TIERS}</div>
+                  <div className="mt-2 grid grid-cols-8 gap-1.5">
+                    {Array.from({ length: TEAM_TIERS }, (_, i) => i + 1).map((t) => (
+                      <button key={t} onClick={() => setLobby((x) => (x ? { ...x, tier: t } : x))}
+                        className={`${btn} aspect-square text-base ${l.tier === t ? 'bg-white text-black' : 'bg-white/10'}`}>{t}</button>
+                    ))}
+                  </div>
+                  <div className="mt-1.5 text-[11px] text-white/40">Higher: more generals, richer, better walled, more of the map, faster growth, less truce.</div>
+                </>
+              )}
               <div className="mt-4 text-[11px] uppercase tracking-wider text-white/40">{l.state === 'open' ? `In the room · ${l.peers.length}` : l.state === 'joining' ? 'Connecting…' : l.state}</div>
               {l.err && <div className="mt-2 text-sm text-[#ff3b3b]">{l.err}</div>}
               <div className="mt-2 space-y-1.5">
@@ -2061,7 +2082,7 @@ export default function Game() {
       <div className="flex items-center justify-between px-3 pt-2 pb-1 text-[13px]">
         <button className={`${btn} bg-white/10 px-3 py-1.5`} onClick={() => { leaveRoom(); setScreen('menu'); worldRef.current = null; }}>✕</button>
         <div className="text-center">
-          <div className="font-black">{run.mp ? run.mp.toUpperCase() : run.endless ? 'LONG WAR' : `LEVEL ${run.level}`} <span className="text-white/40">· {clock(ui?.time ?? 0)}</span></div>
+          <div className="font-black">{run.mp === 'team' ? `TEAM ${run.level}` : run.mp ? run.mp.toUpperCase() : run.endless ? 'LONG WAR' : `LEVEL ${run.level}`} <span className="text-white/40">· {clock(ui?.time ?? 0)}</span></div>
           <div className="text-[11px] text-white/45">{ui?.mine ?? 0} vs {ui?.theirs ?? 0} outposts{(ui?.shiftT ?? 0) > 0 ? ` · roads shift in ${fmt(ui?.shiftT ?? 0)}s` : ''}{(ui?.truceT ?? 0) > 0 ? ` · truce ${fmt(ui?.truceT ?? 0)}s` : ''}{(ui?.hillNeed ?? 0) > 0 ? ` · hill ${fmt(ui?.hillT ?? 0)}/${ui?.hillNeed}s` : ''}{(ui?.generals ?? 1) > 1.005 ? ` · generals +${Math.round(((ui?.generals ?? 1) - 1) * 100)}%` : ''}</div>
         </div>
         <button className={`${btn} bg-white/10 px-3 py-1.5`} onClick={() => { if (confirm('Restart this level?')) start(run.level, run.endless); }}>↻</button>
@@ -2155,7 +2176,7 @@ export default function Game() {
         {ui?.over && (
           <div className="absolute inset-0 flex flex-col items-center justify-center bg-black/70 px-8 text-center">
             <div className={`text-5xl font-black ${ui.over === 'win' ? 'text-white' : 'text-[#ff3b3b]'}`}>{ui.over === 'win' ? 'HELD' : 'OVERRUN'}</div>
-            <div className="mt-2 text-white/60">{ui.over === 'win' ? `${run.mp === 'team' ? 'The generals broken' : run.mp === 'against' ? 'Last one standing' : run.endless ? 'The long war won' : (ui.hillNeed ? 'The hill held' : `Level ${run.level} cleared`)} in ${clock(ui.time)}.` : `Fell at ${clock(ui.time)}.`}</div>
+            <div className="mt-2 text-white/60">{ui.over === 'win' ? `${run.mp === 'team' ? `Team ${run.level} cleared` : run.mp === 'against' ? 'Last one standing' : run.endless ? 'The long war won' : (ui.hillNeed ? 'The hill held' : `Level ${run.level} cleared`)} in ${clock(ui.time)}.` : `Fell at ${clock(ui.time)}.`}</div>
             <div className="mt-6 flex gap-3">
               <button className={`${btn} bg-white/10 px-5 py-3`} onClick={() => { leaveRoom(); setScreen('menu'); worldRef.current = null; }}>Menu</button>
               {!run.mp && <button className={`${btn} bg-white px-5 py-3 text-black`} onClick={() => start(run.level, run.endless)}>{ui.over === 'win' ? 'Again' : 'Retry'}</button>}
