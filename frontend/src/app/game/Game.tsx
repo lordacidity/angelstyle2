@@ -238,11 +238,11 @@ function rulesForMp(mode: 'team' | 'against', humans: number, tier = 1): Rules {
   const generals = Math.min(8 - humans, humans + Math.floor((t + 1) / 2));
   return {
     level: t + 1, endless: false, humans, mp: mode, nodeCount: 24 + 16 * humans, enemies: generals, mapH: 1200 + 500 * humans,
-    aiInterval: Math.max(0.8, 1.2 - 0.05 * t), sendFrac: 0.7, aiMargin: Math.min(0.92, 0.8 + 0.02 * t), aiStageEvery: 1, aiSmart: 2, enemyExtra: 0,
-    enemyGold: Math.round((250 + 75 * humans) * (1 + 0.5 * t)), neutralBase: 20 + 4 * t, enemyTech: 1 + Math.floor(t / 2),
-    fortress: true, enemyWalls: 1 + Math.floor(t / 2), fog: 3, truce: Math.max(30, 90 - 10 * t), escalate: 0.02 + 0.01 * t, mines: 2 + humans,
-    neutralRamp: 14 + 3 * t, tempo: 0.35, generalsShare: 0.25 + 0.04 * t, generalsGarrison: 40 + 25 * t,
-    title: `TEAM ${t + 1}`, blurb: `Team ${t + 1} of ${TEAM_TIERS}. ${generals} generals hold the top ${Math.round((0.25 + 0.04 * t) * 100)}% of the map, fortified, with tech, and grow ${2 + t}% stronger every minute. They never come past the middle on their own: you go to them. A march onto a friend's outpost joins it, you share eyes, and you can give a friend an outpost. ${Math.max(30, 90 - 10 * t)}s of truce. Your Armouries count.`,
+    aiInterval: Math.max(0.8, 1.1 - 0.05 * t), sendFrac: 0.7, aiMargin: Math.min(0.92, 0.82 + 0.02 * t), aiStageEvery: 1, aiSmart: 2, enemyExtra: 0,
+    enemyGold: Math.round((350 + 100 * humans) * (1 + 0.6 * t)), neutralBase: 24 + 5 * t, enemyTech: 1 + Math.ceil(t / 2),
+    fortress: true, enemyWalls: 1 + Math.ceil(t / 2), fog: 3, truce: Math.max(30, 80 - 10 * t), escalate: 0.03 + 0.012 * t, mines: 2 + humans,
+    neutralRamp: 18 + 4 * t, tempo: 0.35, generalsShare: 0.3 + 0.04 * t, generalsGarrison: 60 + 30 * t,
+    title: `TEAM ${t + 1}`, blurb: `Team ${t + 1} of ${TEAM_TIERS}. ${generals} generals hold the top ${Math.round((0.3 + 0.04 * t) * 100)}% of the map, fortified, with tech, and grow ${Math.round((0.03 + 0.012 * t) * 100)}% stronger every minute. They never come past the middle on their own: you go to them. A march onto a friend's outpost joins it, you share eyes, and you can give a friend an outpost. ${Math.max(30, 80 - 10 * t)}s of truce. Your Armouries count.`,
   };
 }
 
@@ -1461,7 +1461,7 @@ export default function Game() {
   const [screen, setScreen] = useState<'menu' | 'armoury' | 'play' | 'room'>('menu');
   // The room this phone is in, while it is: the wire, the seat, and the
   // orders it has given that the host has not yet shown back.
-  const roomRef = useRef<{ room: Room; seat: number; host: boolean; seq: number; pending: { seq: number; a: Action }[]; acked: Record<number, number>; snapAt: number; players: { id: string; name: string }[] } | null>(null);
+  const roomRef = useRef<{ room: Room; seat: number; host: boolean; seq: number; seed: number; pending: { seq: number; a: Action }[]; acked: Record<number, number>; snapAt: number; players: { id: string; name: string; meta?: Record<MetaKey, number> }[] } | null>(null);
   const [lobby, setLobby] = useState<{ code: string; meId: string; host: boolean; mode: 'team' | 'against'; tier: number; peers: Peer[]; state: string; err: string | null } | null>(null);
   const [myName, setMyName] = useState('');
   const [joinCode, setJoinCode] = useState('');
@@ -1535,7 +1535,7 @@ export default function Game() {
     const seat = players.findIndex((x) => x.id === r.room.me.id) + 1;
     if (seat < 1) return;
     ME = seat;
-    r.seat = seat; r.players = players; r.seq = 0; r.pending = []; r.acked = {}; r.snapAt = 0;
+    r.seat = seat; r.players = players; r.seed = seed; r.seq = 0; r.pending = []; r.acked = {}; r.snapAt = 0;
     const metas: Record<number, Record<MetaKey, number>> = {};
     players.forEach((x, i) => { metas[i + 1] = { ...freshSave().meta, ...(x.meta ?? {}) }; });
     const w = buildWorld(rulesForMp(mode, players.length, tier), freshSave().meta, seed, metas);
@@ -1557,18 +1557,41 @@ export default function Game() {
     try { localStorage.setItem('redline.name', name); } catch { /* private mode */ }
     roomRef.current?.room.leave();
     const room = new Room(code, name, host, loadSave().meta);
-    roomRef.current = { room, seat: 0, host, seq: 0, pending: [], acked: {}, snapAt: 0, players: [] };
+    roomRef.current = { room, seat: 0, host, seq: 0, seed: 0, pending: [], acked: {}, snapAt: 0, players: [] };
     setLobby({ code: room.code, meId: room.me.id, host, mode, tier: 1, peers: [], state: 'joining', err: null });
     room.onState = (st) => setLobby((l) => (l ? { ...l, state: st, err: st === 'error' ? 'Could not reach the room. Check the signal and try again.' : l.err } : l));
     room.onPeers = (peers) => {
       setLobby((l) => (l ? { ...l, peers } : l));
-      // The host gone mid-game ends it for everyone.
       const r = roomRef.current;
+      // The host gone mid-game ends it for everyone.
       if (r && !r.host && r.seat > 0 && !peers.some((p) => p.host)) setHostGone(true);
+      // The host, mid-game: a phone back under a seat's name takes that seat
+      // again, and gets the game as it stands.
+      const w = worldRef.current;
+      if (r && r.host && r.seat > 0 && w && w.mp) {
+        const known = new Set(r.players.map((x) => x.id));
+        for (const p of peers) {
+          if (known.has(p.id)) continue;
+          const i = r.players.findIndex((x) => x.name.toLowerCase() === p.name.toLowerCase() && !peers.some((q) => q.id === x.id));
+          if (i < 0) continue;
+          r.players[i] = { ...r.players[i], id: p.id };
+          r.acked[i + 1] = 0;
+          if (w.mp) w.mp.names[i + 1] = r.players[i].name;
+          r.room.send({ ev: 'resume', mode: w.mp.mode, seed: r.seed, players: r.players, tier: w.rules.level, snap: packWorld(w), acked: r.acked });
+        }
+      }
     };
     room.onMsg = (m) => {
       const r = roomRef.current; if (!r) return;
       if (m.ev === 'start') { startMp(m.mode, m.seed, m.players, m.tier ?? 1); return; }
+      if (m.ev === 'resume') {
+        // A game already running, handed to this phone: only if it is for this phone and it has none.
+        if (r.seat > 0 || !m.players.some((x) => x.id === r.room.me.id)) return;
+        startMp(m.mode, m.seed, m.players, m.tier ?? 1);
+        const w2 = worldRef.current; if (w2) unpackWorld(w2, m.snap as Snap);
+        setIntro(false);
+        return;
+      }
       const w = worldRef.current; if (!w) return;
       if (m.ev === 'act' && r.host) {
         applyAction(w, m.p, m.a as Action);
@@ -1582,6 +1605,14 @@ export default function Game() {
       } else if (m.ev === 'end') { setHostGone(true); }
     };
   }, [myName, startMp]);
+
+  /** The host takes the room into another game: the same seats, a new map. */
+  const againMp = useCallback((tier: number) => {
+    const r = roomRef.current; const w = worldRef.current; if (!r || !r.host || !w || !w.mp) return;
+    const seed = Math.floor(Math.random() * 1e9);
+    r.room.send({ ev: 'start', mode: w.mp.mode, seed, players: r.players, tier });
+    startMp(w.mp.mode, seed, r.players, tier);
+  }, [startMp]);
 
   const leaveRoom = useCallback(() => {
     const r = roomRef.current;
@@ -2083,7 +2114,7 @@ export default function Game() {
         <button className={`${btn} bg-white/10 px-3 py-1.5`} onClick={() => { leaveRoom(); setScreen('menu'); worldRef.current = null; }}>✕</button>
         <div className="text-center">
           <div className="font-black">{run.mp === 'team' ? `TEAM ${run.level}` : run.mp ? run.mp.toUpperCase() : run.endless ? 'LONG WAR' : `LEVEL ${run.level}`} <span className="text-white/40">· {clock(ui?.time ?? 0)}</span></div>
-          <div className="text-[11px] text-white/45">{ui?.mine ?? 0} vs {ui?.theirs ?? 0} outposts{(ui?.shiftT ?? 0) > 0 ? ` · roads shift in ${fmt(ui?.shiftT ?? 0)}s` : ''}{(ui?.truceT ?? 0) > 0 ? ` · truce ${fmt(ui?.truceT ?? 0)}s` : ''}{(ui?.hillNeed ?? 0) > 0 ? ` · hill ${fmt(ui?.hillT ?? 0)}/${ui?.hillNeed}s` : ''}{(ui?.generals ?? 1) > 1.005 ? ` · generals +${Math.round(((ui?.generals ?? 1) - 1) * 100)}%` : ''}</div>
+          <div className="text-[11px] text-white/45">{lobby && run.mp ? <span className="text-white/70">room <b className="tracking-widest">{lobby.code}</b> · </span> : ''}{ui?.mine ?? 0} vs {ui?.theirs ?? 0} outposts{(ui?.shiftT ?? 0) > 0 ? ` · roads shift in ${fmt(ui?.shiftT ?? 0)}s` : ''}{(ui?.truceT ?? 0) > 0 ? ` · truce ${fmt(ui?.truceT ?? 0)}s` : ''}{(ui?.hillNeed ?? 0) > 0 ? ` · hill ${fmt(ui?.hillT ?? 0)}/${ui?.hillNeed}s` : ''}{(ui?.generals ?? 1) > 1.005 ? ` · generals +${Math.round(((ui?.generals ?? 1) - 1) * 100)}%` : ''}</div>
         </div>
         <button className={`${btn} bg-white/10 px-3 py-1.5`} onClick={() => { if (confirm('Restart this level?')) start(run.level, run.endless); }}>↻</button>
       </div>
@@ -2177,9 +2208,17 @@ export default function Game() {
           <div className="absolute inset-0 flex flex-col items-center justify-center bg-black/70 px-8 text-center">
             <div className={`text-5xl font-black ${ui.over === 'win' ? 'text-white' : 'text-[#ff3b3b]'}`}>{ui.over === 'win' ? 'HELD' : 'OVERRUN'}</div>
             <div className="mt-2 text-white/60">{ui.over === 'win' ? `${run.mp === 'team' ? `Team ${run.level} cleared` : run.mp === 'against' ? 'Last one standing' : run.endless ? 'The long war won' : (ui.hillNeed ? 'The hill held' : `Level ${run.level} cleared`)} in ${clock(ui.time)}.` : `Fell at ${clock(ui.time)}.`}</div>
+            {run.mp && !lobby?.host && <div className="mt-3 text-sm text-white/50">The host picks what comes next. Stay here.</div>}
             <div className="mt-6 flex gap-3">
               <button className={`${btn} bg-white/10 px-5 py-3`} onClick={() => { leaveRoom(); setScreen('menu'); worldRef.current = null; }}>Menu</button>
               {!run.mp && <button className={`${btn} bg-white px-5 py-3 text-black`} onClick={() => start(run.level, run.endless)}>{ui.over === 'win' ? 'Again' : 'Retry'}</button>}
+              {run.mp === 'team' && lobby?.host && (
+                <>
+                  <button className={`${btn} bg-white/10 px-5 py-3`} onClick={() => againMp(run.level)}>Again</button>
+                  {ui.over === 'win' && run.level < TEAM_TIERS && <button className={`${btn} bg-white px-5 py-3 text-black`} onClick={() => againMp(run.level + 1)}>Team {run.level + 1}</button>}
+                </>
+              )}
+              {run.mp === 'against' && lobby?.host && <button className={`${btn} bg-white px-5 py-3 text-black`} onClick={() => againMp(1)}>Again</button>}
               {ui.over === 'win' && !run.endless && !run.mp && run.level < CAMPAIGN_LEVELS && (
                 <button className={`${btn} bg-white px-5 py-3 text-black`} onClick={() => start(run.level + 1, false)}>Next</button>
               )}

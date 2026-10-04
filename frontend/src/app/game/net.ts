@@ -21,6 +21,7 @@ function sb(): SupabaseClient {
 export interface Peer { id: string; name: string; host: boolean; joined: number; meta?: Record<string, number> }
 export type Msg =
   | { ev: 'start'; mode: 'team' | 'against'; seed: number; players: { id: string; name: string; meta?: Record<string, number> }[]; tier?: number }
+  | { ev: 'resume'; mode: 'team' | 'against'; seed: number; players: { id: string; name: string; meta?: Record<string, number> }[]; tier: number; snap: unknown; acked: Record<number, number> }
   | { ev: 'act'; p: number; seq: number; a: unknown }
   | { ev: 'snap'; snap: unknown; acked: Record<number, number> }
   | { ev: 'end'; why: string };
