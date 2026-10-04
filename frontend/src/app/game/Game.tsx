@@ -143,7 +143,9 @@ interface Node {
   /** Upgrades set to buy themselves. Yours only. */
   auto: Partial<Record<UpgKey, Auto>>;
 }
-interface Edge { a: number; b: number; len: number }
+interface Edge { a: number; b: number; len: number; tunnel?: boolean }
+const TUNNEL_COST = 50;
+const edgeOf = (w: World, a: number, b: number) => w.edges.find((e) => (e.a === a && e.b === b) || (e.a === b && e.b === a));
 /** An upgrade or tech buying itself: the order it was switched on, and 1
  *  while its next level goes ahead of everything else. */
 interface Auto { order: number; prio: number }
@@ -265,6 +267,8 @@ interface World {
   selected: number | null;
   /** The outpost whose standing order is being pointed at, while it is. */
   picking: number | null;
+  /** The outpost a tunnel is being dug from, while a neighbour is being pointed at. */
+  tunneling: number | null;
   /** How many targets the order being pointed at takes, and those tapped so far. */
   pickN: number; picked: number[];
   /** Shifting sands: seconds to the next shift. */
@@ -607,7 +611,7 @@ function buildWorld(rules: Rules, meta: Record<MetaKey, number>, seedExtra = 0, 
     rules, nodes, edges, adj, convoys: [], shots: [], factions,
     econ, mp: rules.mp ? { mode: rules.mp, names: {} } : null, time: 0,
     nextId: 1,
-    over: null, flash: null, selected: null, picking: null, pickN: 1, picked: [], shiftT: rules.shift ?? 0, hillT: 0,
+    over: null, flash: null, selected: null, picking: null, tunneling: null, pickN: 1, picked: [], shiftT: rules.shift ?? 0, hillT: 0,
   };
 }
 
@@ -1029,7 +1033,7 @@ function step(w: World, dt: number) {
     if (n.cd > 0) continue;
     let target: Convoy | null = null; let td = cannonRange(n, w);
     for (const c of w.convoys) {
-      if (isAlly(w, c.owner, n.owner)) continue;
+      if (isAlly(w, c.owner, n.owner) || edgeOf(w, c.from, c.to)?.tunnel) continue;
       const p = convoyPos(w, c);
       const d = Math.hypot(p.x - n.x, p.y - n.y);
       if (d < td) { td = d; target = c; }
@@ -1164,7 +1168,8 @@ type Action =
   | { k: 'auto'; id: number; key: UpgKey } | { k: 'autoTech'; key: TechKey }
   | { k: 'next'; id: number; key: UpgKey } | { k: 'nextTech'; key: TechKey }
   | { k: 'route'; id: number; to: number[] | null }
-  | { k: 'clearAS' } | { k: 'clearAU' } | { k: 'mine'; id: number } | { k: 'give'; id: number; to: number };
+  | { k: 'clearAS' } | { k: 'clearAU' } | { k: 'mine'; id: number } | { k: 'give'; id: number; to: number }
+  | { k: 'tunnel'; a: number; b: number };
 
 function applyAction(w: World, p: number, a: Action) {
   if (w.over || !isHuman(w, p)) return;
@@ -1189,6 +1194,14 @@ function applyAction(w: World, p: number, a: Action) {
     case 'clearAS': for (const n of w.nodes) if (n.owner === p) n.route = null; break;
     case 'clearAU': for (const n of w.nodes) if (n.owner === p) n.auto = {}; e.autoTech = {}; break;
     case 'mine': if (own(a.id)) digMine(w, a.id); break;
+    case 'tunnel': {
+      // A tunnel under a road of yours to a neighbour: nothing on it can be shot, whoever marches it.
+      if (!own(a.a)) break;
+      const e = edgeOf(w, a.a, a.b);
+      if (!e || e.tunnel || econ(w, p).gold < TUNNEL_COST) break;
+      econ(w, p).gold -= TUNNEL_COST; e.tunnel = true;
+      break;
+    }
     case 'give': {
       if (!own(a.id) || !isHuman(w, a.to) || a.to === p || !isAlly(w, p, a.to)) break;
       const n = w.nodes[a.id];
@@ -1251,7 +1264,7 @@ function buildCustom(d: Design, meta: Record<MetaKey, number>): World {
   return {
     rules, nodes, edges, adj, convoys: [], shots: [], factions,
     econ, mp: null, time: 0, nextId: 1,
-    over: null, flash: null, selected: null, picking: null, pickN: 1, picked: [], shiftT: rules.shift ?? 0, hillT: 0,
+    over: null, flash: null, selected: null, picking: null, tunneling: null, pickN: 1, picked: [], shiftT: rules.shift ?? 0, hillT: 0,
   };
 }
 
@@ -1260,7 +1273,7 @@ function buildCustom(d: Design, meta: Record<MetaKey, number>): World {
 // itself never changes in a room (no shifting roads there).
 
 const r2 = (x: number) => Math.round(x * 100) / 100;
-type Snap = { t: number; over: World['over']; nextId: number; nodes: unknown[][]; convoys: unknown[][]; factions: Faction[]; econ: Record<number, Econ> };
+type Snap = { t: number; over: World['over']; nextId: number; nodes: unknown[][]; convoys: unknown[][]; factions: Faction[]; econ: Record<number, Econ>; tunnels?: number[] };
 function packWorld(w: World): Snap {
   return {
     t: r2(w.time), over: w.over, nextId: w.nextId,
@@ -1268,6 +1281,7 @@ function packWorld(w: World): Snap {
     convoys: w.convoys.map((c) => [c.id, c.owner, r2(c.n), c.from, c.to, r2(c.t * 1000) / 1000, r2(c.dur), c.path, c.leg]),
     factions: w.factions.map((f) => ({ ...f, tech: { ...f.tech } })),
     econ: w.econ,
+    tunnels: w.edges.map((e, i) => (e.tunnel ? i : -1)).filter((i) => i >= 0),
   };
 }
 function unpackWorld(w: World, s: Snap) {
@@ -1281,6 +1295,7 @@ function unpackWorld(w: World, s: Snap) {
   w.convoys = s.convoys.map((r) => { const [id, owner, n, from, to, t, dur, path, leg] = r as [number, number, number, number, number, number, number, number[], number]; return { id, owner, n, from, to, t, dur, path, leg }; });
   w.factions = s.factions.map((f) => ({ ...f, tech: { ...f.tech } }));
   w.econ = s.econ;
+  if (s.tunnels) { const t = new Set(s.tunnels); w.edges.forEach((e, i) => { e.tunnel = t.has(i); }); }
   // A picked outpost that is no longer yours is let go of.
   if (w.selected !== null && w.picking !== null && w.nodes[w.picking].owner !== ME) { w.picking = null; w.picked = []; }
 }
@@ -1311,9 +1326,12 @@ function draw(ctx: CanvasRenderingContext2D, w: World, view: { s: number; ox: nu
     if (seen && !(seen.has(e.a) && seen.has(e.b))) continue;
     const a = w.nodes[e.a], b = w.nodes[e.b];
     const sel = w.selected !== null && (e.a === w.selected || e.b === w.selected) && w.nodes[w.selected].owner === ME;
-    ctx.strokeStyle = sel ? 'rgba(255,255,255,0.6)' : '#1c1c1c';
-    ctx.lineWidth = sel ? 3 : 2;
+    const digging = w.tunneling !== null && (e.a === w.tunneling || e.b === w.tunneling) && !e.tunnel;
+    ctx.strokeStyle = digging ? '#ffd166' : sel ? 'rgba(255,255,255,0.6)' : e.tunnel ? '#4a4a4a' : '#1c1c1c';
+    ctx.lineWidth = sel || digging ? 3 : e.tunnel ? 5 : 2;
+    if (e.tunnel) ctx.setLineDash([2, 7]);
     ctx.beginPath(); ctx.moveTo(a.x, a.y); ctx.lineTo(b.x, b.y); ctx.stroke();
+    ctx.setLineDash([]);
   }
   // Drag line.
   if (drag) {
@@ -1497,7 +1515,7 @@ interface Ui {
   selProdPerMin: number; selHold: number;
   /** Everything you hold, breeding, a minute (full outposts breed nothing), and the gold it pays. */
   prodPerMin: number; goldPerMin: number;
-  mine: number; theirs: number; picking: boolean; pickN: number; pickLeft: number;
+  mine: number; theirs: number; picking: boolean; pickN: number; pickLeft: number; tunneling: boolean;
   selHidden: boolean; shiftT: number;
   truceT: number; hillT: number; hillNeed: number; blurb: string | null; title: string | null; generals: number;
   /** Whether the map runs past the screen, and which way there is more of it. */
@@ -2018,7 +2036,7 @@ export default function Game() {
           selProdPerMin: sel ? prodOf(w, sel) * 60 : 0, selHold: sel ? Math.ceil(sel.troops * wallMult(sel)) : 0,
           prodPerMin: w.nodes.filter((n) => n.owner === ME && n.troops < capOf(n) - 0.5).reduce((t, n) => t + prodOf(w, n) * 60, 0),
           goldPerMin: w.nodes.filter((n) => n.owner === ME).reduce((t, n) => t + goldOf(n), 0) * goldMult(w, ME) * 60,
-          mine: w.nodes.filter((n) => n.owner === ME).length, theirs: w.nodes.filter((n) => n.owner !== 0 && !isAlly(w, n.owner, ME)).length, picking: w.picking !== null, pickN: w.pickN, pickLeft: w.pickN - w.picked.length,
+          mine: w.nodes.filter((n) => n.owner === ME).length, theirs: w.nodes.filter((n) => n.owner !== 0 && !isAlly(w, n.owner, ME)).length, picking: w.picking !== null, pickN: w.pickN, pickLeft: w.pickN - w.picked.length, tunneling: w.tunneling !== null,
           selHidden: !!(w.rules.fog && sel && !isAlly(w, sel.owner, ME) && !(seenByPlayer(w)?.has(sel.id) && ringOf(w, sel.id) < (w.rules.fog ?? 0))), shiftT: w.rules.shift ? w.shiftT : 0, truceT: w.rules.truce ? Math.max(0, w.rules.truce - w.time) : 0, hillT: w.hillT, hillNeed: w.rules.hill ?? 0, blurb: w.rules.blurb ?? null, title: w.rules.title ?? null, generals: generalsMult(w),
           scrollFrac: scrollFracRef.current, viewFrac: viewFracRef.current, scrollFracX: scrollFracXRef.current, viewFracX: viewFracXRef.current,
           army: (() => {
@@ -2080,6 +2098,11 @@ export default function Game() {
   // What a tap on an outpost does: picks it, answers an auto-send pick, or
   // (twice) sets or clears one. Playing or paused.
   const tapNode = (w: World, n: Node): boolean => {
+    if (w.tunneling !== null) {
+      const from = w.tunneling; w.tunneling = null;
+      if (n.id !== from && w.adj[from].includes(n.id)) dispatch({ k: 'tunnel', a: from, b: n.id });
+      return true;
+    }
     if (w.picking !== null) {
       const from = w.nodes[w.picking];
       if (n.id !== from.id && from.owner === ME && !w.picked.includes(n.id)) w.picked.push(n.id);
@@ -2115,7 +2138,7 @@ export default function Game() {
       pausedTapRef.current = fingersRef.current.size === 1 ? { x: e.clientX, y: e.clientY, moved: false } : null;
       return;
     }
-    if (!n) { w.selected = null; w.picking = null; w.picked = []; dragRef.current = null; return; }
+    if (!n) { w.selected = null; w.picking = null; w.picked = []; w.tunneling = null; dragRef.current = null; return; }
     if (tapNode(w, n)) { dragRef.current = null; return; }
     dragRef.current = n.owner === ME ? { from: n.id, x: p.x, y: p.y, moved: false, over: null } : null;
   };
@@ -2143,7 +2166,7 @@ export default function Game() {
       const w = worldRef.current;
       if (t && !t.moved && w && !w.over) {
         const n = hit(w, toMap(e));
-        if (n) tapNode(w, n); else { w.selected = null; w.picking = null; w.picked = []; }
+        if (n) tapNode(w, n); else { w.selected = null; w.picking = null; w.picked = []; w.tunneling = null; }
       }
       return;
     }
@@ -2583,7 +2606,9 @@ export default function Game() {
           ) : (
             <>
               <div className="mb-1 flex items-center justify-between text-[12px]">
-                {ui?.picking ? (
+                {ui?.tunneling ? (
+                  <span className="text-[#ffd166]">Tap a neighbour to tunnel to.</span>
+                ) : ui?.picking ? (
                   <span className="text-[#ffd166]">{ui.pickN === 1 ? 'Tap the target.' : ui.pickLeft === 2 ? 'Tap the first target.' : 'Tap the second.'}</span>
                 ) : (
                   <span className="text-white/50">
@@ -2591,8 +2616,8 @@ export default function Game() {
                     <span className="text-white/25"> · </span>falls to <b className="text-white">{(ui?.selHold ?? 0) + 1}</b>+
                   </span>
                 )}
-                {ui?.picking ? (
-                  <button className={`${btn} bg-white/10 px-3 py-1.5 text-[13px]`} onClick={() => act((w) => { w.picking = null; w.picked = []; })}>Cancel</button>
+                {ui?.picking || ui?.tunneling ? (
+                  <button className={`${btn} bg-white/10 px-3 py-1.5 text-[13px]`} onClick={() => act((w) => { w.picking = null; w.picked = []; w.tunneling = null; })}>Cancel</button>
                 ) : (
                   <span className="flex gap-1.5">
                     <button className={`${btn} bg-white/10 px-3 py-1.5 text-[13px]`} onClick={() => act((w) => { w.picking = sel.id; w.pickN = 2; w.picked = []; })}>Split 50/50</button>
@@ -2613,12 +2638,19 @@ export default function Game() {
                 </div>
               ) : (
                 <>
-                  <div className="grid grid-cols-2 gap-1.5">{upgRows(sel)}</div>
-                  <button disabled={sel.base || sel.troops < MINE_TROOPS[0]} onClick={() => dispatch({ k: 'mine', id: sel.id })}
-                    className={`${btn} mt-1 flex w-full items-center justify-between rounded-xl bg-white/5 px-3 py-1 text-left`}>
-                    <span className="text-[13px]"><b className="text-[#ffd166]">Dig mine</b> <span className="text-white/45">· +{Math.round(MINE_GOLD[1] * 60)} gold/min</span></span>
-                    <span className="text-[12px] text-white/60">{sel.base ? 'not an HQ' : `${MINE_TROOPS[0]} troops`}</span>
-                  </button>
+                  <div className="grid grid-cols-2 gap-1.5">
+                    {upgRows(sel)}
+                    <button disabled={sel.base || sel.troops < MINE_TROOPS[0]} onClick={() => dispatch({ k: 'mine', id: sel.id })}
+                      className={`${btn} flex flex-col items-start rounded-xl bg-white/5 px-3 py-1 text-left`}>
+                      <div className="flex w-full items-center justify-between text-[13px]"><b className="text-[#ffd166]">Dig mine</b><span className="text-white">{MINE_TROOPS[0]} troops</span></div>
+                      <div className="text-[11px] text-white/45">{sel.base ? 'not an HQ' : `+${Math.round(MINE_GOLD[1] * 60)} gold/min · breeds nothing`}</div>
+                    </button>
+                    <button disabled={(ui?.gold ?? 0) < TUNNEL_COST || ui?.tunneling} onClick={() => act((w) => { w.tunneling = sel.id; w.picking = null; w.picked = []; })}
+                      className={`${btn} flex flex-col items-start rounded-xl bg-white/5 px-3 py-1 text-left`}>
+                      <div className="flex w-full items-center justify-between text-[13px]"><b className="text-[#ffd166]">Dig tunnel</b><span className="text-white">{TUNNEL_COST}g</span></div>
+                      <div className="text-[11px] text-white/45">to a neighbour · nothing on it can be shot</div>
+                    </button>
+                  </div>
                 </>
               )}
               {run.mp === 'team' && ui && ui.friends.length > 0 && (
