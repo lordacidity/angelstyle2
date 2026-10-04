@@ -22,6 +22,7 @@
 // upright in Safari.
 
 import { useCallback, useEffect, useRef, useState } from 'react';
+import { Room, netAvailable, newCode, type Peer } from './net';
 
 // ── Tuning ─────────────────────────────────────────────────────────────────
 
@@ -30,12 +31,18 @@ const MAP_H = 600;
 const CAMPAIGN_LEVELS = 24;
 const ENDLESS_UNLOCK = 3;
 
-const PLAYER = 1;
-const DEFAULT_COLORS: Record<number, string> = { 0: '#4a4a4a', 1: '#ffffff', 2: '#ff3b3b', 3: '#ff8a3b', 4: '#c04bff', 5: '#2ee6d6' };
+const DEFAULT_COLORS: Record<number, string> = { 0: '#4a4a4a', 1: '#ffffff', 2: '#ff3b3b', 3: '#ff8a3b', 4: '#c04bff', 5: '#2ee6d6', 6: '#b8ff3b', 7: '#ff4fd8', 8: '#ffe84d' };
 // Colour-blind mode: a palette that stays apart under the common kinds of
 // colour blindness (Okabe and Ito's), and a shape for each general besides.
-const CB_COLORS: Record<number, string> = { 0: '#4a4a4a', 1: '#ffffff', 2: '#d55e00', 3: '#f0e442', 4: '#56b4e9', 5: '#009e73' };
-const GLYPHS: Record<number, string> = { 2: '▲', 3: '■', 4: '◆', 5: '✕' };
+const CB_COLORS: Record<number, string> = { 0: '#4a4a4a', 1: '#ffffff', 2: '#d55e00', 3: '#f0e442', 4: '#56b4e9', 5: '#009e73', 6: '#cc79a7', 7: '#0072b2', 8: '#e69f00' };
+const GLYPHS: Record<number, string> = { 2: '▲', 3: '■', 4: '◆', 5: '✕', 6: '●', 7: '★', 8: '⬟' };
+/** The seat this phone plays: 1 alone, whichever seat it drew in a room.
+ *  On screen the local player is always white: its seat's colour and seat
+ *  1's trade places, so the palette reads the same for everyone. */
+let ME = 1;
+const swapSeat = (o: number) => (o === ME ? 1 : o === 1 ? ME : o);
+const colorOf = (o: number) => COLORS[swapSeat(o)] ?? '#888888';
+const glyphOf = (o: number) => GLYPHS[swapSeat(o)] ?? '?';
 let COLORS = DEFAULT_COLORS;
 let colorBlind = false;
 function setColorBlind(on: boolean) { colorBlind = on; COLORS = on ? CB_COLORS : DEFAULT_COLORS; }
@@ -58,7 +65,7 @@ type UpgKey = keyof typeof UPG;
 const cannonDmg = (lvl: number) => (lvl <= 0 ? 0 : lvl <= 4 ? [2, 4, 7, 10][lvl - 1] : 10 + 3 * (lvl - 4));
 const CANNON_RANGE = 130;
 /** A bigger outpost's guns reach further: +20% a size. */
-const cannonRange = (n: Node, w: World) => CANNON_RANGE * (1 + 0.2 * (n.tier - 1)) * (n.owner === PLAYER ? (1 + 0.15 * w.tech.scouts) * (1 + META.range.per * w.meta.range / 100) : 1);
+const cannonRange = (n: Node, w: World) => CANNON_RANGE * (1 + 0.2 * (n.tier - 1)) * (isHuman(w, n.owner) ? (1 + 0.15 * econ(w, n.owner).tech.scouts) * (1 + META.range.per * econ(w, n.owner).meta.range / 100) : 1);
 const CANNON_CD = 0.5;
 
 // A mine: an outpost dug out for gold. It breeds nothing and keeps no
@@ -180,22 +187,59 @@ interface Rules {
   aiMargin: number; aiStageEvery: number;
   /** The head start: outposts already held beside each HQ, and gold in hand. */
   enemyExtra: number; enemyGold: number; neutralBase: number;
+  /** A room: how many humans play, and whether as one side or every one for itself. */
+  humans?: number; mp?: 'team' | 'against';
 }
 
+const isHuman = (w: World, o: number) => o in w.econ;
+const econ = (w: World, o: number) => w.econ[o];
+/** Whether two sides leave each other be: a side and itself, and in a team room every human with every other. */
+const isAlly = (w: World, a: number, b: number) => a === b || (!!w.mp && w.mp.mode === 'team' && isHuman(w, a) && isHuman(w, b));
+/** Gold to whoever: a human's purse or a general's. */
+function addGold(w: World, owner: number, amt: number) {
+  if (isHuman(w, owner)) w.econ[owner].gold += amt;
+  else { const f = w.factions.find((x) => x.id === owner); if (f) f.gold += amt; }
+}
+const nameOf = (w: World, o: number) => w.mp?.names[o] ?? NAMES[o] ?? `SIDE ${o}`;
+/** Whether a side still has anything on the map or the road. */
+const alive = (w: World, o: number) => w.nodes.some((n) => n.owner === o) || w.convoys.some((c) => c.owner === o);
+/** How the run ended for one seat: the one human's result alone, else read off the map. */
+function resultFor(w: World, me: number): 'win' | 'lose' | null {
+  if (w.over !== 'done') return w.over;
+  if (w.mp?.mode === 'team') return w.factions.some((f) => alive(w, f.id)) ? 'lose' : 'win';
+  return alive(w, me) ? 'win' : 'lose';
+}
+
+/** A room's rules. Team: one big map, the generals at the far end, as many
+ *  as there are humans. Against: a map for as many sides as humans, nobody else. */
+function rulesForMp(mode: 'team' | 'against', humans: number): Rules {
+  if (mode === 'against') return {
+    level: 100, endless: false, humans, mp: mode, nodeCount: 12 + 7 * humans, enemies: 0, mapH: 700 + 300 * (humans - 1),
+    aiInterval: 2, sendFrac: 0.6, aiMargin: 0.6, aiStageEvery: 3, aiSmart: 0, enemyExtra: 0, enemyGold: 0, neutralBase: 12,
+    title: 'AGAINST', blurb: 'Every one of you for yourself. The last side standing drinks for free.',
+  };
+  return {
+    level: 101, endless: false, humans, mp: mode, nodeCount: 24 + 16 * humans, enemies: humans, mapH: 1200 + 500 * humans,
+    aiInterval: 1.2, sendFrac: 0.7, aiMargin: 0.8, aiStageEvery: 1, aiSmart: 2, enemyExtra: 3, enemyGold: 300 + 100 * humans, neutralBase: 16, enemyTech: 1,
+    title: 'TEAM', blurb: 'All of you, one side, against the generals at the far end. You cannot hurt each other: a march onto a friend\'s outpost joins it. Pick one of yours to give it to a friend.',
+  };
+}
+
+/** A human side's purse and doctrine: gold, tech, the techs buying
+ *  themselves, the Armoury it brought, and a counter for the autos' order. */
+interface Econ { gold: number; tech: Record<TechKey, number>; autoTech: Partial<Record<TechKey, Auto>>; meta: Record<MetaKey, number>; autoSeq: number }
 interface World {
   rules: Rules;
-  /** Counts the autos switched on, so ties go to the one set first. */
-  autoSeq: number;
-  /** Techs set to buy themselves. */
-  autoTech: Partial<Record<TechKey, Auto>>;
+  /** Every human side, by owner id (1 alone; 1 to 4 in a room). */
+  econ: Record<number, Econ>;
+  /** A room: which kind, and what each seat is called. Null alone. */
+  mp: { mode: 'team' | 'against'; names: Record<number, string> } | null;
   nodes: Node[]; edges: Edge[]; adj: number[][];
   convoys: Convoy[]; shots: Shot[]; factions: Faction[];
-  gold: number; time: number;
-  /** Endless: how many times a broken faction has landed again. */
+  time: number;
   nextId: number;
-  tech: Record<TechKey, number>;
-  meta: Record<MetaKey, number>;
-  over: 'win' | 'lose' | null;
+  /** Win or lose, for the one human alone; done, for a room, with each seat's result read off the map. */
+  over: 'win' | 'lose' | 'done' | null;
   flash: { text: string; age: number; ttl: number } | null;
   selected: number | null;
   /** The outpost whose standing order is being pointed at, while it is. */
@@ -362,6 +406,13 @@ function buildChoke(rules: Rules, rnd: () => number): { nodes: Node[]; edges: Ed
 
 function buildWorld(rules: Rules, meta: Record<MetaKey, number>, seedExtra = 0): World {
   const rnd = mulberry32(rules.level * 7919 + (rules.endless ? 104729 : 0) + seedExtra);
+  // Every human side's purse. In a room nobody brings an Armoury: fair is fair.
+  const H = rules.humans ?? 1;
+  const econ: Record<number, Econ> = {};
+  for (let h = 1; h <= H; h++) {
+    const m = rules.mp ? freshSave().meta : meta;
+    econ[h] = { gold: 40 + META.gold.per * m.gold, tech: { logistics: 0, conscription: 0, tithe: 0, scouts: 0, thrift: 0 }, autoTech: {}, meta: m, autoSeq: 0 };
+  }
   const choke = rules.choke ? buildChoke(rules, rnd) : null;
   const nodes: Node[] = choke ? choke.nodes : [];
   const PAD = 34;
@@ -409,8 +460,9 @@ function buildWorld(rules: Rules, meta: Record<MetaKey, number>, seedExtra = 0):
   // Bases: yours at the bottom, theirs as far from you as the map allows.
   const byY = [...nodes].sort((p, q) => q.y - p.y);
   const home = choke ? nodes[choke.hqs[0]] : byY[Math.floor(rnd() * Math.min(3, byY.length))];
-  home.owner = PLAYER; home.base = true; home.tier = 2; home.troops = 40 + META.garrison.per * meta.garrison; home.wall = 1;
-  home.wallBoost = META.masonry.per * meta.masonry / 100; home.capBoost = META.cap.per * meta.cap / 100;
+  const m1 = econ[1].meta;
+  home.owner = 1; home.base = true; home.tier = 2; home.troops = 40 + META.garrison.per * m1.garrison; home.wall = 1;
+  home.wallBoost = META.masonry.per * m1.masonry / 100; home.capBoost = META.cap.per * m1.cap / 100;
   // Hops from home, so no enemy HQ ever sits a march away.
   const hops = new Array(nodes.length).fill(Infinity) as number[];
   hops[home.id] = 0;
@@ -418,11 +470,33 @@ function buildWorld(rules: Rules, meta: Record<MetaKey, number>, seedExtra = 0):
   const maxHops = Math.max(...hops.filter((h) => h !== Infinity));
   const taken = new Set<number>([home.id]);
   const factions: Faction[] = [];
-  for (let f = 0; f < rules.enemies; f++) {
+  // The other sides: the other humans first (seats 2 on), then the generals.
+  for (let f = 0; f < H - 1 + rules.enemies; f++) {
     const fid = 2 + f;
+    const human = fid <= H;
     let best: Node | null = null; let bestD = -Infinity;
     if (choke) {
       best = nodes[choke.hqs[f + 1]] ?? null;
+    } else if (rules.mp === 'team' && human) {
+      // A friend: low on the map like home, away from the other humans.
+      for (const n of nodes) {
+        if (taken.has(n.id) || hops[n.id] < 2) continue;
+        let near = Infinity;
+        for (const t of taken) near = Math.min(near, Math.hypot(n.x - nodes[t].x, n.y - nodes[t].y));
+        const d = Math.min(near, 260) * 1.2 - (rules.mapH - n.y) * 0.9;
+        if (d > bestD) { bestD = d; best = n; }
+      }
+    } else if (rules.mp === 'team') {
+      // A general: up in the far band, each in a lane of its own.
+      const g = fid - H - 1;
+      const want = rules.mapH * (0.08 + 0.12 * g);
+      for (const n of nodes) {
+        if (taken.has(n.id) || hops[n.id] < 4) continue;
+        let near = Infinity;
+        for (const t of taken) if (t !== home.id) near = Math.min(near, Math.hypot(n.x - nodes[t].x, n.y - nodes[t].y));
+        const d = -Math.abs(n.y - want) + Math.min(near, 220) * 0.6;
+        if (d > bestD) { bestD = d; best = n; }
+      }
     } else if (rules.endless) {
       // The long war: each HQ sits higher up the map than the last.
       const want = rules.mapH * (0.62 - 0.28 * f);
@@ -441,8 +515,14 @@ function buildWorld(rules: Rules, meta: Record<MetaKey, number>, seedExtra = 0):
     }
     if (!best) break;
     best.owner = fid; best.base = true; best.tier = 2; best.troops = 40; best.wall = 1;
-    if (rules.fortress) { best.wall = 2; best.cannon = 2; best.tier = 3; }
     taken.add(best.id);
+    if (human) {
+      const mh = econ[fid].meta;
+      best.troops += META.garrison.per * mh.garrison;
+      best.wallBoost = META.masonry.per * mh.masonry / 100; best.capBoost = META.cap.per * mh.cap / 100;
+      continue;
+    }
+    if (rules.fortress) { best.wall = 2; best.cannon = 2; best.tier = 3; }
     // A few outposts already theirs, beside the base.
     let extra = rules.enemyExtra;
     for (const nb of adj[best.id]) {
@@ -468,7 +548,7 @@ function buildWorld(rules: Rules, meta: Record<MetaKey, number>, seedExtra = 0):
   // Twin HQ: a second one of yours, beside the first.
   if (rules.twinHQ) {
     const twin = adj[home.id].map((i) => nodes[i]).filter((n) => n.owner === 0).sort((a, b) => b.y - a.y)[0];
-    if (twin) { twin.owner = PLAYER; twin.base = true; twin.tier = 2; twin.troops = 40; twin.wall = 1; twin.wallBoost = home.wallBoost; twin.capBoost = home.capBoost; }
+    if (twin) { twin.owner = 1; twin.base = true; twin.tier = 2; twin.troops = 40; twin.wall = 1; twin.wallBoost = home.wallBoost; twin.capBoost = home.capBoost; }
   }
   // The hub: a big neutral garrison, and loot if the level says so.
   if (choke) { nodes[0].troops = Math.round(rules.neutralBase * 2.5); nodes[0].tier = 2; nodes[0].loot = rules.hubLoot ?? 0; }
@@ -484,7 +564,7 @@ function buildWorld(rules: Rules, meta: Record<MetaKey, number>, seedExtra = 0):
   }
   // Gold rush: mines already dug, out in the neutral ground, for whoever takes them.
   if (rules.mines) {
-    const pool = nodes.filter((n) => n.owner === 0 && !adj[n.id].some((i) => nodes[i].base && nodes[i].owner === PLAYER));
+    const pool = nodes.filter((n) => n.owner === 0 && !adj[n.id].some((i) => nodes[i].base && nodes[i].owner in econ));
     for (let k = 0; k < rules.mines && pool.length; k++) {
       const n = pool.splice(Math.floor(rnd() * pool.length), 1)[0];
       n.mine = 1;
@@ -493,9 +573,8 @@ function buildWorld(rules: Rules, meta: Record<MetaKey, number>, seedExtra = 0):
 
   return {
     rules, nodes, edges, adj, convoys: [], shots: [], factions,
-    gold: 40 + META.gold.per * meta.gold, time: 0,
+    econ, mp: rules.mp ? { mode: rules.mp, names: {} } : null, time: 0,
     nextId: 1,
-    tech: { logistics: 0, conscription: 0, tithe: 0, scouts: 0, thrift: 0 }, meta, autoSeq: 0, autoTech: {},
     over: null, flash: null, selected: null, picking: null, pickN: 1, picked: [], shiftT: rules.shift ?? 0, hillT: 0,
   };
 }
@@ -507,25 +586,25 @@ const wallMult = (n: Node) => 1 + (0.25 + n.wallBoost) * n.wall;
 /** Ground changes hands: it takes on the new holder's doctrine. */
 function claim(w: World, n: Node, owner: number) {
   n.owner = owner;
-  n.wallBoost = owner === PLAYER ? META.masonry.per * w.meta.masonry / 100 : 0;
-  n.capBoost = owner === PLAYER ? META.cap.per * w.meta.cap / 100 : 0;
+  n.wallBoost = isHuman(w, owner) ? META.masonry.per * econ(w, owner).meta.masonry / 100 : 0;
+  n.capBoost = isHuman(w, owner) ? META.cap.per * econ(w, owner).meta.cap / 100 : 0;
 }
 // One formula for everyone. Your tech and Armoury sit on top; the red has
 // neither, only what it builds on the ground.
 const prodOf = (w: World, n: Node) => {
   if (n.mine) return 0;
-  let m = n.owner === PLAYER
-    ? (1 + META.prod.per * w.meta.prod / 100) * (1 + 0.15 * w.tech.conscription)
+  let m = isHuman(w, n.owner)
+    ? (1 + META.prod.per * econ(w, n.owner).meta.prod / 100) * (1 + 0.15 * econ(w, n.owner).tech.conscription)
     : 1 + 0.15 * (w.factions.find((f) => f.id === n.owner)?.tech.conscription ?? 0);
   m *= (n.base ? 1.5 : 1) * (1 + 0.35 * n.prod);
   return BASE_PROD_PER_S * m;
 };
 /** What your gold is worth: Tithe and the Vaults. */
-const goldMult = (w: World) => (1 + 0.2 * w.tech.tithe) * (1 + META.vault.per * w.meta.vault / 100);
+const goldMult = (w: World, owner: number) => (isHuman(w, owner) ? (1 + 0.2 * econ(w, owner).tech.tithe) * (1 + META.vault.per * econ(w, owner).meta.vault / 100) : 1);
 const goldOf = (n: Node) => (n.mine ? MINE_GOLD[n.mine] : n.base ? 1.0 : 0.35 + 0.25 * (n.tier - 1));
 const convoySpeed = (w: World, owner: number) =>
-  60 * (owner === PLAYER
-    ? (1 + META.speed.per * w.meta.speed / 100) * (1 + 0.25 * w.tech.logistics)
+  60 * (isHuman(w, owner)
+    ? (1 + META.speed.per * econ(w, owner).meta.speed / 100) * (1 + 0.25 * econ(w, owner).tech.logistics)
     : 1 + 0.25 * (w.factions.find((f) => f.id === owner)?.tech.logistics ?? 0));
 const convoyPos = (w: World, c: Convoy) => {
   const a = w.nodes[c.from], b = w.nodes[c.to];
@@ -548,7 +627,7 @@ function route(w: World, from: number, to: number, owner: number): number[] | nu
     if (u < 0 || u === to) break;
     done[u] = true;
     for (const v of w.adj[u]) {
-      const c = dist[u] + (w.nodes[v].owner === owner || v === to ? 1 : 5) + edgeLen(w, u, v) / 1000;
+      const c = dist[u] + (isAlly(w, w.nodes[v].owner, owner) || v === to ? 1 : 5) + edgeLen(w, u, v) / 1000;
       if (c < dist[v]) { dist[v] = c; prev[v] = u; }
     }
   }
@@ -581,7 +660,7 @@ function sendCount(w: World, from: number, to: number, amount: number) {
 function reachNode(w: World, c: Convoy) {
   const here = w.nodes[c.to];
   const last = c.leg >= c.path.length - 2;
-  if (!last && here.owner === c.owner) {
+  if (!last && isAlly(w, here.owner, c.owner)) {
     c.leg++;
     c.from = c.to; c.to = c.path[c.leg + 1]; c.t = 0;
     // The road ahead may have shifted away: find a new one, or stop here.
@@ -601,7 +680,7 @@ const truceOn = (w: World) => !!w.rules.truce && w.time < w.rules.truce;
 
 function arrive(w: World, c: Convoy) {
   const n = w.nodes[c.to];
-  if (n.owner === c.owner) { n.troops += c.n; return; }
+  if (isAlly(w, n.owner, c.owner)) { n.troops += c.n; return; }
   // A truce: held ground cannot be taken; the column turns round.
   if (truceOn(w) && n.owner !== 0) {
     const back = w.nodes[c.from];
@@ -617,7 +696,7 @@ function arrive(w: World, c: Convoy) {
     // Loot: the soldiers here join the taker; a pile of gold is theirs too.
     if (n.loot) { n.troops += n.loot; n.loot = 0; }
     if (n.gold) {
-      if (c.owner === PLAYER) w.gold += n.gold; else { const f = w.factions.find((x) => x.id === c.owner); if (f) f.gold += n.gold; }
+      addGold(w, c.owner, n.gold);
       n.gold = 0;
     }
     n.cannon = 0; // the guns are spiked as the walls fall
@@ -625,11 +704,11 @@ function arrive(w: World, c: Convoy) {
     n.cd = 0;
     // Taking ground pays half a minute of its gold, once, to whoever takes it.
     const prize = goldOf(n) * 30;
-    if (c.owner === PLAYER) w.gold += prize; else { const f = w.factions.find((x) => x.id === c.owner); if (f) f.gold += prize; }
-    if (was !== 0 && was !== PLAYER && !w.nodes.some((m) => m.owner === was)) {
+    addGold(w, c.owner, prize);
+    if (was !== 0 && !w.nodes.some((m) => m.owner === was)) {
       const f = w.factions.find((x) => x.id === was);
       if (f) f.dead = w.time;
-      if (c.owner === PLAYER) w.flash = { text: `${NAMES[was]} BROKEN`, age: 0, ttl: 1.6 };
+      if (c.owner === ME && was !== ME) w.flash = { text: `${nameOf(w, was)} BROKEN`, age: 0, ttl: 1.6 };
     }
   } else {
     n.troops = (def - c.n) / wallMult(n);
@@ -679,14 +758,14 @@ function aiTick(w: World, f: Faction) {
       const guns = r.aiSmart >= 1 ? w.nodes.filter((g) => g.owner !== f.id && g.cannon && Math.hypot(g.x - m.x, g.y - m.y) < cannonRange(g, w)).reduce((s, g) => s + cannonDmg(g.cannon) * 3, 0) : 0;
       const need = (reckon(w, f.id, m) + incoming) * wallMult(m) + 1 + guns;
       if (avail < need * (m.owner === 0 ? 1.1 : 1.25)) continue;
-      let score = (m.owner === PLAYER ? 3 : m.owner === 0 ? 1 : 2) + (m.base ? 2.5 : 0) + m.prod * 0.4 - need / avail + (m.hub ? 2 : 0) + (m.loot ? 1.5 : 0) + (m.gold ? 1 : 0);
-      if (m.owner === PLAYER && m.cannon && r.aiSmart === 0) score += 1;
+      let score = (isHuman(w, m.owner) ? 3 : m.owner === 0 ? 1 : 2) + (m.base ? 2.5 : 0) + m.prod * 0.4 - need / avail + (m.hub ? 2 : 0) + (m.loot ? 1.5 : 0) + (m.gold ? 1 : 0);
+      if (isHuman(w, m.owner) && m.cannon && r.aiSmart === 0) score += 1;
       if (score > bestScore) { bestScore = score; best = m; }
     }
     if (best) { send(w, n.id, best.id, frac); continue; }
     // Full and nothing it can take: bleed the weakest of yours anyway.
     if (n.troops >= capOf(n) * 0.95) {
-      const yours = hostile.filter((m) => m.owner === PLAYER).sort((a, b) => reckon(w, f.id, a) * wallMult(a) - reckon(w, f.id, b) * wallMult(b));
+      const yours = hostile.filter((m) => isHuman(w, m.owner)).sort((a, b) => reckon(w, f.id, a) * wallMult(a) - reckon(w, f.id, b) * wallMult(b));
       if (yours.length && avail > reckon(w, f.id, yours[0]) * wallMult(yours[0]) * 0.6) { send(w, n.id, yours[0].id, 0.8); continue; }
     }
   }
@@ -824,8 +903,8 @@ function shiftRoads(w: World) {
   w.flash = { text: 'THE ROADS SHIFT', age: 0, ttl: 1.6 };
 }
 
-/** Fog of war: what you can see, your outposts and whatever touches them. */
-function seenByPlayer(w: World): Set<number> | null { return seenBy(w, PLAYER); }
+/** Fog of war: what this phone's seat can see. */
+function seenByPlayer(w: World): Set<number> | null { return seenBy(w, ME); }
 /** Fog of war, for any side: its own outposts and the ones one road off.
  *  Null when there is no fog. */
 function seenBy(w: World, owner: number): Set<number> | null {
@@ -836,16 +915,16 @@ function seenBy(w: World, owner: number): Set<number> | null {
 function ringsFrom(w: World, owner: number): Map<number, number> {
   const ring = new Map<number, number>();
   const q: number[] = [];
-  for (const n of w.nodes) if (n.owner === owner) { ring.set(n.id, 0); q.push(n.id); }
+  for (const n of w.nodes) if (isAlly(w, n.owner, owner)) { ring.set(n.id, 0); q.push(n.id); }
   while (q.length) { const i = q.shift()!; for (const j of w.adj[i]) if (!ring.has(j)) { ring.set(j, ring.get(i)! + 1); q.push(j); } }
   return ring;
 }
-const ringOf = (w: World, id: number) => ringsFrom(w, PLAYER).get(id) ?? Infinity;
+const ringOf = (w: World, id: number) => ringsFrom(w, ME).get(id) ?? Infinity;
 /** The garrison a side reckons an outpost holds. In the fog, nobody's
  *  numbers show but your own: a neutral is taken for an average one, and a
  *  held outpost for half full. Walls show, so they are counted as they are. */
 function reckon(w: World, owner: number, m: Node): number {
-  if (!w.rules.fog || m.owner === owner) return m.troops;
+  if (!w.rules.fog || isAlly(w, m.owner, owner)) return m.troops;
   // Inside the fog's reach but short of its last ring, the numbers show.
   if ((ringsFrom(w, owner).get(m.id) ?? Infinity) < (w.rules.fog ?? 0)) return m.troops;
   return m.owner === 0 ? w.rules.neutralBase * 1.2 : capOf(m) * 0.5;
@@ -868,8 +947,7 @@ function step(w: World, dt: number) {
     if (n.owner === 0) continue;
     const cap = capOf(n);
     if (n.troops < cap) n.troops = Math.min(cap, n.troops + prodOf(w, n) * dt);
-    if (n.owner === PLAYER) w.gold += goldOf(n) * goldMult(w) * dt;
-    else { const f = w.factions.find((x) => x.id === n.owner); if (f) f.gold += goldOf(n) * dt; }
+    addGold(w, n.owner, goldOf(n) * goldMult(w, n.owner) * dt);
   }
 
   autoUpgrade(w);
@@ -877,7 +955,7 @@ function step(w: World, dt: number) {
   // Standing orders.
   const ROUTE_EVERY = 1;
   for (const n of w.nodes) {
-    if (!n.route || n.owner !== PLAYER) continue;
+    if (!n.route || !isHuman(w, n.owner)) continue;
     n.routeT -= dt;
     if (n.routeT > 0) continue;
     n.routeT = ROUTE_EVERY;
@@ -899,7 +977,7 @@ function step(w: World, dt: number) {
     if (a.n <= 0) continue;
     for (let j = i + 1; j < w.convoys.length; j++) {
       const b = w.convoys[j];
-      if (b.n <= 0 || a.owner === b.owner) continue;
+      if (b.n <= 0 || isAlly(w, a.owner, b.owner)) continue;
       const sameRoad = (a.from === b.from && a.to === b.to) || (a.from === b.to && a.to === b.from);
       if (!sameRoad) continue;
       const pa = convoyPos(w, a), pb = convoyPos(w, b);
@@ -919,13 +997,13 @@ function step(w: World, dt: number) {
     if (n.cd > 0) continue;
     let target: Convoy | null = null; let td = cannonRange(n, w);
     for (const c of w.convoys) {
-      if (c.owner === n.owner) continue;
+      if (isAlly(w, c.owner, n.owner)) continue;
       const p = convoyPos(w, c);
       const d = Math.hypot(p.x - n.x, p.y - n.y);
       if (d < td) { td = d; target = c; }
     }
     if (!target) continue;
-    const dmg = cannonDmg(n.cannon) * (n.owner === PLAYER ? 1 + META.cannon.per * w.meta.cannon / 100 : 1);
+    const dmg = cannonDmg(n.cannon) * (isHuman(w, n.owner) ? 1 + META.cannon.per * econ(w, n.owner).meta.cannon / 100 : 1);
     target.n -= dmg;
     const p = convoyPos(w, target);
     w.shots.push({ x1: n.x, y1: n.y, x2: p.x, y2: p.y, age: 0 });
@@ -947,13 +1025,18 @@ function step(w: World, dt: number) {
   // The hill: hold the hub, unbroken, for the time the level asks.
   if (w.rules.hill) {
     const hub = w.nodes.find((n) => n.hub);
-    w.hillT = hub && hub.owner === PLAYER ? w.hillT + dt : 0;
+    w.hillT = hub && isHuman(w, hub.owner) ? w.hillT + dt : 0;
     if (w.hillT >= w.rules.hill) { w.over = 'win'; return; }
   }
 
   // The end.
-  const mine = w.nodes.some((n) => n.owner === PLAYER) || w.convoys.some((c) => c.owner === PLAYER);
-  if (!mine) { w.over = 'lose'; return; }
+  if (w.mp) {
+    const humans = Object.keys(w.econ).map(Number).filter((o) => alive(w, o));
+    const generals = w.factions.some((f) => alive(w, f.id));
+    if (w.mp.mode === 'team' ? (!humans.length || !generals) : humans.length <= 1) w.over = 'done';
+    return;
+  }
+  if (!alive(w, 1)) { w.over = 'lose'; return; }
   const theirs = w.nodes.some((n) => n.owner >= 2) || w.convoys.some((c) => c.owner >= 2);
   if (!theirs) w.over = 'win';
 }
@@ -963,7 +1046,7 @@ function step(w: World, dt: number) {
 function mineCost(n: Node): number | null { return n.mine >= 3 ? null : MINE_TROOPS[n.mine]; }
 function digMine(w: World, id: number) {
   const n = w.nodes[id];
-  if (n.owner !== PLAYER) return;
+  if (!isHuman(w, n.owner)) return;
   digMineAt(n);
 }
 function digMineAt(n: Node) {
@@ -976,32 +1059,37 @@ function digMineAt(n: Node) {
 /** Switch an upgrade's buying itself on or off here. */
 function toggleAuto(w: World, id: number, key: UpgKey) {
   const n = w.nodes[id];
-  if (n.owner !== PLAYER || n.mine) return;
-  if (n.auto[key]) delete n.auto[key]; else n.auto[key] = { order: ++w.autoSeq, prio: 0 };
+  if (!isHuman(w, n.owner) || n.mine) return;
+  if (n.auto[key]) delete n.auto[key]; else n.auto[key] = { order: ++econ(w, n.owner).autoSeq, prio: 0 };
 }
 /** Switch a tech's buying itself on or off. */
-function toggleAutoTech(w: World, key: TechKey) {
-  if (w.autoTech[key]) delete w.autoTech[key]; else w.autoTech[key] = { order: ++w.autoSeq, prio: 0 };
+function toggleAutoTech(w: World, owner: number, key: TechKey) {
+  const e = econ(w, owner);
+  if (e.autoTech[key]) delete e.autoTech[key]; else e.autoTech[key] = { order: ++e.autoSeq, prio: 0 };
 }
 /** The autos buy as far as the purse goes: anything marked next first,
  *  then the rest; cheapest first within each, the earliest set on a tie.
  *  A buy clears the mark. */
 function autoUpgrade(w: World) {
+  for (const o of Object.keys(w.econ).map(Number)) autoUpgradeFor(w, o);
+}
+function autoUpgradeFor(w: World, owner: number) {
   type Want = { a: Auto; cost: () => number; buy: () => void; c: number };
+  const e = econ(w, owner);
   const wants: Want[] = [];
   for (const n of w.nodes) {
-    if (n.owner !== PLAYER || n.mine) continue;
+    if (n.owner !== owner || n.mine) continue;
     for (const key of Object.keys(n.auto) as UpgKey[]) wants.push({ a: n.auto[key]!, cost: () => upgradeCost(w, n, key), buy: () => applyUpgrade(n, key), c: 0 });
   }
-  for (const key of Object.keys(w.autoTech) as TechKey[]) wants.push({ a: w.autoTech[key]!, cost: () => techCost(key, w.tech[key]), buy: () => { w.tech[key]++; }, c: 0 });
+  for (const key of Object.keys(e.autoTech) as TechKey[]) wants.push({ a: e.autoTech[key]!, cost: () => techCost(key, e.tech[key]), buy: () => { e.tech[key]++; }, c: 0 });
   if (!wants.length) return;
   for (const x of wants) x.c = x.cost();
   const rank = (p: Want, q: Want) => (q.a.prio > 0 ? 1 : 0) - (p.a.prio > 0 ? 1 : 0) || p.c - q.c || p.a.order - q.a.order;
   for (let i = 0; i < 4; i++) {
     wants.sort(rank);
     const x = wants[0];
-    if (!x || w.gold < x.c) return;
-    w.gold -= x.c; x.buy();
+    if (!x || e.gold < x.c) return;
+    e.gold -= x.c; x.buy();
     if (x.a.prio > 0) x.a.prio--;
     for (const y of wants) y.c = y.cost();
   }
@@ -1010,24 +1098,103 @@ function autoUpgrade(w: World) {
 /** What the next level of this costs here. There is no top. Thrift is
  *  yours alone; a general pays full price. */
 function upgradeCost(w: World, n: Node, key: UpgKey): number {
+  return upgradeCostAt(n, key, isHuman(w, n.owner) ? econ(w, n.owner).tech.thrift : 0);
+}
+function upgradeCostAt(n: Node, key: UpgKey, thrift: number): number {
   const lvl = key === 'tier' ? n.tier - 1 : n[key];
-  const disc = n.owner === PLAYER ? thriftMult(w.tech.thrift) : 1;
-  return Math.round(UPG[key].base * Math.pow(UPG[key].growth, lvl) * disc);
+  return Math.round(UPG[key].base * Math.pow(UPG[key].growth, lvl) * thriftMult(thrift));
 }
 function applyUpgrade(n: Node, key: UpgKey) { if (key === 'tier') n.tier++; else n[key]++; }
 function buyUpgrade(w: World, id: number, key: UpgKey) {
   const n = w.nodes[id];
-  if (n.owner !== PLAYER || n.mine) return;
+  if (!isHuman(w, n.owner) || n.mine) return;
   const cost = upgradeCost(w, n, key);
-  if (w.gold < cost) return;
-  w.gold -= cost;
+  const e = econ(w, n.owner);
+  if (e.gold < cost) return;
+  e.gold -= cost;
   applyUpgrade(n, key);
 }
-function buyTech(w: World, key: TechKey) {
-  const cost = techCost(key, w.tech[key]);
-  if (w.gold < cost) return;
-  w.gold -= cost;
-  w.tech[key]++;
+function buyTech(w: World, owner: number, key: TechKey) {
+  const e = econ(w, owner);
+  const cost = techCost(key, e.tech[key]);
+  if (e.gold < cost) return;
+  e.gold -= cost;
+  e.tech[key]++;
+}
+
+// ── Orders ─────────────────────────────────────────────────────────────────
+// Everything a human does to the world is one of these, so a room can
+// carry it to the host and the host can check who gave it.
+
+type Action =
+  | { k: 'send'; from: number; to: number; frac: number }
+  | { k: 'upg'; id: number; key: UpgKey } | { k: 'tech'; key: TechKey }
+  | { k: 'auto'; id: number; key: UpgKey } | { k: 'autoTech'; key: TechKey }
+  | { k: 'next'; id: number; key: UpgKey } | { k: 'nextTech'; key: TechKey }
+  | { k: 'route'; id: number; to: number[] | null }
+  | { k: 'clearAS' } | { k: 'clearAU' } | { k: 'mine'; id: number } | { k: 'give'; id: number; to: number };
+
+function applyAction(w: World, p: number, a: Action) {
+  if (w.over || !isHuman(w, p)) return;
+  const e = econ(w, p);
+  const own = (id: number) => !!w.nodes[id] && w.nodes[id].owner === p;
+  switch (a.k) {
+    case 'send': if (own(a.from) && w.nodes[a.to]) send(w, a.from, a.to, a.frac); break;
+    case 'upg': if (own(a.id)) buyUpgrade(w, a.id, a.key); break;
+    case 'tech': buyTech(w, p, a.key); break;
+    case 'auto': if (own(a.id)) toggleAuto(w, a.id, a.key); break;
+    case 'autoTech': toggleAutoTech(w, p, a.key); break;
+    case 'next': { if (own(a.id)) { const x = w.nodes[a.id].auto[a.key]; if (x) x.prio = 1; } break; }
+    case 'nextTech': { const x = e.autoTech[a.key]; if (x) x.prio = 1; break; }
+    case 'route': {
+      if (!own(a.id)) break;
+      const n = w.nodes[a.id];
+      n.route = a.to && a.to.length ? { to: a.to.filter((i) => !!w.nodes[i] && i !== a.id) } : null;
+      n.routeT = 1;
+      if (n.route) shipOrder(w, n);
+      break;
+    }
+    case 'clearAS': for (const n of w.nodes) if (n.owner === p) n.route = null; break;
+    case 'clearAU': for (const n of w.nodes) if (n.owner === p) n.auto = {}; e.autoTech = {}; break;
+    case 'mine': if (own(a.id)) digMine(w, a.id); break;
+    case 'give': {
+      if (!own(a.id) || !isHuman(w, a.to) || a.to === p || !isAlly(w, p, a.to)) break;
+      const n = w.nodes[a.id];
+      n.route = null; n.auto = {}; n.routeT = 0;
+      claim(w, n, a.to);
+      break;
+    }
+  }
+}
+
+// ── Snapshots ──────────────────────────────────────────────────────────────
+// The host's whole world, once a second, small: only what moves. The map
+// itself never changes in a room (no shifting roads there).
+
+const r2 = (x: number) => Math.round(x * 100) / 100;
+type Snap = { t: number; over: World['over']; nextId: number; nodes: unknown[][]; convoys: unknown[][]; factions: Faction[]; econ: Record<number, Econ> };
+function packWorld(w: World): Snap {
+  return {
+    t: r2(w.time), over: w.over, nextId: w.nextId,
+    nodes: w.nodes.map((n) => [n.owner, r2(n.troops), n.tier, n.prod, n.wall, n.cannon, r2(n.cd), n.mine, n.loot, n.gold, n.route ? n.route.to : 0, r2(n.routeT), n.auto, n.wallBoost, n.capBoost, n.base ? 1 : 0]),
+    convoys: w.convoys.map((c) => [c.id, c.owner, r2(c.n), c.from, c.to, r2(c.t * 1000) / 1000, r2(c.dur), c.path, c.leg]),
+    factions: w.factions.map((f) => ({ ...f, tech: { ...f.tech } })),
+    econ: w.econ,
+  };
+}
+function unpackWorld(w: World, s: Snap) {
+  w.time = s.t; w.over = s.over; w.nextId = s.nextId;
+  s.nodes.forEach((r, i) => {
+    const n = w.nodes[i]; if (!n) return;
+    const [owner, troops, tier, prod, wall, cannon, cd, mine, loot, gold, route, routeT, auto, wallBoost, capBoost, base] = r as [number, number, number, number, number, number, number, number, number, number, number[] | 0, number, Node['auto'], number, number, number];
+    n.owner = owner; n.troops = troops; n.tier = tier; n.prod = prod; n.wall = wall; n.cannon = cannon; n.cd = cd; n.mine = mine; n.loot = loot; n.gold = gold;
+    n.route = route ? { to: route } : null; n.routeT = routeT; n.auto = auto ?? {}; n.wallBoost = wallBoost; n.capBoost = capBoost; n.base = !!base;
+  });
+  w.convoys = s.convoys.map((r) => { const [id, owner, n, from, to, t, dur, path, leg] = r as [number, number, number, number, number, number, number, number[], number]; return { id, owner, n, from, to, t, dur, path, leg }; });
+  w.factions = s.factions.map((f) => ({ ...f, tech: { ...f.tech } }));
+  w.econ = s.econ;
+  // A picked outpost that is no longer yours is let go of.
+  if (w.selected !== null && w.picking !== null && w.nodes[w.picking].owner !== ME) { w.picking = null; w.picked = []; }
 }
 
 // ── Drawing ────────────────────────────────────────────────────────────────
@@ -1049,13 +1216,13 @@ function draw(ctx: CanvasRenderingContext2D, w: World, view: { s: number; ox: nu
   ctx.scale(s, s);
 
   const seen = seenByPlayer(w);
-  const rings = seen ? ringsFrom(w, PLAYER) : new Map<number, number>();
+  const rings = seen ? ringsFrom(w, ME) : new Map<number, number>();
   // Edges. In the fog, only roads that touch your ground.
   ctx.lineCap = 'round';
   for (const e of w.edges) {
     if (seen && !(seen.has(e.a) && seen.has(e.b))) continue;
     const a = w.nodes[e.a], b = w.nodes[e.b];
-    const sel = w.selected !== null && (e.a === w.selected || e.b === w.selected) && w.nodes[w.selected].owner === PLAYER;
+    const sel = w.selected !== null && (e.a === w.selected || e.b === w.selected) && w.nodes[w.selected].owner === ME;
     ctx.strokeStyle = sel ? 'rgba(255,255,255,0.6)' : '#1c1c1c';
     ctx.lineWidth = sel ? 3 : 2;
     ctx.beginPath(); ctx.moveTo(a.x, a.y); ctx.lineTo(b.x, b.y); ctx.stroke();
@@ -1063,7 +1230,7 @@ function draw(ctx: CanvasRenderingContext2D, w: World, view: { s: number; ox: nu
   // Drag line.
   if (drag) {
     const a = w.nodes[drag.from];
-    const path = drag.over !== null ? route(w, drag.from, drag.over, PLAYER) : null;
+    const path = drag.over !== null ? route(w, drag.from, drag.over, ME) : null;
     ctx.strokeStyle = 'rgba(255,255,255,0.9)'; ctx.lineWidth = 3; ctx.setLineDash([6, 6]);
     ctx.beginPath(); ctx.moveTo(a.x, a.y);
     if (path) for (const i of path.slice(1)) ctx.lineTo(w.nodes[i].x, w.nodes[i].y);
@@ -1081,14 +1248,14 @@ function draw(ctx: CanvasRenderingContext2D, w: World, view: { s: number; ox: nu
   for (const n of w.nodes) {
     if (seen && !seen.has(n.id)) continue;
     const r = nodeR(n);
-    const hidden = seen !== null && n.owner !== PLAYER && rings.get(n.id) === (w.rules.fog ?? 0);
-    const col = COLORS[n.owner];
+    const hidden = seen !== null && n.owner !== ME && rings.get(n.id) === (w.rules.fog ?? 0);
+    const col = colorOf(n.owner);
     const isSel = w.selected === n.id;
     const canTarget = w.picking !== null && w.picking !== n.id;
     if (n.cannon && n.owner !== 0) {
       // Faint as a rule; a picked enemy's reach draws solid red.
-      const hot = isSel && n.owner !== PLAYER;
-      ctx.strokeStyle = hot ? '#ff3b3b' : n.owner === PLAYER ? 'rgba(255,255,255,0.12)' : 'rgba(255,59,59,0.14)'; ctx.lineWidth = hot ? 2 : 1;
+      const hot = isSel && n.owner !== ME;
+      ctx.strokeStyle = hot ? '#ff3b3b' : n.owner === ME ? 'rgba(255,255,255,0.12)' : 'rgba(255,59,59,0.14)'; ctx.lineWidth = hot ? 2 : 1;
       ctx.beginPath(); ctx.arc(n.x, n.y, cannonRange(n, w), 0, Math.PI * 2); ctx.stroke();
     }
     if (canTarget) {
@@ -1107,14 +1274,14 @@ function draw(ctx: CanvasRenderingContext2D, w: World, view: { s: number; ox: nu
       const q = r * 0.9;
       ctx.fillStyle = '#000000';
       ctx.fillRect(n.x - q, n.y - q, q * 2, q * 2);
-      ctx.fillStyle = n.owner === PLAYER ? (n.route ? '#c9a24f' : '#ffd166') : '#ffd16655';
+      ctx.fillStyle = n.owner === ME ? (n.route ? '#c9a24f' : '#ffd166') : '#ffd16655';
       ctx.fillRect(n.x - q, n.y - q, q * 2, q * 2);
-      ctx.strokeStyle = n.owner === PLAYER ? '#ffd166' : col; ctx.lineWidth = 2.5;
+      ctx.strokeStyle = n.owner === ME ? '#ffd166' : col; ctx.lineWidth = 2.5;
       ctx.strokeRect(n.x - q, n.y - q, q * 2, q * 2);
     } else {
       ctx.fillStyle = '#000000';
       ctx.beginPath(); ctx.arc(n.x, n.y, r, 0, Math.PI * 2); ctx.fill();
-      ctx.fillStyle = n.owner === 0 ? '#111111' : n.owner === PLAYER ? (n.route ? '#a3a3a3' : '#ffffff') : col + '33';
+      ctx.fillStyle = n.owner === 0 ? '#111111' : n.owner === ME ? (n.route ? '#a3a3a3' : '#ffffff') : col + '33';
       ctx.beginPath(); ctx.arc(n.x, n.y, r, 0, Math.PI * 2); ctx.fill();
       ctx.strokeStyle = col; ctx.lineWidth = n.base ? 4 : 2.5;
       ctx.beginPath(); ctx.arc(n.x, n.y, r, 0, Math.PI * 2); ctx.stroke();
@@ -1132,8 +1299,8 @@ function draw(ctx: CanvasRenderingContext2D, w: World, view: { s: number; ox: nu
       ctx.strokeStyle = '#3b82f6'; ctx.lineWidth = 2.5;
       ctx.beginPath(); ctx.arc(n.x, n.y, r + 9 + n.wall * 4.5, 0, Math.PI * 2); ctx.stroke();
     }
-    ctx.fillStyle = n.owner === PLAYER || n.mine ? '#000' : '#fff';
-    if (n.mine && n.owner !== PLAYER) ctx.fillStyle = '#fff';
+    ctx.fillStyle = n.owner === ME || n.mine ? '#000' : '#fff';
+    if (n.mine && n.owner !== ME) ctx.fillStyle = '#fff';
     ctx.font = `700 ${n.base ? 15 : 13}px -apple-system, system-ui, sans-serif`;
     ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
     ctx.fillText(hidden ? '?' : String(Math.floor(n.troops)), n.x, n.y + 0.5);
@@ -1141,7 +1308,7 @@ function draw(ctx: CanvasRenderingContext2D, w: World, view: { s: number; ox: nu
       // The general's shape, over the top of the outpost.
       ctx.font = '700 11px -apple-system, system-ui, sans-serif';
       ctx.fillStyle = '#000'; ctx.beginPath(); ctx.arc(n.x, n.y - r - 1, 8, 0, Math.PI * 2); ctx.fill();
-      ctx.fillStyle = col; ctx.fillText(GLYPHS[n.owner], n.x, n.y - r);
+      ctx.fillStyle = col; ctx.fillText(glyphOf(n.owner), n.x, n.y - r);
     }
     // Small marks for what is built.
     if (!hidden && (n.mine || n.loot || n.gold || n.hub || (n.owner !== 0 && (n.prod || n.cannon || n.base)))) {
@@ -1153,11 +1320,11 @@ function draw(ctx: CanvasRenderingContext2D, w: World, view: { s: number; ox: nu
     }
     // A green dot at the top right of any of yours whose Barracks you can afford now,
     // and a pink one at the top left of any with an upgrade buying itself.
-    if (n.owner === PLAYER && !n.mine && w.gold >= upgradeCost(w, n, 'prod')) {
+    if (n.owner === ME && !n.mine && econ(w, ME).gold >= upgradeCost(w, n, 'prod')) {
       ctx.fillStyle = '#38e08a';
       ctx.beginPath(); ctx.arc(n.x + r * 0.75, n.y - r * 0.75, 3.5, 0, Math.PI * 2); ctx.fill();
     }
-    if (n.owner === PLAYER && Object.keys(n.auto).length) {
+    if (n.owner === ME && Object.keys(n.auto).length) {
       ctx.fillStyle = '#ff4fa3';
       ctx.beginPath(); ctx.arc(n.x - r * 0.75, n.y - r * 0.75, 3.5, 0, Math.PI * 2); ctx.fill();
     }
@@ -1166,7 +1333,7 @@ function draw(ctx: CanvasRenderingContext2D, w: World, view: { s: number; ox: nu
   // green for every outpost shipping to it.
   if (w.selected !== null) {
     const road = (from: number, to: number, color: string) => {
-      const path = route(w, from, to, PLAYER);
+      const path = route(w, from, to, ME);
       if (!path) return;
       ctx.strokeStyle = color; ctx.lineWidth = 2.5; ctx.setLineDash([3, 6]);
       ctx.lineDashOffset = -w.time * 24;
@@ -1182,15 +1349,15 @@ function draw(ctx: CanvasRenderingContext2D, w: World, view: { s: number; ox: nu
       ctx.beginPath(); ctx.arc(n.x, n.y, nodeR(n) + 4, 0, Math.PI * 2); ctx.stroke();
     };
     const s = w.nodes[w.selected];
-    for (const n of w.nodes) if (n.route && n.owner === PLAYER && n.route.to.includes(s.id) && n.id !== s.id) { road(n.id, s.id, '#38e08a'); mark(n.id, '#38e08a'); }
-    if (s.route && s.owner === PLAYER) for (const to of s.route.to) { road(s.id, to, '#ffd166'); mark(to, '#ffd166'); }
+    for (const n of w.nodes) if (n.route && n.owner === ME && n.route.to.includes(s.id) && n.id !== s.id) { road(n.id, s.id, '#38e08a'); mark(n.id, '#38e08a'); }
+    if (s.route && s.owner === ME) for (const to of s.route.to) { road(s.id, to, '#ffd166'); mark(to, '#ffd166'); }
     if (w.picking === s.id) for (const to of w.picked) { road(s.id, to, '#ffd166'); mark(to, '#ffd166'); }
   }
   // Columns.
   for (const c of w.convoys) {
-    if (seen && c.owner !== PLAYER && !(seen.has(c.from) && seen.has(c.to))) continue;
+    if (seen && c.owner !== ME && !(seen.has(c.from) && seen.has(c.to))) continue;
     const p = convoyPos(w, c);
-    const col = COLORS[c.owner];
+    const col = colorOf(c.owner);
     ctx.fillStyle = col;
     ctx.beginPath(); ctx.arc(p.x, p.y, 7, 0, Math.PI * 2); ctx.fill();
     ctx.fillStyle = '#000';
@@ -1211,7 +1378,7 @@ function draw(ctx: CanvasRenderingContext2D, w: World, view: { s: number; ox: nu
     fc.globalCompositeOperation = 'destination-out';
     for (const n of w.nodes) {
       if (!seen.has(n.id)) continue;
-      const reach = n.owner === PLAYER ? 90 : 62;
+      const reach = n.owner === ME ? 90 : 62;
       const g = fc.createRadialGradient(n.x, n.y, reach * 0.55, n.x, n.y, reach);
       g.addColorStop(0, 'rgba(0,0,0,1)'); g.addColorStop(1, 'rgba(0,0,0,0)');
       fc.fillStyle = g;
@@ -1250,6 +1417,8 @@ interface Ui {
   scrollFrac: number; viewFrac: number; scrollFracX: number; viewFracX: number;
   /** Every troop on the map and on the road, by faction. */
   army: { owner: number; n: number }[];
+  /** The other humans in the room, by seat, with names; empty alone. */
+  friends: { seat: number; name: string; ally: boolean }[];
 }
 
 const fmt = (n: number) => String(Math.floor(n));
@@ -1257,14 +1426,21 @@ const clock = (s: number) => `${Math.floor(s / 60)}:${String(Math.floor(s % 60))
 
 export default function Game() {
   const [save, setSave] = useState<Save>(freshSave);
-  const [screen, setScreen] = useState<'menu' | 'armoury' | 'play'>('menu');
+  const [screen, setScreen] = useState<'menu' | 'armoury' | 'play' | 'room'>('menu');
+  // The room this phone is in, while it is: the wire, the seat, and the
+  // orders it has given that the host has not yet shown back.
+  const roomRef = useRef<{ room: Room; seat: number; host: boolean; seq: number; pending: { seq: number; a: Action }[]; acked: Record<number, number>; snapAt: number; players: { id: string; name: string }[] } | null>(null);
+  const [lobby, setLobby] = useState<{ code: string; meId: string; host: boolean; mode: 'team' | 'against'; peers: Peer[]; state: string; err: string | null } | null>(null);
+  const [myName, setMyName] = useState('');
+  const [joinCode, setJoinCode] = useState('');
+  const [hostGone, setHostGone] = useState(false);
   const [ui, setUi] = useState<Ui | null>(null);
   const [tab, setTab] = useState<'post' | 'tech'>('post');
   // The card over the map at the start: the level's name and what it brings, until "Got it".
   const [intro, setIntro] = useState(false);
   // Which outpost the panel last showed, so a new pick flips it back to Outpost.
   const lastSelRef = useRef<number | null>(null);
-  const [run, setRun] = useState<{ level: number; endless: boolean }>({ level: 1, endless: false });
+  const [run, setRun] = useState<{ level: number; endless: boolean; mp: 'team' | 'against' | null }>({ level: 1, endless: false, mp: null });
 
   const worldRef = useRef<World | null>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
@@ -1305,27 +1481,97 @@ export default function Game() {
   const refitRef = useRef<() => void>(() => {});
 
   // localStorage is the browser's: read it once mounted, never on the server.
-  useEffect(() => { const t = setTimeout(() => { const s = loadSave(); setColorBlind(s.cb); setSave(s); }, 0); return () => clearTimeout(t); }, []);
+  useEffect(() => { const t = setTimeout(() => { const s = loadSave(); setColorBlind(s.cb); setSave(s); try { setMyName(localStorage.getItem('redline.name') ?? ''); } catch { /* private mode */ } }, 0); return () => clearTimeout(t); }, []);
 
   const start = useCallback((level: number, endless: boolean) => {
     const s = loadSave();
+    ME = 1;
     worldRef.current = buildWorld(rulesFor(level, endless), s.meta);
     pausedRef.current = true; speedRef.current = 0.5; sendPctRef.current = 1; settledRef.current = false;
     setIntro(true);
     dragRef.current = null;
-    setRun({ level, endless });
+    setRun({ level, endless, mp: null });
     setTab('post');
     setScreen('play');
     // Back onto home, near the bottom of the screen, at the fit.
     camRef.current = { zoom: 1.3, cx: MAP_W / 2, cy: Infinity }; refitRef.current();
   }, []);
 
+  /** A room's game begins: the same world on every phone, from the host's seed. */
+  const startMp = useCallback((mode: 'team' | 'against', seed: number, players: { id: string; name: string }[]) => {
+    const r = roomRef.current; if (!r) return;
+    const seat = players.findIndex((x) => x.id === r.room.me.id) + 1;
+    if (seat < 1) return;
+    ME = seat;
+    r.seat = seat; r.players = players; r.seq = 0; r.pending = []; r.acked = {}; r.snapAt = 0;
+    const w = buildWorld(rulesForMp(mode, players.length), freshSave().meta, seed);
+    if (w.mp) players.forEach((x, i) => { w.mp!.names[i + 1] = x.name; });
+    worldRef.current = w;
+    // A room runs at one speed, never paused: four phones share one clock.
+    pausedRef.current = false; speedRef.current = 1; sendPctRef.current = 1; settledRef.current = false;
+    setIntro(true); setHostGone(false);
+    dragRef.current = null;
+    setRun({ level: 0, endless: false, mp: mode });
+    setTab('post');
+    setScreen('play');
+    camRef.current = { zoom: 1.3, cx: MAP_W / 2, cy: Infinity }; refitRef.current();
+  }, []);
+
+  /** Open or join a room. The host's phone makes the code. */
+  const openRoom = useCallback((code: string, host: boolean, mode: 'team' | 'against') => {
+    const name = (myName.trim() || 'Player').slice(0, 12);
+    try { localStorage.setItem('redline.name', name); } catch { /* private mode */ }
+    roomRef.current?.room.leave();
+    const room = new Room(code, name, host);
+    roomRef.current = { room, seat: 0, host, seq: 0, pending: [], acked: {}, snapAt: 0, players: [] };
+    setLobby({ code: room.code, meId: room.me.id, host, mode, peers: [], state: 'joining', err: null });
+    room.onState = (st) => setLobby((l) => (l ? { ...l, state: st, err: st === 'error' ? 'Could not reach the room. Check the signal and try again.' : l.err } : l));
+    room.onPeers = (peers) => {
+      setLobby((l) => (l ? { ...l, peers } : l));
+      // The host gone mid-game ends it for everyone.
+      const r = roomRef.current;
+      if (r && !r.host && r.seat > 0 && !peers.some((p) => p.host)) setHostGone(true);
+    };
+    room.onMsg = (m) => {
+      const r = roomRef.current; if (!r) return;
+      if (m.ev === 'start') { startMp(m.mode, m.seed, m.players); return; }
+      const w = worldRef.current; if (!w) return;
+      if (m.ev === 'act' && r.host) {
+        applyAction(w, m.p, m.a as Action);
+        r.acked[m.p] = m.seq;
+      } else if (m.ev === 'snap' && !r.host) {
+        unpackWorld(w, m.snap as Snap);
+        // The orders the host has not shown back yet still hold here.
+        const seen = m.acked[r.seat] ?? 0;
+        r.pending = r.pending.filter((x) => x.seq > seen);
+        for (const x of r.pending) applyAction(w, r.seat, x.a);
+      } else if (m.ev === 'end') { setHostGone(true); }
+    };
+  }, [myName, startMp]);
+
+  const leaveRoom = useCallback(() => {
+    const r = roomRef.current;
+    if (r) { if (r.host && worldRef.current) r.room.send({ ev: 'end', why: 'host left' }); r.room.leave(); }
+    roomRef.current = null; setLobby(null); setHostGone(false);
+  }, []);
+  useEffect(() => () => { roomRef.current?.room.leave(); }, []);
+
+  /** An order from this phone: done here at once, and sent to the host if there is one. */
+  const dispatch = (a: Action) => {
+    const w = worldRef.current; if (!w || w.over) return;
+    const r = roomRef.current;
+    applyAction(w, ME, a);
+    if (r && r.seat > 0 && !r.host) { r.seq++; r.pending.push({ seq: r.seq, a }); r.room.send({ ev: 'act', p: r.seat, seq: r.seq, a }); }
+  };
+
   // When a run ends, bank the scrap once.
   const settle = useCallback((w: World) => {
     if (settledRef.current) return;
     settledRef.current = true;
     const s = loadSave();
-    if (w.rules.endless) {
+    if (w.mp) {
+      if (resultFor(w, ME) === 'win') s.scrap += 30;
+    } else if (w.rules.endless) {
       s.scrap += w.over === 'win' ? 120 : Math.min(20, Math.floor(w.time / 30));
       if (w.over === 'win') s.bestTime = s.bestTime ? Math.min(s.bestTime, Math.floor(w.time)) : Math.floor(w.time);
     } else if (w.over === 'win') {
@@ -1413,6 +1659,11 @@ export default function Game() {
       const speed = speedRef.current;
       if (speed < 1) step(w, dt * speed);
       else for (let i = 0; i < speed; i++) step(w, dt);
+      const room = roomRef.current;
+      if (room && room.host && room.seat > 0 && now - room.snapAt > 1000) {
+        room.snapAt = now;
+        room.room.send({ ev: 'snap', snap: packWorld(w), acked: room.acked });
+      }
       if (w.over) settle(w);
       ctx.fillStyle = '#000000';
       ctx.fillRect(0, 0, canvas.width, canvas.height);
@@ -1424,14 +1675,15 @@ export default function Game() {
         const sel = w.selected !== null ? { ...w.nodes[w.selected] } : null;
         if (w.selected !== null && w.selected !== lastSelRef.current) setTab('post');
         lastSelRef.current = w.selected;
+        const me = econ(w, ME);
         setUi({
-          gold: w.gold, time: w.time, over: w.over, paused: pausedRef.current, speed: speedRef.current,
-          sendPct: sendPctRef.current, selected: sel, tech: { ...w.tech }, autoTech: w.autoTech,
+          gold: me.gold, time: w.time, over: resultFor(w, ME), paused: pausedRef.current, speed: speedRef.current,
+          sendPct: sendPctRef.current, selected: sel, tech: { ...me.tech }, autoTech: me.autoTech,
           selProdPerMin: sel ? prodOf(w, sel) * 60 : 0, selHold: sel ? Math.ceil(sel.troops * wallMult(sel)) : 0,
-          prodPerMin: w.nodes.filter((n) => n.owner === PLAYER && n.troops < capOf(n) - 0.5).reduce((t, n) => t + prodOf(w, n) * 60, 0),
-          goldPerMin: w.nodes.filter((n) => n.owner === PLAYER).reduce((t, n) => t + goldOf(n), 0) * goldMult(w) * 60,
-          mine: w.nodes.filter((n) => n.owner === PLAYER).length, theirs: w.nodes.filter((n) => n.owner >= 2).length, picking: w.picking !== null, pickN: w.pickN, pickLeft: w.pickN - w.picked.length,
-          selHidden: !!(w.rules.fog && sel && sel.owner !== PLAYER && !(seenByPlayer(w)?.has(sel.id) && ringOf(w, sel.id) < (w.rules.fog ?? 0))), shiftT: w.rules.shift ? w.shiftT : 0, truceT: w.rules.truce ? Math.max(0, w.rules.truce - w.time) : 0, hillT: w.hillT, hillNeed: w.rules.hill ?? 0, blurb: w.rules.blurb ?? null, title: w.rules.title ?? null,
+          prodPerMin: w.nodes.filter((n) => n.owner === ME && n.troops < capOf(n) - 0.5).reduce((t, n) => t + prodOf(w, n) * 60, 0),
+          goldPerMin: w.nodes.filter((n) => n.owner === ME).reduce((t, n) => t + goldOf(n), 0) * goldMult(w, ME) * 60,
+          mine: w.nodes.filter((n) => n.owner === ME).length, theirs: w.nodes.filter((n) => n.owner !== 0 && !isAlly(w, n.owner, ME)).length, picking: w.picking !== null, pickN: w.pickN, pickLeft: w.pickN - w.picked.length,
+          selHidden: !!(w.rules.fog && sel && !isAlly(w, sel.owner, ME) && !(seenByPlayer(w)?.has(sel.id) && ringOf(w, sel.id) < (w.rules.fog ?? 0))), shiftT: w.rules.shift ? w.shiftT : 0, truceT: w.rules.truce ? Math.max(0, w.rules.truce - w.time) : 0, hillT: w.hillT, hillNeed: w.rules.hill ?? 0, blurb: w.rules.blurb ?? null, title: w.rules.title ?? null,
           scrollFrac: scrollFracRef.current, viewFrac: viewFracRef.current, scrollFracX: scrollFracXRef.current, viewFracX: viewFracXRef.current,
           army: (() => {
             const by = new Map<number, number>();
@@ -1439,6 +1691,7 @@ export default function Game() {
             for (const c of w.convoys) by.set(c.owner, (by.get(c.owner) ?? 0) + c.n);
             return [...by].map(([owner, n]) => ({ owner, n })).sort((a, b) => a.owner - b.owner);
           })(),
+          friends: Object.keys(w.econ).map(Number).filter((o) => o !== ME && alive(w, o)).map((o) => ({ seat: o, name: nameOf(w, o), ally: isAlly(w, o, ME) })),
         });
       }
     };
@@ -1493,19 +1746,20 @@ export default function Game() {
   const tapNode = (w: World, n: Node): boolean => {
     if (w.picking !== null) {
       const from = w.nodes[w.picking];
-      if (n.id !== from.id && from.owner === PLAYER && !w.picked.includes(n.id)) w.picked.push(n.id);
+      if (n.id !== from.id && from.owner === ME && !w.picked.includes(n.id)) w.picked.push(n.id);
       if (w.picked.length >= w.pickN) {
-        from.route = { to: [...w.picked] }; from.routeT = 1;
-        shipOrder(w, from);
+        const to = [...w.picked];
         w.picking = null; w.picked = [];
+        dispatch({ k: 'route', id: from.id, to });
       }
       return true;
     }
+    // eslint-disable-next-line react-hooks/purity -- an event handler, not render
     const now = performance.now();
     const twice = lastTapRef.current.id === n.id && now - lastTapRef.current.t < 350;
     lastTapRef.current = { id: n.id, t: now };
-    if (twice && n.owner === PLAYER) {
-      if (n.route) n.route = null; else { w.picking = n.id; w.pickN = 1; w.picked = []; }
+    if (twice && n.owner === ME) {
+      if (n.route) dispatch({ k: 'route', id: n.id, to: null }); else { w.picking = n.id; w.pickN = 1; w.picked = []; }
       w.selected = n.id;
       return true;
     }
@@ -1519,14 +1773,14 @@ export default function Game() {
     const n = hit(w, p);
     // Paused: a finger on one of yours still marches (below); anywhere else
     // it pans, or taps.
-    if (pausedRef.current && !(n && n.owner === PLAYER && fingersRef.current.size === 0)) {
+    if (pausedRef.current && !(n && n.owner === ME && fingersRef.current.size === 0)) {
       panDown(e);
       pausedTapRef.current = fingersRef.current.size === 1 ? { x: e.clientX, y: e.clientY, moved: false } : null;
       return;
     }
     if (!n) { w.selected = null; w.picking = null; w.picked = []; dragRef.current = null; return; }
     if (tapNode(w, n)) { dragRef.current = null; return; }
-    dragRef.current = n.owner === PLAYER ? { from: n.id, x: p.x, y: p.y, moved: false, over: null } : null;
+    dragRef.current = n.owner === ME ? { from: n.id, x: p.x, y: p.y, moved: false, over: null } : null;
   };
   const onMove = (e: React.PointerEvent) => {
     if (fingersRef.current.size) {
@@ -1560,7 +1814,7 @@ export default function Game() {
     const w = worldRef.current; if (!w || !d || !d.moved) return;
     const n = hit(w, toMap(e));
     if (n && n.id !== d.from) {
-      send(w, d.from, n.id, sendPctRef.current);
+      dispatch({ k: 'send', from: d.from, to: n.id, frac: sendPctRef.current });
       // A drag is one gesture: the next one starts clean.
       w.selected = null;
     }
@@ -1619,6 +1873,7 @@ export default function Game() {
             className={`${btn} mt-6 w-full bg-white py-4 text-lg text-black`}>
             {endlessOpen ? 'THE LONG WAR' : `The Long War unlocks after level ${ENDLESS_UNLOCK}`}
           </button>
+          <button onClick={() => setScreen('room')} className={`${btn} mt-2 w-full bg-white/10 py-4 text-lg`}>WITH FRIENDS</button>
           <div className="mt-8 space-y-2 text-[13px] leading-snug text-white/50">
             <p><b className="text-white/80">Drag</b> from one of your outposts to any other to march. Columns take the shortest road through your ground and fight at the first outpost on it that is not yours, and columns that outnumber the defenders take the ground. <b className="text-white/80">Tap</b> an outpost to build on it, or give it a standing order to keep shipping troops somewhere.</p>
             <p>Outposts breed troops up to their cap. Gold trickles from everything you hold. Spend it on the picked outpost, or on tech for all of them.</p>
@@ -1626,6 +1881,79 @@ export default function Game() {
             <p>An outpost with 100 troops can be dug into a <b className="text-white/80">mine</b>: it breeds nothing and keeps nothing built, but pays gold, more the deeper it goes. Digging and deepening cost troops. Whoever takes a mine keeps it.</p>
             <p className="text-white/30">Walls are inherited by whoever takes the outpost. Cannons are not.</p>
           </div>
+        </div>
+      </div>
+    );
+  }
+
+  if (screen === 'room') {
+    const l = lobby;
+    const canStart = !!l && l.host && l.peers.length >= 2 && l.peers.length <= 4 && l.state === 'open';
+    const startRoom = () => {
+      const r = roomRef.current; if (!r || !l) return;
+      const players = l.peers.slice(0, 4).map((p) => ({ id: p.id, name: p.name }));
+      const seed = Math.floor(Math.random() * 1e9);
+      r.room.send({ ev: 'start', mode: l.mode, seed, players });
+      startMp(l.mode, seed, players);
+    };
+    return (
+      <div className={shell} style={shellStyle}>
+        <div className="flex items-center justify-between px-5 py-4">
+          <button className={`${btn} bg-white/10 px-4 py-2 text-sm`} onClick={() => { leaveRoom(); setScreen('menu'); }}>Back</button>
+          <div className="text-sm text-white/40">2 to 4 phones</div>
+        </div>
+        <div className="flex-1 overflow-y-auto px-5 pb-6">
+          <div className="text-2xl font-black">With friends</div>
+          {!netAvailable() ? (
+            <div className="mt-3 rounded-2xl bg-white/5 px-4 py-3 text-sm text-white/60">Rooms need the Supabase keys on this deployment, and they are not set.</div>
+          ) : !l ? (
+            <>
+              <div className="mt-1 text-sm text-white/50">One phone opens a room and reads out the code. The rest type it in.</div>
+              <div className="mt-5 text-[11px] uppercase tracking-wider text-white/40">Your name</div>
+              <input value={myName} onChange={(e) => setMyName(e.target.value.slice(0, 12))} placeholder="Name" maxLength={12}
+                className="mt-1 w-full rounded-xl bg-white/10 px-4 py-3 text-base outline-none placeholder:text-white/30" />
+              <div className="mt-6 text-[11px] uppercase tracking-wider text-white/40">Open a room</div>
+              <div className="mt-2 grid grid-cols-2 gap-2">
+                <button className={`${btn} bg-white px-4 py-4 text-black`} onClick={() => openRoom(newCode(), true, 'team')}>
+                  <div className="text-lg">TEAM</div><div className="text-[11px] font-normal text-black/60">all of you against the generals</div>
+                </button>
+                <button className={`${btn} bg-white px-4 py-4 text-black`} onClick={() => openRoom(newCode(), true, 'against')}>
+                  <div className="text-lg">AGAINST</div><div className="text-[11px] font-normal text-black/60">every one for themselves</div>
+                </button>
+              </div>
+              <div className="mt-6 text-[11px] uppercase tracking-wider text-white/40">Or join one</div>
+              <div className="mt-2 flex gap-2">
+                <input value={joinCode} onChange={(e) => setJoinCode(e.target.value.toUpperCase().replace(/[^A-Z]/g, '').slice(0, 5))} placeholder="CODE" maxLength={5} autoCapitalize="characters" autoCorrect="off"
+                  className="w-full rounded-xl bg-white/10 px-4 py-3 text-center text-2xl font-black tracking-[0.3em] outline-none placeholder:tracking-normal placeholder:text-white/30" />
+                <button disabled={joinCode.length !== 5} className={`${btn} bg-white/10 px-5 py-3`} onClick={() => openRoom(joinCode, false, 'team')}>Join</button>
+              </div>
+            </>
+          ) : (
+            <>
+              <div className="mt-4 rounded-2xl bg-white px-4 py-5 text-center text-black">
+                <div className="text-[11px] uppercase tracking-wider text-black/50">Room code</div>
+                <div className="text-5xl font-black tracking-[0.25em]">{l.code}</div>
+                {l.host && <div className="mt-1 text-sm text-black/60">{l.mode === 'team' ? 'Team: all of you against the generals' : 'Against: every one for themselves'}</div>}
+              </div>
+              <div className="mt-4 text-[11px] uppercase tracking-wider text-white/40">{l.state === 'open' ? `In the room · ${l.peers.length}` : l.state === 'joining' ? 'Connecting…' : l.state}</div>
+              {l.err && <div className="mt-2 text-sm text-[#ff3b3b]">{l.err}</div>}
+              <div className="mt-2 space-y-1.5">
+                {l.peers.map((p, i) => (
+                  <div key={p.id} className="flex items-center justify-between rounded-xl bg-white/5 px-4 py-2.5">
+                    <span className="flex items-center gap-2"><span className="inline-block h-3 w-3 rounded-full" style={{ background: COLORS[i + 1] }} />{p.name}{p.id === l.meId ? <span className="text-white/40"> (you)</span> : ''}</span>
+                    <span className="text-[11px] uppercase tracking-wider text-white/40">{p.host ? 'host' : i >= 4 ? 'full' : ''}</span>
+                  </div>
+                ))}
+                {l.peers.length < 2 && l.state === 'open' && <div className="px-1 text-sm text-white/40">Waiting for one more phone…</div>}
+              </div>
+              {l.host ? (
+                <button disabled={!canStart} className={`${btn} mt-6 w-full bg-white py-4 text-lg text-black`} onClick={startRoom}>START</button>
+              ) : (
+                <div className="mt-6 text-center text-sm text-white/50">The host starts the game. Keep this open.</div>
+              )}
+              <div className="mt-3 text-center text-[11px] text-white/35">The host phone runs the game: keep it awake and on this page.</div>
+            </>
+          )}
         </div>
       </div>
     );
@@ -1666,28 +1994,28 @@ export default function Game() {
 
   // Play.
   const sel = ui?.selected ?? null;
-  const mineSel = sel?.owner === PLAYER;
+  const mineSel = sel?.owner === ME;
   // A card that buys itself: a hold switches auto on or off; the tap that
   // ends a hold does nothing. A tap on a card already on auto makes its
   // next level the next thing bought; a tap otherwise buys one.
-  const hold = (toggle: (w: World) => void, tap: (w: World) => void) => {
-    const down = () => { clearTimeout(holdRef.current.t); holdRef.current = { t: setTimeout(() => { holdRef.current.fired = true; act(toggle); }, 450), fired: false }; };
+  const hold = (toggle: () => void, tap: () => void) => {
+    const down = () => { clearTimeout(holdRef.current.t); holdRef.current = { t: setTimeout(() => { holdRef.current.fired = true; toggle(); }, 450), fired: false }; };
     const up = () => { clearTimeout(holdRef.current.t); };
     return {
       onPointerDown: down, onPointerUp: up, onPointerLeave: up, onPointerCancel: up,
       onContextMenu: (e: React.MouseEvent) => e.preventDefault(),
-      onClick: () => { if (holdRef.current.fired) { holdRef.current.fired = false; return; } act(tap); },
+      onClick: () => { if (holdRef.current.fired) { holdRef.current.fired = false; return; } tap(); },
     };
   };
   const autoCls = (auto: Auto | undefined, poor: boolean) => `relative flex flex-col items-start rounded-xl px-3 py-1 text-left ${auto ? 'bg-[#ff4fa3]/15 ring-1 ring-inset ring-[#ff4fa3]/70' : 'bg-white/5'} ${poor && !auto ? 'opacity-30' : ''}`;
   const autoTag = (auto: Auto | undefined) => auto && <span className="ml-1.5 text-[9px] font-bold tracking-wide text-[#ff4fa3]">{auto.prio > 0 ? 'AUTO · NEXT' : 'AUTO'}</span>;
   const upgRows = (n: Node) => (Object.keys(UPG) as UpgKey[]).map((k) => {
     const u = UPG[k]; const lvl = k === 'tier' ? n.tier - 1 : n[k];
-    const cost = upgradeCost({ tech: { thrift: ui?.tech.thrift ?? 0 } } as unknown as World, n, k);
+    const cost = upgradeCostAt(n, k, ui?.tech.thrift ?? 0);
     const auto = n.auto[k];
     const poor = (ui?.gold ?? 0) < cost;
     return (
-      <button key={k} {...hold((w) => toggleAuto(w, n.id, k), (w) => { const a = w.nodes[n.id].auto[k]; if (a) a.prio = 1; else if (!poor) buyUpgrade(w, n.id, k); })}
+      <button key={k} {...hold(() => dispatch({ k: 'auto', id: n.id, key: k }), () => { if (auto) dispatch({ k: 'next', id: n.id, key: k }); else if (!poor) dispatch({ k: 'upg', id: n.id, key: k }); })}
         className={`${btn} ${autoCls(auto, poor)}`}>
         {k === 'prod' && <span className="absolute right-1.5 top-1.5 h-2 w-2 rounded-full bg-[#38e08a]" />}
         <div className="flex w-full items-center justify-between text-[13px]"><b>{u.name}{autoTag(auto)}</b><span className="text-white">{cost}g</span></div>
@@ -1706,9 +2034,9 @@ export default function Game() {
   return (
     <div className={shell} style={shellStyle}>
       <div className="flex items-center justify-between px-3 pt-2 pb-1 text-[13px]">
-        <button className={`${btn} bg-white/10 px-3 py-1.5`} onClick={() => { setScreen('menu'); worldRef.current = null; }}>✕</button>
+        <button className={`${btn} bg-white/10 px-3 py-1.5`} onClick={() => { leaveRoom(); setScreen('menu'); worldRef.current = null; }}>✕</button>
         <div className="text-center">
-          <div className="font-black">{run.endless ? 'LONG WAR' : `LEVEL ${run.level}`} <span className="text-white/40">· {clock(ui?.time ?? 0)}</span></div>
+          <div className="font-black">{run.mp ? run.mp.toUpperCase() : run.endless ? 'LONG WAR' : `LEVEL ${run.level}`} <span className="text-white/40">· {clock(ui?.time ?? 0)}</span></div>
           <div className="text-[11px] text-white/45">{ui?.mine ?? 0} vs {ui?.theirs ?? 0} outposts{(ui?.shiftT ?? 0) > 0 ? ` · roads shift in ${fmt(ui?.shiftT ?? 0)}s` : ''}{(ui?.truceT ?? 0) > 0 ? ` · truce ${fmt(ui?.truceT ?? 0)}s` : ''}{(ui?.hillNeed ?? 0) > 0 ? ` · hill ${fmt(ui?.hillT ?? 0)}/${ui?.hillNeed}s` : ''}</div>
         </div>
         <button className={`${btn} bg-white/10 px-3 py-1.5`} onClick={() => { if (confirm('Restart this level?')) start(run.level, run.endless); }}>↻</button>
@@ -1719,12 +2047,12 @@ export default function Game() {
         return (
           <div className="px-3 pb-1.5">
             <div className="flex h-[6px] w-full overflow-hidden rounded-full bg-white/10">
-              {ui.army.map((a) => <div key={a.owner} style={{ width: `${(a.n / total) * 100}%`, background: COLORS[a.owner] }} />)}
+              {ui.army.map((a) => <div key={a.owner} style={{ width: `${(a.n / total) * 100}%`, background: colorOf(a.owner) }} />)}
             </div>
             <div className="mt-1 flex justify-between text-[11px]">
               {ui.army.map((a) => (
-                <span key={a.owner} className="inline-flex items-center gap-1" style={{ color: a.owner === PLAYER ? '#fff' : COLORS[a.owner] }}>
-                  {a.owner === PLAYER ? 'YOU' : colorBlind ? <span className="text-[12px] leading-none">{GLYPHS[a.owner]}</span> : <span className="inline-block h-2.5 w-2.5 rounded-full" style={{ background: COLORS[a.owner] }} />}
+                <span key={a.owner} className="inline-flex items-center gap-1" style={{ color: a.owner === ME ? '#fff' : colorOf(a.owner) }}>
+                  {a.owner === ME ? 'YOU' : ui.friends.some((f) => f.seat === a.owner) ? <span className="max-w-[56px] truncate text-[11px] uppercase">{ui.friends.find((f) => f.seat === a.owner)!.name}</span> : colorBlind ? <span className="text-[12px] leading-none">{glyphOf(a.owner)}</span> : <span className="inline-block h-2.5 w-2.5 rounded-full" style={{ background: colorOf(a.owner) }} />}
                   <b>{fmt(a.n)}</b> <span className="text-[9px] opacity-60">{Math.round((a.n / total) * 100)}%</span>
                 </span>
               ))}
@@ -1740,19 +2068,19 @@ export default function Game() {
           <div className="text-[11px] text-white/40"><b className="text-white/80">+{Math.round(ui?.goldPerMin ?? 0)}</b> gold/min</div>
           <div className="text-[11px] text-white/40"><b className="text-white/80">+{Math.round(ui?.prodPerMin ?? 0)}</b> troops/min</div>
           {/* Flat out: five ticks a frame. Again, and back to normal. */}
-          <button className={`${btn} pointer-events-auto mt-1.5 px-3 py-1.5 text-[13px] ${(ui?.speed ?? 1) === 5 ? 'bg-white text-black' : 'bg-[#1c1c1c]'}`}
-            onClick={() => { speedRef.current = speedRef.current === 5 ? 1 : 5; }}>5×</button>
+          {!run.mp && <button className={`${btn} pointer-events-auto mt-1.5 px-3 py-1.5 text-[13px] ${(ui?.speed ?? 1) === 5 ? 'bg-white text-black' : 'bg-[#1c1c1c]'}`}
+            onClick={() => { speedRef.current = speedRef.current === 5 ? 1 : 5; }}>5×</button>}
         </div>
         {/* The controls, over the foot of the map. Every button the one height. */}
         <div className="pointer-events-none absolute inset-x-0 bottom-0 flex items-end justify-between px-3 pb-1.5 text-[13px]">
           <div className="flex flex-col items-start gap-1.5">
             <div className="rounded-md bg-[#000000] px-1 text-[15px] leading-tight"><span className="text-white/40">Gold </span><b className="text-white">{fmt(ui?.gold ?? 0)}</b></div>
-            <button className={`${btn} pointer-events-auto whitespace-nowrap bg-[#1c1c1c] px-3 py-1.5`} onClick={() => act((w) => { for (const n of w.nodes) n.auto = {}; w.autoTech = {}; })}>Clear AU</button>
-            <button className={`${btn} pointer-events-auto whitespace-nowrap bg-[#1c1c1c] px-3 py-1.5`} onClick={() => act((w) => { for (const n of w.nodes) n.route = null; w.picking = null; w.picked = []; })}>Clear AS</button>
+            <button className={`${btn} pointer-events-auto whitespace-nowrap bg-[#1c1c1c] px-3 py-1.5`} onClick={() => dispatch({ k: 'clearAU' })}>Clear AU</button>
+            <button className={`${btn} pointer-events-auto whitespace-nowrap bg-[#1c1c1c] px-3 py-1.5`} onClick={() => { act((w) => { w.picking = null; w.picked = []; }); dispatch({ k: 'clearAS' }); }}>Clear AS</button>
           </div>
           <div className="flex flex-col items-end gap-1.5">
-            <button className={`${btn} pointer-events-auto min-w-[64px] bg-[#1c1c1c] px-4 py-2.5 text-[15px]`} onClick={() => { const steps = [0.5, 1, 2]; speedRef.current = steps[(steps.indexOf(speedRef.current) + 1) % steps.length]; }}>{ui?.speed ?? 1}×</button>
-            <button className={`${btn} pointer-events-auto min-w-[64px] bg-[#1c1c1c] px-4 py-2.5 text-[15px]`} onClick={() => { pausedRef.current = !pausedRef.current; }}>{ui?.paused ? '▶' : '❚❚'}</button>
+            {!run.mp && <button className={`${btn} pointer-events-auto min-w-[64px] bg-[#1c1c1c] px-4 py-2.5 text-[15px]`} onClick={() => { const steps = [0.5, 1, 2]; speedRef.current = steps[(steps.indexOf(speedRef.current) + 1) % steps.length]; }}>{ui?.speed ?? 1}×</button>}
+            {!run.mp && <button className={`${btn} pointer-events-auto min-w-[64px] bg-[#1c1c1c] px-4 py-2.5 text-[15px]`} onClick={() => { pausedRef.current = !pausedRef.current; }}>{ui?.paused ? '▶' : '❚❚'}</button>}
             <div className="flex gap-1.5">
               <button className={`${btn} pointer-events-auto px-3 py-1.5 ${tab === 'post' ? 'bg-[#333333]' : 'bg-[#1c1c1c]'}`} onClick={() => setTab('post')}>Outpost</button>
               <button className={`${btn} pointer-events-auto px-3 py-1.5 ${tab === 'tech' ? 'bg-[#333333]' : 'bg-[#1c1c1c]'}`} onClick={() => setTab('tech')}>Tech</button>
@@ -1788,18 +2116,25 @@ export default function Game() {
               <div className="text-3xl font-black">{run.endless ? 'THE LONG WAR' : (ui?.title ?? `LEVEL ${run.level}`)}</div>
               {ui?.blurb && <div className="mt-3 text-[14px] leading-snug text-black/80">{ui.blurb}</div>}
               <button className={`${btn} mt-5 bg-black px-6 py-2.5 text-white`} onClick={() => setIntro(false)}>Got it</button>
-              <div className="mt-3 text-[11px] text-black/50">Paused. Press ▶ when ready.</div>
+              <div className="mt-3 text-[11px] text-black/50">{run.mp ? 'Live. The clock is running.' : 'Paused. Press ▶ when ready.'}</div>
             </div>
+          </div>
+        )}
+        {hostGone && !ui?.over && (
+          <div className="absolute inset-0 flex flex-col items-center justify-center bg-black/70 px-8 text-center">
+            <div className="text-3xl font-black">HOST LEFT</div>
+            <div className="mt-2 text-white/60">The host phone ran the game, and it is gone.</div>
+            <button className={`${btn} mt-6 bg-white px-5 py-3 text-black`} onClick={() => { leaveRoom(); setScreen('menu'); worldRef.current = null; }}>Menu</button>
           </div>
         )}
         {ui?.over && (
           <div className="absolute inset-0 flex flex-col items-center justify-center bg-black/70 px-8 text-center">
             <div className={`text-5xl font-black ${ui.over === 'win' ? 'text-white' : 'text-[#ff3b3b]'}`}>{ui.over === 'win' ? 'HELD' : 'OVERRUN'}</div>
-            <div className="mt-2 text-white/60">{ui.over === 'win' ? `${run.endless ? 'The long war won' : (ui.hillNeed ? 'The hill held' : `Level ${run.level} cleared`)} in ${clock(ui.time)}.` : `Fell at ${clock(ui.time)}.`}</div>
+            <div className="mt-2 text-white/60">{ui.over === 'win' ? `${run.mp === 'team' ? 'The generals broken' : run.mp === 'against' ? 'Last one standing' : run.endless ? 'The long war won' : (ui.hillNeed ? 'The hill held' : `Level ${run.level} cleared`)} in ${clock(ui.time)}.` : `Fell at ${clock(ui.time)}.`}</div>
             <div className="mt-6 flex gap-3">
-              <button className={`${btn} bg-white/10 px-5 py-3`} onClick={() => { setScreen('menu'); worldRef.current = null; }}>Menu</button>
-              <button className={`${btn} bg-white px-5 py-3 text-black`} onClick={() => start(run.level, run.endless)}>{ui.over === 'win' ? 'Again' : 'Retry'}</button>
-              {ui.over === 'win' && !run.endless && run.level < CAMPAIGN_LEVELS && (
+              <button className={`${btn} bg-white/10 px-5 py-3`} onClick={() => { leaveRoom(); setScreen('menu'); worldRef.current = null; }}>Menu</button>
+              {!run.mp && <button className={`${btn} bg-white px-5 py-3 text-black`} onClick={() => start(run.level, run.endless)}>{ui.over === 'win' ? 'Again' : 'Retry'}</button>}
+              {ui.over === 'win' && !run.endless && !run.mp && run.level < CAMPAIGN_LEVELS && (
                 <button className={`${btn} bg-white px-5 py-3 text-black`} onClick={() => start(run.level + 1, false)}>Next</button>
               )}
             </div>
@@ -1814,7 +2149,7 @@ export default function Game() {
                 const t = TECH[k]; const lvl = ui?.tech[k] ?? 0; const cost = techCost(k, lvl);
                 const auto = ui?.autoTech[k]; const poor = (ui?.gold ?? 0) < cost;
                 return (
-                  <button key={k} {...hold((w) => toggleAutoTech(w, k), (w) => { const a = w.autoTech[k]; if (a) a.prio = 1; else if (!poor) buyTech(w, k); })}
+                  <button key={k} {...hold(() => dispatch({ k: 'autoTech', key: k }), () => { if (auto) dispatch({ k: 'nextTech', key: k }); else if (!poor) dispatch({ k: 'tech', key: k }); })}
                     className={`${btn} ${autoCls(auto, poor)}`}>
                     <div className="flex w-full items-center justify-between text-[13px]"><b>{t.name}{autoTag(auto)}</b><span className="text-white">{cost}g</span></div>
                     <div className="text-[11px] text-white/45">{t.desc} · lv {lvl}</div>
@@ -1829,7 +2164,7 @@ export default function Game() {
             </div>
           ) : !mineSel ? (
             <div className="flex h-full flex-col items-center justify-center text-center text-[13px] text-white/50">
-              <div className="font-bold" style={{ color: COLORS[sel.owner] }}>{sel.owner === 0 ? 'NEUTRAL' : NAMES[sel.owner]} {sel.base ? 'HQ' : 'outpost'}</div>
+              <div className="font-bold" style={{ color: colorOf(sel.owner) }}>{sel.owner === 0 ? 'NEUTRAL' : NAMES[sel.owner]} {sel.base ? 'HQ' : 'outpost'}</div>
               {ui?.selHidden ? (
                 <div className="text-white/30">Its numbers are in the fog.{sel.wall ? ` Walls ${sel.wall}.` : ''}{sel.cannon ? ` Cannon ${sel.cannon}.` : ''}</div>
               ) : (
@@ -1855,7 +2190,7 @@ export default function Game() {
                 ) : (
                   <span className="flex gap-1.5">
                     <button className={`${btn} bg-white/10 px-3 py-1.5 text-[13px]`} onClick={() => act((w) => { w.picking = sel.id; w.pickN = 2; w.picked = []; })}>Split 50/50</button>
-                    {sel.route && <button className={`${btn} bg-white/10 px-3 py-1.5 text-[13px]`} onClick={() => act((w) => { w.nodes[sel.id].route = null; })}>Clear</button>}
+                    {sel.route && <button className={`${btn} bg-white/10 px-3 py-1.5 text-[13px]`} onClick={() => dispatch({ k: 'route', id: sel.id, to: null })}>Clear</button>}
                   </span>
                 )}
               </div>
@@ -1867,18 +2202,27 @@ export default function Game() {
                     <div className="text-[11px] text-white/45">{mineCost(sel) === null ? 'As deep as it goes.' : `Deepen: ${MINE_TROOPS[sel.mine]} troops · +${Math.round((MINE_GOLD[sel.mine + 1] - MINE_GOLD[sel.mine]) * 60)} gold/min`}</div>
                   </div>
                   {mineCost(sel) !== null && (
-                    <button disabled={sel.troops < MINE_TROOPS[sel.mine]} onClick={() => act((w) => digMine(w, sel.id))} className={`${btn} bg-[#ffd166] px-3 py-1.5 text-[13px] text-black`}>Deepen</button>
+                    <button disabled={sel.troops < MINE_TROOPS[sel.mine]} onClick={() => dispatch({ k: 'mine', id: sel.id })} className={`${btn} bg-[#ffd166] px-3 py-1.5 text-[13px] text-black`}>Deepen</button>
                   )}
                 </div>
               ) : (
                 <>
                   <div className="grid grid-cols-2 gap-1.5">{upgRows(sel)}</div>
-                  <button disabled={sel.base || sel.troops < MINE_TROOPS[0]} onClick={() => act((w) => digMine(w, sel.id))}
+                  <button disabled={sel.base || sel.troops < MINE_TROOPS[0]} onClick={() => dispatch({ k: 'mine', id: sel.id })}
                     className={`${btn} mt-1 flex w-full items-center justify-between rounded-xl bg-white/5 px-3 py-1 text-left`}>
                     <span className="text-[13px]"><b className="text-[#ffd166]">Dig mine</b> <span className="text-white/45">· +{Math.round(MINE_GOLD[1] * 60)} gold/min</span></span>
                     <span className="text-[12px] text-white/60">{sel.base ? 'not an HQ' : `${MINE_TROOPS[0]} troops`}</span>
                   </button>
                 </>
+              )}
+              {run.mp === 'team' && ui && ui.friends.length > 0 && (
+                <div className="mt-1 flex flex-wrap items-center gap-1.5 text-[12px]">
+                  <span className="text-white/45">Give to</span>
+                  {ui.friends.map((f) => (
+                    <button key={f.seat} className={`${btn} px-2.5 py-1.5 text-[12px]`} style={{ background: colorOf(f.seat) + '33', color: colorOf(f.seat) }}
+                      onClick={() => { if (confirm(`Give this outpost to ${f.name}?`)) dispatch({ k: 'give', id: sel.id, to: f.seat }); }}>{f.name}</button>
+                  ))}
+                </div>
               )}
               </div>
             </>
