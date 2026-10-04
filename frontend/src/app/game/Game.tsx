@@ -43,12 +43,12 @@ const BASE_PROD_PER_S = 0.9;
 const UPG = {
   prod: { name: 'Barracks', base: 30, growth: 1.75, desc: '+35% troops/s' },
   wall: { name: 'Walls', base: 25, growth: 1.8, desc: '+25% defence' },
-  cannon: { name: 'Cannon', base: 45, growth: 1.8, desc: 'shooter' },
+  cannon: { name: 'Cannon', base: 55, growth: 1.8, desc: 'shooter' },
   tier: { name: 'Expand', base: 60, growth: 2.2, desc: 'bigger, faster' },
 } as const;
 type UpgKey = keyof typeof UPG;
 /** A cannon's shot by level: 3, 6, 10, 15, then 5 more a level. */
-const cannonDmg = (lvl: number) => (lvl <= 0 ? 0 : lvl <= 4 ? [3, 6, 10, 15][lvl - 1] : 15 + 5 * (lvl - 4));
+const cannonDmg = (lvl: number) => (lvl <= 0 ? 0 : lvl <= 4 ? [2, 4, 7, 10][lvl - 1] : 10 + 3 * (lvl - 4));
 const CANNON_RANGE = 130;
 /** A bigger outpost's guns reach further: +20% a size. */
 const cannonRange = (n: Node, w: World) => CANNON_RANGE * (1 + 0.2 * (n.tier - 1)) * (n.owner === PLAYER ? (1 + 0.15 * w.tech.scouts) * (1 + META.range.per * w.meta.range / 100) : 1);
