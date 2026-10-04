@@ -240,12 +240,12 @@ function rulesFor(level: number, endless: boolean): Rules {
     case 4: return { ...base, title: 'TRUCE', blurb: 'A truce: for 90 seconds nobody can attack anyone. Grab ground and build.', truce: 90, enemies: 2 };
     case 5: return { ...base, title: 'GOLD PILES', blurb: 'Outposts marked Ng pay gold the moment you take them. Fog hides anything 3 roads out.', goldPiles: { count: 3, gold: 80 }, fog: 3 };
     case 6: return { ...base, title: 'THE CHOKE', blurb: 'One hub in the middle, one road into each side\'s land. Hold the hub and you hold the door.', choke: true, enemies: 2, nodeCount: 16, mapH: 900 };
-    case 7: return { ...base, title: 'WALLS UP', blurb: 'The generals open with walls up. Bring more than the garrison times its walls.', enemyWalls: 2 };
+    case 7: return { ...base, title: 'WALLS UP', blurb: 'The generals open with walls up. Bring more than the garrison times its walls.', enemyWalls: 1 };
     case 8: return { ...base, title: 'THE HILL', blurb: 'Hold the hub for 60 seconds in all and the level is yours.', choke: true, hill: 60, enemies: 3, nodeCount: 20, mapH: 1000 };
     case 9: return { ...base, title: 'TWIN HQ', blurb: 'Two HQs each. A side only falls when both are gone.', twinHQ: true, enemies: 3, enemyGold: 200 };
     case 10: return { ...base, title: 'NARROW ROADS', blurb: 'Three roads at most from any outpost, and fog 3 roads out. Routes are long; plan them.', maxDeg: 3, nodeCount: 22, mapH: 800, fog: 3 };
     case 11: return { ...base, title: 'TRUCE II', blurb: 'A longer truce, and more loot to race for before it ends.', truce: 120, loot: { count: 4, troops: 50 }, enemyGold: 250 };
-    case 12: return { ...base, title: 'FORTRESS', blurb: 'The generals\' HQs are fortresses: thick walls and a cannon from the start.', fortress: true, enemyGold: 300 };
+    case 12: return { ...base, title: 'FORTRESS', blurb: 'The generals\' HQs are fortresses: double walls, a bigger cannon and a size up from the start.', fortress: true, enemyGold: 300 };
     case 13: return { ...base, title: 'GOLD RUSH', blurb: 'Mines. Park 100 troops on an outpost and dig for gold a minute. Deeper mines pay more.', mines: 5, enemyGold: 250, neutralBase: 20 };
     case 14: return { ...base, title: 'DEEP POCKETS', blurb: 'The generals open rich. Fog 2 roads out: you see your neighbours and theirs, no further.', enemyGold: 500, enemyExtra: 1, neutralBase: 18, fog: 2 };
     case 15: return { ...base, title: 'FOUR FRONTS', blurb: 'Four generals at once, on a map that goes on. Watch every edge.', enemies: 4, nodeCount: 36, mapH: 1200, enemyExtra: 2, enemyGold: 260 };
@@ -402,7 +402,7 @@ function buildWorld(rules: Rules, meta: Record<MetaKey, number>, seedExtra = 0):
   // Bases: yours at the bottom, theirs as far from you as the map allows.
   const byY = [...nodes].sort((p, q) => q.y - p.y);
   const home = choke ? nodes[choke.hqs[0]] : byY[Math.floor(rnd() * Math.min(3, byY.length))];
-  home.owner = PLAYER; home.base = true; home.tier = 2; home.troops = 40 + META.garrison.per * meta.garrison; home.wall = 1;
+  home.owner = PLAYER; home.base = true; home.tier = 2; home.troops = 40 + META.garrison.per * meta.garrison; home.wall = 1; home.cannon = 1;
   home.wallBoost = META.masonry.per * meta.masonry / 100; home.capBoost = META.cap.per * meta.cap / 100;
   // Hops from home, so no enemy HQ ever sits a march away.
   const hops = new Array(nodes.length).fill(Infinity) as number[];
@@ -433,8 +433,8 @@ function buildWorld(rules: Rules, meta: Record<MetaKey, number>, seedExtra = 0):
       }
     }
     if (!best) break;
-    best.owner = fid; best.base = true; best.tier = 2; best.troops = 40; best.wall = 1;
-    if (rules.fortress) { best.wall = 3; best.cannon = 2; best.tier = 3; }
+    best.owner = fid; best.base = true; best.tier = 2; best.troops = 40; best.wall = 1; best.cannon = 1;
+    if (rules.fortress) { best.wall = 2; best.cannon = 2; best.tier = 3; }
     taken.add(best.id);
     // A few outposts already theirs, beside the base.
     let extra = rules.enemyExtra;
@@ -444,6 +444,11 @@ function buildWorld(rules: Rules, meta: Record<MetaKey, number>, seedExtra = 0):
       if (taken.has(n.id) || n.owner !== 0) continue;
       n.owner = fid; n.troops = 15; n.wall = rules.enemyWalls ?? 0;
       taken.add(n.id); extra--;
+    }
+    // Twin HQ: a second one of theirs beside the first, like yours.
+    if (rules.twinHQ) {
+      const twin = adj[best.id].map((i) => nodes[i]).find((n) => n.owner === fid && !n.base) ?? adj[best.id].map((i) => nodes[i]).find((n) => n.owner === 0 && !taken.has(n.id));
+      if (twin) { twin.owner = fid; twin.base = true; twin.tier = 2; twin.troops = 40; twin.wall = 1; twin.cannon = 1; taken.add(twin.id); }
     }
     factions.push({ id: fid, tick: rnd() * rules.aiInterval, dead: 0, gold: rules.enemyGold, buyT: 2, tech: { conscription: rules.enemyTech ?? 0, logistics: rules.enemyTech ? 1 : 0 } });
   }
@@ -456,7 +461,7 @@ function buildWorld(rules: Rules, meta: Record<MetaKey, number>, seedExtra = 0):
   // Twin HQ: a second one of yours, beside the first.
   if (rules.twinHQ) {
     const twin = adj[home.id].map((i) => nodes[i]).filter((n) => n.owner === 0).sort((a, b) => b.y - a.y)[0];
-    if (twin) { twin.owner = PLAYER; twin.base = true; twin.tier = 2; twin.troops = 40; twin.wall = 1; twin.wallBoost = home.wallBoost; twin.capBoost = home.capBoost; }
+    if (twin) { twin.owner = PLAYER; twin.base = true; twin.tier = 2; twin.troops = 40; twin.wall = 1; twin.cannon = 1; twin.wallBoost = home.wallBoost; twin.capBoost = home.capBoost; }
   }
   // The hub: a big neutral garrison, and loot if the level says so.
   if (choke) { nodes[0].troops = Math.round(rules.neutralBase * 2.5); nodes[0].tier = 2; nodes[0].loot = rules.hubLoot ?? 0; }
@@ -743,20 +748,20 @@ function aiSpend(w: World, f: Faction) {
   const upg = (n: Node, k: UpgKey): Want => ({ cost: upgradeCost(w, n, k), buy: () => applyUpgrade(n, k) });
   const tech = (k: 'conscription' | 'logistics'): Want => ({ cost: techCost(k, f.tech[k]), buy: () => { f.tech[k]++; } });
   const wants: Want[] = [];
-  for (const n of front.slice(0, 2)) if (n.wall < 2) wants.push(upg(n, 'wall'));
   if (hq.prod < 2) wants.push(upg(hq, 'prod'));
+  for (const n of front.slice(0, 2)) if (n.wall < 1) wants.push(upg(n, 'wall'));
   if (front[0] && front[0].cannon < 1) wants.push(upg(front[0], 'cannon'));
   if (held.length >= 3) wants.push(tech('conscription'));
   if (hq.tier < 3) wants.push(upg(hq, 'tier'));
   for (const n of mine) if (n.prod < 2) wants.push(upg(n, 'prod'));
-  if (front[0] && front[0].wall < 3) wants.push(upg(front[0], 'wall'));
+  if (front[0] && front[0].wall < 2) wants.push(upg(front[0], 'wall'));
   if (held.length >= 4) wants.push(tech('logistics'));
   if (front[0] && front[0].cannon < 2) wants.push(upg(front[0], 'cannon'));
   for (const n of mine) if (n.prod < 3) wants.push(upg(n, 'prod'));
   if (held.length >= 5) wants.push(tech('conscription'));
   if (hq.tier < 4) wants.push(upg(hq, 'tier'));
   if (front[0] && front[0].cannon < 3) wants.push(upg(front[0], 'cannon'));
-  if (front[0] && front[0].wall < 4) wants.push(upg(front[0], 'wall'));
+  if (front[0] && front[0].wall < 3) wants.push(upg(front[0], 'wall'));
   for (const n of mine) if (n.prod < 4) wants.push(upg(n, 'prod'));
   if (front[0] && front[0].cannon < 4) wants.push(upg(front[0], 'cannon'));
   for (const n of mine) if (n.tier < 3) wants.push(upg(n, 'tier'));
