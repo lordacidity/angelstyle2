@@ -1507,8 +1507,8 @@ export default function Game() {
     const w = buildWorld(rulesForMp(mode, players.length), freshSave().meta, seed);
     if (w.mp) players.forEach((x, i) => { w.mp!.names[i + 1] = x.name; });
     worldRef.current = w;
-    // A room runs at one speed, never paused: four phones share one clock.
-    pausedRef.current = false; speedRef.current = 1; sendPctRef.current = 1; settledRef.current = false;
+    // A room runs at the slow speed, never paused: four phones share one clock.
+    pausedRef.current = false; speedRef.current = 0.5; sendPctRef.current = 1; settledRef.current = false;
     setIntro(true); setHostGone(false);
     dragRef.current = null;
     setRun({ level: 0, endless: false, mp: mode });
