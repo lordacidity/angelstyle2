@@ -110,9 +110,9 @@ const metaCost = (key: MetaKey, lvl: number) => {
 
 // ── Save ───────────────────────────────────────────────────────────────────
 
-interface Save { scrap: number; cleared: number; bestTime: number; meta: Record<MetaKey, number>; cb: boolean }
+interface Save { scrap: number; cleared: number; bestTime: number; meta: Record<MetaKey, number>; cb: boolean; teamBest: number }
 const SAVE_KEY = 'redline.v1';
-const freshSave = (): Save => ({ scrap: 0, cleared: 0, bestTime: 0, cb: false, meta: { prod: 0, speed: 0, gold: 0, cannon: 0, masonry: 0, range: 0, vault: 0, cap: 0, garrison: 0 } });
+const freshSave = (): Save => ({ scrap: 0, cleared: 0, bestTime: 0, cb: false, teamBest: 0, meta: { prod: 0, speed: 0, gold: 0, cannon: 0, masonry: 0, range: 0, vault: 0, cap: 0, garrison: 0 } });
 function loadSave(): Save {
   try {
     const raw = localStorage.getItem(SAVE_KEY);
@@ -1558,13 +1558,26 @@ export default function Game() {
     roomRef.current?.room.leave();
     const room = new Room(code, name, host, loadSave().meta);
     roomRef.current = { room, seat: 0, host, seq: 0, seed: 0, pending: [], acked: {}, snapAt: 0, players: [] };
-    setLobby({ code: room.code, meId: room.me.id, host, mode, tier: 1, peers: [], state: 'joining', err: null });
+    setLobby({ code: room.code, meId: room.me.id, host, mode, tier: Math.min(TEAM_TIERS, loadSave().teamBest + 1), peers: [], state: 'joining', err: null });
     room.onState = (st) => setLobby((l) => (l ? { ...l, state: st, err: st === 'error' ? 'Could not reach the room. Check the signal and try again.' : l.err } : l));
     room.onPeers = (peers) => {
       setLobby((l) => (l ? { ...l, peers } : l));
       const r = roomRef.current;
-      // The host gone mid-game ends it for everyone.
-      if (r && !r.host && r.seat > 0 && !peers.some((p) => p.host)) setHostGone(true);
+      // The host gone mid-game: the earliest phone still seated becomes the
+      // host, from the game as it last had it; the rest wait a moment for
+      // that, and only give up if nobody steps up.
+      if (r && !r.host && r.seat > 0 && !peers.some((p) => p.host)) {
+        const seated = peers.filter((p) => r.players.some((x) => x.id === p.id)).sort((a, b) => a.joined - b.joined);
+        if (seated[0]?.id === r.room.me.id) {
+          r.host = true; r.pending = []; r.acked = {};
+          r.room.becomeHost();
+          setLobby((l) => (l ? { ...l, host: true } : l));
+          setHostGone(false);
+        } else {
+          setTimeout(() => { const rr = roomRef.current; if (rr && !rr.host && !rr.room.peers.some((p) => p.host)) setHostGone(true); }, 6000);
+        }
+        return;
+      }
       // The host, mid-game: a phone back under a seat's name takes that seat
       // again, and gets the game as it stands.
       const w = worldRef.current;
@@ -1602,7 +1615,8 @@ export default function Game() {
         const seen = m.acked[r.seat] ?? 0;
         r.pending = r.pending.filter((x) => x.seq > seen);
         for (const x of r.pending) applyAction(w, r.seat, x.a);
-      } else if (m.ev === 'end') { setHostGone(true); }
+      }
+      // A host that leaves on purpose says so, but the hand-over goes by presence, like a dropped one.
     };
   }, [myName, startMp]);
 
@@ -1616,10 +1630,22 @@ export default function Game() {
 
   const leaveRoom = useCallback(() => {
     const r = roomRef.current;
-    if (r) { if (r.host && worldRef.current) r.room.send({ ev: 'end', why: 'host left' }); r.room.leave(); }
+    if (r) r.room.leave();
     roomRef.current = null; setLobby(null); setHostGone(false);
   }, []);
   useEffect(() => () => { roomRef.current?.room.leave(); }, []);
+  // In a room the screen stays on: the host's phone is the game, and a
+  // sleeping phone would stall everyone.
+  useEffect(() => {
+    if (screen !== 'play' || !run.mp) return;
+    let lock: { release: () => Promise<void> } | null = null;
+    const nav = navigator as Navigator & { wakeLock?: { request: (t: 'screen') => Promise<{ release: () => Promise<void> }> } };
+    const grab = async () => { try { lock = (await nav.wakeLock?.request('screen')) ?? null; } catch { /* not allowed, or not there */ } };
+    const back = () => { if (document.visibilityState === 'visible') void grab(); };
+    void grab();
+    document.addEventListener('visibilitychange', back);
+    return () => { document.removeEventListener('visibilitychange', back); void lock?.release(); };
+  }, [screen, run.mp]);
 
   /** An order from this phone: done here at once, and sent to the host if there is one. */
   const dispatch = (a: Action) => {
@@ -1635,7 +1661,10 @@ export default function Game() {
     settledRef.current = true;
     const s = loadSave();
     if (w.mp) {
-      if (resultFor(w, ME) === 'win') s.scrap += w.mp.mode === 'team' ? 20 + 15 * w.rules.level : 30;
+      if (resultFor(w, ME) === 'win') {
+        s.scrap += w.mp.mode === 'team' ? 20 + 15 * w.rules.level : 30;
+        if (w.mp.mode === 'team') s.teamBest = Math.max(s.teamBest, w.rules.level);
+      }
     } else if (w.rules.endless) {
       s.scrap += w.over === 'win' ? 120 : Math.min(20, Math.floor(w.time / 30));
       if (w.over === 'win') s.bestTime = s.bestTime ? Math.min(s.bestTime, Math.floor(w.time)) : Math.floor(w.time);
@@ -1838,7 +1867,8 @@ export default function Game() {
     const n = hit(w, p);
     // Paused: a finger on one of yours still marches (below); anywhere else
     // it pans, or taps.
-    if (pausedRef.current && !(n && n.owner === ME && fingersRef.current.size === 0)) {
+    const panning = pausedRef.current || (roomRef.current?.seat ?? 0) > 0;
+    if (panning && !(n && n.owner === ME && fingersRef.current.size === 0)) {
       panDown(e);
       pausedTapRef.current = fingersRef.current.size === 1 ? { x: e.clientX, y: e.clientY, moved: false } : null;
       return;
@@ -1916,6 +1946,7 @@ export default function Game() {
           <div className="mt-5 flex items-center justify-between rounded-2xl bg-white/5 px-4 py-3">
             <div><div className="text-[11px] uppercase tracking-wider text-white/40">Scrap</div><div className="text-xl font-bold">{save.scrap}</div></div>
             <div className="text-right"><div className="text-[11px] uppercase tracking-wider text-white/40">Long war best</div><div className="text-xl font-bold">{save.bestTime ? clock(save.bestTime) : '—'}</div></div>
+            <div className="text-right"><div className="text-[11px] uppercase tracking-wider text-white/40">Team</div><div className="text-xl font-bold">{save.teamBest ? `${save.teamBest}/${TEAM_TIERS}` : '—'}</div></div>
             <div className="flex flex-col gap-1.5">
               <button className={`${btn} bg-white/10 px-4 py-2 text-sm`} onClick={() => setScreen('armoury')}>Armoury</button>
               <button className={`${btn} px-4 py-2 text-[12px] ${save.cb ? 'bg-white text-black' : 'bg-white/10'}`} onClick={() => { const s = { ...loadSave(), cb: !save.cb }; storeSave(s); setSave(s); setColorBlind(s.cb); }}>{save.cb ? 'Colour-blind: on' : 'Colour-blind'}</button>
@@ -2141,7 +2172,7 @@ export default function Game() {
         <canvas ref={canvasRef} className="absolute inset-0 block" style={{ touchAction: 'none' }}
           onPointerDown={onDown} onPointerMove={onMove} onPointerUp={onUp} onPointerCancel={onUp} />
         {/* The purse and the rates, in the corner over the map. */}
-        <div className={`pointer-events-none absolute right-2 text-right leading-tight ${ui && ui.paused && !ui.over && ui.viewFracX < 1 ? 'top-9' : 'top-1'}`}>
+        <div className={`pointer-events-none absolute right-2 text-right leading-tight ${ui && (ui.paused || run.mp) && !ui.over && ui.viewFracX < 1 ? 'top-9' : 'top-1'}`}>
           <div className="text-[11px] text-white/40"><b className="text-white/80">+{Math.round(ui?.goldPerMin ?? 0)}</b> gold/min</div>
           <div className="text-[11px] text-white/40"><b className="text-white/80">+{Math.round(ui?.prodPerMin ?? 0)}</b> troops/min</div>
           {/* Flat out: five ticks a frame. Again, and back to normal. */}
@@ -2178,7 +2209,7 @@ export default function Game() {
           </div>
         )}
         {/* Zoomed in and paused: a scrollbar along the top too, for side to side. */}
-        {ui && ui.paused && !ui.over && ui.viewFracX < 1 && (
+        {ui && (ui.paused || run.mp) && !ui.over && ui.viewFracX < 1 && (
           <div className="absolute left-14 right-2 top-0 h-9" style={{ touchAction: 'none' }}
             onPointerDown={(e) => { e.currentTarget.setPointerCapture(e.pointerId); barGrabXRef.current = { x: e.clientX, frac: ui.scrollFracX }; }}
             onPointerMove={(e) => { const g = barGrabXRef.current; if (!g || !e.currentTarget.hasPointerCapture(e.pointerId)) return; const r = e.currentTarget.getBoundingClientRect(); scrollToXRef.current(g.frac + (e.clientX - g.x) / r.width / (1 - ui.viewFracX)); }}

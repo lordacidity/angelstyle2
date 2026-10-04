@@ -36,7 +36,7 @@ export function newCode(): string {
 
 export class Room {
   readonly code: string;
-  readonly me: Peer;
+  me: Peer;
   private ch: RealtimeChannel;
   peers: Peer[] = [];
   state: 'joining' | 'open' | 'closed' | 'error' = 'joining';
@@ -71,6 +71,9 @@ export class Room {
   }
 
   send(m: Msg) { void this.ch.send({ type: 'broadcast', event: 'msg', payload: m }); }
+
+  /** Step up as the host, for the others to see. */
+  becomeHost() { this.me.host = true; void this.ch.track(this.me); }
 
   leave() {
     this.state = 'closed';
