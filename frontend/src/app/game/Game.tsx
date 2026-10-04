@@ -510,7 +510,7 @@ const prodOf = (w: World, n: Node) => {
 };
 /** What your gold is worth: Tithe and the Vaults. */
 const goldMult = (w: World) => (1 + 0.2 * w.tech.tithe) * (1 + META.vault.per * w.meta.vault / 100);
-const goldOf = (n: Node) => (n.mine ? MINE_GOLD[n.mine] : n.base ? 1.0 : 0.35 + 0.15 * (n.tier - 1));
+const goldOf = (n: Node) => (n.mine ? MINE_GOLD[n.mine] : n.base ? 1.0 : 0.35 + 0.25 * (n.tier - 1));
 const convoySpeed = (w: World, owner: number) =>
   60 * (owner === PLAYER
     ? (1 + META.speed.per * w.meta.speed / 100) * (1 + 0.25 * w.tech.logistics)
@@ -611,7 +611,9 @@ function arrive(w: World, c: Convoy) {
     n.cannon = 0; // the guns are spiked as the walls fall
     n.route = null; n.auto = {};
     n.cd = 0;
-    if (c.owner === PLAYER) { w.gold += 12; }
+    // Taking ground pays half a minute of its gold, once, to whoever takes it.
+    const prize = goldOf(n) * 30;
+    if (c.owner === PLAYER) w.gold += prize; else { const f = w.factions.find((x) => x.id === c.owner); if (f) f.gold += prize; }
     if (was !== 0 && was !== PLAYER && !w.nodes.some((m) => m.owner === was)) {
       const f = w.factions.find((x) => x.id === was);
       if (f) f.dead = w.time;
