@@ -1679,7 +1679,7 @@ export default function Game() {
   // The room this phone is in, while it is: the wire, the seat, and the
   // orders it has given that the host has not yet shown back.
   const roomRef = useRef<{ room: Room; seat: number; host: boolean; seq: number; seed: number; pending: { seq: number; a: Action }[]; acked: Record<number, number>; snapAt: number; players: { id: string; name: string; meta?: Record<MetaKey, number> }[] } | null>(null);
-  const [lobby, setLobby] = useState<{ code: string; meId: string; host: boolean; mode: 'team' | 'against'; tier: number; peers: Peer[]; state: string; err: string | null } | null>(null);
+  const [lobby, setLobby] = useState<{ code: string; meId: string; host: boolean; mode: 'team' | 'against'; cap: number; tier: number; peers: Peer[]; state: string; err: string | null } | null>(null);
   const [myName, setMyName] = useState('');
   const [joinCode, setJoinCode] = useState('');
   const [hostGone, setHostGone] = useState(false);
@@ -1772,6 +1772,11 @@ export default function Game() {
     players.forEach((x, i) => { metas[i + 1] = { ...freshSave().meta, ...(x.meta ?? {}) }; });
     const w = buildWorld(rulesForMp(mode, players.length, tier), freshSave().meta, seed, metas);
     if (w.mp) players.forEach((x, i) => { w.mp!.names[i + 1] = x.name; });
+    // Your own HQ at the bottom of your own screen: a seat placed up the map
+    // sees the map turned over. Every distance is the same upside down, so
+    // the game on this phone stays the host's game exactly.
+    const home = w.nodes.find((n) => n.base && n.owner === seat);
+    if (home && home.y < w.rules.mapH / 2) for (const n of w.nodes) n.y = w.rules.mapH - n.y;
     worldRef.current = w;
     // A room runs at the slow speed, never paused: four phones share one clock.
     pausedRef.current = false; speedRef.current = 0.5; sendPctRef.current = 1; settledRef.current = false;
@@ -1784,13 +1789,13 @@ export default function Game() {
   }, []);
 
   /** Open or join a room. The host's phone makes the code. */
-  const openRoom = useCallback((code: string, host: boolean, mode: 'team' | 'against') => {
+  const openRoom = useCallback((code: string, host: boolean, mode: 'team' | 'against', cap = 4) => {
     const name = (myName.trim() || 'Player').slice(0, 12);
     try { localStorage.setItem('redline.name', name); } catch { /* private mode */ }
     roomRef.current?.room.leave();
     const room = new Room(code, name, host, loadSave().meta);
     roomRef.current = { room, seat: 0, host, seq: 0, seed: 0, pending: [], acked: {}, snapAt: 0, players: [] };
-    setLobby({ code: room.code, meId: room.me.id, host, mode, tier: Math.min(TEAM_TIERS, loadSave().teamBest + 1), peers: [], state: 'joining', err: null });
+    setLobby({ code: room.code, meId: room.me.id, host, mode, cap, tier: Math.min(TEAM_TIERS, loadSave().teamBest + 1), peers: [], state: 'joining', err: null });
     room.onState = (st) => setLobby((l) => (l ? { ...l, state: st, err: st === 'error' ? 'Could not reach the room. Check the signal and try again.' : l.err } : l));
     room.onPeers = (peers) => {
       setLobby((l) => (l ? { ...l, peers } : l));
@@ -2263,10 +2268,10 @@ export default function Game() {
 
   if (screen === 'room') {
     const l = lobby;
-    const canStart = !!l && l.host && l.peers.length >= 2 && l.peers.length <= 4 && l.state === 'open';
+    const canStart = !!l && l.host && l.peers.length >= 2 && l.state === 'open';
     const startRoom = () => {
       const r = roomRef.current; if (!r || !l) return;
-      const players = l.peers.slice(0, 4).map((p) => ({ id: p.id, name: p.name, meta: p.meta }));
+      const players = l.peers.slice(0, l.cap).map((p) => ({ id: p.id, name: p.name, meta: p.meta }));
       const seed = Math.floor(Math.random() * 1e9);
       r.room.send({ ev: 'start', mode: l.mode, seed, players, tier: l.tier });
       startMp(l.mode, seed, players, l.tier);
@@ -2295,6 +2300,9 @@ export default function Game() {
                 <button className={`${btn} bg-white px-4 py-4 text-black`} onClick={() => openRoom(newCode(), true, 'against')}>
                   <div className="text-lg">AGAINST</div><div className="text-[11px] font-normal text-black/60">every one for themselves</div>
                 </button>
+                <button className={`${btn} col-span-2 bg-white px-4 py-4 text-black`} onClick={() => openRoom(newCode(), true, 'against', 2)}>
+                  <div className="text-lg">1 V 1</div><div className="text-[11px] font-normal text-black/60">two of you, opposite ends, nobody else</div>
+                </button>
               </div>
               <div className="mt-6 text-[11px] uppercase tracking-wider text-white/40">Or join one</div>
               <div className="mt-2 flex gap-2">
@@ -2308,7 +2316,7 @@ export default function Game() {
               <div className="mt-4 rounded-2xl bg-white px-4 py-5 text-center text-black">
                 <div className="text-[11px] uppercase tracking-wider text-black/50">Room code</div>
                 <div className="text-5xl font-black tracking-[0.25em]">{l.code}</div>
-                {l.host && <div className="mt-1 text-sm text-black/60">{l.mode === 'team' ? 'Team: all of you against the generals' : 'Against: every one for themselves'}</div>}
+                {l.host && <div className="mt-1 text-sm text-black/60">{l.mode === 'team' ? 'Team: all of you against the generals' : l.cap === 2 ? '1 v 1: opposite ends, nobody else' : 'Against: every one for themselves'}</div>}
               </div>
               {l.host && l.mode === 'team' && (
                 <>
@@ -2328,7 +2336,7 @@ export default function Game() {
                 {l.peers.map((p, i) => (
                   <div key={p.id} className="flex items-center justify-between rounded-xl bg-white/5 px-4 py-2.5">
                     <span className="flex items-center gap-2"><span className="inline-block h-3 w-3 rounded-full" style={{ background: COLORS[i + 1] }} />{p.name}{p.id === l.meId ? <span className="text-white/40"> (you)</span> : ''}</span>
-                    <span className="text-[11px] uppercase tracking-wider text-white/40">{p.host ? 'host' : i >= 4 ? 'full' : ''}</span>
+                    <span className="text-[11px] uppercase tracking-wider text-white/40">{p.host ? 'host' : i >= l.cap ? 'full' : ''}</span>
                   </div>
                 ))}
                 {l.peers.length < 2 && l.state === 'open' && <div className="px-1 text-sm text-white/40">Waiting for one more phone…</div>}
