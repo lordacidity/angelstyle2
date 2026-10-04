@@ -402,7 +402,7 @@ function buildWorld(rules: Rules, meta: Record<MetaKey, number>, seedExtra = 0):
   // Bases: yours at the bottom, theirs as far from you as the map allows.
   const byY = [...nodes].sort((p, q) => q.y - p.y);
   const home = choke ? nodes[choke.hqs[0]] : byY[Math.floor(rnd() * Math.min(3, byY.length))];
-  home.owner = PLAYER; home.base = true; home.tier = 2; home.troops = 40 + META.garrison.per * meta.garrison; home.wall = 1; home.cannon = 1;
+  home.owner = PLAYER; home.base = true; home.tier = 2; home.troops = 40 + META.garrison.per * meta.garrison; home.wall = 1;
   home.wallBoost = META.masonry.per * meta.masonry / 100; home.capBoost = META.cap.per * meta.cap / 100;
   // Hops from home, so no enemy HQ ever sits a march away.
   const hops = new Array(nodes.length).fill(Infinity) as number[];
@@ -433,7 +433,7 @@ function buildWorld(rules: Rules, meta: Record<MetaKey, number>, seedExtra = 0):
       }
     }
     if (!best) break;
-    best.owner = fid; best.base = true; best.tier = 2; best.troops = 40; best.wall = 1; best.cannon = 1;
+    best.owner = fid; best.base = true; best.tier = 2; best.troops = 40; best.wall = 1;
     if (rules.fortress) { best.wall = 2; best.cannon = 2; best.tier = 3; }
     taken.add(best.id);
     // A few outposts already theirs, beside the base.
@@ -448,7 +448,7 @@ function buildWorld(rules: Rules, meta: Record<MetaKey, number>, seedExtra = 0):
     // Twin HQ: a second one of theirs beside the first, like yours.
     if (rules.twinHQ) {
       const twin = adj[best.id].map((i) => nodes[i]).find((n) => n.owner === fid && !n.base) ?? adj[best.id].map((i) => nodes[i]).find((n) => n.owner === 0 && !taken.has(n.id));
-      if (twin) { twin.owner = fid; twin.base = true; twin.tier = 2; twin.troops = 40; twin.wall = 1; twin.cannon = 1; taken.add(twin.id); }
+      if (twin) { twin.owner = fid; twin.base = true; twin.tier = 2; twin.troops = 40; twin.wall = 1; taken.add(twin.id); }
     }
     factions.push({ id: fid, tick: rnd() * rules.aiInterval, dead: 0, gold: rules.enemyGold, buyT: 2, tech: { conscription: rules.enemyTech ?? 0, logistics: rules.enemyTech ? 1 : 0 } });
   }
@@ -461,7 +461,7 @@ function buildWorld(rules: Rules, meta: Record<MetaKey, number>, seedExtra = 0):
   // Twin HQ: a second one of yours, beside the first.
   if (rules.twinHQ) {
     const twin = adj[home.id].map((i) => nodes[i]).filter((n) => n.owner === 0).sort((a, b) => b.y - a.y)[0];
-    if (twin) { twin.owner = PLAYER; twin.base = true; twin.tier = 2; twin.troops = 40; twin.wall = 1; twin.cannon = 1; twin.wallBoost = home.wallBoost; twin.capBoost = home.capBoost; }
+    if (twin) { twin.owner = PLAYER; twin.base = true; twin.tier = 2; twin.troops = 40; twin.wall = 1; twin.wallBoost = home.wallBoost; twin.capBoost = home.capBoost; }
   }
   // The hub: a big neutral garrison, and loot if the level says so.
   if (choke) { nodes[0].troops = Math.round(rules.neutralBase * 2.5); nodes[0].tier = 2; nodes[0].loot = rules.hubLoot ?? 0; }
