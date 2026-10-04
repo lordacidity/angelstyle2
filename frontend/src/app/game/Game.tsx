@@ -1609,7 +1609,10 @@ export default function Game() {
       if (m.ev === 'act' && r.host) {
         applyAction(w, m.p, m.a as Action);
         r.acked[m.p] = m.seq;
+      } else if (m.ev === 'speed' && !r.host) {
+        speedRef.current = m.v;
       } else if (m.ev === 'snap' && !r.host) {
+        if (m.speed) speedRef.current = m.speed;
         unpackWorld(w, m.snap as Snap);
         // The orders the host has not shown back yet still hold here.
         const seen = m.acked[r.seat] ?? 0;
@@ -1756,7 +1759,7 @@ export default function Game() {
       const room = roomRef.current;
       if (room && room.host && room.seat > 0 && now - room.snapAt > 1000) {
         room.snapAt = now;
-        room.room.send({ ev: 'snap', snap: packWorld(w), acked: room.acked });
+        room.room.send({ ev: 'snap', snap: packWorld(w), acked: room.acked, speed: speedRef.current });
       }
       if (w.over) settle(w);
       ctx.fillStyle = '#000000';
@@ -2178,6 +2181,9 @@ export default function Game() {
           {/* Flat out: five ticks a frame. Again, and back to normal. */}
           {!run.mp && <button className={`${btn} pointer-events-auto mt-1.5 px-3 py-1.5 text-[13px] ${(ui?.speed ?? 1) === 5 ? 'bg-white text-black' : 'bg-[#1c1c1c]'}`}
             onClick={() => { speedRef.current = speedRef.current === 5 ? 1 : 5; }}>5×</button>}
+          {/* A room: the host sets the pace for every phone; the rest see it. */}
+          {run.mp && <button disabled={!lobby?.host} className={`${btn} pointer-events-auto mt-1.5 px-3 py-1.5 text-[13px] ${(ui?.speed ?? 0.5) >= 1 ? 'bg-white text-black' : 'bg-[#1c1c1c]'}`}
+            onClick={() => { const r = roomRef.current; if (!r || !r.host) return; speedRef.current = speedRef.current >= 1 ? 0.5 : 1; r.room.send({ ev: 'speed', v: speedRef.current }); }}>2×</button>}
         </div>
         {/* The controls, over the foot of the map. Every button the one height. */}
         <div className="pointer-events-none absolute inset-x-0 bottom-0 flex items-end justify-between px-3 pb-1.5 text-[13px]">

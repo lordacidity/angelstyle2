@@ -23,7 +23,8 @@ export type Msg =
   | { ev: 'start'; mode: 'team' | 'against'; seed: number; players: { id: string; name: string; meta?: Record<string, number> }[]; tier?: number }
   | { ev: 'resume'; mode: 'team' | 'against'; seed: number; players: { id: string; name: string; meta?: Record<string, number> }[]; tier: number; snap: unknown; acked: Record<number, number> }
   | { ev: 'act'; p: number; seq: number; a: unknown }
-  | { ev: 'snap'; snap: unknown; acked: Record<number, number> }
+  | { ev: 'snap'; snap: unknown; acked: Record<number, number>; speed?: number }
+  | { ev: 'speed'; v: number }
   | { ev: 'end'; why: string };
 
 /** Five letters, none that read as another. */
