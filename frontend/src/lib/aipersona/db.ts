@@ -29,7 +29,7 @@ import type {
 // ── Connection pool (singleton, hot-reload safe) ──────────────────────────────
 // Bump SCHEMA_VERSION whenever SCHEMA below changes, so a process that started
 // before the change re-runs the (idempotent) DDL.
-const SCHEMA_VERSION = 1;
+const SCHEMA_VERSION = 2;
 
 const g = globalThis as unknown as {
   __aipersonaPool?: pg.Pool;
@@ -85,6 +85,8 @@ const SCHEMA: string[] = [
     UNIQUE (scene_id, persona_id)
   )`,
   `CREATE INDEX IF NOT EXISTS aipersona_takes_persona ON aipersona_takes (persona_id)`,
+  // A profile picture, made from the photo on request (see avatar route).
+  `ALTER TABLE aipersona_personas ADD COLUMN IF NOT EXISTS avatar_path TEXT`,
 ];
 
 function ensureSchema(): Promise<void> {
@@ -109,6 +111,7 @@ async function query<R extends pg.QueryResultRow>(sql: string, values: unknown[]
 
 const PREFIX = 'aipersona';
 export const photoPath = (id: string, ext: string) => `${PREFIX}/photos/${id}.${ext}`;
+export const avatarPath = (personaId: string) => `${PREFIX}/avatars/${personaId}-${Date.now()}.jpg`;
 export const sourcePath = (id: string, ext: string) => `${PREFIX}/sources/${id}.${ext}`;
 export const sceneFile = (sceneId: string, file: string) => `${PREFIX}/scenes/${sceneId}/${file}`;
 
@@ -219,15 +222,17 @@ export function toScene(rec: SceneRecord, live?: Live): Scene {
 
 // ── The front screen ──────────────────────────────────────────────────────────
 
-interface PersonaDb { id: string; name: string; photo_path: string; created_at: Date }
+interface PersonaDb { id: string; name: string; photo_path: string; avatar_path: string | null; created_at: Date }
+const PERSONA_COLS = 'id, name, photo_path, avatar_path, created_at';
 
 const toPersona = (r: PersonaDb, videos: PersonaVideo[] = []): Persona => ({
-  id: r.id, name: r.name, photoUrl: publicUrl(r.photo_path), createdAt: r.created_at.toISOString(), videos,
+  id: r.id, name: r.name, photoUrl: publicUrl(r.photo_path), avatarUrl: r.avatar_path ? publicUrl(r.avatar_path) : null,
+  createdAt: r.created_at.toISOString(), videos,
 });
 
 export async function getLibrary(): Promise<LibraryPayload> {
   const [personas, videos, scenes] = await Promise.all([
-    query<PersonaDb>('SELECT id, name, photo_path, created_at FROM aipersona_personas ORDER BY created_at'),
+    query<PersonaDb>(`SELECT ${PERSONA_COLS} FROM aipersona_personas ORDER BY created_at`),
     query<{ id: string; persona_id: string; scene_id: string; scene_name: string; video_path: string; frame_path: string | null; saved_at: Date }>(
       `SELECT t.id, t.persona_id, t.scene_id, s.name AS scene_name, t.video_path, t.frame_path, t.saved_at
          FROM aipersona_takes t JOIN aipersona_scenes s ON s.id = t.scene_id
@@ -262,7 +267,7 @@ export async function getLibrary(): Promise<LibraryPayload> {
 
 export async function createPersona(name: string, photo: string): Promise<Persona> {
   const r = await query<PersonaDb>(
-    'INSERT INTO aipersona_personas (name, photo_path) VALUES ($1, $2) RETURNING id, name, photo_path, created_at',
+    `INSERT INTO aipersona_personas (name, photo_path) VALUES ($1, $2) RETURNING ${PERSONA_COLS}`,
     [name, photo],
   );
   return toPersona(r.rows[0]);
@@ -277,7 +282,7 @@ export async function updatePersona(id: string, patch: { name?: string; photoPat
     : undefined;
   const r = await query<PersonaDb>(
     `UPDATE aipersona_personas SET name = COALESCE($2, name), photo_path = COALESCE($3, photo_path)
-      WHERE id = $1 RETURNING id, name, photo_path, created_at`,
+      WHERE id = $1 RETURNING ${PERSONA_COLS}`,
     [id, patch.name ?? null, patch.photoPath ?? null],
   );
   if (!r.rows[0]) return null;
@@ -291,10 +296,34 @@ export async function deletePersona(id: string): Promise<boolean> {
   const files = await query<{ frame_path: string | null; video_path: string | null }>(
     'SELECT frame_path, video_path FROM aipersona_takes WHERE persona_id = $1', [id],
   );
-  const r = await query<{ photo_path: string }>('DELETE FROM aipersona_personas WHERE id = $1 RETURNING photo_path', [id]);
+  const r = await query<{ photo_path: string; avatar_path: string | null }>('DELETE FROM aipersona_personas WHERE id = $1 RETURNING photo_path, avatar_path', [id]);
   if (!r.rows[0]) return false;
-  await removeObjects([r.rows[0].photo_path, ...files.rows.flatMap((f) => [f.frame_path, f.video_path])].filter((p): p is string => !!p));
+  await removeObjects([r.rows[0].photo_path, r.rows[0].avatar_path, ...files.rows.flatMap((f) => [f.frame_path, f.video_path])].filter((p): p is string => !!p));
   return true;
+}
+
+/** The stored photo of one persona, for making its profile picture. */
+export async function personaPhoto(id: string): Promise<string | null> {
+  const r = await query<{ photo_path: string }>('SELECT photo_path FROM aipersona_personas WHERE id = $1', [id]);
+  return r.rows[0]?.photo_path ?? null;
+}
+
+/** Point a persona at a new profile picture, and drop the old one. */
+export async function setAvatar(id: string, path: string): Promise<Persona | null> {
+  const before = (await query<{ avatar_path: string | null }>('SELECT avatar_path FROM aipersona_personas WHERE id = $1', [id])).rows[0];
+  const r = await query<PersonaDb>(`UPDATE aipersona_personas SET avatar_path = $2 WHERE id = $1 RETURNING ${PERSONA_COLS}`, [id, path]);
+  if (!r.rows[0]) { await removeObjects([path]); return null; }
+  if (before?.avatar_path && before.avatar_path !== path) await removeObjects([before.avatar_path]);
+  return toPersona(r.rows[0]);
+}
+
+/** Every persona's name and profile picture, for the other sections that list
+ *  the same people (Vids2 matches them by name). */
+export async function listAvatars(): Promise<{ name: string; avatarUrl: string }[]> {
+  const r = await query<{ name: string; avatar_path: string }>(
+    'SELECT name, avatar_path FROM aipersona_personas WHERE avatar_path IS NOT NULL ORDER BY created_at',
+  );
+  return r.rows.map((x) => ({ name: x.name, avatarUrl: publicUrl(x.avatar_path) }));
 }
 
 // ── Scenes ────────────────────────────────────────────────────────────────────

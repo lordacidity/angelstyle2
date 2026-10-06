@@ -19,6 +19,13 @@ export const FRAME_MODEL = 'openai/gpt-image-2.5/sunburst/edit';
  *  the model is charged by the token, and fal publishes no price per level. */
 export const FRAME_QUALITY: 'low' | 'medium' | 'high' | 'xhigh' | 'max' = 'xhigh';
 
+/** A character's profile picture: the photo redrawn as a funny round-friendly
+ *  headshot, by the same image model at `medium` — it is a small picture, and
+ *  it only has to read at a glance. */
+export const AVATAR_QUALITY = 'medium' as const;
+export const AVATAR_PROMPT =
+  "Make a funny profile picture of the character in #image1: a tight, centered head-and-shoulders shot, square, with a goofy exaggerated expression and a plain bold single-colour background. Keep the character's face, hair, clothes and look exactly as in #image1. The face fills the middle of the frame so it can be cropped to a circle.";
+
 /** Moves the character first frame the way the scene's video moves. Kling's
  *  pro tier (standard until 2026-10-02, and briefly again that day): the same
  *  inputs and the same limits as standard, a better picture, and a higher
@@ -31,9 +38,10 @@ export const DEFAULT_FRAME_PROMPT =
 
 /** What Kling is told. The brackets are a blank to fill in: nothing is sent
  *  to Kling while a prompt still has one in it — see hasBlank. What follows
- *  the blank is said of every video: the camera holds still. */
+ *  the blank is said of every video: the camera holds still, the lens doesn't
+ *  change, and the character keeps its look — only the movement is the video's. */
 export const DEFAULT_MOTION_PROMPT =
-  'A man [briefly what he is doing, just a few words]. Do not move the camera or zoom it, it stays still and stable the whole time.';
+  'A man [briefly what he is doing, just a few words]. Do not move the camera or zoom in, the video should be still and stable the whole time. Do not refocus or change the lens. Keep the person in #image1 looking EXACTLY the same, only change their hand and body movements to match #video1';
 
 /** A prompt that still has a bracket in it has not been filled in. */
 export const hasBlank = (prompt: string) => /[[\]]/.test(prompt);
@@ -80,6 +88,8 @@ export interface Persona {
   id: string;
   name: string;
   photoUrl: string;
+  /** Its round profile picture, once one has been made. */
+  avatarUrl: string | null;
   createdAt: string;
   /** Newest first. */
   videos: PersonaVideo[];

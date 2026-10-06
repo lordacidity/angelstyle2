@@ -60,6 +60,8 @@ const CLIPPER_API = [
   // The emoji a caption can carry, and which ones have been reached for before
   // — the captions rail reads and writes them (lib/emoji-prefs-store).
   '/api/emoji-prefs',
+  // Each persona's round profile picture, by name (read-only).
+  '/api/ai-persona/avatars',
 ];
 
 // Routes with something after them that still belong to the clipper: a saved

@@ -16,7 +16,7 @@
 
 import { fal } from '@fal-ai/client';
 import { fit1080p } from './fit1080';
-import { FRAME_MODEL, FRAME_QUALITY, MOTION_MODEL } from './types';
+import { AVATAR_PROMPT, AVATAR_QUALITY, FRAME_MODEL, FRAME_QUALITY, MOTION_MODEL } from './types';
 
 export type JobKind = 'frame' | 'video';
 const MODEL: Record<JobKind, string> = { frame: FRAME_MODEL, video: MOTION_MODEL };
@@ -113,6 +113,23 @@ export async function submitFrame({ frameUrl, photoUrl, prompt, width, height }:
     return request_id;
   } catch (err) {
     throw falError(err, 'image submit');
+  }
+}
+
+/** A profile picture of the character in the photo, waited for rather than
+ *  queued: at medium and 1024 square it comes back well inside a request.
+ *  Answers with the image's URL on fal's storage. */
+export async function makeAvatar(photoUrl: string): Promise<string> {
+  ensureConfigured();
+  try {
+    const { data } = await fal.subscribe(FRAME_MODEL, {
+      input: { prompt: AVATAR_PROMPT, image_urls: [photoUrl], image_size: { width: 1024, height: 1024 }, quality: AVATAR_QUALITY, output_format: 'png' },
+    });
+    const url = (data as { images?: { url?: string }[] })?.images?.[0]?.url;
+    if (!url) throw new Error(`fal returned no image. Raw: ${JSON.stringify(data).slice(0, 400)}`);
+    return url;
+  } catch (err) {
+    throw falError(err, 'avatar');
   }
 }
 

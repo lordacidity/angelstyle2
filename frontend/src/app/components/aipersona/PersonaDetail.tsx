@@ -12,7 +12,7 @@
 
 import { useEffect, useState } from 'react';
 import { DownloadIcon, SpinnerIcon } from '@/lib/icons';
-import { deletePersona, deleteTake, downloadUrl, fileSlug, updatePersona, uploadFile } from '@/lib/aipersona/client';
+import { deletePersona, deleteTake, downloadUrl, fileSlug, makeAvatar, updatePersona, uploadFile } from '@/lib/aipersona/client';
 import { MAX_NAME_CHARS, PHOTO_TYPES, type Persona } from '@/lib/aipersona/types';
 import { listLibrary } from '@/lib/vids-client';
 import { personaFolders } from '@/lib/vids-persona-folders';
@@ -20,7 +20,7 @@ import { PERSONA_PARTS, type VidRow, type VidsLibraryPayload } from '@/lib/vids-
 import { PersonaVideoMaker } from './PersonaVideoMaker';
 import { ConfirmButton, DropZone, FIELD, LABEL, PRIMARY, Split, errorText, photoProblem } from './aipersona-ui';
 
-type Busy = 'name' | 'photo' | 'video' | 'delete';
+type Busy = 'name' | 'photo' | 'video' | 'delete' | 'avatar';
 
 const day = (iso: string) => new Date(iso).toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' });
 
@@ -113,6 +113,24 @@ export function PersonaDetail({ persona, onBack, onChanged }: {
 
   const side = (
     <div className="grid gap-5">
+      <div className="flex items-center gap-3">
+        <span className="relative grid h-16 w-16 shrink-0 place-items-center overflow-hidden rounded-full bg-zinc-900">
+          {persona.avatarUrl && (
+            // eslint-disable-next-line @next/next/no-img-element
+            <img src={persona.avatarUrl} alt="" className={`h-full w-full object-cover ${busy === 'avatar' ? 'opacity-40' : ''}`} />
+          )}
+          {busy === 'avatar' && <SpinnerIcon size={18} className="absolute animate-spin text-white" />}
+        </span>
+        <button
+          type="button"
+          onClick={() => void run('avatar', () => makeAvatar(persona.id))}
+          disabled={!!busy}
+          className="text-xs text-zinc-400 transition-colors hover:text-white disabled:opacity-40"
+        >
+          {busy === 'avatar' ? 'Making a profile pic…' : persona.avatarUrl ? 'New profile pic' : 'Make a profile pic'}
+        </button>
+      </div>
+
       <div className="grid gap-1.5">
         <span className={LABEL}>Character photo</span>
         <DropZone accept={PHOTO_TYPES.join(',')} onFile={replacePhoto} disabled={!!busy} label="Replace the character photo" className="relative grid place-items-center rounded-md">

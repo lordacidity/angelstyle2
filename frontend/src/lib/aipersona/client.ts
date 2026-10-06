@@ -83,3 +83,8 @@ export const downloadUrl = (url: string, name: string) =>
 /** A name a filesystem will take. */
 export const fileSlug = (text: string) =>
   text.trim().toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 60) || 'character';
+
+/** Make (or remake) a persona's round profile picture. Takes up to a minute. */
+export const makeAvatar = (id: string) => ask<Persona>(`/personas/${id}/avatar`, send('POST'));
+/** Every persona's name and profile picture. */
+export const listAvatars = () => ask<{ name: string; avatarUrl: string }[]>('/avatars');

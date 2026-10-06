@@ -74,7 +74,7 @@ import {
 import { OUTLET_IDS, OUTLETS, outletById } from '@/lib/news/outlets';
 import type { NamedPerson, NewsCategory, NewsHit, OutletId, TrendingHit } from '@/lib/news/types';
 import { SpinnerIcon, VideoIcon } from '@/lib/icons';
-import { CLIPPERS } from '@/lib/clipping';
+import { CLIPPERS, withBase } from '@/lib/clipping';
 import { EmojiHint } from '@/app/components/simpler/VidsCaptionsRail';
 
 // ── Labels ──────────────────────────────────────────────────────────────────
@@ -391,6 +391,20 @@ export function Vids2Form({
    *  card has been moved by hand: it then shows wherever the chosen persona
    *  is. */
   const [browse, setBrowse] = useState<string | null | undefined>(undefined);
+  // Each person's round profile picture from AI Persona, by name. Read once;
+  // a person without one keeps the still from one of their videos.
+  const [avatars, setAvatars] = useState<Map<string, string>>(new Map());
+  useEffect(() => {
+    let live = true;
+    fetch(withBase('/api/ai-persona/avatars'))
+      .then((r) => (r.ok ? r.json() : []))
+      .then((list: { name: string; avatarUrl: string }[]) => {
+        if (live && Array.isArray(list)) setAvatars(new Map(list.map((a) => [a.name.trim().toLowerCase(), a.avatarUrl])));
+      })
+      .catch(() => { /* no pictures: the stills stay */ });
+    return () => { live = false; };
+  }, []);
+  const avatarOf = (name: string | null | undefined) => (name ? avatars.get(name.trim().toLowerCase()) : undefined);
   /** The story chosen for THIS person — one chosen and then Who changed is
    *  about somebody else, and doesn't count (storyFor). */
   const story = storyFor(setup);
@@ -936,12 +950,13 @@ export function Vids2Form({
       case 'mode': return MODE_LABEL[setup.mode];
       case 'caption': return captionSummary?.trim() || '…';
       case 'persona': {
-        const thumb = resolveVideo(persona?.topAId ?? '')?.thumbUrl;
+        const face = avatarOf(chosenGroup?.folder?.name);
+        const thumb = face ?? resolveVideo(persona?.topAId ?? '')?.thumbUrl;
         return (
           <span className="flex min-w-0 items-center gap-2">
             {thumb && (
               // eslint-disable-next-line @next/next/no-img-element
-              <img src={thumb} alt="" className="h-6 w-6 shrink-0 rounded-md object-cover" draggable={false} />
+              <img src={thumb} alt="" className={`h-6 w-6 shrink-0 object-cover ${face ? 'rounded-full' : 'rounded-md'}`} draggable={false} />
             )}
             <span className="truncate">{persona ? personaLabel(persona, folders) : (libraryLoaded ? '' : '…')}</span>
           </span>
@@ -1443,6 +1458,7 @@ export function Vids2Form({
     <div className="vids-scroll grid max-h-[420px] grid-cols-3 gap-2 overflow-y-auto pr-1 sm:grid-cols-5">
       {personaGroups.map((g) => {
         const name = g.folder?.name ?? OTHER_LABEL;
+        const face = avatarOf(g.folder?.name);
         const thumb = g.personas.map((p) => resolveVideo(p.topAId ?? '')?.thumbUrl).find(Boolean);
         const on = g === chosenGroup;
         return (
@@ -1456,7 +1472,12 @@ export function Vids2Form({
             }`}
           >
             <span className="block aspect-square w-full overflow-hidden sm:aspect-[3/4]">
-              {thumb ? (
+              {face ? (
+                <span className="flex h-full items-center justify-center pb-5 sm:pb-0">
+                  {/* eslint-disable-next-line @next/next/no-img-element */}
+                  <img src={face} alt="" className="aspect-square w-[72%] rounded-full object-cover" draggable={false} />
+                </span>
+              ) : thumb ? (
                 // eslint-disable-next-line @next/next/no-img-element
                 <img src={thumb} alt="" className="h-full w-full object-cover" draggable={false} />
               ) : (

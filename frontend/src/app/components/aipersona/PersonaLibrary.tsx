@@ -8,7 +8,7 @@
 
 import { useEffect, useState } from 'react';
 import { SpinnerIcon, UploadIcon } from '@/lib/icons';
-import { createPersona, uploadFile } from '@/lib/aipersona/client';
+import { createPersona, makeAvatar, uploadFile } from '@/lib/aipersona/client';
 import { MAX_NAME_CHARS, PHOTO_TYPES, type LibraryPayload, type SceneStage } from '@/lib/aipersona/types';
 import { DropZone, FIELD, PRIMARY, errorText, photoProblem } from './aipersona-ui';
 
@@ -96,6 +96,27 @@ export function PersonaLibrary({ library, error, onOpenPersona, onNewScene, onOp
   const personas = library?.personas ?? [];
   const scenes = library?.scenes ?? [];
 
+  // Profile pictures for everyone without one, three at a time.
+  const missing = personas.filter((p) => !p.avatarUrl);
+  const [making, setMaking] = useState<{ done: number; of: number; failed: string[] } | null>(null);
+  async function makeMissing() {
+    const queue = [...missing];
+    const of = queue.length;
+    const failed: string[] = [];
+    let done = 0;
+    setMaking({ done, of, failed });
+    const worker = async () => {
+      for (let p = queue.shift(); p; p = queue.shift()) {
+        try { await makeAvatar(p.id); } catch { failed.push(p.name); }
+        done++;
+        setMaking({ done, of, failed: [...failed] });
+        await onChanged();
+      }
+    };
+    await Promise.all([worker(), worker(), worker()]);
+    setMaking(failed.length ? { done, of, failed } : null);
+  }
+
   return (
     <div className="flex h-screen flex-col bg-black text-white">
       <div className="shrink-0 border-b border-zinc-900 px-6 py-4">
@@ -106,15 +127,34 @@ export function PersonaLibrary({ library, error, onOpenPersona, onNewScene, onOp
               A character is a name and a photo. A scene puts every character into the same video: the first frame redrawn with each of them, then moved the way the video moves.
             </p>
           </div>
-          <button
-            type="button"
-            onClick={onNewScene}
-            disabled={!personas.length}
-            title={personas.length ? undefined : 'Make a character first'}
-            className={`${PRIMARY} shrink-0`}
-          >
-            New scene
-          </button>
+          <div className="flex shrink-0 items-center gap-2">
+            {making ? (
+              <span className="flex items-center gap-2 text-xs text-zinc-400">
+                {making.done < making.of && <SpinnerIcon size={13} className="animate-spin" />}
+                Profile pics {making.done}/{making.of}
+                {making.failed.length > 0 && <span className="text-red-400">· failed: {making.failed.join(', ')}</span>}
+                {making.done >= making.of && <button type="button" onClick={() => setMaking(null)} className="text-zinc-500 hover:text-white">✕</button>}
+              </span>
+            ) : missing.length > 0 && (
+              <button
+                type="button"
+                onClick={() => void makeMissing()}
+                title="A funny round profile picture for every character that has none yet, made from its photo"
+                className="h-8 rounded-md border border-zinc-700 px-3 text-xs text-zinc-200 transition-colors hover:border-zinc-400"
+              >
+                Make profile pics ({missing.length})
+              </button>
+            )}
+            <button
+              type="button"
+              onClick={onNewScene}
+              disabled={!personas.length}
+              title={personas.length ? undefined : 'Make a character first'}
+              className={PRIMARY}
+            >
+              New scene
+            </button>
+          </div>
         </div>
       </div>
 
@@ -162,8 +202,15 @@ export function PersonaLibrary({ library, error, onOpenPersona, onNewScene, onOp
                     onClick={() => onOpenPersona(p.id)}
                     className="overflow-hidden rounded-lg border border-zinc-800 text-left transition-colors hover:border-zinc-500"
                   >
-                    {/* eslint-disable-next-line @next/next/no-img-element */}
-                    <img src={p.photoUrl} alt="" className="aspect-[3/4] w-full bg-zinc-950 object-cover" />
+                    {p.avatarUrl ? (
+                      <span className="grid aspect-[3/4] w-full place-items-center bg-zinc-950">
+                        {/* eslint-disable-next-line @next/next/no-img-element */}
+                        <img src={p.avatarUrl} alt="" className="aspect-square w-[78%] rounded-full object-cover" />
+                      </span>
+                    ) : (
+                      // eslint-disable-next-line @next/next/no-img-element
+                      <img src={p.photoUrl} alt="" className="aspect-[3/4] w-full bg-zinc-950 object-cover" />
+                    )}
                     <span className="block px-3 py-2.5">
                       <span className="block truncate text-sm">{p.name}</span>
                       <span className="block text-[11px] text-zinc-500">
