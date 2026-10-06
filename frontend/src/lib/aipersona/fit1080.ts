@@ -108,6 +108,14 @@ async function makeImage(storagePath: string): Promise<string> {
  *  copy turned upright at full size — a PNG stays lossless, a JPEG is re-saved
  *  at quality 100 with the colour at full resolution — kept beside the original
  *  (`<name>.upright.<ext>`) so later sends reuse it. */
+//
+// fal turns away any input over 25,000,000 bytes (HTTP 422), and a character
+// photo may be up to 50MB. One that is too big goes as a full-size JPEG at
+// quality 100 with the colour at full resolution, which is a fraction of a
+// PNG's size and looks the same; only if even that is over does the quality
+// step down, and only after that the size. Kept as `<name>.fal.jpg`.
+export const FAL_MAX_BYTES = 24_000_000;
+
 export function photoAsTaken(storagePath: string): Promise<string> {
   return once(`upright:${storagePath}`, async () => {
     try {
@@ -116,14 +124,34 @@ export function photoAsTaken(storagePath: string): Promise<string> {
       const body = Buffer.from(await res.arrayBuffer());
       const sharp = (await import('sharp')).default;
       const meta = await sharp(body).metadata();
+      const base = storagePath.replace(/\.[a-z0-9]{2,5}$/i, '');
+      if (body.length > FAL_MAX_BYTES) {
+        const to = `${base}.fal.jpg`;
+        if (await exists(to)) return to;
+        const width = ((meta.orientation ?? 1) >= 5 ? meta.height : meta.width) ?? 0;
+        let out: Buffer | null = null;
+        for (const [scale, quality] of [[1, 100], [1, 97], [1, 94], [1, 90], [0.85, 95], [0.7, 95], [0.55, 95], [0.4, 92]] as const) {
+          let img = sharp(body).rotate();
+          if (scale < 1 && width) img = img.resize({ width: Math.round(width * scale), kernel: 'lanczos3' });
+          out = await img.jpeg({ quality, chromaSubsampling: '4:4:4' }).toBuffer();
+          if (out.length <= FAL_MAX_BYTES) break;
+        }
+        await putObject(to, out!, 'image/jpeg');
+        return to;
+      }
       if ((meta.orientation ?? 1) <= 1) return storagePath;
       const jpeg = meta.format === 'jpeg';
-      const to = `${storagePath.replace(/\.[a-z0-9]{2,5}$/i, '')}.upright.${jpeg ? 'jpg' : 'png'}`;
+      const to = `${base}.upright.${jpeg ? 'jpg' : 'png'}`;
       if (await exists(to)) return to;
       const upright = sharp(body).rotate();
       const out = jpeg
         ? await upright.jpeg({ quality: 100, chromaSubsampling: '4:4:4' }).toBuffer()
         : await upright.png().toBuffer();
+      if (out.length > FAL_MAX_BYTES) {
+        const small = await sharp(body).rotate().jpeg({ quality: 97, chromaSubsampling: '4:4:4' }).toBuffer();
+        await putObject(`${base}.fal.jpg`, small, 'image/jpeg');
+        return `${base}.fal.jpg`;
+      }
       await putObject(to, out, jpeg ? 'image/jpeg' : 'image/png');
       return to;
     } catch (err) {
