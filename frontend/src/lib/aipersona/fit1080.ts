@@ -25,12 +25,18 @@ export const over1080p = (width: number, height: number) =>
  *  inside it passes through. The commas inside the expressions are escaped
  *  with backslashes, not wrapped in quotes: a quote that goes missing on the
  *  way to ffmpeg leaves the first comma ending the filter ("No such filter:
- *  'ih)'"), and an escaped comma reads the same on every build. */
-const c = '\\,';
-export const FIT_1080P =
-  `scale=w=if(gte(iw${c}ih)${c}min(${LONG_SIDE}${c}iw)${c}min(${SHORT_SIDE}${c}iw))`
-  + `:h=if(gte(iw${c}ih)${c}min(${SHORT_SIDE}${c}ih)${c}min(${LONG_SIDE}${c}ih))`
-  + ':force_original_aspect_ratio=decrease:force_divisible_by=2:flags=lanczos+accurate_rnd';
+ *  'ih)'"), and an escaped comma reads the same on every build.
+ *
+ *  Built with join(), not template literals joined with `+`: the production
+ *  minifier folds `\`…${x}…\` + \`…\`` wrongly and drops the end of the first
+ *  one, which is what cut this string short in the deployed build. */
+const fit = (a: number, b: number, dim: 'iw' | 'ih') =>
+  ['if(gte(iw\\,ih)\\,min(', a, '\\,', dim, ')\\,min(', b, '\\,', dim, '))'].join('');
+export const FIT_1080P = [
+  'scale=w=', fit(LONG_SIDE, SHORT_SIDE, 'iw'),
+  ':h=', fit(SHORT_SIDE, LONG_SIDE, 'ih'),
+  ':force_original_aspect_ratio=decrease:force_divisible_by=2:flags=lanczos+accurate_rnd',
+].join('');
 
 /** The size a picture of `width`×`height` comes down to inside 1080p. */
 export function fit1080p(width: number, height: number): { width: number; height: number } {
