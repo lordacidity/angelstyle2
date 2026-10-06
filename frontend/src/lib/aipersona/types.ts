@@ -14,11 +14,10 @@
 export const FRAME_MODEL = 'openai/gpt-image-2.5/sunburst/edit';
 
 /** How hard the image model works on a character first frame: low, medium,
- *  high, xhigh or max. `high` is the model's own default. The two above it
- *  draw more detail and are billed for it — the model is charged by the token,
- *  and fal publishes no price per level — so going up is a choice to make with
- *  one frame's bill in hand, not a default. */
-export const FRAME_QUALITY: 'low' | 'medium' | 'high' | 'xhigh' | 'max' = 'high';
+ *  high, xhigh or max. `high` is the model's own default; this asks for one
+ *  above it. The levels above `high` draw more detail and are billed for it —
+ *  the model is charged by the token, and fal publishes no price per level. */
+export const FRAME_QUALITY: 'low' | 'medium' | 'high' | 'xhigh' | 'max' = 'xhigh';
 
 /** Moves the character first frame the way the scene's video moves. Kling's
  *  pro tier (standard until 2026-10-02, and briefly again that day): the same
