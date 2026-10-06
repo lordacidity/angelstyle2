@@ -118,7 +118,7 @@ export function PersonaLibrary({ library, error, onOpenPersona, onNewScene, onOp
   }
 
   return (
-    <div className="flex h-screen flex-col bg-black text-white">
+    <div className="flex h-full flex-col bg-black text-white">
       <div className="shrink-0 border-b border-zinc-900 px-6 py-4">
         <div className="flex items-center justify-between gap-4">
           <div>

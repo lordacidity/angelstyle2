@@ -20,10 +20,12 @@ import { DropZone, FIELD, LABEL, PRIMARY, Split, errorText } from './aipersona-u
 
 const UNTRIMMED: Trim = { start: 0, end: 0, speed: 1 };
 
-export function SceneSetup({ personas, onBack, onCreated }: {
+export function SceneSetup({ personas, onBack, onCreated, onStatus }: {
   personas: Persona[];
   onBack: () => void;
   onCreated: (scene: Scene) => void;
+  /** Its name so far and whether it is busy uploading or cutting — for its tab. */
+  onStatus?: (title: string, busy: boolean) => void;
 }) {
   const [name, setName] = useState('');
   const [video, setVideo] = useState<{ file: File; url: string } | null>(null);
@@ -65,6 +67,8 @@ export function SceneSetup({ personas, onBack, onCreated }: {
   const seconds = clipSeconds(trim.start, trim.end, trim.speed);
   const cutOk = duration > 0 && seconds >= MIN_CLIP_SECONDS && seconds <= MAX_CLIP_SECONDS;
   const busy = phase !== null;
+  const tabTitle = name.trim() || 'New scene';
+  useEffect(() => { onStatus?.(tabTitle, busy); }, [onStatus, tabTitle, busy]);
   const ready = !!name.trim() && !!video && cutOk && !!prompt.trim() && chosen.length > 0 && !busy;
 
   async function go() {

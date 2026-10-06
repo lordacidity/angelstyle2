@@ -29,7 +29,7 @@ export function Split({ title, backLabel, onBack, side, footer, children }: {
   title: string; backLabel: string; onBack: () => void; side: ReactNode; footer?: ReactNode; children: ReactNode;
 }) {
   return (
-    <div className="flex h-screen bg-black text-white">
+    <div className="flex h-full bg-black text-white">
       <aside className="flex w-[380px] shrink-0 flex-col border-r border-zinc-900">
         <div className="shrink-0 border-b border-zinc-900 px-5 py-4">
           <button type="button" onClick={onBack} className="text-xs text-zinc-500 transition-colors hover:text-white">

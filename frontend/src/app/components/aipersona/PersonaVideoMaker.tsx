@@ -398,7 +398,7 @@ export function PersonaVideoMaker({ persona, onClose }: { persona: Persona; onCl
   }
 
   return (
-    <div className="vids-scroll flex h-screen flex-col bg-black text-white">
+    <div className="vids-scroll flex h-full flex-col bg-black text-white">
       <div className="flex shrink-0 items-center gap-5 border-b border-zinc-900 px-6 py-3">
         <div className="min-w-0">
           <button type="button" onClick={leave} className="text-xs text-zinc-500 transition-colors hover:text-white">← {persona.name}</button>

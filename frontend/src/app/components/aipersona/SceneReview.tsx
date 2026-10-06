@@ -165,13 +165,21 @@ function TakeCard({ scene, take, kind, locked, canRemove, onRedo, onRemove }: {
 
 // ── The scene ────────────────────────────────────────────────────────────────
 
-export function SceneReview({ sceneId, initial, onBack, onChanged }: {
+/** How a scene stands, for its tab: still generating, waiting on you,
+ *  approved, or stuck on an error. */
+export type SceneTabState = 'working' | 'ready' | 'done' | 'error';
+
+export function SceneReview({ sceneId, initial, onBack, onChanged, onStatus, onDiscarded }: {
   sceneId: string;
   /** The scene as Go just answered with it, when this is opened straight from Go. */
   initial: Scene | null;
   onBack: () => void;
   /** Something the front screen lists has changed. */
   onChanged: () => void;
+  /** Its name and where it stands, whenever either changes — for its tab. */
+  onStatus?: (title: string, state: SceneTabState) => void;
+  /** It was deleted: close its tab. */
+  onDiscarded?: () => void;
 }) {
   const [scene, setScene] = useState<Scene | null>(initial);
   const [missing, setMissing] = useState('');
@@ -211,6 +219,16 @@ export function SceneReview({ sceneId, initial, onBack, onChanged }: {
     timer = setTimeout(tick, loaded ? POLL_MS : 0);
     return () => { live = false; clearTimeout(timer); };
   }, [polling, loaded, sceneId]);
+
+  // Tell the tab where this scene stands.
+  const tabTitle = scene?.name ?? 'Scene';
+  const tabState: SceneTabState = !scene
+    ? (missing ? 'error' : 'working')
+    : scene.takes.some((t) => t.frame.status === 'running' || t.video.status === 'running') ? 'working'
+    : scene.stage === 'done' ? 'done'
+    : scene.takes.some((t) => t.frame.status === 'error' || t.video.status === 'error') ? 'error'
+    : 'ready';
+  useEffect(() => { onStatus?.(tabTitle, tabState); }, [onStatus, tabTitle, tabState]);
 
   // On reaching the prompt, put the cursor on the blank that has to be filled in.
   const stage = scene?.stage;
@@ -273,7 +291,7 @@ export function SceneReview({ sceneId, initial, onBack, onChanged }: {
     try {
       await deleteScene(scene!.id);
       onChanged();
-      onBack();
+      if (onDiscarded) onDiscarded(); else onBack();
     } catch (err) {
       setError(errorText(err));
       setActing(false);
