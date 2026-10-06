@@ -112,6 +112,8 @@ async function query<R extends pg.QueryResultRow>(sql: string, values: unknown[]
 const PREFIX = 'aipersona';
 export const photoPath = (id: string, ext: string) => `${PREFIX}/photos/${id}.${ext}`;
 export const avatarPath = (personaId: string) => `${PREFIX}/avatars/${personaId}-${Date.now()}.jpg`;
+/** Where the browser asks for a photo's thumbnail (made on first ask). */
+export const thumbUrl = (path: string) => `/api/ai-persona/thumb?p=${encodeURIComponent(path)}`;
 export const sourcePath = (id: string, ext: string) => `${PREFIX}/sources/${id}.${ext}`;
 export const sceneFile = (sceneId: string, file: string) => `${PREFIX}/scenes/${sceneId}/${file}`;
 
@@ -214,6 +216,7 @@ export function toScene(rec: SceneRecord, live?: Live): Scene {
       personaId: t.personaId,
       personaName: t.personaName,
       photoUrl: publicUrl(t.photoPath),
+      thumbUrl: thumbUrl(t.photoPath),
       frame: toJob(t, 'frame', live),
       video: toJob(t, 'video', live),
     })),
@@ -226,7 +229,7 @@ interface PersonaDb { id: string; name: string; photo_path: string; avatar_path:
 const PERSONA_COLS = 'id, name, photo_path, avatar_path, created_at';
 
 const toPersona = (r: PersonaDb, videos: PersonaVideo[] = []): Persona => ({
-  id: r.id, name: r.name, photoUrl: publicUrl(r.photo_path), avatarUrl: r.avatar_path ? publicUrl(r.avatar_path) : null,
+  id: r.id, name: r.name, photoUrl: publicUrl(r.photo_path), thumbUrl: thumbUrl(r.photo_path), avatarUrl: r.avatar_path ? publicUrl(r.avatar_path) : null,
   createdAt: r.created_at.toISOString(), videos,
 });
 

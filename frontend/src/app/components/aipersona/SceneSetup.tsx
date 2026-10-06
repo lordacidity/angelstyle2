@@ -205,7 +205,7 @@ export function SceneSetup({ personas, onBack, onCreated, onStatus }: {
             >
               <div className="relative aspect-[3/4] bg-zinc-950">
                 {/* eslint-disable-next-line @next/next/no-img-element */}
-                <img src={p.photoUrl} alt="" className={`h-full w-full object-cover transition-opacity ${left ? 'opacity-20' : ''}`} />
+                <img src={p.thumbUrl} alt="" loading="lazy" decoding="async" className={`h-full w-full object-cover transition-opacity ${left ? 'opacity-20' : ''}`} />
                 {left && <span className="absolute inset-0 grid place-items-center text-[11px] uppercase tracking-wide text-zinc-400">left out</span>}
               </div>
               <div className={`truncate px-3 py-2 text-sm ${left ? 'text-zinc-600' : 'text-white'}`}>{p.name}</div>

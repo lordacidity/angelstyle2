@@ -106,7 +106,7 @@ function TakeCard({ scene, take, kind, locked, canRemove, onRedo, onRemove }: {
 
       <div className="flex items-center gap-2 px-3 py-2.5">
         {/* eslint-disable-next-line @next/next/no-img-element */}
-        <img src={take.photoUrl} alt="" className="h-6 w-6 shrink-0 rounded-full object-cover" />
+        <img src={take.thumbUrl} alt="" className="h-6 w-6 shrink-0 rounded-full object-cover" />
         <span className="min-w-0 flex-1 truncate text-sm">{take.personaName}</span>
         {done && (
           <a href={downloadUrl(job.url!, fileName)} download={fileName} title="Download" className="text-zinc-500 transition-colors hover:text-white">

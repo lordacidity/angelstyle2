@@ -88,6 +88,8 @@ export interface Persona {
   id: string;
   name: string;
   photoUrl: string;
+  /** The photo small, for lists: GET /api/ai-persona/thumb, which makes it once. */
+  thumbUrl: string;
   /** Its round profile picture, once one has been made. */
   avatarUrl: string | null;
   createdAt: string;
@@ -130,6 +132,8 @@ export interface SceneTake {
   personaId: string;
   personaName: string;
   photoUrl: string;
+  /** The photo small, for the name badges. */
+  thumbUrl: string;
   frame: SceneJob;
   video: SceneJob;
 }

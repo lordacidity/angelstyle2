@@ -100,6 +100,34 @@ async function makeImage(storagePath: string): Promise<string> {
   }
 }
 
+/** A small JPEG of the picture at `storagePath`, for showing it in a list: a
+ *  character photo can be tens of megabytes, and a screen of them at full size
+ *  is what made the front screen crawl. Made once and kept beside the original
+ *  (`<name>.thumb.jpg`); the original is never touched. Falls back to the
+ *  original if the picture can't be read here. */
+export const THUMB_SIDE = 480;
+export function imageThumb(storagePath: string): Promise<string> {
+  return once(`thumb:${storagePath}`, async () => {
+    const to = `${storagePath.replace(/\.[a-z0-9]{2,5}$/i, '')}.thumb.jpg`;
+    try {
+      if (await exists(to)) return to;
+      const res = await fetch(publicUrl(storagePath));
+      if (!res.ok) return storagePath;
+      const sharp = (await import('sharp')).default;
+      const out = await sharp(Buffer.from(await res.arrayBuffer()))
+        .rotate()
+        .resize(THUMB_SIDE, THUMB_SIDE, { fit: 'inside', withoutEnlargement: true })
+        .jpeg({ quality: 82 })
+        .toBuffer();
+      await putObject(to, out, 'image/jpeg');
+      return to;
+    } catch (err) {
+      console.error('[ai-persona] could not make a thumbnail, showing the original:', err);
+      return storagePath;
+    }
+  });
+}
+
 /** Kling's file limit, with room to spare, and the most any picture needs. */
 const VIDEO_BUDGET_BITS = 92 * 1024 * 1024 * 8;
 const MAX_VIDEO_BITRATE = 80_000_000;

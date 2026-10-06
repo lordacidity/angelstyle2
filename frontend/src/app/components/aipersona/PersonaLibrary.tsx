@@ -209,7 +209,7 @@ export function PersonaLibrary({ library, error, onOpenPersona, onNewScene, onOp
                       </span>
                     ) : (
                       // eslint-disable-next-line @next/next/no-img-element
-                      <img src={p.photoUrl} alt="" className="aspect-[3/4] w-full bg-zinc-950 object-cover" />
+                      <img src={p.thumbUrl} alt="" loading="lazy" decoding="async" className="aspect-[3/4] w-full bg-zinc-950 object-cover" />
                     )}
                     <span className="block px-3 py-2.5">
                       <span className="block truncate text-sm">{p.name}</span>
