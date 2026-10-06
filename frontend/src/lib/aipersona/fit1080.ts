@@ -22,10 +22,14 @@ export const over1080p = (width: number, height: number) =>
   Math.max(width, height) > LONG_SIDE || Math.min(width, height) > SHORT_SIDE;
 
 /** ffmpeg's scale for "no bigger than 1080p", either way up; anything already
- *  inside it passes through. */
+ *  inside it passes through. The commas inside the expressions are escaped
+ *  with backslashes, not wrapped in quotes: a quote that goes missing on the
+ *  way to ffmpeg leaves the first comma ending the filter ("No such filter:
+ *  'ih)'"), and an escaped comma reads the same on every build. */
+const c = '\\,';
 export const FIT_1080P =
-  `scale=w='if(gte(iw,ih),min(${LONG_SIDE},iw),min(${SHORT_SIDE},iw))'`
-  + `:h='if(gte(iw,ih),min(${SHORT_SIDE},ih),min(${LONG_SIDE},ih))'`
+  `scale=w=if(gte(iw${c}ih)${c}min(${LONG_SIDE}${c}iw)${c}min(${SHORT_SIDE}${c}iw))`
+  + `:h=if(gte(iw${c}ih)${c}min(${SHORT_SIDE}${c}ih)${c}min(${LONG_SIDE}${c}ih))`
   + ':force_original_aspect_ratio=decrease:force_divisible_by=2:flags=lanczos+accurate_rnd';
 
 /** The size a picture of `width`×`height` comes down to inside 1080p. */
