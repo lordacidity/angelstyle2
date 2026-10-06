@@ -139,7 +139,7 @@ export function PersonaLibrary({ library, error, onOpenPersona, onNewScene, onOp
               <button
                 type="button"
                 onClick={() => void makeMissing()}
-                title="A funny round profile picture for every character that has none yet, made from its photo"
+                title="A round profile picture for every character that has none yet, made from its photo"
                 className="h-8 rounded-md border border-zinc-700 px-3 text-xs text-zinc-200 transition-colors hover:border-zinc-400"
               >
                 Make profile pics ({missing.length})

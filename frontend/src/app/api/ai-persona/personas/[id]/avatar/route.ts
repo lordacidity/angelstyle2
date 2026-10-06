@@ -1,7 +1,7 @@
 // /api/ai-persona/personas/:id/avatar
 //
 //   POST -> a new profile picture for the persona: its photo, redrawn by the
-//           image model at medium as a funny square headshot, saved as a 512px
+//           image model at medium as a plain square headshot on white, saved as a 512px
 //           JPEG and shown round wherever the persona is listed. Answers with
 //           the persona. Any picture it had before is replaced.
 //
