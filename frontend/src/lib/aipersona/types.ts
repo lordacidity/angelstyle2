@@ -61,7 +61,7 @@ export const clipSeconds = (start: number, end: number, speed: number) => Math.m
 
 /** What the image model reads as a character photo. */
 export const PHOTO_TYPES = ['image/jpeg', 'image/png', 'image/webp'];
-export const MAX_PHOTO_BYTES = 20 * 1024 * 1024;
+export const MAX_PHOTO_BYTES = 50 * 1024 * 1024;
 
 // ── Rows ─────────────────────────────────────────────────────────────────────
 
