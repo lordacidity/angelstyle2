@@ -1,5 +1,7 @@
-// Nothing goes to fal bigger than 1080p: 1920 on the long side and 1080 on the
-// short, whichever way round the picture is. New scenes are cut at that size
+// Nothing goes to fal bigger than 1080p — 1920 on the long side and 1080 on the
+// short, whichever way round the picture is — except the character photo, which
+// goes at its full size (photoAsTaken): it is usually a reference sheet of a
+// dozen small views, and shrinking it shrinks every face on it. New scenes are cut at that size
 // (clip.ts) and the first frame is asked for at it (fal.ts), so most of what is
 // sent is already there. What came before — a scene cut at 4K, a character
 // first frame drawn at 4K, a character photo straight off a phone — is sent as
@@ -98,6 +100,37 @@ async function makeImage(storagePath: string): Promise<string> {
     console.error('[ai-persona] could not bring a picture to 1080p, sending it as it is:', err);
     return storagePath;
   }
+}
+
+/** A character photo for the image model at its full size, losing nothing:
+ *  the very file that was uploaded, byte for byte. The one exception is a
+ *  phone photo stored on its side (EXIF orientation 2–8), which is sent as a
+ *  copy turned upright at full size — a PNG stays lossless, a JPEG is re-saved
+ *  at quality 100 with the colour at full resolution — kept beside the original
+ *  (`<name>.upright.<ext>`) so later sends reuse it. */
+export function photoAsTaken(storagePath: string): Promise<string> {
+  return once(`upright:${storagePath}`, async () => {
+    try {
+      const res = await fetch(publicUrl(storagePath));
+      if (!res.ok) return storagePath;
+      const body = Buffer.from(await res.arrayBuffer());
+      const sharp = (await import('sharp')).default;
+      const meta = await sharp(body).metadata();
+      if ((meta.orientation ?? 1) <= 1) return storagePath;
+      const jpeg = meta.format === 'jpeg';
+      const to = `${storagePath.replace(/\.[a-z0-9]{2,5}$/i, '')}.upright.${jpeg ? 'jpg' : 'png'}`;
+      if (await exists(to)) return to;
+      const upright = sharp(body).rotate();
+      const out = jpeg
+        ? await upright.jpeg({ quality: 100, chromaSubsampling: '4:4:4' }).toBuffer()
+        : await upright.png().toBuffer();
+      await putObject(to, out, jpeg ? 'image/jpeg' : 'image/png');
+      return to;
+    } catch (err) {
+      console.error('[ai-persona] could not read the photo, sending it as it is:', err);
+      return storagePath;
+    }
+  });
 }
 
 /** A small JPEG of the picture at `storagePath`, for showing it in a list: a

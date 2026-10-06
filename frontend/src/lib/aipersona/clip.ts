@@ -215,9 +215,10 @@ export async function cutClip({ sourceUrl, dir, start, end, speed }: {
 }
 
 /** A character first frame, in a form Kling will take as its image. The image
- *  model answers with a PNG, and that is passed on untouched whenever it fits
- *  Kling's 10MB. Only a PNG too big for Kling is re-saved — as a JPEG at the
- *  highest quality that fits, with the colour at full resolution. */
+ *  model answers with a PNG, and that is passed on untouched (the same Buffer
+ *  back) whenever it fits Kling's 10MB. Only a PNG too big for Kling is
+ *  re-saved — as a JPEG at the highest quality that fits, with the colour at
+ *  full resolution — and only in the copy sent to Kling (scenes.ts). */
 export async function fitForKling(image: Buffer, contentType: string): Promise<{ body: Buffer; contentType: string }> {
   if (image.length <= KLING_IMAGE_BYTES - MB / 4) return { body: image, contentType };
   const dir = await mkdtemp(path.join(os.tmpdir(), 'ai-persona-'));
