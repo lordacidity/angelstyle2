@@ -78,9 +78,10 @@ import { CLIPPERS, withBase } from '@/lib/clipping';
 import { CAPTION_STYLES, DEFAULT_CAPTION_STYLE } from '@/lib/simpler/vidsCaptions';
 import { cachedClipBlob, isCacheableClipUrl } from '@/lib/vids-clip-cache';
 import { DownloadIcon, SpinnerIcon } from '@/lib/icons';
+import { SavePopup } from './SavePopup';
 import { parseRecipeCode, suggestedFrom, type VidRecipe, type Vids2Answers } from '@/lib/vids-types';
 import {
-  ShareIcon, Vids2Builder, canShareVideo, downloadBlob, rollStyleId, type Vids2Auto,
+  Vids2Builder, canShareVideo, downloadBlob, rollStyleId, type Vids2Auto,
 } from './Vids2Builder';
 import { Vids2ClipCaption, Vids2ClipPreview } from './Vids2ClipPanel';
 import { Vids2Form, jobLegs, jobProgress, type Vids2Job, type Vids2Leg } from './Vids2Form';
@@ -1260,8 +1261,11 @@ export function Vids2Section({ active }: { active: boolean }) {
         seen: {},
       };
     }
+    // A new try, ahead or pressed, retires the last one's failure: it is the
+    // one that runs now, and a line left over from before reads as this one
+    // failing while it goes on to work.
+    setJobError(null);
     if (!quietly) {
-      setJobError(null);
       // The file from last time is not this video's.
       setSaved(null);
       setSavePrompt(false);
@@ -1727,31 +1731,10 @@ export function Vids2Section({ active }: { active: boolean }) {
       </div>
 
       {/* The clipper page on a phone, when the share sheet would not open by
-          itself: the whole screen is the press it wants. Not now leaves the
-          file on Save again, under Download. */}
-      {CLIPPERS && savePrompt && saved && (
-        <div
-          role="button"
-          tabIndex={0}
-          onClick={() => { setSavePrompt(false); void saveFile(saved); }}
-          onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { setSavePrompt(false); void saveFile(saved); } }}
-          className="fixed inset-0 z-50 flex cursor-pointer flex-col items-center justify-center gap-4 bg-black/95 px-8 text-center"
-        >
-          <span className="flex h-20 w-20 items-center justify-center rounded-full bg-white text-black [&_svg]:h-9 [&_svg]:w-9">
-            <ShareIcon />
-          </span>
-          <p className="text-2xl font-semibold text-white">Rendered</p>
-          <p className="text-base text-zinc-300">Tap anywhere to save it to Photos</p>
-          <p className="text-sm text-zinc-500">Then tap Save Video in the sheet</p>
-          <button
-            type="button"
-            onClick={(e) => { e.stopPropagation(); setSavePrompt(false); }}
-            className="mt-6 text-sm text-zinc-500 underline decoration-zinc-700 underline-offset-4 hover:text-white"
-          >
-            Not now
-          </button>
-        </div>
-      )}
+          itself: a phone opens it only for a tap, so the one button that
+          opens it pops up over the foot, Save Video, with nothing in front
+          of the page. × leaves the file on Save again, under Download. */}
+      {CLIPPERS && savePrompt && saved && <SavePopup onSave={() => { setSavePrompt(false); void saveFile(saved); }} onClose={() => setSavePrompt(false)} />}
     </div>
   );
 }

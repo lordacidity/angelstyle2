@@ -111,6 +111,7 @@ import {
 import { drawVeil, rollVeil, veilFromRecord, type Veil } from '@/lib/simpler/vidsVeil';
 import { fmtTime, safeExportName } from '@/lib/utils';
 import { DownloadIcon, SpinnerIcon, VideoIcon } from '@/lib/icons';
+import { SavePopup } from './SavePopup';
 import { CLIPPERS } from '@/lib/clipping';
 import { usePhonedeck } from '../../hooks/usePhonedeck';
 import { useCachedClipSrcs } from '../../hooks/useCachedClipSrcs';
@@ -2725,32 +2726,10 @@ export function Vids2Builder({
         />
       )}
 
-      {/* Render + Save's second press, when the browser insists on one: the
-          whole screen, so the next tap anywhere opens the share sheet. Not
-          now leaves the file on the Save to Photos button below. */}
-      {CLIPPERS && savePrompt && made && (
-        <div
-          role="button"
-          tabIndex={0}
-          onClick={() => { setSavePrompt(false); void saveToPhotos(); }}
-          onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { setSavePrompt(false); void saveToPhotos(); } }}
-          className="fixed inset-0 z-50 flex cursor-pointer flex-col items-center justify-center gap-4 bg-black/95 px-8 text-center"
-        >
-          <span className="flex h-20 w-20 items-center justify-center rounded-full bg-white text-black [&_svg]:h-9 [&_svg]:w-9">
-            <ShareIcon />
-          </span>
-          <p className="text-2xl font-semibold text-white">Rendered</p>
-          <p className="text-base text-zinc-300">Tap anywhere to save it to Photos</p>
-          <p className="text-sm text-zinc-500">Then tap Save Video in the sheet</p>
-          <button
-            type="button"
-            onClick={(e) => { e.stopPropagation(); setSavePrompt(false); }}
-            className="mt-6 text-sm text-zinc-500 underline decoration-zinc-700 underline-offset-4 hover:text-white"
-          >
-            Not now
-          </button>
-        </div>
-      )}
+      {/* Render + Save's second press, when the browser insists on one: a
+          phone opens the share sheet only for a tap, so the button that opens
+          it pops up over the foot. × leaves the file on Save to Photos. */}
+      {CLIPPERS && savePrompt && made && <SavePopup onSave={() => { setSavePrompt(false); void saveToPhotos(); }} onClose={() => setSavePrompt(false)} />}
     </div>
   );
 }
