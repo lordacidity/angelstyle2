@@ -49,7 +49,7 @@ export const boomIdOf = (slot: LayerId): string => slot.slice('boom:'.length);
 export type LayerId = SlotId | BoomLayerId;
 /** Where on the frame something is drawn. `frame` is the whole output, bars
  *  and all — the BOOM goes over everything, so it answers to nothing that
- *  shapes the sequence underneath it. */
+ *  shapes the sequence underneath it. An upright Start has it too (isUpright). */
 export type Region = 'full' | 'top' | 'bottom' | 'frame';
 /** height = match the region's height exactly (width crops or letterboxes);
  *  width  = match its width exactly (height crops or letterboxes). */
@@ -340,13 +340,37 @@ export const SLOT_PLACEMENT: Partial<Record<SlotId, { fit: Fit; align: Align; tr
   start: { fit: 'width', align: 'center', transform: { zoom: 1.25, dx: 0, dy: 0 } },
 };
 
+/** A clip shot upright — taller than it is wide, as far as the library knows
+ *  its size. One whose size was never measured is not counted. */
+export const isUpright = (video: Pick<VidRow, 'width' | 'height'>): boolean =>
+  !!video.width && !!video.height && video.height > video.width;
+
+/** How far past the frame an upright Start is pushed: a fiftieth, so a
+ *  hundredth of it hangs over each edge. That is all that keeps the few pixels
+ *  a build nudges Start by (rollStartNudge in lib/vids2/vids2Build) from
+ *  showing as a black line along the foot of the frame. */
+export const UPRIGHT_START_ZOOM = 1.02;
+
+/** Where an upright Start lands: the whole frame is its region (buildPlan), it
+ *  is as wide as the frame and shown top to bottom, with nothing cut off the
+ *  sides. One shorter than the frame stands on the frame's foot, so whatever
+ *  black there is is above it. */
+export const UPRIGHT_START_PLACEMENT: { fit: Fit; align: Align; transform: Transform } = {
+  fit: 'width', align: 'end', transform: { zoom: UPRIGHT_START_ZOOM, dx: 0, dy: 0 },
+};
+
 /** The fit / align / transform a freshly picked clip gets. A slot with a
  *  placement of its own always opens there; the rest carry over whatever fit and
  *  align the slot was already using, and start from the untouched auto-fit. */
 export function slotPlacement(
   slot: SlotId,
   prev?: { fit?: Fit; align?: Align },
+  video?: Pick<VidRow, 'width' | 'height'>,
 ): { fit: Fit; align: Align; transform: Transform } {
+  if (slot === 'start' && video && isUpright(video)) {
+    const { fit, align, transform } = UPRIGHT_START_PLACEMENT;
+    return { fit, align, transform: { ...transform } };
+  }
   const preset = SLOT_PLACEMENT[slot];
   if (preset) return { fit: preset.fit, align: preset.align, transform: { ...preset.transform } };
   return {
@@ -394,7 +418,7 @@ export function freshPick(slot: SlotId, video: VidRow, prev?: { fit?: Fit; align
   return {
     video,
     muted: !video.hasSfx,
-    ...slotPlacement(slot, prev),
+    ...slotPlacement(slot, prev, video),
     trim: { ...DEFAULT_TRIM },
     speed: DEFAULT_SPEED,
   };
@@ -612,7 +636,10 @@ export function buildPlan(
 
   let t = 0;
   if (has('start')) {
-    push('start', 0, dur('start'), 'full');
+    // An upright Start has the whole frame, bars and all: it is shown top to
+    // bottom at the frame's width (UPRIGHT_START_PLACEMENT). The hook stays
+    // where it has always been, measured off 'full' (lib/simpler/vidsCaptions).
+    push('start', 0, dur('start'), isUpright(picks.start!.video) ? 'frame' : 'full');
     t = dur('start');
   }
   const splitStart = t;

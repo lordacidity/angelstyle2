@@ -60,7 +60,9 @@ function TakeCard({ scene, take, kind, locked, canRemove, onRedo, onRemove }: {
   const running = job.status === 'running';
   const done = job.status === 'done' && !!job.url;
   // What stands in while there is nothing of its own to show.
-  const backdrop = kind === 'video' ? take.frame.url ?? take.photoUrl : take.photoUrl;
+  // The profile picture where there is one; never the photo at full size.
+  const face = take.avatarUrl ?? take.thumbUrl;
+  const backdrop = kind === 'video' ? take.frame.url ?? face : face;
   const blank = kind === 'video' && hasBlank(prompt);
   // A frame is a PNG unless it had to be re-saved to fit Kling — see fitForKling.
   const extension = /\.([a-z0-9]{2,5})(?:\?|$)/i.exec(job.url ?? '')?.[1] ?? (kind === 'frame' ? 'png' : 'mp4');
@@ -106,7 +108,7 @@ function TakeCard({ scene, take, kind, locked, canRemove, onRedo, onRemove }: {
 
       <div className="flex items-center gap-2 px-3 py-2.5">
         {/* eslint-disable-next-line @next/next/no-img-element */}
-        <img src={take.thumbUrl} alt="" className="h-6 w-6 shrink-0 rounded-full object-cover" />
+        <img src={face} alt="" className="h-6 w-6 shrink-0 rounded-full object-cover" />
         <span className="min-w-0 flex-1 truncate text-sm">{take.personaName}</span>
         {done && (
           <a href={downloadUrl(job.url!, fileName)} download={fileName} title="Download" className="text-zinc-500 transition-colors hover:text-white">
@@ -400,7 +402,13 @@ export function SceneReview({ sceneId, initial, onBack, onChanged, onStatus, onD
       {scene.stage === 'videos' && (
         <>
           <p className="text-xs tabular-nums text-zinc-500">{progress('video', total === 1 ? 'video' : 'videos')}</p>
-          <button type="button" onClick={() => act(() => approveScene(scene.id), true)} disabled={!videosDone || acting} className={PRIMARY}>
+          <button type="button" onClick={() => act(async () => {
+            const next = await approveScene(scene.id);
+            // Nothing left to do here once it is approved: straight back to
+            // the characters. The scene's tab stays, marked done.
+            onBack();
+            return next;
+          }, true)} disabled={!videosDone || acting} className={PRIMARY}>
             {acting && <SpinnerIcon size={13} className="animate-spin" />}
             Approve all
           </button>

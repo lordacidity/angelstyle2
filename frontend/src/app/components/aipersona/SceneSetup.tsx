@@ -2,10 +2,11 @@
 
 // A new scene, before Go. The panel on the left takes a name, a video (trimmed
 // and sped up there), and the prompt the image model will be given; the
-// personas are on the right, and any of them can be left out of this scene.
+// personas are on the right, the ones with the most videos first, and the
+// scene has only the ones pressed — none to begin with.
 //
 // Go uploads the video, has the server cut it and pull its first frame, and
-// starts a character first frame for every persona still in. Nothing is spent
+// starts a character first frame for every persona picked. Nothing is spent
 // before Go.
 
 import { useEffect, useRef, useState } from 'react';
@@ -32,8 +33,8 @@ export function SceneSetup({ personas, onBack, onCreated, onStatus }: {
   const [duration, setDuration] = useState(0);
   const [trim, setTrim] = useState<Trim>(UNTRIMMED);
   const [prompt, setPrompt] = useState(DEFAULT_FRAME_PROMPT);
-  /** Personas left out of this scene. */
-  const [out, setOut] = useState<ReadonlySet<string>>(new Set());
+  /** The personas in this scene: the ones pressed. */
+  const [picked, setPicked] = useState<ReadonlySet<string>>(new Set());
   const [phase, setPhase] = useState<'uploading' | 'cutting' | null>(null);
   const [progress, setProgress] = useState(0);
   const [error, setError] = useState('');
@@ -56,14 +57,16 @@ export function SceneSetup({ personas, onBack, onCreated, onStatus }: {
   }
 
   function toggle(id: string) {
-    setOut((prev) => {
+    setPicked((prev) => {
       const next = new Set(prev);
       if (!next.delete(id)) next.add(id);
       return next;
     });
   }
 
-  const chosen = personas.filter((p) => !out.has(p.id));
+  // Most videos first; the ones level stay in the order they were made.
+  const sorted = [...personas].sort((a, b) => b.videos.length - a.videos.length);
+  const chosen = sorted.filter((p) => picked.has(p.id));
   const seconds = clipSeconds(trim.start, trim.end, trim.speed);
   const cutOk = duration > 0 && seconds >= MIN_CLIP_SECONDS && seconds <= MAX_CLIP_SECONDS;
   const busy = phase !== null;
@@ -177,7 +180,8 @@ export function SceneSetup({ personas, onBack, onCreated, onStatus }: {
       <p className="text-[11px] text-zinc-600">
         {busy
           ? 'The clip is cut at full quality, which can take a minute. The first frames start as soon as it is done.'
-          : `Go makes a character first frame for ${chosen.length === 1 ? 'the 1 character' : `each of the ${chosen.length} characters`} on the right.`}
+          : chosen.length === 0 ? 'Pick who is in this scene on the right.'
+          : `Go makes a character first frame for ${chosen.length === 1 ? 'the 1 character' : `each of the ${chosen.length} characters`} picked on the right.`}
       </p>
     </div>
   );
@@ -186,11 +190,22 @@ export function SceneSetup({ personas, onBack, onCreated, onStatus }: {
     <Split title="New scene" backLabel="Characters" onBack={onBack} side={side} footer={footer}>
       <div className="mb-4 flex items-baseline justify-between gap-4">
         <h2 className="text-sm font-semibold">Characters in this scene</h2>
-        <span className="text-xs tabular-nums text-zinc-500">{chosen.length} of {personas.length} · click one to leave it out</span>
+        <span className="flex items-baseline gap-3 text-xs tabular-nums text-zinc-500">
+          {chosen.length} of {personas.length} picked · click the ones you want
+          {!busy && personas.length > 0 && (
+            <button
+              type="button"
+              onClick={() => setPicked(chosen.length === personas.length ? new Set() : new Set(personas.map((p) => p.id)))}
+              className="text-zinc-400 transition-colors hover:text-white"
+            >
+              {chosen.length === personas.length ? 'none' : 'all'}
+            </button>
+          )}
+        </span>
       </div>
-      <div className="grid grid-cols-[repeat(auto-fill,minmax(160px,1fr))] gap-3">
-        {personas.map((p) => {
-          const left = out.has(p.id);
+      <div className="grid grid-cols-[repeat(auto-fill,minmax(120px,1fr))] gap-3">
+        {sorted.map((p) => {
+          const left = !picked.has(p.id);
           return (
             <button
               key={p.id}
@@ -198,17 +213,28 @@ export function SceneSetup({ personas, onBack, onCreated, onStatus }: {
               onClick={() => toggle(p.id)}
               disabled={busy}
               aria-pressed={!left}
-              title={left ? 'Left out of this scene — click to put back' : 'Click to leave out of this scene'}
+              title={left ? 'Click to put in this scene' : 'In this scene — click to take out'}
               className={`group overflow-hidden rounded-lg border text-left transition-colors disabled:cursor-default ${
-                left ? 'border-zinc-900' : 'border-zinc-700 hover:border-zinc-500'
+                left ? 'border-zinc-900 hover:border-zinc-600' : 'border-emerald-400'
               }`}
             >
-              <div className="relative aspect-[3/4] bg-zinc-950">
+              {/* Its profile picture, which says who it is at this size; the
+                  photo, small, for one that has none yet. */}
+              <div className="relative grid aspect-square place-items-center bg-zinc-950">
                 {/* eslint-disable-next-line @next/next/no-img-element */}
-                <img src={p.thumbUrl} alt="" loading="lazy" decoding="async" className={`h-full w-full object-cover transition-opacity ${left ? 'opacity-20' : ''}`} />
-                {left && <span className="absolute inset-0 grid place-items-center text-[11px] uppercase tracking-wide text-zinc-400">left out</span>}
+                <img
+                  src={p.avatarUrl ?? p.thumbUrl}
+                  alt=""
+                  loading="lazy"
+                  decoding="async"
+                  className={`object-cover transition-opacity ${p.avatarUrl ? 'aspect-square w-[78%] rounded-full' : 'h-full w-full object-top'} ${left ? 'opacity-40 group-hover:opacity-70' : ''}`}
+                />
+                {!left && <span className="absolute right-1.5 top-1.5 rounded bg-emerald-500 px-1.5 py-0.5 text-[10px] font-semibold text-black">✓ in</span>}
               </div>
-              <div className={`truncate px-3 py-2 text-sm ${left ? 'text-zinc-600' : 'text-white'}`}>{p.name}</div>
+              <div className={`flex items-baseline gap-2 px-3 py-2 text-sm ${left ? 'text-zinc-500' : 'text-white'}`}>
+                <span className="min-w-0 flex-1 truncate">{p.name}</span>
+                <span className="text-[11px] tabular-nums text-zinc-500" title={`${p.videos.length} video${p.videos.length === 1 ? '' : 's'}`}>{p.videos.length}</span>
+              </div>
             </button>
           );
         })}

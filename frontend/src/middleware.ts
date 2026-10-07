@@ -43,6 +43,10 @@ const CLIPPER_API = [
   '/api/vids/post-captions',
   '/api/vids/question',
   '/api/vids/recipes',
+  // A trade recording somebody has already drawn, handed over instead of
+  // drawn again; and how long each Download took, written as one lands.
+  '/api/vids/trade-cache',
+  '/api/vids/timings',
   // The recordings: the roster, the trade's price history, the news story and
   // its photos, the music, and the proxy both of those draw images through.
   '/api/ai/talents',

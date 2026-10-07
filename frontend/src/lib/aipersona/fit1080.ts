@@ -167,11 +167,40 @@ export function photoAsTaken(storagePath: string): Promise<string> {
  *  (`<name>.thumb.jpg`); the original is never touched. Falls back to the
  *  original if the picture can't be read here. */
 export const THUMB_SIDE = 480;
+/** The thumbnails this process has seen in the bucket, by the picture's path:
+ *  one never changes once made, so a second ask needs no look, and a list can
+ *  be sent with the thumbnail's own address in place of a trip through the
+ *  thumb route for every picture on the page (knownThumb). */
+// On globalThis, because each route is bundled with a copy of this module of
+// its own: kept here, the thumb route would learn of them and the list route
+// never hear.
+const thumbs = ((globalThis as unknown as { __aipersonaThumbs?: Map<string, string> }).__aipersonaThumbs ??= new Map<string, string>());
+export const knownThumb = (storagePath: string): string | null => thumbs.get(storagePath) ?? null;
+
+/** Find — or make — the thumbnails of these pictures, a few at a time, and
+ *  wait no longer than `budget` ms for them: whatever is not known by then
+ *  goes on being found behind, and is known the next time. The front screen
+ *  calls this as it lists everything, so that a page of stills is a page of
+ *  plain image addresses and not a request here for each. */
+export async function warmThumbs(storagePaths: string[], budget: number): Promise<void> {
+  const todo = [...new Set(storagePaths)].filter((p) => !thumbs.has(p));
+  if (!todo.length) return;
+  let next = 0;
+  const worker = async () => {
+    while (next < todo.length) await imageThumb(todo[next++]).catch(() => {});
+  };
+  const all = Promise.all(Array.from({ length: Math.min(12, todo.length) }, worker));
+  await Promise.race([all, new Promise((resolve) => setTimeout(resolve, budget))]);
+}
+
 export function imageThumb(storagePath: string): Promise<string> {
+  const known = thumbs.get(storagePath);
+  if (known) return Promise.resolve(known);
   return once(`thumb:${storagePath}`, async () => {
     const to = `${storagePath.replace(/\.[a-z0-9]{2,5}$/i, '')}.thumb.jpg`;
+    const keep = () => { thumbs.set(storagePath, to); return to; };
     try {
-      if (await exists(to)) return to;
+      if (await exists(to)) return keep();
       const res = await fetch(publicUrl(storagePath));
       if (!res.ok) return storagePath;
       const sharp = (await import('sharp')).default;
@@ -181,7 +210,7 @@ export function imageThumb(storagePath: string): Promise<string> {
         .jpeg({ quality: 82 })
         .toBuffer();
       await putObject(to, out, 'image/jpeg');
-      return to;
+      return keep();
     } catch (err) {
       console.error('[ai-persona] could not make a thumbnail, showing the original:', err);
       return storagePath;

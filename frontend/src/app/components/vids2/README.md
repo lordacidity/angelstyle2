@@ -288,6 +288,14 @@ the Studio and the clipper page alike, since both are this section:
   `lib/vids2/vids2Build`, put on the pick's `transform.dy` by `personaPicks`
   in `Vids2Section`). Start is fitted to the width at 1.25×, so the picture
   overflows its region by far more than that and nothing shows at an edge.
+- **An upright Start has the whole frame** (since 2026-10-06). A Start
+  taller than it is wide (`isUpright` in `lib/simpler/vidsPlan`, off the
+  row's width and height) is not put between the bars and pushed in: its
+  region is the whole frame, it is as wide as the frame and shown top to
+  bottom, and one shorter than the frame stands on the foot with the black
+  above it (`UPRIGHT_START_PLACEMENT`). It is pushed past the frame by a
+  fiftieth, which is what covers the nudge. The hook does not move. A code
+  from before this comes back in the new framing with its own nudge.
 - **The veil** (`lib/simpler/vidsVeil`): a wash of a random colour one to
   two and a half percent strong and a grain tile one and a half to three
   percent strong, laid over every frame last of all — over the clips, the
@@ -655,6 +663,54 @@ thing the measuring turned up: a page that has rendered many times slows
 down, by several times, as canvas memory piles up — the renderers and the
 exporter now zero their canvases when they are done rather than leaving
 them to the collector.
+
+## Phones: what the clipper page does about the wait (2026-10-06)
+
+The numbers above are a desk's. Clippers are on phones, where the same work
+is several times longer, and four things were done about that:
+
+- **The video is made before Download is pressed** (`Vids2Section`, "Made
+  before the press"). Once both recordings are in and the caption has stood
+  still for `AHEAD_SETTLE_MS`, the same Download runs out of sight
+  (`generate(setup, { ahead })`) and the file waits (`ready`); the press saves
+  it there and then, which is also what lets a phone's share sheet open on
+  the press instead of on a second tap. A line under the button says how far
+  along it is, and a press while it is still going turns it into an ordinary
+  Download with its bar. Keyed by the recordings, the persona, the caption
+  and its look (`aheadKey`): change one and the file — or the render — is
+  dropped and made again once the answers settle. A video somebody has been
+  handed is not made a second time unasked.
+- **The recordings outlive the build** (`heldRef`, `giveBack`). They used to
+  be let go as each video landed; on the clipper page they go back to being
+  a head start, so a caption retyped costs the render and nothing else, and
+  a second video off the same answers has them already. The words' draft is
+  kept with them for the same video made again, and written afresh for a
+  second one.
+- **A trade recording is drawn once** (`lib/vids2/trade-cache`,
+  `api/vids/trade-cache`, `vids_trade_cache`). It is the same for everybody
+  making a video on the same person, the same way, in the same theme, so the
+  first one drawn — in the Studio or by a clipper — is sent up and the
+  clipper page is handed that file from then on. Kept for good: the price on
+  it is the day's it was drawn. The Studio always draws its own. **Bump
+  `TRADE_CACHE_VERSION` when `trade-video` changes how the recording looks.**
+- **Oversized persona clips have a lighter copy** (`scripts/make-lite.mjs`,
+  `lite_*` on `vids_videos`). A top-half clip is shown 780px tall; many were
+  filed at 1936×1072 or 2880×1800 and 20–40Mbps. The copy is the same
+  footage at 800px tall (a landscape Start at 1440 wide; an upright Start is
+  left alone), CRF 16, and `toVideo` serves it in place of the file **in the
+  clipper build only**. Replacing a clip's footage drops its copy, and a
+  copied clip takes its copy with it. Run the script again after filing new
+  persona videos; `--remove` takes the copies away.
+
+And every video the clipper page makes writes down how long it took and on
+what (`lib/vids2/timing`, `api/vids/timings`, `vids_render_timings`): the
+recordings, the words, opening the clips, the frames, the finish, whether it
+was made ahead, whether the trade was a kept one, and the browser's account
+of the device. `GET /api/vids/timings` reads the last few hundred.
+
+One thing this turned up and did not change: the file's bitrate follows the
+densest clip in the build (`composeSequence`), so a persona filed at 40Mbps
+makes a 40Mbps, 130MB video where the house floor is 12Mbps and 40MB.
 
 ## Things worth knowing
 

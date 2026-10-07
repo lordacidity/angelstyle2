@@ -1513,6 +1513,13 @@ export function Vids2Builder({
         onProgress: (frac, label) => setExporting({ frac, label }),
         signal: ctrl.signal,
       });
+      // Taken off the page while the last of it was being written: Cancel, or
+      // — on the clipper page — an answer changed under a build being made
+      // ahead of the press, which unmounts this one. The abort only stops a
+      // render still running, so without this the file goes on to be handed
+      // over (auto below) for a video nobody is making any more. It would be
+      // handed over under whatever the answers have since become.
+      if (ctrl.signal.aborted) return;
       let recipe: VidRecipe | null = null;
       try {
         recipe = await recipeP;
@@ -1523,6 +1530,9 @@ export function Vids2Builder({
         setRecipeError(`Exported, but no code could be saved for it: ${e instanceof Error ? e.message : String(e)}`);
       }
       const name = recipe ? `${recipe.name}.mp4` : exportName();
+      // And again: the record is waited on above, and that wait is where a
+      // build is most likely to be taken off the page out from under it.
+      if (ctrl.signal.aborted) return;
       // A build that renders by itself hands the file to whoever mounted it,
       // which does the saving — a download, or the share sheet on a phone.
       if (auto) {

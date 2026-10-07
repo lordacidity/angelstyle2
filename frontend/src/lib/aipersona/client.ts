@@ -74,6 +74,10 @@ export const approveScene = (id: string) => ask<Scene>(`/scenes/${id}/approve`, 
 
 /** Take a persona out of a scene, or delete a saved video — see the route. */
 export const deleteTake = (id: string) => ask<{ ok: true }>(`/takes/${id}`, send('DELETE'));
+/** Rename a saved video. */
+export const renameTake = (id: string, name: string) => ask<{ ok: true }>(`/takes/${id}`, send('PATCH', { name }));
+/** Note that a saved video was the start of a persona video in Vids. */
+export const markTakeUsed = (id: string, usedIn: string) => ask<{ ok: true }>(`/takes/${id}`, send('PATCH', { usedIn }));
 
 /** The bucket is another origin, where <a download> is ignored; asked this
  *  way, it sends the file as an attachment under the given name instead. */

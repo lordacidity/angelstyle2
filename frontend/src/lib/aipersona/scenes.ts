@@ -11,7 +11,7 @@
 
 import { errMessage, publicUrl, putObject, removeObjects } from '@/lib/vids-db';
 import { fitForKling } from './clip';
-import { fit1080p, imageAt1080p, photoAsTaken, videoAt1080p } from './fit1080';
+import { fit1080p, imageAt1080p, imageThumb, photoAsTaken, videoAt1080p } from './fit1080';
 import { claimJob, jobDone, jobFailed, jobQueued, jobRefused, sceneFile, type Live, type SceneRecord, type TakeRecord } from './db';
 import { jobResult, jobStatus, submitFrame, submitMotion, type JobKind } from './fal';
 
@@ -68,6 +68,8 @@ async function keep(url: string, scene: SceneRecord, take: TakeRecord, kind: Job
   const contentType = EXTENSION[type] ? type : fallback;
   const path = sceneFile(scene.id, `${take.id}-${kind}-${Date.now().toString(36)}.${EXTENSION[contentType]}`);
   await putObject(path, body, contentType);
+  // Its small copy, made now rather than the first time a list wants it.
+  if (kind === 'frame') void imageThumb(path).catch(() => {});
   return path;
 }
 

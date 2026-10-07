@@ -37,6 +37,7 @@ import { isOutletId, outletById } from '@/lib/news/outlets';
 import type { NewsArticle, NewsHit, RailItem } from '@/lib/news/types';
 import type { BoomSound } from '@/lib/simpler/vidsAudio';
 import { makeLocalClip, type LocalClipMeta } from '@/lib/simpler/vidsLocal';
+import { keepTradeClip, readTradeCache, tradeCacheKey } from './trade-cache';
 import {
   MAX_MARK_TEXT, type VidBuildSpec, type VidMark, type VidRecipe, type VidRow, type Vids2Answers,
 } from '@/lib/vids-types';
@@ -773,7 +774,7 @@ export interface MakeTradeClipOptions {
   /** The clip as it will be filed, bar its bytes and poster, and who Pauv
    *  turned out to have, as soon as the renderer has laid it out — before the
    *  first frame (renderTradeVideo onPlanned). */
-  onPlanned?: (meta: LocalClipMeta, person: TradeTalent) => void;
+  onPlanned?: (meta: LocalClipMeta, person: TradePerson) => void;
   /** How hard the recording pushes in on the trade card — the one thing it
    *  moves for (components/trade/trade-video, "The camera"). A Bottom B plays
    *  in the bottom half of a 9:16 frame, so the trade card is small twice
@@ -784,6 +785,11 @@ export interface MakeTradeClipOptions {
   zoom?: ZoomLevel;
 }
 
+/** Who the recording turned out to be of: Pauv's spelling of the name asked
+ *  for. All a recording that was kept (lib/vids2/trade-cache) knows of them,
+ *  and all anything downstream reads. */
+export type TradePerson = Pick<TradeTalent, 'name'>;
+
 /** What a Vids 2 trade is shot at: the same push Studio > Trade opens on, so
  *  what is previewed there is what gets laid in. */
 export const TRADE_ZOOM: ZoomLevel = 'normal';
@@ -793,11 +799,10 @@ export const TRADE_ZOOM: ZoomLevel = 'normal';
  *  components/trade/trade-video — the one home for it — and held in this tab. */
 export async function makeTradeClip(
   o: MakeTradeClipOptions,
-): Promise<{ row: VidRow; person: TradeTalent; beats: TradeBeats }> {
+): Promise<{ row: VidRow; person: TradePerson; beats: TradeBeats; kept: boolean }> {
   o.onProgress?.({ stage: 'load', frac: null });
-  const assets = await loadTradeAssets(o.name, o.theme, o.signal);
-  const person = assets.person.name;
-  const meta = (p: { beats: TradeBeats; seconds: number }): LocalClipMeta => ({
+  const zoom = o.zoom ?? TRADE_ZOOM;
+  const meta = (person: string, p: { beats: TradeBeats; seconds: number }): LocalClipMeta => ({
     name: bottomBName(person, o.direction, o.theme),
     context: bottomBContext(person, o.direction),
     marks: bottomBMarks(p.beats, person, o.direction),
@@ -810,16 +815,36 @@ export async function makeTradeClip(
     // where it doesn't fill the bottom half (vidsPlan itemBacking).
     theme: o.theme,
   });
-  const zoom = o.zoom ?? TRADE_ZOOM;
+
+  // One somebody has drawn already, on the clipper page: the same recording,
+  // handed over rather than drawn again — which on a phone is most of the
+  // wait (lib/vids2/trade-cache). The Studio always draws its own, so what is
+  // made there carries today's price; and what it draws is kept for the
+  // clippers like anybody else's. No poster with a kept one: only the tuning
+  // page shows a clip as a card, and the clipper page has none.
+  const key = tradeCacheKey(o.name, o.direction, o.theme, zoom);
+  if (CLIPPERS) {
+    const kept = await readTradeCache(key, o.signal);
+    if (kept) {
+      const m = meta(kept.person, kept);
+      o.onPlanned?.(m, { name: kept.person });
+      return { row: makeLocalClip(kept.blob, m), person: { name: kept.person }, beats: kept.beats, kept: true };
+    }
+  }
+
+  const assets = await loadTradeAssets(o.name, o.theme, o.signal);
+  const person = assets.person.name;
   const r = await renderTradeVideo(assets, {
     direction: o.direction,
     zoom,
     signal: o.signal,
     onProgress: (done, total) => o.onProgress?.({ stage: 'render', frac: done / total }),
-    onPlanned: (p) => o.onPlanned?.(meta(p), assets.person),
+    onPlanned: (p) => o.onPlanned?.(meta(person, p), assets.person),
   });
-  const row = makeLocalClip(r.blob, { ...meta(r), poster: await tradePoster(assets, o.direction, r.beats, zoom) });
-  return { row, person: assets.person, beats: r.beats };
+  const row = makeLocalClip(r.blob, { ...meta(person, r), poster: await tradePoster(assets, o.direction, r.beats, zoom) });
+  // Kept for the next one to ask, behind everything: nothing waits on it.
+  void keepTradeClip(key, r.blob, { person, seconds: r.seconds, beats: r.beats });
+  return { row, person: assets.person, beats: r.beats, kept: false };
 }
 
 /** A frame off the end of the recording — the card green, Trade confirmed —

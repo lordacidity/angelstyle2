@@ -72,6 +72,7 @@
 // Bottom A and the trade recording as a Bottom B). See components/vids2/README.md.
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { reportTiming, type TimingValue } from '@/lib/vids2/timing';
 import { useVidsLibrary } from '@/app/hooks/useVidsLibrary';
 import { CLIPPERS, withBase } from '@/lib/clipping';
 import { CAPTION_STYLES, DEFAULT_CAPTION_STYLE } from '@/lib/simpler/vidsCaptions';
@@ -85,8 +86,8 @@ import { Vids2ClipCaption, Vids2ClipPreview } from './Vids2ClipPanel';
 import { Vids2Form, jobLegs, jobProgress, type Vids2Job, type Vids2Leg } from './Vids2Form';
 import { Vids2Recall } from './Vids2Recall';
 import {
-  DEFAULT_TEMPO, DEFAULT_TRIM, INTAKE_SPEED, LIBRARY_FOLDERS, PERSONA_PART_SLOT, SLOT_META,
-  buildPlan, folderGroupIds, freshPick, type Picks, type SlotId, type SlotPick,
+  DEFAULT_TEMPO, DEFAULT_TRIM, INTAKE_SPEED, LIBRARY_FOLDERS, PERSONA_PART_SLOT, SLOT_META, SLOT_PLACEMENT,
+  buildPlan, folderGroupIds, freshPick, isUpright, type Picks, type SlotId, type SlotPick,
 } from '@/lib/simpler/vidsPlan';
 import { PERSONA_PARTS, isPhoto, type VidPersona, type VidRow } from '@/lib/vids-types';
 import {
@@ -183,6 +184,20 @@ const outletName = (id: string) => (isOutletId(id) ? outletById(id).name : id);
 // kept and re-stamped rather than thrown away. A ChatGPT intro is not so
 // lucky: the model is told which way before it writes a word, so flipping
 // Which way after it has started does start it again.
+
+/** How long the caption has to stand still before the video is made ahead of
+ *  the press (the clipper page) — see "Made before the press". */
+const AHEAD_SETTLE_MS = 2500;
+
+/** What becomes of the words a build was made with when it is let go
+ *  (dropBuild / giveBack on the clipper page):
+ *    keep   the same video may be made again — its caption retyped, its look
+ *           pressed — so the draft is handed back and only the render repeats.
+ *    skip   it went out: the words went with it, and the next video off these
+ *           answers is written when it is asked for, never two the same.
+ *    fresh  it came to nothing, and the draft is not to be trusted: dropped,
+ *           with nothing to stop another being written. */
+type Words = 'keep' | 'skip' | 'fresh';
 
 /** One recording on its way, wherever it was started from. */
 interface Run<T, L> {
@@ -467,6 +482,52 @@ export function Vids2Section({ active }: { active: boolean }) {
   const [saved, setSaved] = useState<File | null>(null);
   const [savePrompt, setSavePrompt] = useState(false);
 
+  // ── Made before the press (the clipper page) ────────────────────────────
+  // Everything a Download makes is settled before it is pressed: the
+  // recordings have been going since Which way, and the caption has been in
+  // its box since the persona was chosen. So once both recordings are in and
+  // the caption has stood still for a moment, the video is made — the very
+  // Download a press would have run, out of sight — and the press, when it
+  // comes, is handed the file. On a phone that is the difference between a
+  // minute's wait and none, and it is also what lets the share sheet open on
+  // the press itself: a sheet asked for a minute after the press that wanted
+  // it is refused, and the whole-screen "tap to save" was the way round that.
+  //
+  // Keyed by what the video is made from (aheadKey): the two recordings, the
+  // persona, the caption and its look. Change any of them and a file made
+  // ahead is for a video nobody is making — it is let go, a render still
+  // going is stopped, and the answers as they now stand get their own once
+  // they settle. The recordings and the words are kept across that (heldRef):
+  // a caption retyped costs the render again and nothing else.
+  /** The key the build under way was started ahead for, while nobody has
+   *  pressed Download for it. A press turns it into an ordinary Download. */
+  const aheadRef = useRef<string | null>(null);
+  const [ahead, setAhead] = useState<string | null>(null);
+  /** The file made ahead, and what it was made from. */
+  const [ready, setReady] = useState<{ file: File; key: string } | null>(null);
+  /** What is not to be made ahead again: the very thing just made ahead (or
+   *  that just failed to be), and — whatever its look — a video somebody has
+   *  already been handed. A second one of those is theirs to ask for. */
+  const skipAhead = useRef<string | null>(null);
+  const skipContent = useRef<string | null>(null);
+  /** What the build under way was made from, less its look. */
+  const buildContent = useRef<string | null>(null);
+  /** The answers as they stand, for what runs after the render that set them. */
+  const setupRef = useRef(setup);
+  setupRef.current = setup;
+  /** How the video under way is getting on, for the row written when it lands
+   *  (lib/vids2/timing). Times are performance.now(). */
+  const timingRef = useRef<{
+    startedAt: number;
+    /** When Download was pressed for it; null while it is only being made ahead. */
+    pressedAt: number | null;
+    ahead: boolean;
+    stages: Record<string, TimingValue>;
+    buildAt: number | null;
+    /** The first time the render said each thing it says. */
+    seen: Record<string, number>;
+  } | null>(null);
+
   // The four library folders always exist at the top level. Vids 2 only reads
   // Persona and End (and Bottom B, for a BOOM filed by hand), but the library
   // is one library and it is the same four wherever they are made.
@@ -570,8 +631,15 @@ export function Vids2Section({ active }: { active: boolean }) {
 
   /** The video under way is let go: the build (which unmounts the builder,
    *  and stops its render with it) and the recordings under it. */
-  const dropBuild = () => {
-    dropLocal(picksRef.current);
+  const dropBuild = (words: Words = 'skip') => {
+    // On the clipper page the recordings a build was made from go back to
+    // being a head start rather than being let go (giveBack): the next video
+    // off the same answers — the same one with its caption retyped, or a
+    // second one — has them already.
+    const held = heldRef.current;
+    heldRef.current = null;
+    if (held) giveBack(held, words);
+    else dropLocal(picksRef.current);
     setPicks({});
     setBuild(null);
     setRendering(false);
@@ -582,8 +650,13 @@ export function Vids2Section({ active }: { active: boolean }) {
     jobRef.current?.abort();
     jobRef.current = null;
     setJob(null);
-    // On the clipper page the press also covers the render that follows.
-    if (CLIPPERS && build) dropBuild();
+    // On the clipper page the press also covers the render that follows. One
+    // being made ahead was nobody's: its words stand for whatever is made of
+    // these answers next.
+    if (CLIPPERS && build) dropBuild(aheadRef.current ? 'keep' : 'fresh');
+    aheadRef.current = null;
+    setAhead(null);
+    timingRef.current = null;
   };
 
   // The persona on the clipper page's preview, and its Start clip.
@@ -671,17 +744,83 @@ export function Vids2Section({ active }: { active: boolean }) {
 
   /** What the build that renders by itself reports (Vids2Builder auto). */
   const auto: Vids2Auto = {
-    onStatus: (status) => { if (status) setRender(status); },
+    onStatus: (status) => {
+      if (!status) return;
+      setRender(status);
+      // "Rendering frame 12 / 780" is one thing said many times.
+      const said = status.label.replace(/\s*\d.*$/, '').trim();
+      const t = timingRef.current;
+      if (t && said && t.seen[said] == null) t.seen[said] = performance.now();
+    },
     onMade: (blob, name) => {
       const file = new File([blob], name, { type: blob.type || 'video/mp4' });
+      landed(blob);
+      const key = aheadRef.current;
+      if (key) {
+        // Nobody has pressed Download yet: the file waits for the press. The
+        // look stays as it is — it is part of what this file was made from.
+        aheadRef.current = null;
+        setAhead(null);
+        skipAhead.current = key;
+        setReady({ file, key });
+        // Last press's failure is not this file's.
+        setJobError(null);
+        dropBuild('keep');
+        return;
+      }
       setSaved(file);
+      skipContent.current = buildContent.current;
       dropBuild();
       // The next video gets a look of its own.
       stylePicked.current = false;
       setClipStyle(rollLook());
       void saveFile(file);
     },
-    onFail: (message) => { setJobError(message); dropBuild(); },
+    onFail: (message) => {
+      // One being made ahead fails quietly, and is not tried again by itself:
+      // the press makes it in the open, and says why if it fails again.
+      if (aheadRef.current) {
+        skipAhead.current = aheadRef.current;
+        aheadRef.current = null;
+        setAhead(null);
+        // Whatever stopped it may have been the words themselves, so the
+        // press writes its own rather than replaying a draft that failed.
+        dropBuild('fresh');
+        return;
+      }
+      setJobError(message);
+      dropBuild('fresh');
+    },
+  };
+
+  /** The video under way has landed: write down how long it took. */
+  const landed = (blob: Blob) => {
+    const t = timingRef.current;
+    timingRef.current = null;
+    if (!t) return;
+    const now = performance.now();
+    const at = (label: string) => t.seen[label] ?? null;
+    const span = (from: number | null, to: number | null) => (from != null && to != null ? Math.max(0, to - from) : null);
+    const open = at('Opening clips…');
+    const frames = at('Rendering frame');
+    const sound = at('Encoding audio…') ?? at('Finalizing…');
+    const stages: Record<string, TimingValue> = {
+      kind: 'render',
+      ahead: t.ahead,
+      // Made ahead, and the press came before it was done.
+      pressedMidway: t.ahead && t.pressedAt != null,
+      ...t.stages,
+      fileMb: blob.size / 1048576,
+    };
+    const put = (key: string, ms: number | null) => { if (ms != null) stages[key] = Math.round(ms); };
+    put('wordsMs', span(t.buildAt, open));
+    put('openMs', span(open, frames));
+    put('framesMs', span(frames, sound));
+    put('finishMs', span(sound, now));
+    put('renderMs', span(t.buildAt, now));
+    put('madeMs', now - t.startedAt);
+    // What somebody actually waited: from their press, where there was one.
+    reportTiming(t.pressedAt != null ? now - t.pressedAt : now - t.startedAt, stages);
   };
 
   // ── The head start ────────────────────────────────────────────────────
@@ -705,6 +844,11 @@ export function Vids2Section({ active }: { active: boolean }) {
   const startWarm = (kind: 'intro' | 'trade', s: Vids2Setup) => {
     const key = warmKey(kind, s);
     if (warmRef.current[kind]?.key === key) return;
+    // The build under way is holding one for exactly these answers and hands
+    // it back when it is done (heldRef, giveBack): a second would be a second
+    // ChatGPT call and a second render, beside an encode, for the same file.
+    // An answer re-pressed at its own value is what gets here (Vids2Form).
+    if (heldRef.current?.[kind]?.key === key) return;
     dropWarm(kind);
     if (!key) return;
     if (kind === 'intro') {
@@ -815,7 +959,8 @@ export function Vids2Section({ active }: { active: boolean }) {
     if (!CLIPPERS || jobRef.current) return;
     const key = draftKey(setup);
     if (draftRef.current && draftRef.current.key !== key) dropDraft();
-    if (!key || draftRef.current) return;
+    if (draftSkip.current !== key) draftSkip.current = null;
+    if (!key || draftRef.current || draftSkip.current) return;
     const persona = personas.find((p) => p.id === setup.personaId);
     if (!persona) return;
     // Both recordings have to be going for these very answers, and going
@@ -857,6 +1002,42 @@ export function Vids2Section({ active }: { active: boolean }) {
   }, [setup, warm, personas, videos]);
   useEffect(() => () => dropDraft(), []);
 
+  /** What the build under way was made from, on the clipper page: the two
+   *  recordings and the words' draft. Handed back when the build is done with
+   *  (dropBuild) instead of being let go. */
+  const heldRef = useRef<{ intro: IntroRun | null; trade: TradeRun | null; draft: WordsDraft | null } | null>(null);
+  /** A draft is not started for these answers again by itself (draftKey): a
+   *  video has just been made from them, and the words for a second one are
+   *  asked for when it is — see the effect above. */
+  const draftSkip = useRef<string | null>(null);
+  const giveBack = (held: NonNullable<typeof heldRef.current>, words: Words) => {
+    const now = setupRef.current;
+    const fits = (kind: 'intro' | 'trade', run: IntroRun | TradeRun) =>
+      !!run.out && !run.failed && !warmRef.current[kind] && run.key === warmKey(kind, now);
+    if (held.intro) {
+      const run = held.intro;
+      if (fits('intro', run)) {
+        run.sink = (leg) => setWarm((w) => ({ ...w, intro: leg }));
+        warmRef.current.intro = run;
+        setWarm((w) => ({ ...w, intro: run.leg }));
+      } else stopRun(run);
+    }
+    if (held.trade) {
+      const run = held.trade;
+      if (fits('trade', run)) {
+        run.sink = (leg) => setWarm((w) => ({ ...w, trade: leg }));
+        warmRef.current.trade = run;
+        setWarm((w) => ({ ...w, trade: run.leg }));
+      } else stopRun(run);
+    }
+    // And the words — see Words. `fresh` leaves nothing behind and nothing
+    // in the way, so the draft that was in hand (which may be the very thing
+    // that failed) is written again rather than replayed.
+    const key = draftKey(now);
+    if (words === 'keep' && held.draft && !draftRef.current && held.draft.key === key) draftRef.current = held.draft;
+    else if (words === 'skip') draftSkip.current = key;
+  };
+
   /** Reset, top right of either page: Vids 2 as it opens. The answers go
    *  back to empty (and are saved that way), the recordings are let go, and
    *  the build goes — which unmounts the tuning page and everything it was
@@ -885,6 +1066,9 @@ export function Vids2Section({ active }: { active: boolean }) {
     setRender(null);
     setSaved(null);
     setSavePrompt(false);
+    setReady(null);
+    skipAhead.current = null;
+    skipContent.current = null;
     stylePicked.current = false;
     if (CLIPPERS) setClipStyle(rollLook());
   };
@@ -1005,12 +1189,18 @@ export function Vids2Section({ active }: { active: boolean }) {
    *  takes them (Vids2Early) rather than asking again. A failure or a cancel
    *  aborts them along with the recordings; one of them failing fails
    *  nothing but itself. */
-  const generate = async (from: Vids2Setup) => {
+  const generate = async (from: Vids2Setup, opts: { ahead?: string } = {}) => {
     // The ref rather than the state: loadCode cancels a job and presses this
     // in the same breath, before the state has caught up.
     if (!setupReady(from) || jobRef.current || rendering) return;
+    /** Made before the press (the clipper page): the same Download, out of
+     *  sight — nothing on the form moves, and nothing is saved until asked. */
+    const quietly = !!opts.ahead;
     const persona = personas.find((p) => p.id === from.personaId) ?? null;
-    if (!persona) { setJobError('That persona is no longer in the library. Choose another.'); return; }
+    if (!persona) {
+      if (!quietly) setJobError('That persona is no longer in the library. Choose another.');
+      return;
+    }
     const { direction, mode, intro } = from;
     const question = intro === 'chatgpt' ? from.question.trim() : '';
     const story = intro === 'news' ? storyFor(from) : null;
@@ -1055,14 +1245,31 @@ export function Vids2Section({ active }: { active: boolean }) {
 
     const ctrl = new AbortController();
     jobRef.current = ctrl;
-    setJobError(null);
-    // The file from last time is not this video's.
-    setSaved(null);
-    setSavePrompt(false);
-    // Whatever each run has got to by now: one that has been going since the
-    // form was halfway through says so, rather than starting its line again
-    // at nothing.
-    setJob({ intro: introRun?.leg ?? null, trade: tradeRun.leg });
+    aheadRef.current = opts.ahead ?? null;
+    setAhead(opts.ahead ?? null);
+    if (CLIPPERS) {
+      const now = performance.now();
+      buildContent.current = contentKeyOf(from);
+      timingRef.current = {
+        startedAt: now,
+        pressedAt: quietly ? null : now,
+        ahead: quietly,
+        // Whether each recording was already going (or done) when this began.
+        stages: { intro, introWarm: !!introRun?.out, tradeWarm: !!tradeRun.out },
+        buildAt: null,
+        seen: {},
+      };
+    }
+    if (!quietly) {
+      setJobError(null);
+      // The file from last time is not this video's.
+      setSaved(null);
+      setSavePrompt(false);
+      // Whatever each run has got to by now: one that has been going since the
+      // form was halfway through says so, rather than starting its line again
+      // at nothing.
+      setJob({ intro: introRun?.leg ?? null, trade: tradeRun.leg });
+    }
     /** One of the lines on the form, moved on its own. */
     const leg = (which: 'intro' | 'trade', next: Partial<Vids2Leg>) =>
       setJob((j) => (j && j[which] ? { ...j, [which]: { ...j[which], ...next } } : j));
@@ -1092,7 +1299,16 @@ export function Vids2Section({ active }: { active: boolean }) {
     // A video brought back opens where it went out: its Start was nudged by
     // a roll of its own, and the record has that nudge on the pick.
     const recordedStart = restore?.recipe.build.picks.start?.transform;
-    if (base.start && recordedStart) base.start = { ...base.start, transform: { ...recordedStart } };
+    // A record from before an upright Start had the whole frame carries the
+    // old push-in, which would cut the sides off it now: only its nudge is kept.
+    if (base.start && recordedStart) {
+      base.start = {
+        ...base.start,
+        transform: isUpright(base.start.video) && recordedStart.zoom === SLOT_PLACEMENT.start!.transform.zoom
+          ? { ...base.start.transform, dy: recordedStart.dy }
+          : { ...recordedStart },
+      };
+    }
     // And the way round it went out: the record says of each of the three
     // whether it was flipped (nothing said is not), in place of this roll.
     if (restore) {
@@ -1187,12 +1403,28 @@ export function Vids2Section({ active }: { active: boolean }) {
       }
       const introClip = introR.value;
       const trade = tradeR.value;
+      const timing = timingRef.current;
+      if (timing) {
+        timing.stages.recordingsMs = Math.round(performance.now() - timing.startedAt);
+        // The trade was somebody's already (lib/vids2/trade-cache), not drawn.
+        timing.stages.tradeKept = trade.kept;
+      }
 
       const next: Picks = { ...base, bottomB: tradePick(trade.row) };
       if (introClip) next.bottomA = freshPick('bottomA', stamp(introClip.row));
       // Settled already — both recordings were laid out before their first
       // frame — and never a reason for Generate to fail.
       const { lines } = await linesP.catch(() => ({ lines: null }));
+      // Stopped while that was awaited — an answer changed under one being
+      // made ahead. Both recordings had landed, so they are handed back
+      // rather than put on a stage nobody wants.
+      if (ctrl.signal.aborted) {
+        if (CLIPPERS) giveBack({ intro: introRun, trade: tradeRun, draft: pre }, 'keep');
+        else { releaseLocalClip(trade.row); if (introClip) releaseLocalClip(introClip.row); }
+        return;
+      }
+      if (CLIPPERS) heldRef.current = { intro: introRun, trade: tradeRun, draft: pre };
+      if (timing) timing.buildAt = performance.now();
 
       // The video before this one goes now rather than at any point earlier:
       // until here, a failure still had the old one to fall back on.
@@ -1233,10 +1465,84 @@ export function Vids2Section({ active }: { active: boolean }) {
         setRender({ frac: 0, label: 'Writing the captions…' });
       } else setOnForm(false);
     } catch (e) {
-      if (!cancelled(e)) setJobError(e instanceof Error ? e.message : String(e));
+      // One being made ahead says nothing: the press makes it in the open.
+      if (aheadRef.current) { skipAhead.current = aheadRef.current; aheadRef.current = null; setAhead(null); }
+      else if (!cancelled(e)) setJobError(e instanceof Error ? e.message : String(e));
     } finally {
       if (jobRef.current === ctrl) { jobRef.current = null; setJob(null); }
     }
+  };
+
+  // ── Made before the press: when, and the press itself ───────────────────
+  /** What a video is made from, less its look; null until it could be made. */
+  const contentKeyOf = (s: Vids2Setup): string | null => {
+    const key = draftKey(s);
+    const hook = clipHook.trim();
+    return CLIPPERS && key && hook ? `${key}|${hook}` : null;
+  };
+  const contentKey = loaded && setupReady(setup) && !hookWriting ? contentKeyOf(setup) : null;
+  const aheadKey = contentKey ? `${contentKey}|${clipStyle}` : null;
+  useEffect(() => {
+    if (!CLIPPERS) return;
+    // A file made ahead for answers that have since changed is nobody's, and
+    // so is a render still going for them.
+    if (ready && ready.key !== aheadKey) {
+      // Gone, so it is one to make again should the answers come back to it.
+      if (skipAhead.current === ready.key) skipAhead.current = null;
+      setReady(null);
+    }
+    if (aheadRef.current && aheadRef.current !== aheadKey) { cancel(); return; }
+    if (!aheadKey || jobRef.current || rendering || build) return;
+    if (ready?.key === aheadKey || skipAhead.current === aheadKey || skipContent.current === contentKey) return;
+    // Both recordings in hand, for these very answers: the render is all
+    // that is left, and it is the only thing started here.
+    const tradeRun = warmRef.current.trade;
+    const introRun = warmRef.current.intro;
+    if (!tradeRun?.out || tradeRun.failed || tradeRun.key !== warmKey('trade', setup)) return;
+    if (setup.intro !== 'none' && (!introRun?.out || introRun.failed || introRun.key !== warmKey('intro', setup))) return;
+    // Once the caption has stood still: a render for every letter typed
+    // would be a render thrown away for every letter typed.
+    const timer = window.setTimeout(() => { void generate(setup, { ahead: aheadKey }); }, AHEAD_SETTLE_MS);
+    return () => window.clearTimeout(timer);
+    // `warm` is what moves when a recording lands — the runs are a ref.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [aheadKey, contentKey, ready, rendering, build, warm, job]);
+
+  /** Download, on the clipper page. The file made ahead, if these are still
+   *  the answers it was made from; the one still being made ahead, which
+   *  becomes this Download and shows its progress; or the whole thing, made
+   *  now, the way it always was. */
+  const download = () => {
+    if (ready && ready.key === aheadKey) {
+      const { file } = ready;
+      // First, and in the press itself: a share sheet opens for a press and
+      // not for anything that happens after one.
+      void saveFile(file);
+      setReady(null);
+      setSaved(file);
+      setJobError(null);
+      skipContent.current = contentKey;
+      // The words went out in it. A second video off the same answers is a
+      // second video, not this one again: without this it would come back
+      // with the same lines, the same End, the same speed and the persona
+      // the same way round — the very thing the rolls are there to prevent.
+      dropDraft();
+      draftSkip.current = draftKey(setup);
+      // The next video gets a look of its own.
+      stylePicked.current = false;
+      setClipStyle(rollLook());
+      reportTiming(0, { kind: 'instant' });
+      return;
+    }
+    if (aheadRef.current && aheadRef.current === aheadKey) {
+      aheadRef.current = null;
+      setAhead(null);
+      setSaved(null);
+      setSavePrompt(false);
+      if (timingRef.current) timingRef.current.pressedAt = performance.now();
+      return;
+    }
+    void generate(setup);
   };
 
   // The clipper page never leaves the form: its build renders out of sight.
@@ -1245,7 +1551,9 @@ export function Vids2Section({ active }: { active: boolean }) {
   // ── The clipper page's foot: Download, and how it is getting on ──────────
   // The recordings are the first six tenths of the bar, the words and the
   // render the rest — roughly how the minute divides.
-  const clipRunning = !!job || rendering;
+  // One being made ahead is not shown as running: the form stays as it is,
+  // with a line under Download saying how far along it is.
+  const clipRunning = (!!job || rendering) && !ahead;
   const clipFrac = job ? jobProgress(job) * 0.6 : 0.6 + (render?.frac ?? 0) * 0.4;
   const clipPct = Math.round(clipFrac * 100);
   const clipFooter = clipRunning ? (
@@ -1277,7 +1585,7 @@ export function Vids2Section({ active }: { active: boolean }) {
     <>
       <button
         type="button"
-        onClick={() => void generate(setup)}
+        onClick={download}
         // Not until the Start caption is in: the video goes out with the one
         // in the box, and a press before it lands would go without it.
         disabled={!setupReady(setup) || !loaded || hookWriting}
@@ -1286,6 +1594,14 @@ export function Vids2Section({ active }: { active: boolean }) {
       >
         <DownloadIcon size={16} /> Download
       </button>
+      {ready && ready.key === aheadKey ? (
+        <p className="mt-2 text-xs text-emerald-400">✓ Ready — Download saves it straight away.</p>
+      ) : ahead && (
+        <p className="mt-2 flex items-center gap-2 text-xs text-zinc-500">
+          <SpinnerIcon size={12} className="animate-spin" />
+          Getting it ready… {Math.round((render?.frac ?? 0) * 100)}%
+        </p>
+      )}
       {saved && (
         <div className="mt-2 flex items-center gap-3 text-xs text-zinc-500">
           <span className="min-w-0 flex-1 truncate" title={saved.name}>
@@ -1363,7 +1679,7 @@ export function Vids2Section({ active }: { active: boolean }) {
             onGenerate={() => void generate(setup)}
             onCancel={cancel}
             {...(CLIPPERS ? {
-              locked: rendering,
+              locked: rendering && !ahead,
               footer: clipFooter,
               side: <Vids2ClipPreview start={clipStart} text={clipHook} styleId={clipStyle} made={saved} />,
               captionSummary: hookWriting ? 'Writing…' : clipHook,

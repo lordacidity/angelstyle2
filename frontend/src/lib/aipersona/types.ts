@@ -77,11 +77,23 @@ export interface PersonaVideo {
   /** The take it came from — see SceneTake. Deleting the video deletes this. */
   id: string;
   sceneId: string;
+  /** What it is called: its scene's name, until it is given one of its own on
+   *  the character's page (PATCH /api/ai-persona/takes/:id). */
   sceneName: string;
   url: string;
   /** The character first frame it was made from; the poster. */
   frameUrl: string | null;
+  /** That frame small, for lists: GET /api/ai-persona/thumb, which makes it once. */
+  thumbUrl: string | null;
   savedAt: string;
+  /** The persona videos in Vids (their ids there) this was the start of, as
+   *  "Make persona video" noted them. One since deleted in Vids is still
+   *  listed, so it is read against what Vids has now. */
+  usedIn: string[];
+  /** Its scene's size in px (0 when unknown) — the shape a list holds open
+   *  for its still while that loads. */
+  width: number;
+  height: number;
 }
 
 export interface Persona {
@@ -132,8 +144,12 @@ export interface SceneTake {
   personaId: string;
   personaName: string;
   photoUrl: string;
-  /** The photo small, for the name badges. */
+  /** The photo small. */
   thumbUrl: string;
+  /** The persona's profile picture, once one has been made: who the card is,
+   *  at a glance — the badge by its name, and what stands in for a frame that
+   *  is still being drawn. */
+  avatarUrl: string | null;
   frame: SceneJob;
   video: SceneJob;
 }

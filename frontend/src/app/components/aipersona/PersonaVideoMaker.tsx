@@ -48,6 +48,7 @@ import { personaFolders } from '@/lib/vids-persona-folders';
 import {
   PERSONA_PARTS, PERSONA_PART_LABEL, cleanEdit, type VidEdit, type VidFolder, type VidPersona, type VidRow,
 } from '@/lib/vids-types';
+import { markTakeUsed } from '@/lib/aipersona/client';
 import { MAX_NAME_CHARS, type Persona, type PersonaVideo } from '@/lib/aipersona/types';
 import { VidsClipEditor, type ClipSaveJob } from '../vids/VidsClipEditor';
 import { FIELD, GHOST, LABEL, PRIMARY, errorText } from './aipersona-ui';
@@ -143,9 +144,10 @@ const NEW_FOLDER = '__new__';
 const NO_FOLDER = '__none__';
 
 function Poster({ video, className }: { video: PersonaVideo; className: string }) {
-  return video.frameUrl
+  const still = video.thumbUrl ?? video.frameUrl;
+  return still
     // eslint-disable-next-line @next/next/no-img-element
-    ? <img src={video.frameUrl} alt="" draggable={false} className={className} />
+    ? <img src={still} alt="" loading="lazy" draggable={false} className={className} />
     : <video src={video.url} muted playsInline preload="metadata" className={className} />;
 }
 
@@ -228,6 +230,13 @@ export function PersonaVideoMaker({ persona, onClose }: { persona: Persona; onCl
    *  row of its own — they are edited, and saved, separately. */
   async function edit() {
     if (!ready || busy) return;
+    const opened = await fetchParts();
+    if (!opened) return;
+    setRows(opened);
+    setIndex(0);
+  }
+
+  async function fetchParts(): Promise<LocalRow[] | null> {
     setError('');
     try {
       const wanted = [...new Map(picks.map((p) => [p!.id, p!])).values()];
@@ -244,10 +253,10 @@ export function PersonaVideoMaker({ persona, onClose }: { persona: Persona; onCl
         return localRow(file, `${name.trim()} — ${PERSONA_PART_LABEL[PERSONA_PARTS[i]]}`);
       });
       urls.current.push(...opened.map((r) => r.url));
-      setRows(opened);
-      setIndex(0);
+      return opened;
     } catch (err) {
       setError(errorText(err));
+      return null;
     } finally {
       setFetching(null);
     }
@@ -325,6 +334,9 @@ export function PersonaVideoMaker({ persona, onClose }: { persona: Persona; onCl
         // Not degen; whose it is and whether the clippers get it as chosen.
         : await createPersona(name.trim(), false, { ...part, folderId: await personaFolder(rootId), clipable });
       setMade(madeRef.current);
+      // The start is what a persona video is known by: the character's page
+      // greys a video that has been one. Only a note, so it is not waited on.
+      if (i === 0) void markTakeUsed(videoId, madeRef.current.id).catch(() => {});
       patchSave(i, { stage: 'saved', frac: 1 });
     } catch (err) {
       patchSave(i, { stage: 'failed', error: errorText(err) });

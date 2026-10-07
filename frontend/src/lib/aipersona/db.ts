@@ -21,6 +21,7 @@
 import pg from 'pg';
 import { publicUrl, removeObjects } from '@/lib/vids-db';
 import type { JobKind } from './fal';
+import { knownThumb, warmThumbs } from './fit1080';
 import { PersonaInputError } from './respond';
 import type {
   JobStatus, LibraryPayload, Persona, PersonaVideo, Scene, SceneJob, SceneStage, SceneSummary,
@@ -29,7 +30,7 @@ import type {
 // ── Connection pool (singleton, hot-reload safe) ──────────────────────────────
 // Bump SCHEMA_VERSION whenever SCHEMA below changes, so a process that started
 // before the change re-runs the (idempotent) DDL.
-const SCHEMA_VERSION = 2;
+const SCHEMA_VERSION = 4;
 
 const g = globalThis as unknown as {
   __aipersonaPool?: pg.Pool;
@@ -87,6 +88,12 @@ const SCHEMA: string[] = [
   `CREATE INDEX IF NOT EXISTS aipersona_takes_persona ON aipersona_takes (persona_id)`,
   // A profile picture, made from the photo on request (see avatar route).
   `ALTER TABLE aipersona_personas ADD COLUMN IF NOT EXISTS avatar_path TEXT`,
+  // A saved video's own name, once it has been renamed on its character's
+  // page. Null until then, and it goes by its scene's name.
+  `ALTER TABLE aipersona_takes ADD COLUMN IF NOT EXISTS name TEXT`,
+  // The persona videos in Vids (their ids there) a saved video has been the
+  // start of — what the character's page greys a used hook by.
+  `ALTER TABLE aipersona_takes ADD COLUMN IF NOT EXISTS used_in UUID[] NOT NULL DEFAULT '{}'`,
 ];
 
 function ensureSchema(): Promise<void> {
@@ -113,7 +120,12 @@ const PREFIX = 'aipersona';
 export const photoPath = (id: string, ext: string) => `${PREFIX}/photos/${id}.${ext}`;
 export const avatarPath = (personaId: string) => `${PREFIX}/avatars/${personaId}-${Date.now()}.jpg`;
 /** Where the browser asks for a photo's thumbnail (made on first ask). */
-export const thumbUrl = (path: string) => `/api/ai-persona/thumb?p=${encodeURIComponent(path)}`;
+export const thumbUrl = (path: string) => {
+  // Once this process has seen the thumbnail it is sent by its own address,
+  // which spares the page a request here for every picture on it.
+  const known = knownThumb(path);
+  return known ? publicUrl(known) : `/api/ai-persona/thumb?p=${encodeURIComponent(path)}`;
+};
 export const sourcePath = (id: string, ext: string) => `${PREFIX}/sources/${id}.${ext}`;
 export const sceneFile = (sceneId: string, file: string) => `${PREFIX}/scenes/${sceneId}/${file}`;
 
@@ -124,6 +136,12 @@ export const isPhotoPath = (v: unknown): v is string =>
   typeof v === 'string' && new RegExp(`^${PREFIX}/photos/${OBJECT_ID}$`).test(v);
 export const isSourcePath = (v: unknown): v is string =>
   typeof v === 'string' && new RegExp(`^${PREFIX}/sources/${OBJECT_ID}$`).test(v);
+const UUID = '[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}';
+/** A take's character first frame, as lib/aipersona/scenes files one. */
+export const isFramePath = (v: unknown): v is string =>
+  typeof v === 'string' && new RegExp(`^${PREFIX}/scenes/${UUID}/${UUID}-frame-[a-z0-9]+\\.[a-z0-9]{2,5}$`).test(v);
+/** Where lib/aipersona/fit1080 keeps a picture's thumbnail, if it has made one. */
+const thumbOf = (path: string) => `${path.replace(/\.[a-z0-9]{2,5}$/i, '')}.thumb.jpg`;
 
 // ── Records: the rows as the server works with them ───────────────────────────
 
@@ -141,6 +159,8 @@ export interface TakeRecord {
   personaId: string;
   personaName: string;
   photoPath: string;
+  /** The persona's profile picture, if one has been made. */
+  avatarPath: string | null;
   frame: JobRecord;
   video: JobRecord;
 }
@@ -173,13 +193,14 @@ type JobDb<K extends JobKind> = {
   [F in 'status' | 'request' | 'path' | 'prompt' | 'error' as `${K}_${F}`]:
     F extends 'status' ? JobStatus : F extends 'request' | 'path' ? string | null : string;
 };
-type TakeDb = { id: string; persona_id: string; persona_name: string; photo_path: string } & JobDb<'frame'> & JobDb<'video'>;
+type TakeDb = { id: string; persona_id: string; persona_name: string; photo_path: string; avatar_path: string | null } & JobDb<'frame'> & JobDb<'video'>;
 
 const toTake = (r: TakeDb): TakeRecord => ({
   id: r.id,
   personaId: r.persona_id,
   personaName: r.persona_name,
   photoPath: r.photo_path,
+  avatarPath: r.avatar_path,
   frame: { status: r.frame_status, request: r.frame_request, path: r.frame_path, prompt: r.frame_prompt, error: r.frame_error },
   video: { status: r.video_status, request: r.video_request, path: r.video_path, prompt: r.video_prompt, error: r.video_error },
 });
@@ -217,6 +238,7 @@ export function toScene(rec: SceneRecord, live?: Live): Scene {
       personaName: t.personaName,
       photoUrl: publicUrl(t.photoPath),
       thumbUrl: thumbUrl(t.photoPath),
+      avatarUrl: t.avatarPath ? publicUrl(t.avatarPath) : null,
       frame: toJob(t, 'frame', live),
       video: toJob(t, 'video', live),
     })),
@@ -236,8 +258,8 @@ const toPersona = (r: PersonaDb, videos: PersonaVideo[] = []): Persona => ({
 export async function getLibrary(): Promise<LibraryPayload> {
   const [personas, videos, scenes] = await Promise.all([
     query<PersonaDb>(`SELECT ${PERSONA_COLS} FROM aipersona_personas ORDER BY created_at`),
-    query<{ id: string; persona_id: string; scene_id: string; scene_name: string; video_path: string; frame_path: string | null; saved_at: Date }>(
-      `SELECT t.id, t.persona_id, t.scene_id, s.name AS scene_name, t.video_path, t.frame_path, t.saved_at
+    query<{ id: string; persona_id: string; scene_id: string; scene_name: string; video_path: string; frame_path: string | null; saved_at: Date; used_in: string[]; width: number; height: number }>(
+      `SELECT t.id, t.persona_id, t.scene_id, COALESCE(NULLIF(t.name, ''), s.name) AS scene_name, t.video_path, t.frame_path, t.saved_at, t.used_in, s.width, s.height
          FROM aipersona_takes t JOIN aipersona_scenes s ON s.id = t.scene_id
         WHERE t.saved_at IS NOT NULL AND t.video_path IS NOT NULL
         ORDER BY t.saved_at DESC, t.id`,
@@ -248,12 +270,21 @@ export async function getLibrary(): Promise<LibraryPayload> {
     ),
   ]);
 
+  // Every still the section is about to show, found before it is listed —
+  // see warmThumbs. A second and a half at most; the rest catch up behind.
+  await warmThumbs(
+    [...personas.rows.map((p) => p.photo_path), ...videos.rows.flatMap((v) => (v.frame_path ? [v.frame_path] : []))],
+    1500,
+  );
+
   const byPersona = new Map<string, PersonaVideo[]>();
   for (const v of videos.rows) {
     const list = byPersona.get(v.persona_id) ?? [];
     list.push({
       id: v.id, sceneId: v.scene_id, sceneName: v.scene_name, url: publicUrl(v.video_path),
-      frameUrl: v.frame_path ? publicUrl(v.frame_path) : null, savedAt: v.saved_at.toISOString(),
+      frameUrl: v.frame_path ? publicUrl(v.frame_path) : null, thumbUrl: v.frame_path ? thumbUrl(v.frame_path) : null,
+      savedAt: v.saved_at.toISOString(), usedIn: v.used_in ?? [],
+      width: v.width, height: v.height,
     });
     byPersona.set(v.persona_id, list);
   }
@@ -339,7 +370,7 @@ export async function loadScene(id: string): Promise<SceneRecord | null> {
   const [scene, takes] = await Promise.all([
     query<SceneDb>('SELECT * FROM aipersona_scenes WHERE id = $1', [id]),
     query<TakeDb>(
-      `SELECT t.id, t.persona_id, p.name AS persona_name, p.photo_path, ${TAKE_COLS}
+      `SELECT t.id, t.persona_id, p.name AS persona_name, p.photo_path, p.avatar_path, ${TAKE_COLS}
          FROM aipersona_takes t JOIN aipersona_personas p ON p.id = t.persona_id
         WHERE t.scene_id = $1 ORDER BY p.created_at, t.id`,
       [id],
@@ -413,8 +444,27 @@ export async function deleteTake(id: string): Promise<boolean> {
     'DELETE FROM aipersona_takes WHERE id = $1 RETURNING frame_path, video_path', [id],
   );
   if (!r.rows[0]) return false;
-  await removeObjects([r.rows[0].frame_path, r.rows[0].video_path].filter((p): p is string => !!p));
+  const frame = r.rows[0].frame_path;
+  await removeObjects([frame, frame && thumbOf(frame), r.rows[0].video_path].filter((p): p is string => !!p));
   return true;
+}
+
+/** Give a saved video a name of its own. Its scene, and the other characters'
+ *  videos of that scene, keep theirs. */
+export async function renameTake(id: string, name: string): Promise<boolean> {
+  const r = await query('UPDATE aipersona_takes SET name = $2 WHERE id = $1 AND saved_at IS NOT NULL', [id, name]);
+  return !!r.rowCount;
+}
+
+/** Note that a saved video was the start of a persona video in Vids. */
+export async function markTakeUsed(id: string, vidsPersonaId: string): Promise<boolean> {
+  const r = await query(
+    `UPDATE aipersona_takes
+        SET used_in = CASE WHEN $2::uuid = ANY(used_in) THEN used_in ELSE array_append(used_in, $2::uuid) END
+      WHERE id = $1 AND saved_at IS NOT NULL`,
+    [id, vidsPersonaId],
+  );
+  return !!r.rowCount;
 }
 
 // ── Jobs ──────────────────────────────────────────────────────────────────────

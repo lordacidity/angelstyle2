@@ -8,7 +8,7 @@
 // Behind the site gate like every /api/* route.
 
 import { NextRequest, NextResponse } from 'next/server';
-import { isPhotoPath } from '@/lib/aipersona/db';
+import { isFramePath, isPhotoPath } from '@/lib/aipersona/db';
 import { imageThumb } from '@/lib/aipersona/fit1080';
 import { refuse } from '@/lib/aipersona/respond';
 import { publicUrl } from '@/lib/vids-db';
@@ -19,7 +19,9 @@ export const maxDuration = 60;
 
 export async function GET(req: NextRequest) {
   const path = req.nextUrl.searchParams.get('p');
-  if (!isPhotoPath(path)) return refuse('Not a character photo.');
+  // A character photo, or the first frame one of its saved videos was made
+  // from — a character's page lists its videos by those.
+  if (!isPhotoPath(path) && !isFramePath(path)) return refuse('Not a character photo.');
   const thumb = await imageThumb(path);
   return NextResponse.redirect(publicUrl(thumb), {
     status: 302,

@@ -39,7 +39,7 @@ export const errMessage = (e: unknown) => (e instanceof Error ? e.message : 'une
 // reload in dev, or a long-lived server between deploys. Comparing the version
 // makes such a process re-run the (idempotent) DDL instead of trusting a
 // promise that was resolved against the older schema.
-const SCHEMA_VERSION = 17;
+const SCHEMA_VERSION = 18;
 
 const g = globalThis as unknown as {
   __vidsPool?: pg.Pool;
@@ -323,6 +323,41 @@ function ensureSchema(): Promise<void> {
         created_at TIMESTAMPTZ NOT NULL DEFAULT now()
       );
     `);
+    // A lighter copy of a clip, for the clipper page: the same footage sized
+    // to what a build's frame actually shows of it, so a phone neither fetches
+    // nor decodes more than that (scripts/make-lite.mjs makes them; toVideo
+    // serves one in place of the file in the clipper build only). Null on a
+    // clip that was never oversized. Dropped whenever the footage changes.
+    for (const col of ['lite_path TEXT NULL', 'lite_size BIGINT NULL', 'lite_width INTEGER NULL', 'lite_height INTEGER NULL']) {
+      await pool.query(`ALTER TABLE vids_videos ADD COLUMN IF NOT EXISTS ${col}`);
+    }
+    // A Pauv trade recording, kept the first time anybody renders one so the
+    // next clipper to make a video on the same person the same way is handed
+    // the file instead of drawing it (lib/vids2/trade-cache). One per person,
+    // direction and theme, for good: the price on it is the price that day.
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS vids_trade_cache (
+        key        TEXT        PRIMARY KEY,
+        path       TEXT        NOT NULL,
+        person     TEXT        NOT NULL,
+        seconds    REAL        NOT NULL,
+        beats      JSONB       NOT NULL,
+        size_bytes BIGINT      NOT NULL DEFAULT 0,
+        created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+      );
+    `);
+    // How long each Download took, stage by stage, and on what — written by
+    // the page as a video lands (lib/vids2/timing). Read by hand.
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS vids_render_timings (
+        id         UUID        PRIMARY KEY DEFAULT gen_random_uuid(),
+        app        TEXT        NOT NULL,
+        total_ms   INTEGER     NOT NULL,
+        stages     JSONB       NOT NULL,
+        device     JSONB       NOT NULL,
+        created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+      );
+    `);
     await pool.query('CREATE INDEX IF NOT EXISTS vids_videos_folder_idx ON vids_videos (folder_id)');
     await pool.query('CREATE INDEX IF NOT EXISTS vids_folders_parent_idx ON vids_folders (parent_id)');
   })().catch((e) => {
@@ -342,6 +377,7 @@ interface VideoDb {
   duration_s: number | null; width: number | null; height: number | null;
   has_sfx: boolean; context: string; marks: unknown; source_path: string | null; edit: unknown;
   clipable: boolean; theme: string | null; created_at: Date;
+  lite_path: string | null; lite_size: string | number | null; lite_width: number | null; lite_height: number | null;
 }
 
 interface PersonaDb {
@@ -365,7 +401,8 @@ const RECIPE_COLS = 'code, title, video_id, build, created_at';
 const PERSONA_COLS = 'id, name, start_id, top_a_id, top_b_id, folder_id, context, clipable, degen, created_at';
 const VIDEO_COLS =
   'id, folder_id, name, storage_path, thumb_path, mime_type, size_bytes, duration_s, width, height, '
-  + 'has_sfx, context, marks, source_path, edit, clipable, theme, created_at';
+  + 'has_sfx, context, marks, source_path, edit, clipable, theme, created_at, '
+  + 'lite_path, lite_size, lite_width, lite_height';
 
 const toFolder = (r: FolderDb): VidFolder => ({
   id: r.id, parentId: r.parent_id, name: r.name, createdAt: r.created_at.toISOString(),
@@ -401,17 +438,22 @@ const toRecipe = (r: RecipeDb): VidRecipe => ({
   createdAt: r.created_at.toISOString(),
 });
 
-const toVideo = (r: VideoDb): VidRow => ({
+const toVideo = (r: VideoDb): VidRow => {
+  // The clipper build is handed the lighter copy where there is one: the row
+  // is the same row, playing the same footage, off a smaller file. The Studio
+  // always has the file itself.
+  const lite = CLIPPERS && r.lite_path ? r.lite_path : null;
+  return {
   id: r.id,
   folderId: r.folder_id,
   name: r.name,
   storagePath: r.storage_path,
   thumbPath: r.thumb_path,
-  mimeType: r.mime_type,
-  sizeBytes: Number(r.size_bytes) || 0,
+  mimeType: lite ? 'video/mp4' : r.mime_type,
+  sizeBytes: Number(lite ? r.lite_size : r.size_bytes) || 0,
   duration: r.duration_s,
-  width: r.width,
-  height: r.height,
+  width: lite ? r.lite_width ?? r.width : r.width,
+  height: lite ? r.lite_height ?? r.height : r.height,
   hasSfx: r.has_sfx,
   context: r.context ?? '',
   marks: cleanMarks(r.marks),
@@ -421,9 +463,10 @@ const toVideo = (r: VideoDb): VidRow => ({
   clipable: r.clipable === true,
   theme: cleanTheme(r.theme),
   createdAt: r.created_at.toISOString(),
-  url: publicUrl(r.storage_path),
+  url: publicUrl(lite ?? r.storage_path),
   thumbUrl: r.thumb_path ? publicUrl(r.thumb_path) : null,
-});
+  };
+};
 
 // ── Library ───────────────────────────────────────────────────────────────────
 
@@ -869,7 +912,9 @@ export async function copyVideo(id: string, name: string, folderId: string | nul
     };
     const thumbPath = await beside(from.thumb_path, 'thumbs');
     const sourcePath = await beside(from.source_path, 'sources');
-    return await createVideo({
+    // The lighter copy goes with it: a copy is the same footage.
+    const litePath = await beside(from.lite_path, 'lite');
+    const row = await createVideo({
       id: newId, folderId, name, storagePath, thumbPath,
       mimeType: from.mime_type, sizeBytes: Number(from.size_bytes) || 0,
       duration: from.duration_s, width: from.width, height: from.height,
@@ -877,6 +922,13 @@ export async function copyVideo(id: string, name: string, folderId: string | nul
       // The edit is only any use beside the recording it is timed on.
       sourcePath, edit: sourcePath ? cleanEdit(from.edit) : null,
     });
+    if (litePath) {
+      await getPool().query(
+        'UPDATE vids_videos SET lite_path = $2, lite_size = $3, lite_width = $4, lite_height = $5 WHERE id = $1',
+        [newId, litePath, from.lite_size, from.lite_width, from.lite_height],
+      );
+    }
+    return row;
   } catch (e) {
     await removeObjects(made);
     throw e;
@@ -941,8 +993,8 @@ export async function replaceVideoMedia(
 ): Promise<VidRow | null> {
   await ensureSchema();
   const pool = getPool();
-  const before = await pool.query<Pick<VideoDb, 'storage_path' | 'thumb_path' | 'source_path'>>(
-    'SELECT storage_path, thumb_path, source_path FROM vids_videos WHERE id = $1',
+  const before = await pool.query<Pick<VideoDb, 'storage_path' | 'thumb_path' | 'source_path' | 'lite_path'>>(
+    'SELECT storage_path, thumb_path, source_path, lite_path FROM vids_videos WHERE id = $1',
     [id],
   );
   if (!before.rows[0]) return null;
@@ -955,7 +1007,8 @@ export async function replaceVideoMedia(
         SET storage_path = $1, thumb_path = $2, mime_type = $3, size_bytes = $4,
             duration_s = $5, width = $6, height = $7, has_sfx = $8,
             name = COALESCE($9, name), marks = COALESCE($10::jsonb, marks),
-            source_path = $11, edit = $12::jsonb, updated_at = now()
+            source_path = $11, edit = $12::jsonb, updated_at = now(),
+            lite_path = NULL, lite_size = NULL, lite_width = NULL, lite_height = NULL
       WHERE id = $13
       RETURNING ${VIDEO_COLS}`,
     [
@@ -969,14 +1022,15 @@ export async function replaceVideoMedia(
 
   const stale = [old.storage_path, ...(old.thumb_path ? [old.thumb_path] : [])]
     .filter((p) => p !== media.storagePath && p !== media.thumbPath && p !== source);
-  await removeObjects(stale);
+  // The lighter copy was of the footage just replaced.
+  await removeObjects([...stale, ...(old.lite_path ? [old.lite_path] : [])]);
   return toVideo(r.rows[0]);
 }
 
 export async function deleteVideo(id: string): Promise<boolean> {
   await ensureSchema();
-  const r = await getPool().query<Pick<VideoDb, 'storage_path' | 'thumb_path' | 'source_path'>>(
-    'DELETE FROM vids_videos WHERE id = $1 RETURNING storage_path, thumb_path, source_path',
+  const r = await getPool().query<Pick<VideoDb, 'storage_path' | 'thumb_path' | 'source_path' | 'lite_path'>>(
+    'DELETE FROM vids_videos WHERE id = $1 RETURNING storage_path, thumb_path, source_path, lite_path',
     [id],
   );
   const row = r.rows[0];
@@ -985,8 +1039,112 @@ export async function deleteVideo(id: string): Promise<boolean> {
     row.storage_path,
     ...(row.thumb_path ? [row.thumb_path] : []),
     ...(row.source_path ? [row.source_path] : []),
+    ...(row.lite_path ? [row.lite_path] : []),
   ]);
   return true;
+}
+
+// ── Lighter copies ────────────────────────────────────────────────────────────
+// See the lite_* columns in ensureSchema.
+
+/** Where a clip's lighter copy is kept. A path of its own each time, so one
+ *  made again is never served the last one out of the CDN's cache. */
+export const litePathFor = (id: string): string => `lite/${id}-${Date.now().toString(36)}.mp4`;
+export const isLitePathOf = (id: string, path: unknown): path is string =>
+  typeof path === 'string' && new RegExp(`^lite/${id}-[a-z0-9]+\\.mp4$`).test(path);
+
+/** Point a clip at its lighter copy (already in the bucket), dropping the one
+ *  it had. False when there is no such clip. */
+export async function setLite(
+  id: string, lite: { path: string; sizeBytes: number; width: number; height: number },
+): Promise<boolean> {
+  await ensureSchema();
+  const pool = getPool();
+  const before = await pool.query<Pick<VideoDb, 'lite_path'>>('SELECT lite_path FROM vids_videos WHERE id = $1', [id]);
+  if (!before.rows[0]) return false;
+  await pool.query(
+    'UPDATE vids_videos SET lite_path = $2, lite_size = $3, lite_width = $4, lite_height = $5 WHERE id = $1',
+    [id, lite.path, Math.round(lite.sizeBytes), Math.round(lite.width), Math.round(lite.height)],
+  );
+  const old = before.rows[0].lite_path;
+  if (old && old !== lite.path) await removeObjects([old]);
+  return true;
+}
+
+/** Take a clip's lighter copy away: the clipper build is back on the file. */
+export async function clearLite(id: string): Promise<boolean> {
+  await ensureSchema();
+  const r = await getPool().query<Pick<VideoDb, 'lite_path'>>(
+    `UPDATE vids_videos v SET lite_path = NULL, lite_size = NULL, lite_width = NULL, lite_height = NULL
+       FROM (SELECT id, lite_path FROM vids_videos WHERE id = $1) old
+      WHERE v.id = old.id RETURNING old.lite_path`,
+    [id],
+  );
+  if (!r.rows[0]) return false;
+  if (r.rows[0].lite_path) await removeObjects([r.rows[0].lite_path]);
+  return true;
+}
+
+/** Which clips have a lighter copy, and how big each is — for the script that
+ *  makes them, which is told nothing of them by the library (toVideo hides the
+ *  columns from the Studio). */
+export async function listLite(): Promise<{ id: string; sizeBytes: number; width: number | null; height: number | null }[]> {
+  await ensureSchema();
+  const r = await getPool().query<Pick<VideoDb, 'id' | 'lite_size' | 'lite_width' | 'lite_height'>>(
+    'SELECT id, lite_size, lite_width, lite_height FROM vids_videos WHERE lite_path IS NOT NULL',
+  );
+  return r.rows.map((x) => ({ id: x.id, sizeBytes: Number(x.lite_size) || 0, width: x.lite_width, height: x.lite_height }));
+}
+
+// ── Trade recordings kept ─────────────────────────────────────────────────────
+// See vids_trade_cache in ensureSchema.
+
+export interface TradeCacheRow { key: string; url: string; person: string; seconds: number; beats: unknown; sizeBytes: number }
+
+export const tradeCachePath = (): string => `trade-cache/${randomUUID()}.mp4`;
+export const isTradeCachePath = (path: unknown): path is string =>
+  typeof path === 'string' && /^trade-cache\/[0-9a-f-]{36}\.mp4$/.test(path);
+
+export async function getTradeCache(key: string): Promise<TradeCacheRow | null> {
+  await ensureSchema();
+  const r = await getPool().query<{ key: string; path: string; person: string; seconds: number; beats: unknown; size_bytes: string | number }>(
+    'SELECT key, path, person, seconds, beats, size_bytes FROM vids_trade_cache WHERE key = $1', [key],
+  );
+  const x = r.rows[0];
+  return x ? { key: x.key, url: publicUrl(x.path), person: x.person, seconds: x.seconds, beats: x.beats, sizeBytes: Number(x.size_bytes) || 0 } : null;
+}
+
+/** Keep a recording under its key. The first one in stays: a second clipper
+ *  who rendered the same one at the same moment has theirs dropped. */
+export async function putTradeCache(
+  row: { key: string; path: string; person: string; seconds: number; beats: unknown; sizeBytes: number },
+): Promise<boolean> {
+  await ensureSchema();
+  const r = await getPool().query(
+    `INSERT INTO vids_trade_cache (key, path, person, seconds, beats, size_bytes)
+     VALUES ($1, $2, $3, $4, $5::jsonb, $6) ON CONFLICT (key) DO NOTHING`,
+    [row.key, row.path, row.person, row.seconds, JSON.stringify(row.beats), Math.round(row.sizeBytes)],
+  );
+  if (!r.rowCount) await removeObjects([row.path]);
+  return !!r.rowCount;
+}
+
+// ── Render timings ────────────────────────────────────────────────────────────
+
+export async function addRenderTiming(t: { app: string; totalMs: number; stages: unknown; device: unknown }): Promise<void> {
+  await ensureSchema();
+  await getPool().query(
+    'INSERT INTO vids_render_timings (app, total_ms, stages, device) VALUES ($1, $2, $3::jsonb, $4::jsonb)',
+    [t.app, Math.round(t.totalMs), JSON.stringify(t.stages), JSON.stringify(t.device)],
+  );
+}
+
+export async function listRenderTimings(limit = 200): Promise<{ app: string; totalMs: number; stages: unknown; device: unknown; createdAt: string }[]> {
+  await ensureSchema();
+  const r = await getPool().query<{ app: string; total_ms: number; stages: unknown; device: unknown; created_at: Date }>(
+    'SELECT app, total_ms, stages, device, created_at FROM vids_render_timings ORDER BY created_at DESC LIMIT $1', [limit],
+  );
+  return r.rows.map((x) => ({ app: x.app, totalMs: x.total_ms, stages: x.stages, device: x.device, createdAt: x.created_at.toISOString() }));
 }
 
 // ── Recipes ───────────────────────────────────────────────────────────────────
