@@ -319,8 +319,18 @@ export function drawDressedChart(
   ctx: CanvasRenderingContext2D, series: XPhotoPoint[], key: string, pct: number,
   x: number, y: number, w: number, h: number, color: string, weight = 1,
 ) {
+  drawChart(ctx, dressedSeries(series, key, pct), x, y, w, h, color, weight);
+}
+
+/**
+ * The points drawDressedChart would draw — cleaned, thinned and dressed. For
+ * anything that needs the line as data rather than as a stroke: the price
+ * video (./renderVideo.ts) reads a value off it per frame and draws it a
+ * little further across each time.
+ */
+export function dressedSeries(series: XPhotoPoint[], key: string, pct: number): XPhotoPoint[] {
   const clean = thin(series.filter(p => Number.isFinite(p.value)), CHART_MAX_POINTS);
-  drawChart(ctx, dressSeries(clean, key, pct), x, y, w, h, color, weight);
+  return dressSeries(clean, key, pct);
 }
 
 /** Draws the full strip. Expects ctx.canvas to be XPHOTO_W×XPHOTO_H times any uniform scale. */

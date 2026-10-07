@@ -11,6 +11,11 @@
 //   · Movers       — 3:2 card with three hand-picked people (tall photo with
 //                    the chart at its foot · name · industry · change · price).
 //                    ./renderMovers.ts.
+//   · Price video  — the only one that isn't a PNG: a 15-second MP4 of their
+//                    market drawn as a trading app's profile screen, the line
+//                    sweeping in over the first 1.5s and the end of it
+//                    breathing for the rest. ./renderVideo.ts, encoded by
+//                    ./encodeVideo.ts.
 // The 3:2 cards share a frame (./card.ts) and can be drawn light or dark.
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
@@ -27,6 +32,11 @@ import {
 import { drawListedCard } from './renderListed';
 import { drawChangeCard } from './renderChange';
 import { drawMoversCard, moverPhotoRect, MOVERS_MAX } from './renderMovers';
+import {
+  drawVideoFrame, prepareVideoCard,
+  VIDEO_W, VIDEO_H, VIDEO_FPS, VIDEO_FRAMES, VIDEO_SECONDS, VIDEO_SWEEP,
+} from './renderVideo';
+import { encodeCanvasVideo } from './encodeVideo';
 import type { CardTheme } from './shared';
 
 interface Talent {
@@ -40,13 +50,14 @@ interface Talent {
   price: { usd: number | null; startUsd: number | null; lifetimeChangePct: number | null; holders: number | null };
 }
 
-type Generator = 'strip' | 'listed' | 'change' | 'movers';
+type Generator = 'strip' | 'listed' | 'change' | 'movers' | 'video';
 
 const GENERATORS: { id: Generator; label: string; blurb: string }[] = [
   { id: 'strip', label: 'Price strip', blurb: 'Search anyone on Pauv, pick them, download a long thin price strip for X.' },
   { id: 'listed', label: 'Newly listed', blurb: 'Announce a fresh listing — photo, name, starting price, call to action. Newest listings first.' },
   { id: 'change', label: 'Price change', blurb: 'Call out a big move — photo, UP or DOWN, how far they have moved, and their Pauv chart.' },
   { id: 'movers', label: 'Movers', blurb: 'Three people you choose, faces first — a tall photo each with their chart at its foot, name, industry, change and price.' },
+  { id: 'video', label: 'Price video', blurb: 'A 15-second MP4 of their market — the line sweeps in over the first second and a half, then the end of it keeps breathing.' },
 ];
 
 const THEMES: { id: CardTheme; label: string }[] = [
@@ -60,6 +71,8 @@ const FONT_LINK_ID = 'gfont-xphoto';
 // No scheme on purpose — the copied text is the bare "pauv.com/profile/<ticker>".
 const PROFILE_URL_BASE = 'pauv.com/profile/';
 const COPIED_TOAST_MS = 2500;
+// A failed render is worth reading — it stays up longer than a copy notice.
+const ERROR_TOAST_MS = 9000;
 
 /** Per-person assets the cards draw: a CORS-clean photo and lifetime history. */
 interface TalentAssets { photo: HTMLImageElement | null; series: XPhotoPoint[]; loading: boolean }
@@ -232,6 +245,8 @@ export function XPhotoSection() {
   const dragRef = useRef<{ ticker: string; rect: PhotoRect; img: HTMLImageElement; lastX: number; lastY: number } | null>(null);
   const [fontsReady, setFontsReady] = useState(false);
   const [exporting, setExporting] = useState(false);
+  // How far through the video's 450 frames the encoder is, 0–1.
+  const [videoProgress, setVideoProgress] = useState(0);
   // Transient "Copied …" / "Couldn't copy" notice next to the Download button.
   const [copyNotice, setCopyNotice] = useState<{ ok: boolean; text: string } | null>(null);
   const copyTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -246,7 +261,10 @@ export function XPhotoSection() {
 
   const isMovers = generator === 'movers';
   const isListed = generator === 'listed';
-  const isCard = generator !== 'strip';
+  const isVideo = generator === 'video';
+  // "Card" is the 3:2 PNG family — the one with a draggable photo column and
+  // a size control. The video shares the picker and the theme, nothing else.
+  const isCard = generator !== 'strip' && !isVideo;
 
   const loadTalents = useCallback(async () => {
     setTalentsLoading(true);
@@ -326,7 +344,7 @@ export function XPhotoSection() {
   // preselects once the roster is in (Movers takes up to three).
   useEffect(() => {
     const g = new URLSearchParams(window.location.search).get('g');
-    if (g === 'listed' || g === 'change' || g === 'movers') setGenerator(g);
+    if (g === 'listed' || g === 'change' || g === 'movers' || g === 'video') setGenerator(g);
   }, []);
   const deepLinked = useRef(false);
   useEffect(() => {
@@ -385,6 +403,24 @@ export function XPhotoSection() {
   const series = selectedAssets.series;
   const rawPct = selected ? lifetimePct(selected, series) : null;
   const nowUsd = selected ? nowUsdOf(selected, series) : null;
+
+  // The video's whole shape — the line, its axis and its labels — settled once
+  // per pick, so the 450 frames only reveal more of a picture that was decided
+  // before the first one. Remade whenever the history or the photo lands.
+  const videoCard = useMemo(() => {
+    if (!isVideo || !selected) return null;
+    return prepareVideoCard({
+      theme: cardTheme,
+      name: selected.name,
+      ticker: selected.ticker,
+      avatar: selectedAssets.photo,
+      logo,
+      series,
+      pct: displayChangePct(rawPct, selected.ticker),
+      nowUsd,
+      listedAt: listedMs(selected) || null,
+    });
+  }, [isVideo, selected, cardTheme, selectedAssets.photo, logo, series, rawPct, nowUsd]);
 
   // ── photo placement on the 3:2 cards ─────────────────────────────────
   // Pointer position → design units on the card (the canvas is CSS-scaled).
@@ -458,7 +494,7 @@ export function XPhotoSection() {
   // passive and could not stop the page from scrolling under the card.
   useEffect(() => {
     const canvas = canvasRef.current;
-    if (!canvas || generator === 'strip') return;
+    if (!canvas || generator === 'strip' || generator === 'video') return;
     const onWheel = (e: WheelEvent) => {
       const p = toDesign(canvas, e);
       const hit = photoAt(p.x, p.y);
@@ -478,6 +514,8 @@ export function XPhotoSection() {
     const canvas = canvasRef.current;
     const ctx = canvas?.getContext('2d');
     if (!canvas || !ctx) return;
+    // The video paints itself, frame by frame, in its own loop below.
+    if (generator === 'video') return;
     if (generator === 'movers') {
       if (!movers.length) return;
       drawMoversCard(ctx, {
@@ -545,18 +583,38 @@ export function XPhotoSection() {
     });
   }, [selected, selectedAssets.photo, series, movers, assets, crops, logo, rawPct, nowUsd, generator, cardTheme, cta]);
 
-  const exportW = isCard ? CARD_W * cardScale : XPHOTO_EXPORT_W * stripScale;
-  const exportH = isCard ? CARD_H * cardScale : XPHOTO_EXPORT_H * stripScale;
+  const exportW = isVideo ? VIDEO_W : isCard ? CARD_W * cardScale : XPHOTO_EXPORT_W * stripScale;
+  const exportH = isVideo ? VIDEO_H : isCard ? CARD_H * cardScale : XPHOTO_EXPORT_H * stripScale;
   // The export size is a dep because changing the canvas size wipes its bitmap.
   useEffect(() => { if (fontsReady) draw(); }, [draw, fontsReady, exportW, exportH]);
+
+  // The video preview: the same draw the encoder calls, on a wall clock, looped
+  // so the sweep and the pay-off are both there to watch without a replay button.
+  useEffect(() => {
+    if (!isVideo || !videoCard || !fontsReady) return;
+    const ctx = canvasRef.current?.getContext('2d');
+    if (!ctx) return;
+    let raf = 0;
+    const from = performance.now();
+    const tick = (ms: number) => {
+      drawVideoFrame(ctx, videoCard, ((ms - from) / 1000) % VIDEO_SECONDS);
+      raf = requestAnimationFrame(tick);
+    };
+    raf = requestAnimationFrame(tick);
+    return () => cancelAnimationFrame(raf);
+  }, [isVideo, videoCard, fontsReady]);
+
+  const notify = useCallback((ok: boolean, text: string, ms = COPIED_TOAST_MS) => {
+    setCopyNotice({ ok, text });
+    if (copyTimer.current) clearTimeout(copyTimer.current);
+    copyTimer.current = setTimeout(() => setCopyNotice(null), ms);
+  }, []);
 
   const copyProfileLink = useCallback(async (t: Talent) => {
     const url = profileUrl(t);
     const ok = await copyText(url);
-    setCopyNotice(ok ? { ok, text: `Copied ${url}` } : { ok, text: "Couldn't copy profile link" });
-    if (copyTimer.current) clearTimeout(copyTimer.current);
-    copyTimer.current = setTimeout(() => setCopyNotice(null), COPIED_TOAST_MS);
-  }, []);
+    notify(ok, ok ? `Copied ${url}` : "Couldn't copy profile link");
+  }, [notify]);
   useEffect(() => () => { if (copyTimer.current) clearTimeout(copyTimer.current); }, []);
 
   const hasSubject = isMovers ? movers.length > 0 : !!selected;
@@ -565,12 +623,39 @@ export function XPhotoSection() {
   const waiting = isMovers ? moversLoading : (!isListed && selectedAssets.loading);
   const canDownload = hasSubject && fontsReady && !waiting && !exporting;
 
+  // The video is encoded off-screen rather than captured from the preview, so
+  // a busy tab can't drop frames: every one of the 450 is drawn, then handed
+  // to the encoder (./encodeVideo.ts).
+  const exportVideo = useCallback(async () => {
+    if (!videoCard || !selected) return;
+    setExporting(true);
+    setVideoProgress(0);
+    try {
+      const blob = await encodeCanvasVideo({
+        width: VIDEO_W,
+        height: VIDEO_H,
+        fps: VIDEO_FPS,
+        frames: VIDEO_FRAMES,
+        draw: (ctx, f) => drawVideoFrame(ctx, videoCard, f / VIDEO_FPS),
+        onProgress: setVideoProgress,
+      });
+      const theme = cardTheme === 'light' ? '-light' : '';
+      triggerDownload(blob, `${safeFile(selected.name)}-${selected.ticker.toLowerCase()}-price-video${theme}.mp4`);
+    } catch (err) {
+      notify(false, err instanceof Error ? err.message : String(err), ERROR_TOAST_MS);
+    } finally {
+      setExporting(false);
+      setVideoProgress(0);
+    }
+  }, [videoCard, selected, cardTheme, notify]);
+
   const handleDownload = () => {
     const canvas = canvasRef.current;
     if (!canvas || !hasSubject || exporting) return;
     // Copy first, while the click's user activation still covers the clipboard.
     // Movers has no single profile to copy.
     if (selected && !isMovers) void copyProfileLink(selected);
+    if (isVideo) { void exportVideo(); return; }
     setExporting(true);
     draw();
     canvas.toBlob(blob => {
@@ -655,7 +740,9 @@ export function XPhotoSection() {
               className="flex items-center gap-2 h-9 px-4 rounded-md text-xs font-semibold bg-emerald-500 text-black hover:bg-emerald-400 transition-colors disabled:opacity-30 disabled:cursor-not-allowed"
             >
               {exporting ? <SpinnerIcon size={14} className="animate-spin" /> : <DownloadIcon size={14} />}
-              Download PNG
+              {isVideo
+                ? (exporting ? `Rendering ${Math.round(videoProgress * 100)}%` : 'Download MP4')
+                : 'Download PNG'}
             </button>
           </div>
         </div>
@@ -813,7 +900,7 @@ export function XPhotoSection() {
           {/* Preview */}
           {hasSubject ? (
             <div className="flex flex-col gap-3">
-              <div className={`rounded-xl bg-zinc-950 border border-zinc-900 p-4 ${isCard ? 'w-full max-w-[880px] mx-auto' : ''}`}>
+              <div className={`rounded-xl bg-zinc-950 border border-zinc-900 p-4 ${isVideo ? 'w-full max-w-[460px] mx-auto' : isCard ? 'w-full max-w-[880px] mx-auto' : ''}`}>
                 {/* Keyed on the generator so a switch remounts the canvas at its size. */}
                 <canvas
                   key={generator}
@@ -874,6 +961,11 @@ export function XPhotoSection() {
                   {isCard && (
                     <span className="text-zinc-600 truncate">Drag a photo to reposition · scroll to zoom · double-click to reset</span>
                   )}
+                  {isVideo && (
+                    <span className="text-zinc-600 truncate tabular-nums">
+                      {VIDEO_W}×{VIDEO_H} · {VIDEO_SECONDS}s · {VIDEO_FPS}fps · line sweeps in over {VIDEO_SWEEP}s, end marker breathes after
+                    </span>
+                  )}
                 </div>
                 <div className="flex items-center gap-4 shrink-0">
                   {(isListed || isMovers) && (
@@ -888,14 +980,14 @@ export function XPhotoSection() {
                       />
                     </label>
                   )}
-                  {isCard && (
+                  {(isCard || isVideo) && (
                     <Segmented label="Theme" options={THEMES} value={cardTheme} onChange={setCardTheme} />
                   )}
-                  {isCard ? (
+                  {!isVideo && (isCard ? (
                     <Segmented label="Size" options={scaleOptions as { id: CardExportScale; label: string }[]} value={cardScale} onChange={setCardScale} />
                   ) : (
                     <Segmented label="Size" options={scaleOptions as { id: XPhotoExportScale; label: string }[]} value={stripScale} onChange={setStripScale} />
-                  )}
+                  ))}
                 </div>
               </div>
             </div>
@@ -924,6 +1016,12 @@ export function XPhotoSection() {
                     <circle cx="17" cy="10" r="2" />
                     <path d="M5 16h4M10 16h4M15 16h4" />
                   </svg>
+                ) : isVideo ? (
+                  <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" className="text-zinc-500">
+                    <rect x="4" y="2.5" width="16" height="19" rx="3" />
+                    <path d="M7 15l3.2-3.4 2.4 2.2L17 9" />
+                    <circle cx="17" cy="9" r="1.5" fill="currentColor" stroke="none" />
+                  </svg>
                 ) : (
                   <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" className="text-zinc-500">
                     <rect x="2" y="6" width="20" height="12" rx="4" />
@@ -939,7 +1037,9 @@ export function XPhotoSection() {
                     ? 'Pick someone to call out their move'
                     : isMovers
                       ? 'Pick three movers'
-                      : 'Pick someone to build their strip'}
+                      : isVideo
+                        ? 'Pick someone to film their market'
+                        : 'Pick someone to build their strip'}
               </p>
               <p className="text-xs text-zinc-600">
                 {isListed
@@ -948,7 +1048,9 @@ export function XPhotoSection() {
                     ? 'Photo · UP or DOWN · name · how far they have moved · their Pauv chart — 3:2, light or dark.'
                     : isMovers
                       ? 'Three tall photos with their charts · names · industries · change and price — 3:2, light or dark.'
-                      : 'Avatar · name · ticker · price · lifetime chart — ready to download.'}
+                      : isVideo
+                        ? `Avatar · name · live price · change · their lifetime chart drawing itself — ${VIDEO_SECONDS}s MP4, light or dark.`
+                        : 'Avatar · name · ticker · price · lifetime chart — ready to download.'}
               </p>
             </div>
           )}

@@ -14,10 +14,15 @@ export interface CardPalette {
   muted: string;
   up: string;
   down: string;
+  /** The brief pulse a number takes on when it ticks, before settling back to
+   *  up/down — the Pauv app's flash-positive / flash-negative. Only the price
+   *  video ticks, so only ./renderVideo.ts reads these. */
+  flashUp: string;
+  flashDown: string;
 }
 
 // Mirrors the Pauv app's theme tokens (background, border-default,
-// text-primary/secondary/muted, chart-up/down). The wordmark is grey on dark
+// text-primary/secondary/muted, chart-up/down, flash-positive/negative). The wordmark is grey on dark
 // and black on light, same as the app's per-theme logo files.
 export const PALETTES: Record<CardTheme, CardPalette> = {
   dark: {
@@ -29,6 +34,9 @@ export const PALETTES: Record<CardTheme, CardPalette> = {
     muted: '#71717A',
     up: '#0CDF9D',
     down: '#FF4B4B',
+    // mint300 / red300 — on dark the pulse goes BRIGHTER than the resting colour.
+    flashUp: '#7EFFD4',
+    flashDown: '#FF8888',
   },
   light: {
     card: '#FFFFFF',
@@ -39,6 +47,10 @@ export const PALETTES: Record<CardTheme, CardPalette> = {
     muted: '#71717A',
     up: '#03C88C',
     down: '#DC2626',
+    // green800 / red800 — on white the pulse must go DARKER: mint300 is
+    // invisible there, and a flash equal to the resting colour is a no-op.
+    flashUp: '#047857',
+    flashDown: '#B91C1C',
   },
 };
 
