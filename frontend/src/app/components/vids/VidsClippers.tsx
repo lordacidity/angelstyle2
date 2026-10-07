@@ -480,7 +480,15 @@ export function VidsClippers({
     if (!active) setPlaying(null);
   }
 
-  const personasOn = useMemo(() => personas.filter((p) => p.clipable).length, [personas]);
+  // The personas switched off on the Personas page. Every video of theirs is
+  // held back whatever its own switch says, so they don't count as on here
+  // either — see VidClipable.
+  const heldBack = useMemo(() => new Set(folders.filter((f) => !f.clipable).map((f) => f.id)), [folders]);
+  const offered = useMemo(
+    () => personas.filter((p) => !(p.folderId && heldBack.has(p.folderId))),
+    [personas, heldBack],
+  );
+  const personasOn = useMemo(() => offered.filter((p) => p.clipable).length, [offered]);
   const songsOn = useMemo(
     () => (tracks ?? []).filter((t) => isClipable(flags, 'music', t.url)).length,
     [tracks, flags],
@@ -538,11 +546,11 @@ export function VidsClippers({
         <Section>
           <SectionHead
             title="Persona videos"
-            hint="One switch a video, listed under the persona it is of."
+            hint="One switch a video, listed under the persona it is of. A persona switched off on Personas keeps all of theirs back."
             on={personasOn}
-            total={personas.length}
-            onAll={() => setEvery(personas, (p) => p.clipable, (p, on) => onPersona(p.id, on), true)}
-            onNone={() => setEvery(personas, (p) => p.clipable, (p, on) => onPersona(p.id, on), false)}
+            total={offered.length}
+            onAll={() => setEvery(offered, (p) => p.clipable, (p, on) => onPersona(p.id, on), true)}
+            onNone={() => setEvery(offered, (p) => p.clipable, (p, on) => onPersona(p.id, on), false)}
           />
           {personas.length === 0 ? (
             <Empty>No persona videos yet — make one on <span className="text-zinc-300">Personas</span>, or in AI Persona.</Empty>
@@ -550,27 +558,38 @@ export function VidsClippers({
             // By whose they are, the way the clippers choose them: a folder
             // per person, then that person's personas.
             <div className="space-y-3">
-              {groupPersonas(personas, folders, { empty: false }).map((g) => (
-                <div key={g.folder?.id ?? 'unfiled'} className="space-y-1.5">
-                  {personaFolders(folders).length > 0 && (
-                    <p className="text-[9px] font-semibold uppercase tracking-wider text-zinc-500">
-                      {g.folder?.name ?? UNFILED_LABEL}
-                      <span className="ml-1.5 font-normal normal-case tracking-normal text-zinc-600">
-                        {g.personas.filter((p) => p.clipable).length} of {g.personas.length} on
-                      </span>
-                    </p>
-                  )}
-                  {g.personas.map((p) => (
-                    <PersonaRow
-                      key={p.id}
-                      persona={p}
-                      resolveVideo={resolveVideo}
-                      onChange={(on) => onPersona(p.id, on)}
-                      onContext={() => setRenaming({ kind: 'persona', id: p.id, name: p.name })}
-                    />
-                  ))}
-                </div>
-              ))}
+              {groupPersonas(personas, folders, { empty: false }).map((g) => {
+                const held = !!g.folder && !g.folder.clipable;
+                return (
+                  <div key={g.folder?.id ?? 'unfiled'} className="space-y-1.5">
+                    {personaFolders(folders).length > 0 && (
+                      <p className="text-[9px] font-semibold uppercase tracking-wider text-zinc-500">
+                        {g.folder?.name ?? UNFILED_LABEL}
+                        {held ? (
+                          <span className="ml-1.5 font-normal normal-case tracking-normal text-amber-400">
+                            switched off on Personas — none of these go
+                          </span>
+                        ) : (
+                          <span className="ml-1.5 font-normal normal-case tracking-normal text-zinc-600">
+                            {g.personas.filter((p) => p.clipable).length} of {g.personas.length} on
+                          </span>
+                        )}
+                      </p>
+                    )}
+                    <div className={`space-y-1.5 ${held ? 'opacity-50' : ''}`}>
+                      {g.personas.map((p) => (
+                        <PersonaRow
+                          key={p.id}
+                          persona={p}
+                          resolveVideo={resolveVideo}
+                          onChange={(on) => onPersona(p.id, on)}
+                          onContext={() => setRenaming({ kind: 'persona', id: p.id, name: p.name })}
+                        />
+                      ))}
+                    </div>
+                  </div>
+                );
+              })}
             </div>
           )}
         </Section>

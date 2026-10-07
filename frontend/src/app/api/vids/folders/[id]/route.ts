@@ -1,7 +1,8 @@
-// /api/vids/folders/:id — rename (PATCH { name }) or delete (DELETE).
+// /api/vids/folders/:id — rename (PATCH { name }), put a person on offer to
+// the clippers or keep them back (PATCH { clipable }), or delete (DELETE).
 // Deleting cascades to sub-folders; videos inside drop back to the root.
 import { NextRequest, NextResponse } from 'next/server';
-import { deleteFolder, errMessage, isUuid, renameFolder } from '@/lib/vids-db';
+import { deleteFolder, errMessage, isUuid, renameFolder, setFolderClipable } from '@/lib/vids-db';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -9,7 +10,18 @@ export const dynamic = 'force-dynamic';
 export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
   if (!isUuid(id)) return NextResponse.json({ error: 'bad id' }, { status: 400 });
-  const body = (await req.json().catch(() => ({}))) as { name?: unknown };
+  const body = (await req.json().catch(() => ({}))) as { name?: unknown; clipable?: unknown };
+  // One or the other: the switch is posted on its own, like a clip's.
+  if (body.clipable !== undefined) {
+    try {
+      const folder = await setFolderClipable(id, body.clipable === true);
+      if (!folder) return NextResponse.json({ error: 'folder not found' }, { status: 404 });
+      return NextResponse.json(folder);
+    } catch (err) {
+      console.error('[vids folders clipable]', err);
+      return NextResponse.json({ error: errMessage(err) }, { status: 500 });
+    }
+  }
   const name = typeof body.name === 'string' ? body.name.trim().slice(0, 120) : '';
   if (!name) return NextResponse.json({ error: 'name is required' }, { status: 400 });
   try {

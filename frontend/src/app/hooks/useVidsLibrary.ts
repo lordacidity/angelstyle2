@@ -379,10 +379,22 @@ export function useVidsLibrary(active: boolean) {
   }, [refresh, tracked]);
 
   // ── Clipable ────────────────────────────────────────────────────────────────
-  // What the clippers get — see VidClipable. A persona's flag goes through
-  // updatePersona like its name; a clip's and a song's or caption look's are
-  // here. Optimistic like everything else: a switch must flip as it is pressed,
+  // What the clippers get — see VidClipable. A persona video's flag goes through
+  // updatePersona like its name; the person's, a clip's and a song's or caption
+  // look's are here. Optimistic like everything else: a switch must flip as it is pressed,
   // and comes back from the server if the write didn't take.
+
+  /** The person's own switch — it withholds every video of theirs whatever
+   *  each one says, so it is the folder that is written, not the videos. */
+  const setFolderClipable = useCallback(async (id: string, on: boolean) => {
+    setFolders((prev) => prev.map((f) => (f.id === id ? { ...f, clipable: on } : f)));
+    try {
+      await tracked(client.setFolderClipable(id, on));
+    } catch (e) {
+      setError(msg(e));
+      void refresh();
+    }
+  }, [refresh, tracked]);
 
   const setVideoClipable = useCallback(async (id: string, on: boolean) => {
     setVideos((prev) => prev.map((v) => (v.id === id ? { ...v, clipable: on } : v)));
@@ -524,7 +536,7 @@ export function useVidsLibrary(active: boolean) {
     createPersona, updatePersona, deletePersona,
     moveVideo, renameVideo, deleteVideo, setVideoContext, setVideoMarks,
     setLinks,
-    setVideoClipable, setClipable, renameTrack,
+    setFolderClipable, setVideoClipable, setClipable, renameTrack,
     uploadFiles, uploadBlob, replaceVideo,
   };
 }

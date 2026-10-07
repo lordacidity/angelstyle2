@@ -23,7 +23,10 @@
 //           persona by dragging its tile onto the name, or with the Move to
 //           list on the tile; the ones nobody has attributed yet sit under
 //           "No persona". The pencil renames a persona, the trash deletes it
-//           (its videos stay, under No persona). Right-click a video to rename
+//           (its videos stay, under No persona), and the switch beside the
+//           count says whether the clippers get them: off, every video of that
+//           persona is ours alone, whatever its own switch on the Clippers
+//           page says, and so is one made of them later. Right-click a video to rename
 //           it, move it or say what he is doing in it. Dropping footage onto a
 //           persona's name starts the upload with that persona already chosen.
 //           Clicking a video opens its three clips, and clicking one of those
@@ -93,21 +96,55 @@ const PART_SAID: Record<PersonaPart, string> = { startId: 'Start', topAId: 'Midd
 /** The folders a run of loose clips could be filed in: none, from this page. */
 const NO_FOLDERS: readonly FolderChoice[] = [];
 
+/** The clipper switch on a persona's row — green is on offer, grey is ours
+ *  alone. It is the person's, so it has the last word over the switch each of
+ *  their videos carries on the Clippers page: off, not one of them reaches the
+ *  clippers' app, and nor does one added to them later. */
+function OfferSwitch({ on, label, onChange }: {
+  on: boolean;
+  label: string;
+  onChange: (on: boolean) => void;
+}) {
+  return (
+    <button
+      role="switch"
+      aria-checked={on}
+      aria-label={`${label} — on offer to the clippers`}
+      title={on
+        ? `${label} is on offer to the clippers — switch off to keep every video of theirs ours alone`
+        : `${label} is ours alone — switch on to offer the clippers their videos`}
+      onClick={(e) => { e.stopPropagation(); onChange(!on); }}
+      className={`relative h-3.5 w-6 shrink-0 rounded-full transition-colors ${
+        on ? 'bg-emerald-500' : 'bg-zinc-700 hover:bg-zinc-600'
+      }`}
+    >
+      <span
+        className={`absolute top-0.5 h-2.5 w-2.5 rounded-full bg-white shadow transition-[left] ${on ? 'left-3' : 'left-0.5'}`}
+      />
+    </button>
+  );
+}
+
 /** One persona on the list — a person — with a still of one of their videos
  *  and how many they have. Pressing it shows the videos below. A video dragged
  *  onto it becomes theirs; footage dropped on it starts a new video of them. */
-function PersonaRow({ label, count, thumb, selected, title, onSelect, onVideoDrop, onFiles, onRename, onDelete }: {
+function PersonaRow({
+  label, count, thumb, selected, title, clipable, onSelect, onVideoDrop, onFiles, onRename, onDelete, onClipable,
+}: {
   label: string;
   count: number;
   thumb: string | null;
   selected: boolean;
   title: string;
+  /** Whether the clippers get this persona — see OfferSwitch. */
+  clipable: boolean;
   onSelect: () => void;
   onVideoDrop: (personaVideoId: string) => void;
   /** Left out on the "No persona" row, which is nobody to make a video of. */
   onFiles?: (files: FileList) => void;
   onRename?: () => void;
   onDelete?: () => void;
+  onClipable?: (on: boolean) => void;
 }) {
   const [over, setOver] = useState(false);
   const takes = (e: DragEvent) => hasVideo(e) || (!!onFiles && hasFiles(e));
@@ -146,7 +183,9 @@ function PersonaRow({ label, count, thumb, selected, title, onSelect, onVideoDro
           <img src={thumb} alt="" className="h-full w-full object-cover" draggable={false} />
         )}
       </span>
-      <span className="min-w-0 flex-1 truncate font-medium">{label}</span>
+      <span className={`min-w-0 flex-1 truncate font-medium ${onClipable && !clipable ? 'text-zinc-500' : ''}`}>
+        {label}
+      </span>
       {onRename && (
         <button
           onClick={(e) => { e.stopPropagation(); onRename(); }}
@@ -168,6 +207,7 @@ function PersonaRow({ label, count, thumb, selected, title, onSelect, onVideoDro
           <TrashIcon size={11} />
         </button>
       )}
+      {onClipable && <OfferSwitch on={clipable} label={label} onChange={onClipable} />}
       <span className="text-[10px] tabular-nums text-zinc-500">{count}</span>
     </div>
   );
@@ -1064,11 +1104,13 @@ export function VidsPrep({ lib, active }: { lib: VidsLib; active: boolean }) {
                     title={folder
                       ? `${folder.name} — ${personas.length} video${personas.length === 1 ? '' : 's'} · drag a video here to make it ${folder.name}'s, or drop footage here to make a new one`
                       : 'Videos that are nobody’s yet — move each to its persona'}
+                    clipable={folder ? folder.clipable : true}
                     onSelect={() => setList(key)}
                     onVideoDrop={(id) => moveVideoTo(id, folder?.id ?? null)}
                     onFiles={folder ? (files) => startIntake(files, folder.id) : undefined}
                     onRename={folder ? () => setFolderDraft({ id: folder.id, name: folder.name }) : undefined}
                     onDelete={folder ? () => deletePerson(folder, personas.length) : undefined}
+                    onClipable={folder ? (on) => void lib.setFolderClipable(folder.id, on) : undefined}
                   />
                 );
               })}

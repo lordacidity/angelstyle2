@@ -48,6 +48,11 @@ export const renameFolder = (id: string, name: string) =>
 export const deleteFolder = (id: string) =>
   api<{ ok: true }>(`/folders/${id}`, { method: 'DELETE' });
 
+/** Put a persona — the person, and so every video of theirs — on offer to the
+ *  clippers, or keep them back. See VidClipable. */
+export const setFolderClipable = (id: string, clipable: boolean) =>
+  api<VidFolder>(`/folders/${id}`, { method: 'PATCH', body: JSON.stringify({ clipable }) });
+
 /** What a persona can be made with beyond its name: any of its clips, the
  *  folder under Persona it is filed in (whose it is), and `clipable: false` to
  *  keep it from the clippers — left out, it is on offer to them. */

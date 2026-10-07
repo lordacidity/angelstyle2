@@ -58,11 +58,17 @@ export function readThemePatch(body: Record<string, unknown>, patch: VidThemePat
 // Personas are the exception since 2026-10-02: a new one is made on offer, and
 // is switched off here if it shouldn't be.
 //
-// Personas and clips are rows, so the flag is a column on each. Songs and
-// caption looks are defined in code rather than in the database (public/audio
-// and lib/vidsCaptions), so theirs is a row in a table of its own, keyed by
-// kind and by what names the thing: the song's url, the look's id. A row
-// there means yes; no row means no.
+// The person carries one too — the folder a persona video is filed under, on
+// the Personas page — and it is the last word: with a person switched off, no
+// video of theirs reaches the clippers however its own switch stands. One
+// person is kept back without going through their videos one at a time, and a
+// video added to them later is kept back as well.
+//
+// Personas, clips and people are rows, so the flag is a column on each. Songs
+// and caption looks are defined in code rather than in the database
+// (public/audio and lib/vidsCaptions), so theirs is a row in a table of its
+// own, keyed by kind and by what names the thing: the song's url, the look's
+// id. A row there means yes; no row means no.
 
 export interface VidClipable {
   clipable: boolean;
@@ -229,6 +235,10 @@ export interface VidFolder {
   id: string;
   parentId: string | null;   // null = top level
   name: string;
+  /** Whether the clippers get this persona — see VidClipable. Only a persona
+   *  folder (one directly under Persona) is ever switched off; on every other
+   *  folder the flag is there and means nothing. True unless someone said no. */
+  clipable: boolean;
   createdAt: string;
 }
 

@@ -39,7 +39,7 @@ export const errMessage = (e: unknown) => (e instanceof Error ? e.message : 'une
 // reload in dev, or a long-lived server between deploys. Comparing the version
 // makes such a process re-run the (idempotent) DDL instead of trusting a
 // promise that was resolved against the older schema.
-const SCHEMA_VERSION = 18;
+const SCHEMA_VERSION = 19;
 
 const g = globalThis as unknown as {
   __vidsPool?: pg.Pool;
@@ -252,6 +252,12 @@ function ensureSchema(): Promise<void> {
     for (const table of ['vids_videos', 'vids_personas'] as const) {
       await pool.query(`ALTER TABLE ${table} ADD COLUMN IF NOT EXISTS clipable BOOLEAN NOT NULL DEFAULT false`);
     }
+    // And on the folder, where it means the person: a persona folder switched
+    // off keeps every video of theirs from the clippers whatever each video's
+    // own switch says (see clipableOnly). The default is the other way round to
+    // the two above — true — because a person is on offer unless somebody says
+    // otherwise, which is also what every persona made before this meant.
+    await pool.query('ALTER TABLE vids_folders ADD COLUMN IF NOT EXISTS clipable BOOLEAN NOT NULL DEFAULT true');
     // Whether a persona is degen — see VidPersona.degen. Every persona that
     // existed when the flag arrived is degen, so the column's first appearance
     // marks them all; from then on it is said when a persona is made. Guarded
@@ -370,7 +376,9 @@ function ensureSchema(): Promise<void> {
 
 // ── Row mapping ───────────────────────────────────────────────────────────────
 
-interface FolderDb { id: string; parent_id: string | null; name: string; created_at: Date }
+interface FolderDb {
+  id: string; parent_id: string | null; name: string; clipable: boolean; created_at: Date;
+}
 interface VideoDb {
   id: string; folder_id: string | null; name: string; storage_path: string;
   thumb_path: string | null; mime_type: string; size_bytes: string | number;
@@ -394,7 +402,7 @@ interface RecipeDb {
 
 interface LinkDb { bottom_a_id: string; bottom_b_id: string }
 
-const FOLDER_COLS = 'id, parent_id, name, created_at';
+const FOLDER_COLS = 'id, parent_id, name, clipable, created_at';
 const LINK_COLS = 'bottom_a_id, bottom_b_id';
 const CLIPABLE_COLS = 'kind, key';
 const RECIPE_COLS = 'code, title, video_id, build, created_at';
@@ -405,7 +413,11 @@ const VIDEO_COLS =
   + 'lite_path, lite_size, lite_width, lite_height';
 
 const toFolder = (r: FolderDb): VidFolder => ({
-  id: r.id, parentId: r.parent_id, name: r.name, createdAt: r.created_at.toISOString(),
+  id: r.id,
+  parentId: r.parent_id,
+  name: r.name,
+  clipable: r.clipable !== false,
+  createdAt: r.created_at.toISOString(),
 });
 
 const toPersona = (r: PersonaDb): VidPersona => ({
@@ -498,9 +510,16 @@ export async function listLibrary(): Promise<VidsLibraryPayload> {
  *  A persona's own clips come with it whichever way they are flagged. Switching
  *  a persona on is switching on the three parts it *is*; leaving them behind
  *  would offer a clipper somebody whose video can't be built. Everything else —
- *  every Bottom A, Bottom B and End — is offered one clip at a time. */
+ *  every Bottom A, Bottom B and End — is offered one clip at a time.
+ *
+ *  The person they are of has the last word: a persona folder switched off on
+ *  the Personas page withholds every video filed under it, however each video's
+ *  own switch stands. The folder itself stays in the payload — the lists that
+ *  show people leave the empty ones out (groupPersonas `empty: false`), so a
+ *  person held back simply isn't there to choose. */
 function clipableOnly(lib: VidsLibraryPayload): VidsLibraryPayload {
-  const personas = lib.personas.filter((p) => p.clipable);
+  const off = new Set(lib.folders.filter((f) => !f.clipable).map((f) => f.id));
+  const personas = lib.personas.filter((p) => p.clipable && !(p.folderId && off.has(p.folderId)));
   const parts = new Set(
     personas.flatMap((p) => [p.startId, p.topAId, p.topBId].filter((id): id is string => !!id)),
   );
@@ -780,6 +799,18 @@ export async function renameFolder(id: string, name: string): Promise<VidFolder 
   const r = await getPool().query<FolderDb>(
     `UPDATE vids_folders SET name = $1, updated_at = now() WHERE id = $2 RETURNING ${FOLDER_COLS}`,
     [name, id],
+  );
+  return r.rows[0] ? toFolder(r.rows[0]) : null;
+}
+
+/** Put a person on offer to the clippers, or keep them back — the folder's own
+ *  flag, which outranks every video filed under it (see clipableOnly). Means
+ *  nothing on a folder that isn't a persona. */
+export async function setFolderClipable(id: string, clipable: boolean): Promise<VidFolder | null> {
+  await ensureSchema();
+  const r = await getPool().query<FolderDb>(
+    `UPDATE vids_folders SET clipable = $1, updated_at = now() WHERE id = $2 RETURNING ${FOLDER_COLS}`,
+    [clipable, id],
   );
   return r.rows[0] ? toFolder(r.rows[0]) : null;
 }
