@@ -35,6 +35,7 @@ import {
   DEFAULT_SPEED, DEFAULT_TRIM, type Trim,
 } from '@/lib/vidsPlan';
 import { decodeAudio, scheduleLoop, stretchToRate, SFX_URL } from '@/lib/vidsAudio';
+import { canWriteAac } from '@/lib/canWriteAac';
 import type { VidEdit, VidMark } from '@/lib/vids-types';
 
 /** A removed range, in source seconds. */
@@ -423,7 +424,7 @@ export async function renderEditedClip(opts: RenderOptions): Promise<Blob> {
     const keys = sfxSpans(edit, duration);
     let mixed: AudioBuffer | null = null;
     const wantAudio = (!edit.muted || keys.length > 0)
-      && typeof OfflineAudioContext !== 'undefined' && (await canEncodeAudio('aac'));
+      && typeof OfflineAudioContext !== 'undefined' && (await canWriteAac(canEncodeAudio));
 
     if (wantAudio) {
       const SR = 48_000;

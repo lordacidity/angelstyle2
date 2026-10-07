@@ -22,6 +22,7 @@ import { isPhoto } from '@/lib/vids-types';
 import { withBase } from '@/lib/clipping';
 import { localClipBlob } from '@/lib/simpler/vidsLocal';
 import { cachedClipBlob, isCacheableClipUrl } from '@/lib/vids-clip-cache';
+import { canWriteAac } from '@/lib/canWriteAac';
 import {
   drawPlanItem, isBoomItem, smoothScaling, videoBitrate,
   type Plan, type PlanItem,
@@ -66,6 +67,27 @@ export interface ComposeOptions {
 }
 
 const clamp = (v: number, lo: number, hi: number) => Math.min(hi, Math.max(lo, v));
+
+/** A clip's sound, read whole by the browser's own decodeAudioData. */
+async function decodeWhole(ctx: BaseAudioContext, src: Blob | string): Promise<AudioBuffer | null> {
+  try {
+    const bytes = typeof src === 'string' ? await (await fetch(src)).arrayBuffer() : await src.arrayBuffer();
+    return await ctx.decodeAudioData(bytes);
+  } catch {
+    return null;
+  }
+}
+
+/** `len` seconds of `buf` from `from`, as a buffer of its own. */
+function sliceBuffer(ctx: BaseAudioContext, buf: AudioBuffer, from: number, len: number): AudioBuffer | null {
+  const start = Math.max(0, Math.floor(from * buf.sampleRate));
+  const end = Math.min(buf.length, Math.ceil((from + len) * buf.sampleRate));
+  if (end <= start) return null;
+  const ch = Math.min(2, buf.numberOfChannels) || 1;
+  const out = ctx.createBuffer(ch, end - start, buf.sampleRate);
+  for (let c = 0; c < ch; c++) out.copyToChannel(buf.getChannelData(c).subarray(start, end), c);
+  return out;
+}
 
 interface Part {
   item: PlanItem;
@@ -148,6 +170,9 @@ export async function composeSequence(opts: ComposeOptions): Promise<Blob> {
     const stills = plan.items.filter((i) => isPhoto(i.video));
     let srcFps = 0;
     let srcBpp = 0;
+    /** Where each clip was read from, for a browser that can't decode its
+     *  sound track by itself (see decodeWhole). */
+    const sourceOf = new Map<PlanItem, Blob | string>();
     for (const item of plan.items) {
       if (isPhoto(item.video)) continue;
       // A BOOM laid for its noise alone has no picture to decode — it is on the
@@ -167,6 +192,7 @@ export async function composeSequence(opts: ComposeOptions): Promise<Blob> {
         formats: ALL_FORMATS,
       });
       inputs.push(input);
+      sourceOf.set(item, local ?? url);
       const track = await input.getPrimaryVideoTrack();
       if (!track) throw new Error(`${item.video.name}: no video track.`);
       if (!(await track.canDecode())) {
@@ -272,7 +298,7 @@ export async function composeSequence(opts: ComposeOptions): Promise<Blob> {
     const wantBangs = plan.items.some((i) => isBoomItem(i) && i.sound)
       && boomGain(opts.boomLevel ?? DEFAULT_BOOM_LEVEL) > 0;
     const wantAudio = (audible.length > 0 || wantRoom || wantMusic || wantBangs)
-      && typeof OfflineAudioContext !== 'undefined' && (await canEncodeAudio('aac'));
+      && typeof OfflineAudioContext !== 'undefined' && (await canWriteAac(canEncodeAudio));
 
     if (wantAudio) {
       const SR = 48_000;
@@ -283,7 +309,6 @@ export async function composeSequence(opts: ComposeOptions): Promise<Blob> {
       for (const p of audible) {
         if (!p.input) continue;
         const at = await p.input.getPrimaryAudioTrack();
-        if (!at || !(await at.canDecode())) continue;
         // `span` is timeline seconds; the source range that fills it is that
         // much longer when sped up, and the node plays it back at the same rate.
         const span = p.item.end - p.item.start;
@@ -293,25 +318,39 @@ export async function composeSequence(opts: ComposeOptions): Promise<Blob> {
         // see instead of running out under a picture that keeps going.
         const sourceSpan = p.item.loop ? Math.min(p.item.sourceLength, span * rate) : span * rate;
         const inPoint = p.item.trimStart;
-        const pieces: AudioBuffer[] = [];
+        let buf: AudioBuffer | null = null;
         let firstTs: number | null = null;
-        for await (const s of new AudioSampleSink(at).samples(inPoint, inPoint + sourceSpan)) {
-          throwIfAborted();
-          if (firstTs === null) firstTs = s.timestamp;
-          pieces.push(s.toAudioBuffer());
-          s.close();
-        }
-        if (!pieces.length) continue;
-        // One buffer at the clip's native rate; the offline graph resamples.
-        const ch = Math.min(2, pieces[0].numberOfChannels) || 1;
-        const length = pieces.reduce((n, b) => n + b.length, 0);
-        const buf = octx.createBuffer(ch, length, pieces[0].sampleRate);
-        let off = 0;
-        for (const piece of pieces) {
-          for (let c = 0; c < ch; c++) {
-            buf.copyToChannel(piece.getChannelData(Math.min(c, piece.numberOfChannels - 1)), c, off);
+        if (at && (await at.canDecode())) {
+          const pieces: AudioBuffer[] = [];
+          for await (const s of new AudioSampleSink(at).samples(inPoint, inPoint + sourceSpan)) {
+            throwIfAborted();
+            if (firstTs === null) firstTs = s.timestamp;
+            pieces.push(s.toAudioBuffer());
+            s.close();
           }
-          off += piece.length;
+          if (!pieces.length) continue;
+          // One buffer at the clip's native rate; the offline graph resamples.
+          const ch = Math.min(2, pieces[0].numberOfChannels) || 1;
+          const length = pieces.reduce((n, b) => n + b.length, 0);
+          buf = octx.createBuffer(ch, length, pieces[0].sampleRate);
+          let off = 0;
+          for (const piece of pieces) {
+            for (let c = 0; c < ch; c++) {
+              buf.copyToChannel(piece.getChannelData(Math.min(c, piece.numberOfChannels - 1)), c, off);
+            }
+            off += piece.length;
+          }
+        } else {
+          // A browser with no audio decoder of its own (an iPhone before iOS
+          // 26): the whole file goes through decodeAudioData instead, which
+          // every browser has, and the stretch wanted is cut out of that. A
+          // file it can't read either is left silent, as before.
+          const src = sourceOf.get(p.item);
+          const whole = src ? await decodeWhole(octx, src) : null;
+          throwIfAborted();
+          if (!whole) continue;
+          buf = sliceBuffer(octx, whole, inPoint, sourceSpan);
+          if (!buf) continue;
         }
         const g = octx.createGain();
         g.gain.value = clipGain;
