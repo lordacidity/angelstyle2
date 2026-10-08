@@ -137,7 +137,7 @@ export const LOVE_MAX = 8;
 
 /** How often a hook, in any mode, is one of the generic lines instead: drawn
  *  before anything else, so every other odd here is a share of the rest. */
-export const GENERIC_ODDS = 0.4;
+export const GENERIC_ODDS = 0.5;
 
 /** The generic hooks, at even odds, put on as written: capitals, emoji and
  *  all. Nothing about who or which way, so the model is never asked. */
@@ -157,6 +157,17 @@ export const GENERIC_HOOKS: readonly string[] = [
   'How I afford a Rollie in 2026⌚️',
   'This method is printing for me rn',
   'This method is printing for me rn, but most will just scroll',
+  'This is how I make 10k a month trading people',
+  'Trading people is the 2026 method',
+  'This is how I make 10k a month with just a computer',
+  'This is how I make 10k a month with just a wifi connection',
+  'Trading on people, unpatched method',
+  'Trading on people is printing in 2026',
+  'Trading on people is printing in 2026, but most will just scroll',
+  'Teaching you how to make $10k a month, but most will just scroll',
+  'Trading in popularity is the new meta, but most will just scroll',
+  'Making $10k a month trading popularity',
+  'Trading on people is the new meta',
 ];
 
 // ── The twists ───────────────────────────────────────────────────────────────

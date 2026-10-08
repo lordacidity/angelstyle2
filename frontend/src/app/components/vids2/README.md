@@ -414,11 +414,11 @@ by the route, not the model — down is always "shorting" / "shorts", up is
 "going long on" or "trading on" / "goes long on" or "trades on" — and a line
 that says the trade on another verb has it swapped.
 
-**Four hooks in ten are generic**, in every mode, before anything else is
-drawn: one of fifteen fixed lines at even odds ("This method is printing for
+**Half of all hooks are generic**, in every mode, before anything else is
+drawn: one of twenty-six fixed lines at even odds ("This method is printing for
 me rn 🤯", "How I afford a Rollie in 2026⌚️"), put on as written, capitals
 and emoji and all, with the model never asked (`GENERIC_HOOKS`,
-`GENERIC_ODDS`). Every other odd below is a share of the other six in ten.
+`GENERIC_ODDS`). Every other odd below is a share of the other half.
 
 **Serious** is flat and in a fixed order: the trading verb, the person, now and
 then a real-world moment that gives the trade a reason, and what the money
