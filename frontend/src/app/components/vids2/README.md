@@ -597,21 +597,22 @@ or the Studio pages do moved.
 
 ## The trade's captions
 
-Bottom B is the rendered trade, four beats, one caption each — and only one
-of the four is written:
+Bottom B is the rendered trade, four beats, one caption each, and none of
+the four is written:
 
 | Beat | Caption |
 | --- | --- |
 | Searching them | fixed: go to pauv.com / search {name} (`bottomBOpen`) |
 | Reading their chart | one at random: check their chart, look at the price, analyze... |
-| Putting the money on | written by Gemini (`api/vids/captions`), always with the amount in $ |
+| Putting the money on | fixed: trade $10 up bc {he's/she's} the goat💯, or trade $10 down bc {he's/she's} cooked🥀 |
 | The trade goes through | one at random: locked in, trade confirmed, confirmed, order placed |
 
-The two sets and the trade line's fallback are `bottomBFixed` and
-`bottomBTrade` in `lib/vids2/vids2Build.ts`. The captions call goes out with
-`renderedTrade`, which tells the writer those slots are fixed and the trade
-line carries "$10", never "10 dollars"; a trade line that still comes back
-without a $ amount is replaced with "put $10 up on {name}". The confirmation
+The two sets and the trade line are `bottomBFixed` and `bottomBTrade` in
+`lib/vids2/vids2Build.ts`. Nothing in the app records who is a he or a she,
+so the captions call (`api/vids/captions`, Gemini) goes out with
+`renderedTrade`, which tells the writer all of Bottom B is fixed and asks it
+for one more thing: `pronoun`, he, she or they for the person traded on. A
+missing or odd answer is "they're". The confirmation
 never repeats a line Bottom A's pick already landed on ("locked in" is in
 both sets).
 

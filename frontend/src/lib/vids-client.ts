@@ -168,6 +168,9 @@ export interface CaptionDraft {
   end: string;
   /** When Bottom A was placed: the second into its window each line goes up. */
   bottomAAt?: number[];
+  /** On a rendered trade: how the person traded on is referred to, for
+   *  Bottom B's fixed trade line (lib/vids2 bottomBTrade). */
+  pronoun?: 'he' | 'she' | 'they';
 }
 
 export const writeCaptions = (input: CaptionRequest, signal?: AbortSignal) =>

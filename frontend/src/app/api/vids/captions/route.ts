@@ -176,18 +176,24 @@ BOTTOM A is wherever its own recording shows — chatgpt, google, x, or pauv.com
  *  back filled: the arrays line up with the marks by index, so a short one would
  *  put every later line on the wrong moment.
  *
- *  Vids 2's rendered trade (`renderedTrade`) fixes two more: Bottom B's chart
- *  line and its confirmation (lib/vids2 bottomBFixed), which leaves the trade
- *  itself as the one Bottom B line the model writes. */
+ *  Vids 2's rendered trade (`renderedTrade`) fixes the other three: Bottom B's
+ *  chart line, the trade and the confirmation (lib/vids2 bottomBFixed,
+ *  bottomBTrade). The trade line takes one thing from the model, the pronoun,
+ *  which it returns on its own (see PRONOUN). */
 const FIXED = (renderedTrade: boolean) => `THE FIXED LINES
-${renderedTrade ? 'Five' : 'Three'} of the screen captions are not yours to write — they are picked from a set afterwards, and whatever you put in those slots is replaced:
+${renderedTrade ? 'Six' : 'Three'} of the screen captions are not yours to write — they are picked from a set afterwards, and whatever you put in those slots is replaced:
   BOTTOM A's 2nd caption (waiting for the answer to load)
   BOTTOM A's 3rd caption (taking the name off the answer)
   BOTTOM B's 1st caption (which is always: go to pauv.com, then search the name)${renderedTrade ? `
   BOTTOM B's 2nd caption (checking their chart)
+  BOTTOM B's 3rd caption (the trade itself)
   BOTTOM B's 4th caption (the trade going through)` : ''}
-Still return a line in each of those slots so the arrays stay one entry per moment — a short array puts every line after it on the wrong moment. Write something plain and short there; it will not be used. Never put an emoji on one of them — those lines get their own afterwards — and do not count on them to carry anything the rest of the set needs: the address, the person's name, the reason he picked them all have to stand up in the lines you DO write. BOTTOM A's 1st caption is yours, and it is the one that says what he searched.${renderedTrade ? `
-BOTTOM B's 3rd caption is yours too, and it is the trade itself: which way he goes on them and the amount, ALWAYS with the $ sign and digits — "put $10 up on him", "$10 down on trump bc ppl hate him rn". Never "10 dollars", never "ten dollars", and never a trade line with no amount in it.` : ''}`;
+Still return a line in each of those slots so the arrays stay one entry per moment — a short array puts every line after it on the wrong moment. Write something plain and short there; it will not be used. Never put an emoji on one of them — those lines get their own afterwards — and do not count on them to carry anything the rest of the set needs: the address, the person's name, the reason he picked them all have to stand up in the lines you DO write. BOTTOM A's 1st caption is yours, and it is the one that says what he searched.`;
+
+/** Bottom B's trade line is fixed (lib/vids2 bottomBTrade) bar the pronoun:
+ *  "trade $10 up bc she's the goat💯". Nothing in the app records who is a he
+ *  or a she, so the writer, who knows the name, says which. */
+const PRONOUN = '"pronoun": "he", "she" or "they" — how the person this video trades on is referred to. "they" for a group, a company, a thing, or anyone you are not sure of';
 
 /** The one thing every build has to leave the viewer holding. The Bottom B
  *  lines name Pauv often enough on their own, but "on pauv" is a name and not
@@ -414,6 +420,7 @@ function buildPrompt(input: z.infer<typeof Schema>): string {
   if (shapeA) wanted.push(shapeA);
   const shapeB = shape('bottomB', bottomB);
   if (shapeB) wanted.push(shapeB);
+  if (input.renderedTrade) wanted.push(PRONOUN);
   /** An emoji for the worked example: from the palette when there is one, so
    *  the example is made of the same set the real lines are picked from. */
   const ex = (i: number, fallback: string) => (emojis ? ` ${emojiPalette[i] ?? fallback}` : '');
@@ -433,14 +440,13 @@ function buildPrompt(input: z.infer<typeof Schema>): string {
     : 'bottom a — 2 moments (the clip overall: asking chatgpt who is trending, then heading to pauv):\n'
       + '  1. asked chatgpt who\'s trending, picked ronaldo\n'
       + '  2. typed pauv.com';
-  // The rendered trade's trade line always carries the amount (see FIXED), so
-  // its example does too.
-  const exTrade = input.renderedTrade ? "put $10 up on him bc he's trending" : "trade up on him bc he's trending";
+  // The rendered trade's trade line is fixed (see FIXED), so its example is too.
+  const exTrade = input.renderedTrade ? "trade $10 up bc he's the goat💯" : "trade up on him bc he's trending";
   const exLines = fastEx
     ? `bottomA: [{"text": "ask chatgpt who's trending rn${ex(1, '👀')}", "at": 0}, {"text": "pick ronaldo from the list", "at": 3.5}]\n`
-      + `bottomB: ["search ronaldo on pauv.com", "${exTrade}${ex(2, '📈')}"]`
+      + `bottomB: ["search ronaldo on pauv.com", "${exTrade}${input.renderedTrade ? '' : ex(2, '📈')}"]`
     : `bottomA: ["ask chatgpt who's trending rn${ex(1, '👀')} / pick ronaldo from the list", ${mergeSeam ? '"go to pauv.com, search ronaldo"' : '"go to pauv.com"'}]\n`
-      + `bottomB: [${mergeSeam ? '""' : '"search ronaldo on pauv"'}, "${exTrade}${ex(2, '📈')}"]`;
+      + `bottomB: [${mergeSeam ? '""' : '"search ronaldo on pauv"'}, "${exTrade}${input.renderedTrade ? '' : ex(2, '📈')}"]`;
   const exShape = fastEx
     ? 'bottom a is on fast, so it is two captions: the search at 0, and the pick at 3.5, where that moment starts. '
     : mergeSeam
@@ -583,7 +589,9 @@ export async function POST(req: NextRequest) {
       end: wantEnd ? END_LINE : '',
     };
     const done = ensureSite(drafted, input.mergeSeam && !bottomA?.placed);
-    return NextResponse.json(placedA ? { ...done, bottomAAt: placedA.map((l) => l.at) } : done);
+    const pronoun = input.renderedTrade && ['he', 'she', 'they'].includes(parsed.pronoun as string)
+      ? parsed.pronoun as string : undefined;
+    return NextResponse.json({ ...done, ...(placedA && { bottomAAt: placedA.map((l) => l.at) }), ...(pronoun && { pronoun }) });
   } catch (err) {
     console.error('[vids captions POST]', err);
     const msg = err instanceof Error ? err.message : 'unexpected error';

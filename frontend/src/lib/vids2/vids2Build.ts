@@ -734,8 +734,8 @@ export function bottomBMarks(beats: TradeBeats, person: string, direction: Direc
 // The trade says the same four things every build, and three of them never
 // change: the opener is the address and the search (lib/simpler/vidsCaptions
 // bottomBOpen), the chart and the confirmation come off the sets below, one at
-// random. The third — the trade itself — is the caption writer's, and it always
-// carries the amount in $.
+// random. The third — the trade itself — is fixed too (bottomBTrade): the
+// amount, which way, and the reason, with only the pronoun the caption writer's.
 
 /** Bottom B's second caption — reading their chart. */
 export const BOTTOM_B_CHART: readonly string[] = ['check their chart', 'look at the price', 'analyze...'];
@@ -756,11 +756,18 @@ export function bottomBFixed(index: number, avoid: readonly string[] = []): stri
   return from[Math.floor(Math.random() * from.length)];
 }
 
-/** The written trade line, held to its money: kept as written when it has a $
- *  amount in it, and otherwise the plain trade, amount and all — "put $10 up
- *  on ronaldo". */
-export const bottomBTrade = (line: string, name: string, direction: Direction): string =>
-  (/\$\d/.test(line) ? line : `put $${AMOUNT_USD} ${direction} on ${name || 'them'}`);
+/** How the caption writer says the person is referred to (api/vids/captions). */
+export type Pronoun = 'he' | 'she' | 'they';
+
+/** Bottom B's third caption — the trade. The same line every build bar which
+ *  way and the pronoun: "trade $10 up bc she's the goat💯", "trade $10 down bc
+ *  he's cooked🥀". Without a pronoun it is "they're". */
+export const bottomBTrade = (direction: Direction, pronoun?: Pronoun): string => {
+  const is = pronoun === 'he' ? "he's" : pronoun === 'she' ? "she's" : "they're";
+  return direction === 'up'
+    ? `trade $${AMOUNT_USD} up bc ${is} the goat💯`
+    : `trade $${AMOUNT_USD} down bc ${is} cooked🥀`;
+};
 
 export interface TradeClipProgress { stage: 'load' | 'render'; frac: number | null }
 

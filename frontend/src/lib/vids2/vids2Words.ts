@@ -167,16 +167,16 @@ export async function draftLines(a: LinesAsk): Promise<LinesDraft> {
   const fixedA = !placeA && draft.bottomA.length >= 3;
   const textA = draft.bottomA.map((t, i) =>
     (newsA && NEWS_BOTTOM_A_LINES[i]) || (fixedA && fixedLine('bottomA', i, capName)) || t);
-  // Bottom B is the rendered trade, and three of its four lines are not the
-  // model's either: the opener, the chart and the confirmation. The trade
-  // between them is, held to having its amount in $ (lib/vids2
-  // bottomBFixed, bottomBTrade). The chart and confirmation steer clear of
-  // whatever Bottom A just said.
+  // Bottom B is the rendered trade, and none of its four lines are the
+  // model's: the opener, the chart, the trade and the confirmation (lib/vids2
+  // bottomBFixed, bottomBTrade). The trade takes only the pronoun from the
+  // writer. The chart and confirmation steer clear of whatever Bottom A just
+  // said.
   const fixedB = draft.bottomB.length >= 4;
   const saidA = textA.map(bareFixedLine);
   const textB = draft.bottomB.map((t, i) => (i === 0 ? bottomBOpen(capName)
     : !fixedB ? t
-    : bottomBFixed(i, saidA) ?? (i === 2 ? bottomBTrade(t, capName, a.direction) : t)));
+    : bottomBFixed(i, saidA) ?? (i === 2 ? bottomBTrade(a.direction, draft.pronoun) : t)));
   return {
     bottomA: textA.map((text, i) => {
       const at = atA?.[i];
