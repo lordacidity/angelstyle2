@@ -168,6 +168,14 @@ export const GENERIC_HOOKS: readonly string[] = [
   'Trading in popularity is the new meta, but most will just scroll',
   'Making $10k a month trading popularity',
   'Trading on people is the new meta',
+  'You trade stocks, I trade people. We are not the same',
+  'You trade stocks, I trade people. This method is printing for me',
+  'You trade crypto, I trade people',
+  'You trade stocks, I trade people. Unpatched money making glitch',
+  'If you’re trading stock, you’re behind. We’re trading on ppl in 2026',
+  'Most untapped market in 2026, and it’s printing for me rn',
+  'How to get your bag up trading on people',
+  'Trading on people is printing for me rn',
 ];
 
 // ── The twists ───────────────────────────────────────────────────────────────

@@ -415,7 +415,7 @@ by the route, not the model — down is always "shorting" / "shorts", up is
 that says the trade on another verb has it swapped.
 
 **Half of all hooks are generic**, in every mode, before anything else is
-drawn: one of twenty-six fixed lines at even odds ("This method is printing for
+drawn: one of thirty-four fixed lines at even odds ("This method is printing for
 me rn 🤯", "How I afford a Rollie in 2026⌚️"), put on as written, capitals
 and emoji and all, with the model never asked (`GENERIC_HOOKS`,
 `GENERIC_ODDS`). Every other odd below is a share of the other half.
