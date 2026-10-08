@@ -101,8 +101,9 @@ import { NextRequest, NextResponse } from 'next/server';
 import { z } from 'zod';
 import { deepseekChat, parseJson } from '@/lib/deepseek';
 import {
-  DEGEN_EMOJI, DEGEN_EXAMPLES, DEGEN_VERBS, DESCRIPTORS, HOOK_ATTEMPTS, HYPE_NAMED, HYPE_NICKNAMED, LOVE_MAX,
-  LOVE_ODDS, ME_IF_NAMED, ME_IF_NICKNAMED, MIDDLE_ANALOGIES, MIDDLE_MYSTERY_VERBS, MIDDLE_PARENTHETICAL_ODDS,
+  DEGEN_EMOJI, DEGEN_EXAMPLES, DEGEN_VERBS, DESCRIPTORS, GENERIC_HOOKS, GENERIC_ODDS, HOOK_ATTEMPTS, HYPE_NAMED,
+  HYPE_NICKNAMED, LOVE_MAX, LOVE_ODDS, ME_IF_NAMED, ME_IF_NICKNAMED, MIDDLE_ANALOGIES, MIDDLE_MYSTERY_VERBS,
+  MIDDLE_PARENTHETICAL_ODDS,
   MIDDLE_SECONDS, MIDDLE_SHAPE_ODDS, MIDDLE_SHAPES, MIDDLE_TASKS, MYSTERY_EXAMPLES, NICKNAME_EXAMPLES,
   NO_CONTEXT_TWISTS, SELF_OWNS, SERIOUS_EXAMPLES, TWIST_ODDS, TWISTS, VERBS, parentheticalsOf,
   type MiddleShape, type Twist,
@@ -492,11 +493,13 @@ const TWIST_PLAN: Record<Twist, (input: Input) => Plan> = {
   meIf: meIfPlan,
 };
 
-/** What this call writes: now and then a twist, otherwise the mode's own. Me if
- *  is written off what the video shows, so a build with no context draws from
- *  the twists that need none. Middle takes no twist: its mystery is a slot in
- *  its own while shape. */
+/** What this call writes: first, in any mode, maybe a generic line, put on as
+ *  written; then now and then a twist, otherwise the mode's own. Me if is
+ *  written off what the video shows, so a build with no context draws from the
+ *  twists that need none. Middle takes no twist: its mystery is a slot in its
+ *  own while shape. */
 function planFor(input: Input): Plan {
+  if (Math.random() < GENERIC_ODDS) return { line: pick(GENERIC_HOOKS) };
   if (input.mode === 'middle' || Math.random() >= TWIST_ODDS) return modePlan(input);
   const twists = input.personaContext ? TWISTS : NO_CONTEXT_TWISTS;
   return TWIST_PLAN[pick(twists[input.direction])](input);

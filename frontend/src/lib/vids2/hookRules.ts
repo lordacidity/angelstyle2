@@ -133,6 +133,32 @@ export const LOVE_ODDS = 1 / 3;
 /** Longer than this and "i love you ___" stops reading as a pet name. */
 export const LOVE_MAX = 8;
 
+// ── Generic ──────────────────────────────────────────────────────────────────
+
+/** How often a hook, in any mode, is one of the generic lines instead: drawn
+ *  before anything else, so every other odd here is a share of the rest. */
+export const GENERIC_ODDS = 0.4;
+
+/** The generic hooks, at even odds, put on as written: capitals, emoji and
+ *  all. Nothing about who or which way, so the model is never asked. */
+export const GENERIC_HOOKS: readonly string[] = [
+  'This method is printing for me rn 🤯',
+  'This method is printing for me rn 🤫',
+  'Real ones know this method…',
+  'How to get your bands up, a guide💵',
+  'Best kept secret of 2026',
+  'Unpatched money glitch, but most will just scroll',
+  'Getting the bag with just a computer, but most will just scroll',
+  'This method is printing for me rn, unpatched',
+  'How much you can make with just a computer, a guide',
+  'This method is printing, and it’s just common sense',
+  'Unpatched money glitch',
+  'You just need wifi to retire in 2026, but most will just scroll',
+  'How I afford a Rollie in 2026⌚️',
+  'This method is printing for me rn',
+  'This method is printing for me rn, but most will just scroll',
+];
+
 // ── The twists ───────────────────────────────────────────────────────────────
 
 /** How often a hook is one of the twists instead of its mode's own. */

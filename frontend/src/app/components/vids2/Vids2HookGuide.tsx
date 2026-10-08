@@ -13,7 +13,7 @@
 
 import { useEffect, type ReactNode } from 'react';
 import {
-  DEGEN_EMOJI, DEGEN_EXAMPLES, DEGEN_VERBS, DESCRIPTORS, HOOK_ATTEMPTS, HYPE_NAMED, HYPE_NICKNAMED, LOVE_MAX,
+  DEGEN_EMOJI, DEGEN_EXAMPLES, DEGEN_VERBS, DESCRIPTORS, GENERIC_HOOKS, GENERIC_ODDS, HOOK_ATTEMPTS, HYPE_NAMED, HYPE_NICKNAMED, LOVE_MAX,
   LOVE_ODDS, ME_IF_NAMED, ME_IF_NICKNAMED, MIDDLE_ANALOGIES, MIDDLE_EXAMPLES, MIDDLE_MYSTERY_VERBS,
   MIDDLE_PARENTHETICAL_ODDS, MIDDLE_SECONDS, MIDDLE_SHAPE_ODDS, MIDDLE_SHAPES, MIDDLE_TASKS, MYSTERY_EXAMPLES,
   NICKNAME_EXAMPLES, NO_CONTEXT_TWISTS, SELF_OWNS, SERIOUS_EXAMPLES, TWIST_ODDS, TWISTS, VERBS,
@@ -190,6 +190,18 @@ export function Vids2HookGuide({ mode, direction, hasContext, hasParenthetical, 
             Green is the share of the lines that draw it. Where there is a grey one beside it, that is the share of
             every hook in that mode, twists included.
           </p>
+        </Block>
+
+        <Block title={`Step 0 · generic · ${pct(GENERIC_ODDS)} of every hook, in every mode`}>
+          <p>
+            Before anything else, {pct(GENERIC_ODDS)} of hooks are one of these lines, drawn at even odds (
+            {pct(GENERIC_ODDS / GENERIC_HOOKS.length)} each) and put on exactly as written: capitals, emoji and all.
+            Nothing about who or which way, and the model is never asked.
+          </p>
+          <p className="text-[11px] text-zinc-500">
+            Every other percentage on this page is a share of the other {pct(1 - GENERIC_ODDS)}.
+          </p>
+          <Examples lines={GENERIC_HOOKS} max={GENERIC_HOOKS.length} />
         </Block>
 
         <Block title="Step 1 · its mode's own line, or a twist (Serious and Degen)">
