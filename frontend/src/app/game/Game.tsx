@@ -13,7 +13,7 @@
 // on the map (outposts already held, a fatter purse) and sharper generals.
 // Clear every red outpost to win. Lose your last one and it's over.
 //
-// Campaign: twelve levels, each meaner than the last. The Long War: one
+// Campaign: twenty-eight levels, each meaner than the last. The Long War: one
 // map many screens tall, three factions stacked up it, scrolled with the
 // arrows, won the same way. Scrap earned either way buys permanent upgrades
 // in the Armoury.
@@ -28,7 +28,7 @@ import { Room, netAvailable, newCode, type Peer } from './net';
 
 const MAP_W = 360;
 const MAP_H = 600;
-const CAMPAIGN_LEVELS = 24;
+const CAMPAIGN_LEVELS = 28;
 const ENDLESS_UNLOCK = 3;
 
 const DEFAULT_COLORS: Record<number, string> = { 0: '#4a4a4a', 1: '#ffffff', 2: '#ff3b3b', 3: '#ff8a3b', 4: '#c04bff', 5: '#2ee6d6', 6: '#b8ff3b', 7: '#ff4fd8', 8: '#ffe84d' };
@@ -153,7 +153,9 @@ interface Auto { order: number; prio: number }
  *  whole route, and `leg` which step of it. */
 interface Convoy { id: number; owner: number; n: number; from: number; to: number; t: number; dur: number; path: number[]; leg: number }
 interface Shot { x1: number; y1: number; x2: number; y2: number; age: number }
-interface Faction { id: number; tick: number; dead: number; gold: number; buyT: number; tech: { conscription: number; logistics: number } }
+/** A column a general has planned but not yet sent, so a strike can land all at once. */
+interface Launch { at: number; from: number; to: number; n: number }
+interface Faction { id: number; tick: number; dead: number; gold: number; buyT: number; tech: { conscription: number; logistics: number }; queue?: Launch[] }
 
 interface Rules {
   level: number; endless: boolean; nodeCount: number; enemies: number;
@@ -193,6 +195,12 @@ interface Rules {
   humans?: number; mp?: 'team' | 'against';
   /** How much stronger the generals' breeding and gold grow each minute (0.05 is 5% a minute). */
   escalate?: number;
+  /** How much stronger the generals' breeding, gold and guns get for every level
+   *  of Armoury the player has bought (0.01 is 1% a level): scrap is no free win. */
+  adapt?: number;
+  /** The generals are at peace with each other: they share eyes, never fight
+   *  one another and cross each other's ground, and all of it falls on you. */
+  coalition?: boolean;
   /** How much harder the unclaimed ground is held the farther up the map it sits (a team room). */
   neutralRamp?: number;
   /** How fast everyone breeds, against the usual (1): a long game runs slow. */
@@ -203,13 +211,28 @@ interface Rules {
 /** In a team room the generals take no unclaimed ground past the middle of
  *  the map: the lower half is the humans' to win, and the fight comes to them. */
 const keepsOut = (w: World, m: Node) => w.rules.mp === 'team' && m.owner === 0 && m.y > w.rules.mapH * 0.5;
-/** How far the generals have grown: 1 at the start, more every minute where the level says so. */
-const generalsMult = (w: World) => 1 + (w.rules.escalate ?? 0) * (w.time / 60);
+/** How far the generals have answered the player's Armoury: 1 with none, more
+ *  for every level bought where the level says so. */
+function adaptMult(w: World): number {
+  if (!w.rules.adapt) return 1;
+  let best = 0;
+  for (const o of Object.keys(w.econ)) {
+    let sum = 0;
+    for (const k of Object.keys(w.econ[Number(o)].meta) as MetaKey[]) sum += w.econ[Number(o)].meta[k];
+    best = Math.max(best, sum);
+  }
+  return 1 + w.rules.adapt * best;
+}
+/** How far the generals have grown: 1 at the start, more every minute and
+ *  for every level of Armoury where the level says so. */
+const generalsMult = (w: World) => (1 + (w.rules.escalate ?? 0) * (w.time / 60)) * adaptMult(w);
 
 const isHuman = (w: World, o: number) => o in w.econ;
 const econ = (w: World, o: number) => w.econ[o];
 /** Whether two sides leave each other be: a side and itself, and in a team room every human with every other. */
-const isAlly = (w: World, a: number, b: number) => a === b || (!!w.mp && w.mp.mode === 'team' && a !== 0 && b !== 0 && isHuman(w, a) === isHuman(w, b));
+const isAlly = (w: World, a: number, b: number) => a === b
+  || (!!w.mp && w.mp.mode === 'team' && a !== 0 && b !== 0 && isHuman(w, a) === isHuman(w, b))
+  || (!w.mp && !!w.rules.coalition && a >= 2 && b >= 2);
 /** Gold to whoever: a human's purse or a general's. */
 function addGold(w: World, owner: number, amt: number) {
   if (isHuman(w, owner)) w.econ[owner].gold += amt;
@@ -299,7 +322,13 @@ function rulesFor(level: number, endless: boolean): Rules {
     enemyExtra: Math.min(3, Math.floor(L / 3)),
     enemyGold: L * 20,
     neutralBase: 6 + L * 2,
-    aiSmart: level <= 8 ? 0 : level <= 16 ? 1 : 2,
+    // 3 is a general that holds a reserve, reinforces what you are about to
+    // hit, times a pincer so every column lands together, and goes for your HQ.
+    aiSmart: level <= 8 ? 0 : level <= 16 ? 1 : level <= 20 ? 2 : 3,
+    // Scrap and time no longer carry you: past twelve the generals answer the
+    // Armoury you bring and keep growing the longer the war drags on.
+    adapt: level >= 25 ? 0.015 : level >= 13 ? 0.006 : 0,
+    escalate: level >= 25 ? 0.04 : level >= 13 ? 0.02 : 0,
   };
   const late = (r: Rules): Rules => {
     // Past sixteen the purse grows and the generals open with tech of their own.
@@ -334,6 +363,10 @@ function rulesFor(level: number, endless: boolean): Rules {
     case 22: return { ...base, title: 'THE GAUNTLET', blurb: 'Four generals, twin HQs each, a huge map. The gauntlet.', enemies: 4, nodeCount: 54, mapH: 1800, twinHQ: true, enemyExtra: 3, enemyGold: 600, fog: 3 };
     case 23: return { ...base, title: 'THE HILL II', blurb: 'Hold the hub 90 seconds while the roads shift under you.', choke: true, hill: 90, enemies: 4, shift: 45, nodeCount: 28, mapH: 1300, enemyGold: 400, fog: 2 };
     case 24: return { ...base, title: 'ALL OF IT', blurb: 'Everything at once: heavy fog, shifting roads, four generals, fortresses, twin HQs.', fog: 1, shift: 45, enemies: 4, nodeCount: 48, mapH: 1600, fortress: true, twinHQ: true, enemyExtra: 2, enemyGold: 450, aiInterval: 1.0, aiMargin: 0.85, aiStageEvery: 1 };
+    case 25: return { ...base, title: 'COALITION', blurb: 'Three generals have made peace with each other. They share what they see, never fight one another, cross each other\'s ground to reinforce, and every column is aimed at you.', coalition: true, enemies: 3, nodeCount: 40, mapH: 1400, fog: 2, enemyGold: 150, neutralBase: 24 };
+    case 26: return { ...base, title: 'THE MARSHAL', blurb: 'One general, and a good one. Twin fortress HQs, mines, ground already held and a deep purse. It keeps a reserve, reinforces what you are about to hit, strikes from two sides at the same instant and goes for your HQ the moment it is thin.', enemies: 1, nodeCount: 30, mapH: 1000, twinHQ: true, fortress: true, mines: 4, enemyExtra: 4, enemyGold: 200, escalate: 0.05, neutralBase: 24 };
+    case 27: return { ...base, title: 'THE CLOCK', blurb: 'Every minute the generals breed and earn 15% more. A slow win is a loss. Three fortress HQs, a short truce and loot to race for: be fast.', enemies: 3, fortress: true, nodeCount: 26, mapH: 900, maxDeg: 3, truce: 25, loot: { count: 4, troops: 60 }, goldPiles: { count: 2, gold: 100 }, enemyGold: 120, escalate: 0.15 };
+    case 28: return { ...base, title: 'NO QUARTER', blurb: 'The last war. Four allied generals with twin fortress HQs each, fog on every side, roads that shift, mines to fight over and a clock that favours them. Nobody is coming to help you.', coalition: true, enemies: 4, nodeCount: 60, mapH: 2000, fortress: true, twinHQ: true, fog: 2, shift: 60, mines: 6, enemyExtra: 3, enemyGold: 200, escalate: 0.06, aiInterval: 0.8, aiMargin: 0.9, aiStageEvery: 1, neutralBase: 26 };
     default: return base;
   }
   }
@@ -751,17 +784,113 @@ function arrive(w: World, c: Convoy) {
   }
 }
 
+/** Seconds a column of this side takes to get from one outpost to another. */
+function etaOf(w: World, from: number, to: number, owner: number): number {
+  const path = w.adj[from].includes(to) ? [from, to] : route(w, from, to, owner);
+  if (!path) return Infinity;
+  let len = 0;
+  for (let i = 0; i + 1 < path.length; i++) len += edgeLen(w, path[i], path[i + 1]);
+  return len / convoySpeed(w, owner);
+}
+
+/** What a careful general keeps at home in an outpost: half of what the
+ *  hostile ground beside it could throw at it, counted in the outpost's own
+ *  walls, and never more than half the garrison. */
+function holdOf(w: World, f: Faction, n: Node): number {
+  if (truceOn(w)) return 0;
+  let threat = 0;
+  for (const i of w.adj[n.id]) {
+    const m = w.nodes[i];
+    if (m.owner === 0 || isAlly(w, m.owner, f.id) || keepsOut(w, m)) continue;
+    threat += reckon(w, f.id, m) * 0.5;
+  }
+  return Math.min(n.troops * 0.5, threat / wallMult(n));
+}
+
+/** Columns of another side that are on their last leg to this outpost, as this side sees them. */
+function incomingTo(w: World, f: Faction, n: Node): { total: number; soonest: number } {
+  let total = 0; let soonest = Infinity;
+  for (const c of w.convoys) {
+    if (c.to !== n.id || isAlly(w, c.owner, f.id) || !seesColumn(w, f.id, c)) continue;
+    total += c.n;
+    soonest = Math.min(soonest, (1 - c.t) * c.dur);
+  }
+  return { total, soonest };
+}
+
+/** A general sees a column coming that will take an outpost, and has the
+ *  men next door to stop it in time: the neighbours send what they can spare,
+ *  timed to land before the column does. Returns the outposts it saved. */
+function reinforce(w: World, f: Faction): Set<number> {
+  const helped = new Set<number>();
+  if (truceOn(w)) return helped;
+  for (const n of w.nodes) {
+    if (n.owner !== f.id) continue;
+    const { total, soonest } = incomingTo(w, f, n);
+    if (!total) continue;
+    const wm = wallMult(n);
+    // Help already marching to it counts: no sending twice for one attack.
+    const onRoad = w.convoys.filter((c) => c.to === n.id && c.owner === f.id).reduce((s, c) => s + c.n, 0);
+    const short = total / wm - n.troops - onRoad + 3;
+    if (short <= 0) continue;
+    const donors = w.adj[n.id].map((i) => w.nodes[i])
+      .filter((m) => m.owner === f.id && !m.mine && etaOf(w, m.id, n.id, f.id) < soonest - 0.2)
+      .map((m) => ({ m, spare: Math.floor(m.troops - holdOf(w, f, m) - 3) }))
+      .filter((d) => d.spare >= 1)
+      .sort((a, b) => b.spare - a.spare);
+    // Only if it can hold: half a rescue is troops thrown after a lost cause.
+    if (donors.reduce((s, d) => s + d.spare, 0) < short) continue;
+    let left = Math.ceil(short);
+    for (const d of donors) {
+      if (left <= 0) break;
+      const amt = Math.min(d.spare, left);
+      sendCount(w, d.m.id, n.id, amt);
+      left -= amt;
+    }
+    helped.add(n.id);
+  }
+  return helped;
+}
+
+/** A pincer: every column leaves at the moment that has them all land on the
+ *  target together, so the garrison has no time to answer the first before
+ *  the rest are on it. */
+function planStrike(w: World, f: Faction, target: Node, from: Node[], frac: number) {
+  const legs = from
+    .map((n) => ({ n, amt: Math.floor(Math.max(0, n.troops - holdOf(w, f, n)) * frac), eta: etaOf(w, n.id, target.id, f.id) }))
+    .filter((l) => l.amt >= 1 && l.eta < Infinity);
+  if (!legs.length) return;
+  const slowest = Math.max(...legs.map((l) => l.eta));
+  f.queue = legs.map((l) => ({ at: w.time + (slowest - l.eta), from: l.n.id, to: target.id, n: l.amt }));
+}
+/** Send the planned columns whose time has come. */
+function runQueue(w: World, f: Faction) {
+  if (!f.queue?.length) return;
+  const rest: Launch[] = [];
+  for (const q of f.queue) {
+    if (q.at > w.time) { rest.push(q); continue; }
+    const n = w.nodes[q.from];
+    if (n.owner !== f.id || isAlly(w, w.nodes[q.to].owner, f.id)) continue;
+    sendCount(w, q.from, q.to, Math.min(q.n, Math.floor(n.troops)));
+  }
+  f.queue = rest;
+}
+
 // What a faction's general does with every outpost it holds, once a tick:
 // takes what it can beat, keeps pressure on what it almost can, and feeds
 // the front from the rear.
 function aiTick(w: World, f: Faction) {
   const r = w.rules;
   const frac = r.sendFrac;
+  const careful = r.aiSmart >= 3;
+  // The best generals see the blow coming and stop it with men from next
+  // door, rather than only running from it.
+  const helped = careful ? reinforce(w, f) : new Set<number>();
   // A canny general gets its troops out of an outpost that is about to
   // fall, to the strongest neighbour of its own, rather than lose them.
   if (r.aiSmart >= 1) {
     for (const n of w.nodes) {
-      if (n.owner !== f.id || n.troops < 5) continue;
+      if (n.owner !== f.id || n.troops < 5 || helped.has(n.id)) continue;
       const incoming = w.convoys.filter((c) => c.to === n.id && !isAlly(w, c.owner, f.id) && c.t > 0.5).reduce((s, c) => s + c.n, 0);
       if (incoming <= n.troops * wallMult(n) * 1.1) continue;
       const safe = w.adj[n.id].map((i) => w.nodes[i]).filter((m) => m.owner === f.id).sort((a, b) => b.troops - a.troops)[0];
@@ -786,7 +915,10 @@ function aiTick(w: World, f: Faction) {
     if (!n.base && ((n.id * 7 + Math.floor(w.time / w.rules.aiInterval)) & 1)) continue;
     const nbs = w.adj[n.id].map((i) => w.nodes[i]);
     const hostile = nbs.filter((m) => !isAlly(w, m.owner, f.id) && (!truceOn(w) || m.owner === 0) && !keepsOut(w, m));
-    const avail = n.troops * frac;
+    // A careful general never empties a front outpost: it keeps what the
+    // enemy beside it could throw back, and sends only the rest.
+    const avail = (n.troops - (careful ? holdOf(w, f, n) : 0)) * frac;
+    if (avail < 1) continue;
     let best: Node | null = null; let bestScore = -Infinity;
     for (const m of hostile) {
       const incoming = w.convoys.filter((c) => c.to === m.id && c.owner === m.owner && seesColumn(w, f.id, c)).reduce((s, c) => s + c.n, 0);
@@ -796,9 +928,12 @@ function aiTick(w: World, f: Faction) {
       if (avail < need * (m.owner === 0 ? 1.1 : 1.25)) continue;
       let score = (isHuman(w, m.owner) ? 3 : m.owner === 0 ? 1 : 2) + (m.base ? 2.5 : 0) + m.prod * 0.4 - need / avail + (m.hub ? 2 : 0) + (m.loot ? 1.5 : 0) + (m.gold ? 1 : 0);
       if (isHuman(w, m.owner) && m.cannon && r.aiSmart === 0) score += 1;
+      // Cut off the head: your HQ is worth more the thinner it is held, and an
+      // outpost you have just emptied sending columns out is the one to hit.
+      if (careful && isHuman(w, m.owner)) score += (m.base ? 2 : 0) + (m.troops < capOf(m) * 0.4 ? 1.5 : 0);
       if (score > bestScore) { bestScore = score; best = m; }
     }
-    if (best) { send(w, n.id, best.id, frac); continue; }
+    if (best) { sendCount(w, n.id, best.id, Math.floor(avail)); continue; }
     // Full and nothing it can take: bleed the weakest of yours anyway.
     if (n.troops >= capOf(n) * 0.95) {
       const yours = hostile.filter((m) => isHuman(w, m.owner)).sort((a, b) => reckon(w, f.id, a) * wallMult(a) - reckon(w, f.id, b) * wallMult(b));
@@ -821,6 +956,8 @@ function aiTick(w: World, f: Faction) {
   // however far — and goes when what is staged plus what touches the target
   // can break it. Columns arrive one after another and each thins the walls
   // for the next.
+  // A strike already planned is left to land before the next is thought of.
+  if (f.queue?.length) return;
   let bestT: Node | null = null; let bestRatio = Infinity; let bestFrom: Node[] = [];
   for (const m of w.nodes) {
     if (isAlly(w, m.owner, f.id) || (truceOn(w) && m.owner !== 0) || keepsOut(w, m)) continue;
@@ -832,12 +969,16 @@ function aiTick(w: World, f: Faction) {
     if (!from.length) continue;
     const incoming = w.convoys.filter((c) => c.to === m.id && c.owner === m.owner && seesColumn(w, f.id, c)).reduce((s, c) => s + c.n, 0);
     const need = (reckon(w, f.id, m) + incoming) * wallMult(m) + 1 + (m.cannon ? 15 * m.cannon : 0);
-    const avail = from.reduce((s, n) => s + n.troops * frac, 0);
+    const avail = from.reduce((s, n) => s + Math.max(0, n.troops - (careful ? holdOf(w, f, n) : 0)) * frac, 0);
     const ratio = need / avail;
     if (ratio < bestRatio) { bestRatio = ratio; bestT = m; bestFrom = from; }
   }
   if (!bestT) return;
-  if (bestRatio < r.aiMargin) { for (const n of bestFrom) send(w, n.id, bestT.id, frac); return; }
+  if (bestRatio < r.aiMargin) {
+    if (careful) planStrike(w, f, bestT, bestFrom, frac);
+    else for (const n of bestFrom) send(w, n.id, bestT.id, frac);
+    return;
+  }
   if (Math.floor(w.time / r.aiInterval) % r.aiStageEvery !== 0) return;
   const stage = w.adj[bestT.id].map((i) => w.nodes[i]).filter((n) => n.owner === f.id).sort((a, b) => b.troops - a.troops)[0];
   if (!stage) return;
@@ -870,8 +1011,20 @@ function aiSpend(w: World, f: Faction) {
   const upg = (n: Node, k: UpgKey): Want => ({ cost: upgradeCost(w, n, k), buy: () => applyUpgrade(n, k) });
   const tech = (k: 'conscription' | 'logistics'): Want => ({ cost: techCost(k, f.tech[k]), buy: () => { f.tech[k]++; } });
   const wants: Want[] = [];
+  const careful = w.rules.aiSmart >= 3;
+  // A careful general answers an attack it can see coming: walls and then a
+  // cannon on whatever outpost a column is marching on, before anything else.
+  if (careful) {
+    for (const n of mine) {
+      const { total } = incomingTo(w, f, n);
+      if (total < n.troops * wallMult(n) * 0.5) continue;
+      if (n.wall < 8) wants.push(upg(n, 'wall'));
+      if (n.cannon < 8) wants.push(upg(n, 'cannon'));
+    }
+  }
   if (hq.prod < 2) wants.push(upg(hq, 'prod'));
-  for (const n of front.slice(0, 2)) if (n.wall < 1) wants.push(upg(n, 'wall'));
+  for (const n of front.slice(0, careful ? 3 : 2)) if (n.wall < 1) wants.push(upg(n, 'wall'));
+  if (careful) for (const n of front.slice(1, 3)) if (n.cannon < 2) wants.push(upg(n, 'cannon'));
   if (front[0] && front[0].cannon < 1) wants.push(upg(front[0], 'cannon'));
   if (held.length >= 3) wants.push(tech('conscription'));
   if (hq.tier < 3) wants.push(upg(hq, 'tier'));
@@ -892,11 +1045,14 @@ function aiSpend(w: World, f: Faction) {
   if (front[0]) wants.push(upg(front[0], 'wall'), upg(front[0], 'cannon'));
   wants.push(tech('logistics'));
   // Two buys a tick, in order; it saves for the first thing it cannot afford.
+  // A careful general buys three, and only saves for its top two wants: past
+  // those, what it can afford it buys rather than sitting on a full purse.
   let bought = 0;
-  for (const want of wants) {
-    if (f.gold < want.cost) return;
+  for (let i = 0; i < wants.length; i++) {
+    const want = wants[i];
+    if (f.gold < want.cost) { if (!careful || i < 2) return; continue; }
     f.gold -= want.cost; want.buy();
-    if (++bought >= 2) return;
+    if (++bought >= (careful ? 3 : 2)) return;
   }
 }
 
@@ -1039,7 +1195,7 @@ function step(w: World, dt: number) {
       if (d < td) { td = d; target = c; }
     }
     if (!target) continue;
-    const dmg = cannonDmg(n.cannon) * (isHuman(w, n.owner) ? 1 + META.cannon.per * econ(w, n.owner).meta.cannon / 100 : 1);
+    const dmg = cannonDmg(n.cannon) * (isHuman(w, n.owner) ? 1 + META.cannon.per * econ(w, n.owner).meta.cannon / 100 : 1 + (adaptMult(w) - 1) * 0.5);
     target.n -= dmg;
     const p = convoyPos(w, target);
     w.shots.push({ x1: n.x, y1: n.y, x2: p.x, y2: p.y, age: 0 });
@@ -1053,9 +1209,10 @@ function step(w: World, dt: number) {
   for (const f of w.factions) {
     if (f.dead) continue;
     f.tick -= dt;
-    if (f.tick <= 0) { aiTick(w, f); f.tick = w.rules.aiInterval; }
+    if (f.tick <= 0) { aiTick(w, f); f.tick = w.rules.aiInterval * (w.rules.aiSmart >= 3 ? 0.6 : 1); }
+    if (w.rules.aiSmart >= 3) runQueue(w, f);
     f.buyT -= dt;
-    if (f.buyT <= 0) { aiSpend(w, f); f.buyT = 2; }
+    if (f.buyT <= 0) { aiSpend(w, f); f.buyT = w.rules.aiSmart >= 3 ? 1.2 : 2; }
   }
 
   // The hill: hold the hub, unbroken, for the time the level asks.
@@ -1279,7 +1436,7 @@ function packWorld(w: World): Snap {
     t: r2(w.time), over: w.over, nextId: w.nextId,
     nodes: w.nodes.map((n) => [n.owner, r2(n.troops), n.tier, n.prod, n.wall, n.cannon, r2(n.cd), n.mine, n.loot, n.gold, n.route ? n.route.to : 0, r2(n.routeT), n.auto, n.wallBoost, n.capBoost, n.base ? 1 : 0]),
     convoys: w.convoys.map((c) => [c.id, c.owner, r2(c.n), c.from, c.to, r2(c.t * 1000) / 1000, r2(c.dur), c.path, c.leg]),
-    factions: w.factions.map((f) => ({ ...f, tech: { ...f.tech } })),
+    factions: w.factions.map((f) => ({ ...f, tech: { ...f.tech }, queue: f.queue?.map((q) => ({ ...q })) })),
     econ: w.econ,
     tunnels: w.edges.map((e, i) => (e.tunnel ? i : -1)).filter((i) => i >= 0),
   };
@@ -1293,7 +1450,7 @@ function unpackWorld(w: World, s: Snap) {
     n.route = route ? { to: route } : null; n.routeT = routeT; n.auto = auto ?? {}; n.wallBoost = wallBoost; n.capBoost = capBoost; n.base = !!base;
   });
   w.convoys = s.convoys.map((r) => { const [id, owner, n, from, to, t, dur, path, leg] = r as [number, number, number, number, number, number, number, number[], number]; return { id, owner, n, from, to, t, dur, path, leg }; });
-  w.factions = s.factions.map((f) => ({ ...f, tech: { ...f.tech } }));
+  w.factions = s.factions.map((f) => ({ ...f, tech: { ...f.tech }, queue: f.queue?.map((q) => ({ ...q })) }));
   w.econ = s.econ;
   if (s.tunnels) { const t = new Set(s.tunnels); w.edges.forEach((e, i) => { e.tunnel = t.has(i); }); }
   // A picked outpost that is no longer yours is let go of.
@@ -2239,6 +2396,7 @@ export default function Game() {
             <p><b className="text-white/80">Drag</b> from one of your outposts to any other to march. Columns take the shortest road through your ground and fight at the first outpost on it that is not yours, and columns that outnumber the defenders take the ground. <b className="text-white/80">Tap</b> an outpost to build on it, or give it a standing order to keep shipping troops somewhere.</p>
             <p>Outposts breed troops up to their cap. Gold trickles from everything you hold. Spend it on the picked outpost, or on tech for all of them.</p>
             <p>The red plays by your rules: same breeding, same gold, same upgrades bought with it. On the harder levels it starts with more ground and more gold, and its generals are quicker. Clear every red outpost to win.</p>
+            <p>From level 13 the generals answer the Armoury you bring: the more you have bought, the harder they breed and earn, and the longer a war drags on the stronger they get. The best of them keep a reserve, send help to an outpost you are about to hit, and strike from two sides at once. On some of the last levels the generals are at peace with each other, and it all falls on you.</p>
             <p>An outpost with 100 troops can be dug into a <b className="text-white/80">mine</b>: it breeds nothing and keeps nothing built, but pays gold, more the deeper it goes. Digging and deepening cost troops. Whoever takes a mine keeps it.</p>
             <p className="text-white/30">Walls are inherited by whoever takes the outpost. Cannons are not.</p>
           </div>
