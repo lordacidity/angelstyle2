@@ -13,7 +13,12 @@ import { GAME_KEY } from '@/lib/game-key';
 
 // /api/aier/health is exempt so platform healthchecks (Railway) can reach it without the
 // site_auth cookie — it returns only boolean status, nothing sensitive.
-const PUBLIC_PREFIXES = ['/unlock', '/api/unlock', '/api/aier/health'];
+// /Sloan is a public tribute page for Dr. E, with its own small Ask-Claude
+// endpoint under /api/sloan — both are meant to be opened by a visitor with no
+// password. (Its lowercase alias is redirected below, not in next.config.ts:
+// a config redirect matches case-insensitively, so '/sloan' → '/Sloan' there
+// would catch '/Sloan' too and loop.)
+const PUBLIC_PREFIXES = ['/unlock', '/api/unlock', '/api/aier/health', '/Sloan', '/api/sloan'];
 
 // ── The clipper deployment ───────────────────────────────────────────────────
 // pauv.io/clipping is this same app built with NEXT_PUBLIC_APP=clippers, so
@@ -112,6 +117,14 @@ export async function middleware(req: NextRequest) {
     url.pathname = '/clippers';
     return NextResponse.rewrite(url);
   };
+
+  // angelstyle.com/Sloan is the address on the page's own letterhead; the
+  // lowercase spelling lands in the same place.
+  if (pathname === '/sloan' || pathname === '/sloan/') {
+    const url = req.nextUrl.clone();
+    url.pathname = '/Sloan';
+    return NextResponse.redirect(url, 308);
+  }
 
   const password = process.env.ACCESS_TOKEN;
   const secret = process.env.AUTH_SECRET || '';
