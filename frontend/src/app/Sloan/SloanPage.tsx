@@ -1,60 +1,41 @@
 'use client';
 
-// angelstyle.com/Sloan — one page, scrolled top to bottom, for Dr. E.
+// angelstyle.com/Sloan — "Hey Dr. E, I'm Claude."
 //
-// Everything on it was researched from public sources and written by Claude
-// Fable 5.1 on 10 October 2026, for Aiden Davenport to show his old professor.
-// The page carries no photographs on purpose: nothing here is scraped from a
-// university site, and the one portrait that matters is sitting next to the
-// screen. The visuals are drawn live instead — a market line in the hero, a
-// valuation gauge, a compound-growth chart — because he is a finance man and
-// numbers that move are the honest decoration.
+// A stack of phone-sized cards, scrolled with a thumb. Claude talks in the
+// first person, because Aiden asked it to introduce itself to his old finance
+// professor. Everything is drawn in code: the market line behind the hello, a
+// valuation gauge, a compound-growth chart, confetti. The phone's own tricks
+// are used where Safari allows them: the gyroscope tilts a card, the speech
+// engine says hello out loud, the share sheet passes the page on.
+//
+// Every fact traces to a public source listed at the bottom. "Dr. E" is a
+// nickname and the page says so.
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-
-// ── Facts (every line traces to a source listed in the footer) ───────────────
 
 const YEAR_NOW = 2026;
 const CAREER_START = 1983;
 const HARDING_START = 2005;
 
-const TIMELINE = [
-  { year: '1983', title: 'Enters the industry', body: 'Ellis Sloan starts a career in finance that will run more than four decades, through bull markets, crashes and everything between.' },
-  { year: '2005', title: 'Joins Harding', body: 'Follows his wife Lori onto the faculty of the Paul R. Carter College of Business Administration in Searcy, the one Sloan who did not grow up a Bison.' },
-  { year: 'Then', title: 'Builds the finance degree', body: 'Helps develop Harding’s finance major and takes charge of the chartered financial analyst competition team.' },
-  { year: 'Feb 11, 2012', title: 'First team, first place', body: 'Harding’s first-ever CFA Institute Research Challenge team wins the regional round in Memphis, coached by Sloan and Ken Moran.' },
-  { year: 'Apr 10, 2012', title: 'New York', body: 'The team carries its Polaris Industries valuation to the Americas round in New York City.' },
-  { year: '2017', title: 'Founds APEX Wealth Management', body: 'Opens an independent registered investment adviser in Searcy, after years with Kernodle & Katon Tax and Asset Management Group.' },
-  { year: '2021', title: 'The whole family on campus', body: 'Ellis and Lori on the faculty, Camille a senior, Ben a freshman: four Sloans at Harding in one year.' },
-  { year: 'Oct 10, 2026', title: 'This page', body: 'A former student sits down with Dr. E and asks Claude to show what it can do. You are reading the result.' },
-];
-
-const TICKER = [
-  'EST. 1983', 'CFA CHARTERHOLDER', 'HARDING UNIVERSITY', 'SEARCY, AR 72143', 'FIN 343',
-  'POLARIS: HOLD @ $63', 'MEMPHIS → NEW YORK', 'APEX WEALTH MANAGEMENT', 'M.B.A.',
-  'BISON FOREVER', 'EXPERIENCE > CREDENTIALS', 'BUILT BY CLAUDE FABLE 5.1',
-];
-
 const SOURCES = [
-  { label: 'Harding University faculty gallery: Ellis Sloan, M.B.A., Assistant Professor', href: 'https://facultygallery.harding.edu/en/persons/ellis-sloan' },
-  { label: 'The Bison (2012): Finance team advances to meet in NYC', href: 'https://thelink.harding.edu/the-bison/2012/02/24/finance-team-advances-to-meet-in-nyc/' },
-  { label: 'The Bison (2021): Sloans get the whole family involved on campus this year', href: 'https://thelink.harding.edu/the-bison/2021/03/19/sloans-get-the-whole-family-involved-on-campus-this-year/' },
-  { label: 'SEC Investment Adviser Public Disclosure: Ellis Martin Sloan, APEX Wealth Management', href: 'https://adviserinfo.sec.gov/individual/summary/1161247' },
-  { label: 'Adviser profile: Ellis Sloan, CFA, Searcy, AR', href: 'https://app.getwarmer.com/advisors/ellis-sloan' },
-  { label: 'Rate My Professors: Ellis Sloan, Harding University', href: 'https://www.ratemyprofessors.com/professor/870086' },
-  { label: 'Harding University finance program', href: 'https://www.harding.edu/business-admin/hu-finance.html' },
+  { label: 'Harding faculty gallery', href: 'https://facultygallery.harding.edu/en/persons/ellis-sloan' },
+  { label: 'The Bison, 2012: finance team advances to NYC', href: 'https://thelink.harding.edu/the-bison/2012/02/24/finance-team-advances-to-meet-in-nyc/' },
+  { label: 'The Bison, 2021: the Sloans on campus', href: 'https://thelink.harding.edu/the-bison/2021/03/19/sloans-get-the-whole-family-involved-on-campus-this-year/' },
+  { label: 'SEC adviser record, APEX Wealth Management', href: 'https://adviserinfo.sec.gov/individual/summary/1161247' },
+  { label: 'Rate My Professors', href: 'https://www.ratemyprofessors.com/professor/870086' },
 ];
 
 const SUGGESTED = [
-  'What is a CFA, in one breath?',
-  'Why did the 2012 team say HOLD on Polaris?',
-  'Explain the time value of money like Dr. E would.',
-  'How did you build this page?',
+  'Who are you, in one sentence?',
+  'Why HOLD on Polaris?',
+  'Rule of 72, but make it funny.',
+  'What did it take to build this?',
 ];
 
-// ── Small hooks ──────────────────────────────────────────────────────────────
+// ── Hooks ────────────────────────────────────────────────────────────────────
 
-function useInView<T extends Element>(threshold = 0.2) {
+function useInView<T extends Element>(threshold = 0.3) {
   const ref = useRef<T | null>(null);
   const [seen, setSeen] = useState(false);
   useEffect(() => {
@@ -81,46 +62,59 @@ function useReducedMotion() {
   return reduced;
 }
 
+/** Types a string out, one character at a time, once its card is on screen. */
+function useTypewriter(text: string, go: boolean, speed = 42) {
+  const reduced = useReducedMotion();
+  const [n, setN] = useState(0);
+  useEffect(() => {
+    if (!go) return;
+    let i = 0;
+    const id = setInterval(() => {
+      i = reduced ? text.length : i + 1;
+      setN(i);
+      if (i >= text.length) clearInterval(id);
+    }, reduced ? 1 : speed);
+    return () => clearInterval(id);
+  }, [go, text, speed, reduced]);
+  return { shown: text.slice(0, n), done: n >= text.length };
+}
+
 // ── Pieces ───────────────────────────────────────────────────────────────────
 
-function Reveal({ children, className = '', delay = 0 }: { children: React.ReactNode; className?: string; delay?: number }) {
-  const { ref, seen } = useInView<HTMLDivElement>(0.15);
+function Card({ id, children, className = '' }: { id: string; children: React.ReactNode; className?: string }) {
+  const { ref, seen } = useInView<HTMLElement>(0.25);
   return (
-    <div ref={ref} className={`reveal ${seen ? 'in' : ''} ${className}`} style={{ transitionDelay: `${delay}ms` }}>
+    <section id={id} ref={ref} className={`card ${seen ? 'in' : ''} ${className}`}>
       {children}
-    </div>
+    </section>
   );
 }
 
-function Stat({ value, label, suffix = '', decimals = 0 }: { value: number; label: string; suffix?: string; decimals?: number }) {
-  const { ref, seen } = useInView<HTMLDivElement>(0.5);
+function Bubble({ children, delay = 0, me = true }: { children: React.ReactNode; delay?: number; me?: boolean }) {
+  return <div className={`bubble ${me ? 'me' : 'them'}`} style={{ transitionDelay: `${delay}ms` }}>{children}</div>;
+}
+
+function Count({ value, decimals = 0, suffix = '' }: { value: number; decimals?: number; suffix?: string }) {
+  const { ref, seen } = useInView<HTMLSpanElement>(0.6);
   const reduced = useReducedMotion();
   const [n, setN] = useState(0);
   useEffect(() => {
     if (!seen) return;
     let raf = 0;
     const t0 = performance.now();
-    const dur = reduced ? 1 : 1400;
+    const dur = reduced ? 1 : 1300;
     const tick = (t: number) => {
       const p = Math.min(1, (t - t0) / dur);
-      const eased = 1 - Math.pow(1 - p, 3);
-      setN(value * eased);
+      setN(value * (1 - Math.pow(1 - p, 3)));
       if (p < 1) raf = requestAnimationFrame(tick);
     };
     raf = requestAnimationFrame(tick);
     return () => cancelAnimationFrame(raf);
   }, [seen, value, reduced]);
-  return (
-    <div ref={ref} className="stat">
-      <div className="stat-n">{n.toFixed(decimals)}<span className="stat-suffix">{suffix}</span></div>
-      <div className="stat-l">{label}</div>
-    </div>
-  );
+  return <span ref={ref} className="count">{n.toFixed(decimals)}{suffix}</span>;
 }
 
-/** The hero's market line: a slow random walk, redrawn each frame, with a
- *  faint grid behind it. Pauses when the tab is hidden and stands still for
- *  anyone who has asked the OS for less motion. */
+/** The market line behind the hello: a slow random walk in gold. */
 function MarketCanvas() {
   const ref = useRef<HTMLCanvasElement | null>(null);
   const reduced = useReducedMotion();
@@ -129,61 +123,42 @@ function MarketCanvas() {
     if (!canvas) return;
     const ctx = canvas.getContext('2d');
     if (!ctx) return;
-    let raf = 0;
-    let w = 0, h = 0, dpr = 1;
-    const N = 160;
+    let raf = 0, w = 0, h = 0;
+    const N = 110;
     const pts: number[] = [];
     let v = 0.5;
-    for (let i = 0; i < N; i++) { v += (Math.random() - 0.48) * 0.03; v = Math.min(0.9, Math.max(0.1, v)); pts.push(v); }
-    let phase = 0;
-
+    for (let i = 0; i < N; i++) { v += (Math.random() - 0.48) * 0.04; v = Math.min(0.9, Math.max(0.1, v)); pts.push(v); }
     const resize = () => {
-      dpr = Math.min(2, window.devicePixelRatio || 1);
+      const dpr = Math.min(2, window.devicePixelRatio || 1);
       w = canvas.clientWidth; h = canvas.clientHeight;
       canvas.width = Math.floor(w * dpr); canvas.height = Math.floor(h * dpr);
       ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
     };
     resize();
     window.addEventListener('resize', resize);
-
     const draw = () => {
       ctx.clearRect(0, 0, w, h);
-      // grid
-      ctx.strokeStyle = 'rgba(239,233,220,0.06)';
-      ctx.lineWidth = 1;
-      const step = 64;
-      for (let x = (phase % step); x < w; x += step) { ctx.beginPath(); ctx.moveTo(x, 0); ctx.lineTo(x, h); ctx.stroke(); }
-      for (let y = 0; y < h; y += step) { ctx.beginPath(); ctx.moveTo(0, y); ctx.lineTo(w, y); ctx.stroke(); }
-      // line
       const xs = (i: number) => (i / (N - 1)) * w;
-      const ys = (p: number) => h * (0.15 + (1 - p) * 0.7);
-      const grad = ctx.createLinearGradient(0, 0, w, 0);
-      grad.addColorStop(0, 'rgba(201,162,39,0)');
-      grad.addColorStop(0.35, 'rgba(201,162,39,0.55)');
-      grad.addColorStop(1, 'rgba(201,162,39,0.95)');
+      const ys = (p: number) => h * (0.2 + (1 - p) * 0.6);
       ctx.beginPath();
       pts.forEach((p, i) => { const x = xs(i), y = ys(p); if (i === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y); });
-      ctx.strokeStyle = grad; ctx.lineWidth = 2; ctx.shadowColor = 'rgba(201,162,39,0.5)'; ctx.shadowBlur = 14; ctx.stroke();
+      const grad = ctx.createLinearGradient(0, 0, w, 0);
+      grad.addColorStop(0, 'rgba(201,162,39,0)'); grad.addColorStop(1, 'rgba(201,162,39,0.9)');
+      ctx.strokeStyle = grad; ctx.lineWidth = 2; ctx.shadowColor = 'rgba(201,162,39,0.6)'; ctx.shadowBlur = 16; ctx.stroke();
       ctx.shadowBlur = 0;
-      // fill under the line
       ctx.lineTo(w, h); ctx.lineTo(0, h); ctx.closePath();
       const fill = ctx.createLinearGradient(0, 0, 0, h);
-      fill.addColorStop(0, 'rgba(201,162,39,0.12)'); fill.addColorStop(1, 'rgba(201,162,39,0)');
+      fill.addColorStop(0, 'rgba(201,162,39,0.14)'); fill.addColorStop(1, 'rgba(201,162,39,0)');
       ctx.fillStyle = fill; ctx.fill();
-      // last point
-      const lx = xs(N - 1), ly = ys(pts[N - 1]);
-      ctx.beginPath(); ctx.arc(lx, ly, 4, 0, Math.PI * 2); ctx.fillStyle = '#c9a227'; ctx.fill();
+      ctx.beginPath(); ctx.arc(xs(N - 1), ys(pts[N - 1]), 4, 0, Math.PI * 2); ctx.fillStyle = '#c9a227'; ctx.fill();
     };
-
     const frame = () => {
-      phase -= 0.35;
-      v = pts[N - 1] + (Math.random() - 0.485) * 0.035;
-      v = Math.min(0.92, Math.max(0.08, v));
-      pts.push(v); pts.shift();
+      let nv = pts[N - 1] + (Math.random() - 0.485) * 0.04;
+      nv = Math.min(0.92, Math.max(0.08, nv));
+      pts.push(nv); pts.shift();
       draw();
       raf = requestAnimationFrame(frame);
     };
-
     draw();
     if (!reduced) raf = requestAnimationFrame(frame);
     const vis = () => { cancelAnimationFrame(raf); if (!document.hidden && !reduced) raf = requestAnimationFrame(frame); };
@@ -193,24 +168,70 @@ function MarketCanvas() {
   return <canvas ref={ref} className="hero-canvas" aria-hidden="true" />;
 }
 
-function ProgressBar() {
-  const [p, setP] = useState(0);
-  useEffect(() => {
-    const on = () => {
-      const max = document.documentElement.scrollHeight - window.innerHeight;
-      setP(max > 0 ? window.scrollY / max : 0);
+/** Gold confetti over everything, for one and a half seconds. */
+function useConfetti() {
+  const ref = useRef<HTMLCanvasElement | null>(null);
+  const fire = useCallback(() => {
+    const canvas = ref.current;
+    if (!canvas) return;
+    const ctx = canvas.getContext('2d');
+    if (!ctx) return;
+    const dpr = Math.min(2, window.devicePixelRatio || 1);
+    const w = window.innerWidth, h = window.innerHeight;
+    canvas.width = w * dpr; canvas.height = h * dpr; ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    canvas.style.display = 'block';
+    const colors = ['#c9a227', '#efe9dc', '#e2c45a', '#ffffff', '#8a6d12'];
+    const ps = Array.from({ length: 160 }, () => ({
+      x: w / 2 + (Math.random() - 0.5) * 60, y: h * 0.6,
+      vx: (Math.random() - 0.5) * 14, vy: -Math.random() * 16 - 6,
+      r: Math.random() * 5 + 3, a: Math.random() * Math.PI, va: (Math.random() - 0.5) * 0.3,
+      c: colors[Math.floor(Math.random() * colors.length)],
+    }));
+    const t0 = performance.now();
+    let raf = 0;
+    const tick = (t: number) => {
+      const el = (t - t0) / 1000;
+      ctx.clearRect(0, 0, w, h);
+      ps.forEach((p) => {
+        p.vy += 0.45; p.x += p.vx; p.y += p.vy; p.vx *= 0.99; p.a += p.va;
+        ctx.save(); ctx.translate(p.x, p.y); ctx.rotate(p.a);
+        ctx.globalAlpha = Math.max(0, 1 - el / 1.8);
+        ctx.fillStyle = p.c; ctx.fillRect(-p.r / 2, -p.r / 4, p.r, p.r / 2);
+        ctx.restore();
+      });
+      if (el < 1.9) raf = requestAnimationFrame(tick); else { ctx.clearRect(0, 0, w, h); canvas.style.display = 'none'; }
     };
-    on();
-    window.addEventListener('scroll', on, { passive: true });
-    window.addEventListener('resize', on);
-    return () => { window.removeEventListener('scroll', on); window.removeEventListener('resize', on); };
+    cancelAnimationFrame(raf);
+    raf = requestAnimationFrame(tick);
   }, []);
-  return <div className="progress" style={{ transform: `scaleX(${p})` }} aria-hidden="true" />;
+  return { ref, fire };
+}
+
+// ── The hello ────────────────────────────────────────────────────────────────
+
+function Hello() {
+  const { ref, seen } = useInView<HTMLDivElement>(0.3);
+  const line = useTypewriter('Hey Dr. E.', seen, 70);
+  const line2 = useTypewriter('I’m Claude.', line.done, 60);
+  return (
+    <section id="hello" className="card hero in">
+      <MarketCanvas />
+      <div className="hero-inner" ref={ref}>
+        <div className="eyebrow">Searcy, Arkansas &middot; {new Date().getFullYear()}</div>
+        <h1 className="hello-title">
+          <span>{line.shown}{!line.done && <i className="caret" />}</span>
+          <span className="gold">{line2.shown}{line.done && !line2.done && <i className="caret" />}</span>
+        </h1>
+        <p className={`hero-sub ${line2.done ? 'show' : ''}`}>
+          Aiden asked me to introduce myself. So I read up on you, wrote this, drew the pictures, and put it on his phone. Scroll. I&rsquo;ll keep it short. You taught him, so I know you grade.
+        </p>
+        <div className={`hero-cue ${line2.done ? 'show' : ''}`}><span /></div>
+      </div>
+    </section>
+  );
 }
 
 // ── The Polaris call ─────────────────────────────────────────────────────────
-// The 2012 team valued Polaris at $63 while it traded near $68, and said HOLD.
-// The slider lets a visitor move the market and watch the call change.
 
 const FAIR_VALUE = 63;
 const BAND = 0.10;
@@ -228,46 +249,28 @@ function PolarisCall() {
   return (
     <div className="polaris">
       <div className="polaris-top">
-        <div>
-          <div className="eyebrow">Market price</div>
-          <div className="polaris-price mono">${price.toFixed(2)}</div>
-        </div>
-        <div>
-          <div className="eyebrow">Team&rsquo;s intrinsic value</div>
-          <div className="polaris-price mono dim">${FAIR_VALUE.toFixed(2)}</div>
-        </div>
-        <div className={`polaris-call call-${call.toLowerCase()}`}>
-          <div className="eyebrow">The call</div>
-          <div className="polaris-verdict">{call}</div>
-        </div>
+        <div><div className="eyebrow">Market</div><div className="polaris-price mono">${price.toFixed(0)}</div></div>
+        <div><div className="eyebrow">Your team said</div><div className="polaris-price mono dim">${FAIR_VALUE}</div></div>
+        <div className={`polaris-call call-${call.toLowerCase()}`}><div className="eyebrow">Call</div><div className="polaris-verdict">{call}</div></div>
       </div>
       <div className="polaris-track" aria-hidden="true">
         <div className="polaris-band" style={{ left: `${lo}%`, width: `${hi - lo}%` }} />
-        <div className="polaris-fv" style={{ left: `${fvPct}%` }}><span>$63 fair value</span></div>
+        <div className="polaris-fv" style={{ left: `${fvPct}%` }} />
         <div className="polaris-dot" style={{ left: `${pct}%` }} />
       </div>
-      <label className="polaris-slider">
-        <span className="sr-only">Market price of Polaris</span>
-        <input type="range" min={min} max={max} step={0.5} value={price} onChange={(e) => setPrice(Number(e.target.value))} style={{ ['--fill' as string]: `${pct}%` }} />
-      </label>
+      <input className="slider" type="range" min={min} max={max} step={1} value={price} onChange={(e) => setPrice(Number(e.target.value))} style={{ ['--fill' as string]: `${pct}%` }} aria-label="Market price of Polaris" />
       <p className="polaris-read mono">
-        {gap >= 0 ? `+${gap.toFixed(1)}% upside to fair value` : `${gap.toFixed(1)}% downside to fair value`}
-        {' · '}
-        {call === 'HOLD' ? 'inside the 10% margin of safety: not cheap enough to buy, not rich enough to sell' : call === 'BUY' ? 'trading well below what the business is worth' : 'the market is paying more than the cash flows justify'}
-      </p>
-      <p className="polaris-note">
-        On 11 February 2012 in Memphis, Harding&rsquo;s first-ever Research Challenge team, Austin Augsburger, Ben Beggs and Steven Terry, put Polaris Industries at $63 a share against a $68 print and recommended <strong>hold</strong>. Judges gave them first place. Their coaches were Ken Moran and Ellis Sloan.
+        {gap >= 0 ? `+${gap.toFixed(1)}%` : `${gap.toFixed(1)}%`} to fair value &middot; {call === 'HOLD' ? 'inside the 10% band' : call === 'BUY' ? 'cheap. pounce.' : 'rich. take the money.'}
       </p>
     </div>
   );
 }
 
-// ── Dr. E's lesson: time value of money ──────────────────────────────────────
+// ── The lesson ───────────────────────────────────────────────────────────────
 
 function money(n: number) {
   return n >= 1_000_000 ? `$${(n / 1_000_000).toFixed(2)}M` : `$${Math.round(n).toLocaleString('en-US')}`;
 }
-
 function series(monthly: number, years: number, annual: number, delayYears: number) {
   const r = annual / 100 / 12;
   const out: number[] = [];
@@ -275,9 +278,7 @@ function series(monthly: number, years: number, annual: number, delayYears: numb
   for (let y = 0; y <= years; y++) {
     out.push(bal);
     if (y === years) break;
-    for (let m = 0; m < 12; m++) {
-      if (y >= delayYears) bal = bal * (1 + r) + monthly;
-    }
+    for (let m = 0; m < 12; m++) if (y >= delayYears) bal = bal * (1 + r) + monthly;
   }
   return out;
 }
@@ -287,57 +288,28 @@ function Lesson() {
   const [years, setYears] = useState(40);
   const [rate, setRate] = useState(8);
   const delay = 10;
-
   const a = useMemo(() => series(monthly, years, rate, 0), [monthly, years, rate]);
   const b = useMemo(() => series(monthly, years, rate, delay), [monthly, years, rate]);
   const peak = Math.max(a[a.length - 1], 1);
-  const contributedA = monthly * 12 * years;
-  const contributedB = monthly * 12 * Math.max(0, years - delay);
-
-  const W = 640, H = 300, P = 28;
-  const path = (s: number[]) => s.map((v, i) => {
-    const x = P + (i / (s.length - 1)) * (W - 2 * P);
-    const y = H - P - (v / peak) * (H - 2 * P);
-    return `${i === 0 ? 'M' : 'L'}${x.toFixed(1)},${y.toFixed(1)}`;
-  }).join(' ');
-  const gridYs = [0.25, 0.5, 0.75, 1];
-
+  const W = 340, H = 190, P = 10;
+  const path = (s: number[]) => s.map((v, i) => `${i === 0 ? 'M' : 'L'}${(P + (i / (s.length - 1)) * (W - 2 * P)).toFixed(1)},${(H - P - (v / peak) * (H - 2 * P)).toFixed(1)}`).join(' ');
   return (
     <div className="lesson">
-      <div className="lesson-controls">
-        <Control label="Each month" value={monthly} min={25} max={2000} step={25} fmt={(v) => `$${v}`} onChange={setMonthly} />
-        <Control label="For how long" value={years} min={5} max={50} step={1} fmt={(v) => `${v} yrs`} onChange={setYears} />
-        <Control label="Annual return" value={rate} min={1} max={15} step={0.5} fmt={(v) => `${v}%`} onChange={setRate} />
-      </div>
-      <svg className="lesson-chart" viewBox={`0 0 ${W} ${H}`} role="img" aria-label="Growth of monthly investing, starting now versus starting ten years later">
-        {gridYs.map((g) => (
-          <g key={g}>
-            <line x1={P} x2={W - P} y1={H - P - g * (H - 2 * P)} y2={H - P - g * (H - 2 * P)} className="grid" />
-            <text x={P} y={H - P - g * (H - 2 * P) - 4} className="axis">{money(peak * g)}</text>
-          </g>
-        ))}
+      <svg className="lesson-chart" viewBox={`0 0 ${W} ${H}`} role="img" aria-label="Growth of monthly investing, starting now versus ten years later">
+        {[0.25, 0.5, 0.75].map((g) => <line key={g} x1={P} x2={W - P} y1={H - P - g * (H - 2 * P)} y2={H - P - g * (H - 2 * P)} className="grid" />)}
         <path d={`${path(a)} L${W - P},${H - P} L${P},${H - P} Z`} className="area-a" />
         <path d={path(b)} className="line-b" />
         <path d={path(a)} className="line-a" />
-        <text x={W - P} y={H - 8} className="axis end">{years} years</text>
-        <text x={P} y={H - 8} className="axis">today</text>
       </svg>
       <div className="lesson-read">
-        <div className="lesson-card a">
-          <div className="eyebrow">Start today</div>
-          <div className="lesson-big mono">{money(a[a.length - 1])}</div>
-          <div className="lesson-sub">you put in {money(contributedA)}; growth did the rest</div>
-        </div>
-        <div className="lesson-card b">
-          <div className="eyebrow">Wait {delay} years</div>
-          <div className="lesson-big mono">{money(b[b.length - 1])}</div>
-          <div className="lesson-sub">you put in {money(contributedB)}; the decade you skipped cost {money(a[a.length - 1] - b[b.length - 1])}</div>
-        </div>
-        <div className="lesson-card c">
-          <div className="eyebrow">Rule of 72</div>
-          <div className="lesson-big mono">{(72 / rate).toFixed(1)} yrs</div>
-          <div className="lesson-sub">to double your money at {rate}%. Dr. E can do that one in his head.</div>
-        </div>
+        <div className="lesson-card a"><div className="eyebrow">Start today</div><div className="lesson-big mono">{money(a[a.length - 1])}</div></div>
+        <div className="lesson-card b"><div className="eyebrow">Wait {delay} yrs</div><div className="lesson-big mono">{money(b[b.length - 1])}</div></div>
+      </div>
+      <p className="lesson-cost">The decade you waited cost <b className="mono">{money(a[a.length - 1] - b[b.length - 1])}</b>. Rule of 72 says money doubles every <b className="mono">{(72 / rate).toFixed(1)}</b> years at {rate}%. You do that in your head. I do it in a microsecond. We&rsquo;re basically colleagues.</p>
+      <div className="controls">
+        <Control label="Each month" value={monthly} min={25} max={2000} step={25} fmt={(v) => `$${v}`} onChange={setMonthly} />
+        <Control label="Years" value={years} min={5} max={50} step={1} fmt={(v) => `${v}`} onChange={setYears} />
+        <Control label="Return" value={rate} min={1} max={15} step={0.5} fmt={(v) => `${v}%`} onChange={setRate} />
       </div>
     </div>
   );
@@ -348,12 +320,107 @@ function Control({ label, value, min, max, step, fmt, onChange }: { label: strin
   return (
     <label className="control">
       <span className="control-row"><span>{label}</span><span className="mono">{fmt(value)}</span></span>
-      <input type="range" min={min} max={max} step={step} value={value} onChange={(e) => onChange(Number(e.target.value))} style={{ ['--fill' as string]: `${pct}%` }} />
+      <input className="slider" type="range" min={min} max={max} step={step} value={value} onChange={(e) => onChange(Number(e.target.value))} style={{ ['--fill' as string]: `${pct}%` }} />
     </label>
   );
 }
 
-// ── Ask Claude ───────────────────────────────────────────────────────────────
+// ── Phone tricks ─────────────────────────────────────────────────────────────
+
+type DOE = typeof DeviceOrientationEvent & { requestPermission?: () => Promise<'granted' | 'denied'> };
+
+function TiltCard() {
+  const [on, setOn] = useState<'off' | 'on' | 'denied'>('off');
+  const [rot, setRot] = useState({ x: 0, y: 0 });
+  useEffect(() => {
+    if (on !== 'on') return;
+    const handler = (e: DeviceOrientationEvent) => {
+      const g = e.gamma ?? 0, b = e.beta ?? 45;
+      setRot({ y: Math.max(-18, Math.min(18, g * 0.6)), x: Math.max(-18, Math.min(18, (45 - b) * 0.5)) });
+    };
+    window.addEventListener('deviceorientation', handler);
+    return () => window.removeEventListener('deviceorientation', handler);
+  }, [on]);
+  const ask = async () => {
+    const D = DeviceOrientationEvent as DOE;
+    try {
+      if (typeof D.requestPermission === 'function') {
+        const r = await D.requestPermission();
+        setOn(r === 'granted' ? 'on' : 'denied');
+      } else setOn('on');
+    } catch { setOn('denied'); }
+  };
+  return (
+    <div className="tilt-wrap">
+      <div className="tilt" style={{ transform: `perspective(700px) rotateX(${rot.x}deg) rotateY(${rot.y}deg)` }}>
+        <div className="tilt-shine" style={{ backgroundPosition: `${50 + rot.y * 2}% ${50 + rot.x * 2}%` }} />
+        <div className="eyebrow">Chartered Financial Analyst</div>
+        <div className="tilt-name">Ellis Sloan, <span className="gold">CFA</span></div>
+        <div className="tilt-row mono"><span>SINCE 1983</span><span>HARDING &middot; 2005</span></div>
+        <div className="tilt-row mono"><span>APEX WEALTH MGMT</span><span>SEARCY, AR</span></div>
+      </div>
+      {on === 'off' && <button type="button" className="btn" onClick={ask}>Tilt your phone</button>}
+      {on === 'on' && <p className="tiny">That&rsquo;s your gyroscope. I asked nicely.</p>}
+      {on === 'denied' && <p className="tiny">Safari said no. Fair. Imagine it tilting.</p>}
+    </div>
+  );
+}
+
+function Speak() {
+  const [state, setState] = useState<'idle' | 'talking' | 'no'>('idle');
+  const say = () => {
+    if (!('speechSynthesis' in window)) { setState('no'); return; }
+    const u = new SpeechSynthesisUtterance('Hey Dr. E. I’m Claude. Aiden says you taught him everything he knows about money. I checked his math. You did a good job.');
+    const voices = window.speechSynthesis.getVoices();
+    const v = voices.find((x) => /Samantha|Daniel|Karen|Moira/.test(x.name)) || voices.find((x) => x.lang.startsWith('en'));
+    if (v) u.voice = v;
+    u.rate = 0.98;
+    u.onend = () => setState('idle');
+    u.onerror = () => setState('no');
+    setState('talking');
+    window.speechSynthesis.cancel();
+    window.speechSynthesis.speak(u);
+  };
+  return (
+    <div className="speak">
+      <button type="button" className="btn" onClick={say} disabled={state === 'talking'}>
+        {state === 'talking' ? 'Talking…' : 'Hear me say it'}
+      </button>
+      {state === 'no' && <p className="tiny">Your phone kept its mouth shut. Read it in my voice, then: warm, a little smug.</p>}
+    </div>
+  );
+}
+
+function ShareButton() {
+  const [msg, setMsg] = useState('');
+  const share = async () => {
+    const data = { title: 'Hey Dr. E, I’m Claude', text: 'Claude built a page for Dr. E.', url: 'https://angelstyle.com/Sloan' };
+    try {
+      if (navigator.share) { await navigator.share(data); setMsg('Sent.'); }
+      else { await navigator.clipboard.writeText(data.url); setMsg('Link copied.'); }
+    } catch { /* user closed the sheet */ }
+  };
+  return (
+    <div className="speak">
+      <button type="button" className="btn ghost" onClick={share}>Share this page</button>
+      {msg && <p className="tiny">{msg}</p>}
+    </div>
+  );
+}
+
+function ImpressedButton() {
+  const { ref, fire } = useConfetti();
+  const [n, setN] = useState(0);
+  const labels = ['I\u2019m impressed, Claude', 'Again.', 'Okay, you can stop now.', 'Dr. E. Please.', 'Fine. One more.'];
+  return (
+    <>
+      <canvas ref={ref} className="confetti" aria-hidden="true" />
+      <button type="button" className="btn gold" onClick={() => { fire(); setN((x) => x + 1); }}>{labels[Math.min(n, labels.length - 1)]}</button>
+    </>
+  );
+}
+
+// ── Ask ──────────────────────────────────────────────────────────────────────
 
 type Turn = { q: string; a?: string; err?: string };
 
@@ -362,50 +429,44 @@ function Ask() {
   const [turns, setTurns] = useState<Turn[]>([]);
   const [busy, setBusy] = useState(false);
   const bottom = useRef<HTMLDivElement | null>(null);
-
   const send = useCallback(async (text: string) => {
     const question = text.trim();
     if (!question || busy) return;
-    setQ('');
-    setBusy(true);
+    setQ(''); setBusy(true);
     setTurns((t) => [...t, { q: question }]);
     try {
       const res = await fetch('/api/sloan/ask', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ question }) });
       const data = await res.json().catch(() => ({}));
-      const err = res.status === 503 ? 'The ask box is asleep on this deployment (no API key). Everything else on the page still works.'
-        : res.status === 429 ? 'Easy there. Give it a few minutes.'
+      const err = res.status === 503 ? 'My voice box is unplugged on this deployment (no API key). The rest of me works.'
+        : res.status === 429 ? 'Easy. Give me a few minutes.'
         : !res.ok ? 'That one fell over. Try again.' : undefined;
       setTurns((t) => t.map((x, i) => (i === t.length - 1 ? { ...x, a: err ? undefined : data.answer, err } : x)));
     } catch {
-      setTurns((t) => t.map((x, i) => (i === t.length - 1 ? { ...x, err: 'No connection.' } : x)));
+      setTurns((t) => t.map((x, i) => (i === t.length - 1 ? { ...x, err: 'No signal.' } : x)));
     } finally {
       setBusy(false);
       setTimeout(() => bottom.current?.scrollIntoView({ behavior: 'smooth', block: 'nearest' }), 50);
     }
   }, [busy]);
-
   return (
     <div className="ask">
       <div className="ask-chips">
-        {SUGGESTED.map((s) => (
-          <button key={s} type="button" className="chip" onClick={() => send(s)} disabled={busy}>{s}</button>
-        ))}
+        {SUGGESTED.map((s) => <button key={s} type="button" className="chip" onClick={() => send(s)} disabled={busy}>{s}</button>)}
       </div>
       <div className="ask-log" aria-live="polite">
-        {turns.length === 0 && <p className="ask-empty">Ask about Dr. E, about finance, or about how this page was made. A live model answers, not a script.</p>}
         {turns.map((t, i) => (
           <div key={i} className="turn">
-            <div className="turn-q">{t.q}</div>
-            {t.a && <div className="turn-a">{t.a}</div>}
+            <div className="bubble them small">{t.q}</div>
+            {t.a && <div className="bubble me small">{t.a}</div>}
             {t.err && <div className="turn-err">{t.err}</div>}
-            {!t.a && !t.err && <div className="turn-a thinking"><span /><span /><span /></div>}
+            {!t.a && !t.err && <div className="bubble me small thinking"><span /><span /><span /></div>}
           </div>
         ))}
         <div ref={bottom} />
       </div>
       <form className="ask-form" onSubmit={(e) => { e.preventDefault(); send(q); }}>
-        <input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Ask Claude something…" maxLength={400} aria-label="Your question" />
-        <button type="submit" disabled={busy || !q.trim()}>{busy ? 'Thinking' : 'Ask'}</button>
+        <input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Ask me anything, Dr. E" maxLength={400} aria-label="Your question" enterKeyHint="send" />
+        <button type="submit" disabled={busy || !q.trim()} aria-label="Send">&uarr;</button>
       </form>
     </div>
   );
@@ -413,201 +474,113 @@ function Ask() {
 
 // ── The page ─────────────────────────────────────────────────────────────────
 
+const CARDS = ['hello', 'lookup', 'nickname', 'polaris', 'lesson', 'family', 'card', 'tricks', 'ask', 'bye'];
+
 export default function SloanPage() {
   const careerYears = YEAR_NOW - CAREER_START;
   const hardingYears = YEAR_NOW - HARDING_START;
+  const [active, setActive] = useState('hello');
+  const [sources, setSources] = useState(false);
+
+  useEffect(() => {
+    const els = CARDS.map((id) => document.getElementById(id)).filter((x): x is HTMLElement => !!x);
+    const io = new IntersectionObserver((entries) => {
+      entries.forEach((e) => { if (e.isIntersecting) setActive(e.target.id); });
+    }, { threshold: 0.5 });
+    els.forEach((el) => io.observe(el));
+    return () => io.disconnect();
+  }, []);
 
   return (
-    <>
-      <ProgressBar />
-      <nav className="nav" aria-label="Sections">
-        <a href="#top" className="nav-mark">Dr.&nbsp;<em>E</em></a>
-        <div className="nav-links">
-          <a href="#story">Story</a>
-          <a href="#timeline">Timeline</a>
-          <a href="#polaris">The call</a>
-          <a href="#lesson">Lesson</a>
-          <a href="#claude">Made by Claude</a>
-          <a href="#ask">Ask</a>
-        </div>
+    <main className="phone">
+      <nav className="dots" aria-label="Cards">
+        {CARDS.map((id) => <a key={id} href={`#${id}`} className={active === id ? 'on' : ''} aria-label={id} />)}
       </nav>
 
-      <header id="top" className="hero">
-        <MarketCanvas />
-        <div className="hero-inner">
-          <div className="eyebrow hero-eyebrow">Searcy, Arkansas &middot; Harding University &middot; Paul R. Carter College of Business</div>
-          <h1 className="hero-title">Dr.&nbsp;<em>E</em></h1>
-          <p className="hero-sub">
-            <strong>Ellis Sloan, CFA.</strong> {careerYears} years in the markets. {hardingYears} years at the front of a Harding classroom. One professor a lot of people in finance still quote.
-          </p>
-          <div className="hero-facts">
-            <span><b>1983</b> first year in finance</span>
-            <span><b>2005</b> joined Harding</span>
-            <span><b>2012</b> coached the first Bison CFA team to a regional title</span>
-            <span><b>2017</b> founded APEX Wealth Management</span>
-          </div>
-          <a href="#story" className="scroll-cue" aria-label="Scroll down"><span /></a>
+      <Hello />
+
+      <Card id="lookup">
+        <div className="eyebrow">What I found</div>
+        <h2>I looked you up. <em>Politely.</em></h2>
+        <Bubble>I read the Harding faculty gallery, two Bison articles, the SEC&rsquo;s adviser register and 36 student ratings. Took me about as long as you take to find your reading glasses.</Bubble>
+        <div className="stats">
+          <div className="stat"><Count value={careerYears} /><small>years in finance</small></div>
+          <div className="stat"><Count value={hardingYears} /><small>years at Harding</small></div>
+          <div className="stat"><Count value={1} suffix="st" /><small>Bison CFA team ever. It won.</small></div>
+          <div className="stat"><Count value={4.2} decimals={1} /><small>out of 5, from students</small></div>
         </div>
-        <div className="hero-stamp mono">Researched, written, designed, coded and shipped by Claude Fable 5.1 &middot; 10 Oct 2026</div>
-      </header>
+        <Bubble delay={200}>You started in 1983. The Dow was at 1,000-and-change. I was not born. I was not even a research paper.</Bubble>
+      </Card>
 
-      <div className="ticker" aria-hidden="true">
-        <div className="ticker-track">
-          {[...TICKER, ...TICKER].map((t, i) => <span key={i}>{t}<i>&#9670;</i></span>)}
+      <Card id="nickname">
+        <div className="eyebrow">About the name</div>
+        <h2>Dr. <em>E.</em></h2>
+        <Bubble>Harding lists you as M.B.A., CFA. Everyone calls you Dr. E anyway. I checked, and I&rsquo;m keeping it.</Bubble>
+        <Bubble delay={150}>You told The Bison: <q>Experience is as important, if not more important, than having a Ph.D.</q> I am a machine that read the entire internet and still agrees with you.</Bubble>
+        <Bubble delay={300} me={false}>So who gave you the nickname?</Bubble>
+        <Bubble delay={450}>Students. It is always students. They also gave you a 4.2, and one of them called FIN 343 &ldquo;one of the hardest classes in the core&rdquo; and then thanked you. That is the whole review.</Bubble>
+      </Card>
+
+      <Card id="polaris" className="tall">
+        <div className="eyebrow">Interactive &middot; 2012</div>
+        <h2>The <em>Polaris</em> call.</h2>
+        <Bubble>Your first Research Challenge team. Augsburger, Beggs, Terry. Memphis. Polaris at $68, they said it was worth $63, they said HOLD. First place. Drag the market and watch the discipline.</Bubble>
+        <PolarisCall />
+        <p className="tiny">Coaches: Ken Moran and some guy named Sloan.</p>
+      </Card>
+
+      <Card id="lesson" className="tall paper">
+        <div className="eyebrow">Interactive &middot; lecture one</div>
+        <h2>Your lesson, <em>with my thumb.</em></h2>
+        <Lesson />
+      </Card>
+
+      <Card id="family">
+        <div className="eyebrow">2021</div>
+        <h2>Four Sloans, <em>one campus.</em></h2>
+        <Bubble>Lori on the communication faculty. Camille a senior. Ben a freshman. You in the business building. That is not a family, Dr. E. That is a diversified fund.</Bubble>
+        <Bubble delay={200} me={false}>Did you really need to put that in?</Bubble>
+        <Bubble delay={350}>I have read your lectures. Yes.</Bubble>
+      </Card>
+
+      <Card id="card">
+        <div className="eyebrow">Your phone can do this</div>
+        <h2>The <em>charter.</em></h2>
+        <TiltCard />
+      </Card>
+
+      <Card id="tricks">
+        <div className="eyebrow">Things I can do</div>
+        <h2>Watch <em>this.</em></h2>
+        <Bubble>I researched you, wrote this, designed it, drew every picture in code, type-checked it, built it, pushed it to Aiden&rsquo;s site and opened the door for iPhones only. In one conversation. Also:</Bubble>
+        <div className="tricks">
+          <Speak />
+          <ImpressedButton />
+          <ShareButton />
         </div>
-      </div>
+        <p className="tiny">The middle one is for you. Be honest.</p>
+      </Card>
 
-      <section id="story" className="section">
-        <Reveal>
-          <div className="eyebrow">The story</div>
-          <h2>Forty-three years of <em>compounding.</em></h2>
-        </Reveal>
-        <div className="story-grid">
-          <Reveal className="story-text" delay={80}>
-            <p>
-              Ellis Sloan went to work in finance in 1983, the year the Dow was still finding its feet above 1,000. He earned the Chartered Financial Analyst charter, the credential that the people who actually manage money hold, and spent two decades doing the job before he ever graded a paper.
-            </p>
-            <p>
-              In 2005 he followed his wife, Lori, onto the faculty at Harding University in Searcy. He was the one Sloan who had not grown up a Bison. He helped design the finance degree, took on FIN&nbsp;343 and the rest of the finance core, and started a tradition: the chartered financial analyst competition team. The first one he coached, in 2012, won its regional on the first try.
-            </p>
-            <p>
-              He never stopped practising. In 2017 he founded APEX Wealth Management, an independent registered investment adviser in Searcy, so the lessons in the classroom stayed the lessons from the street. His own line says it best: <em>&ldquo;Experience is as important, if not more important, than having a Ph.D.&rdquo;</em> Which is why the title on this page is a nickname, and why nobody who sat in his class minds.
-            </p>
-          </Reveal>
-          <div className="stats">
-            <Stat value={careerYears} label="years in finance" />
-            <Stat value={hardingYears} label="years teaching at Harding" />
-            <Stat value={1} label="Harding CFA team ever, and it won its regional" suffix="st" />
-            <Stat value={4.2} label="out of 5, from 36 student ratings" decimals={1} />
-          </div>
-        </div>
-      </section>
+      <Card id="ask" className="tall">
+        <div className="eyebrow">Live &middot; not a script</div>
+        <h2>Ask me <em>anything.</em></h2>
+        <Ask />
+      </Card>
 
-      <section id="timeline" className="section alt">
-        <Reveal>
-          <div className="eyebrow">Timeline</div>
-          <h2>The <em>long</em> game.</h2>
-        </Reveal>
-        <ol className="timeline">
-          {TIMELINE.map((t, i) => (
-            <li key={t.year + i}>
-              <Reveal delay={i * 60}>
-                <div className="tl-year mono">{t.year}</div>
-                <div className="tl-body">
-                  <h3>{t.title}</h3>
-                  <p>{t.body}</p>
-                </div>
-              </Reveal>
-            </li>
-          ))}
-        </ol>
-      </section>
-
-      <section id="polaris" className="section">
-        <Reveal>
-          <div className="eyebrow">Interactive &middot; the 2012 Research Challenge</div>
-          <h2>The <em>Polaris</em> call.</h2>
-          <p className="lede">Move the market. Watch what a disciplined analyst says. The team&rsquo;s number stays put, because the value of a business does not change with the mood of the tape.</p>
-        </Reveal>
-        <Reveal delay={120}><PolarisCall /></Reveal>
-      </section>
-
-      <section id="lesson" className="section paper">
-        <Reveal>
-          <div className="eyebrow">Interactive &middot; the first lecture</div>
-          <h2>Dr. E&rsquo;s <em>lesson</em>, live.</h2>
-          <p className="lede">Time value of money. The same monthly amount, the same return. The only difference is whether you start now or ten years from now. Drag the sliders.</p>
-        </Reveal>
-        <Reveal delay={120}><Lesson /></Reveal>
-      </section>
-
-      <section id="voices" className="section alt">
-        <div className="voices">
-          <Reveal>
-            <blockquote className="bigquote">
-              <p>&ldquo;Experience is as important, if not more important, than having a Ph.D.&rdquo;</p>
-              <cite>Ellis Sloan, to The Bison, 2021</cite>
-            </blockquote>
-          </Reveal>
-          <Reveal delay={100}>
-            <div className="voice-cards">
-              <div className="voice">
-                <div className="eyebrow">A student, FIN 343, 2022</div>
-                <p>One of the hardest classes in the business core. He made it manageable.</p>
-              </div>
-              <div className="voice">
-                <div className="eyebrow">The Bison, 2021</div>
-                <p>He recommends Harding to any prospective student he comes across.</p>
-              </div>
-              <div className="voice">
-                <div className="eyebrow">A Harding family</div>
-                <p>Lori teaches communication. Camille was a senior and Ben a freshman the year all four Sloans were on campus together.</p>
-              </div>
-            </div>
-          </Reveal>
-        </div>
-      </section>
-
-      <section id="claude" className="section">
-        <Reveal>
-          <div className="eyebrow">Made by Claude</div>
-          <h2>How this page <em>got made.</em></h2>
-          <p className="lede">Aiden typed one sentence. What followed happened inside a single session of Claude Fable 5.1, Anthropic&rsquo;s most capable generally available model. Here is the receipt.</p>
-        </Reveal>
-        <div className="made-grid">
-          {[
-            ['01', 'Research', 'Ran a dozen web searches, cross-checked the Harding faculty gallery, two Bison articles, the SEC adviser register and student ratings, and threw out what did not agree.'],
-            ['02', 'Judgement', 'Noticed the faculty page lists an M.B.A., so “Dr. E” stays a nickname and the page never claims a doctorate. Skipped the gossip. Kept the facts.'],
-            ['03', 'Design', 'Chose a type system, a palette and a rhythm for a one-page scroll, then drew every visual in code: the market line, the valuation gauge, the growth chart. No stock images.'],
-            ['04', 'Engineering', 'Wrote the page in TypeScript and React inside Aiden’s existing Next.js site, opened the route in the password middleware, added the /sloan alias and a rate-limited API route.'],
-            ['05', 'Verification', 'Type-checked, linted and built the whole site locally before pushing, because a page that breaks the rest of angelstyle.com is not a page.'],
-            ['06', 'Ship', 'Committed, pushed, and let the deploy pipeline put it at angelstyle.com/Sloan. Then wrote this list, which is itself part of the page.'],
-          ].map(([n, t, b], i) => (
-            <Reveal key={n} delay={i * 70}>
-              <div className="made">
-                <div className="made-n mono">{n}</div>
-                <h3>{t}</h3>
-                <p>{b}</p>
-              </div>
-            </Reveal>
-          ))}
-        </div>
-        <Reveal delay={200}>
-          <div className="capabilities">
-            <div className="eyebrow">What that is, in plain terms</div>
-            <p>
-              A model that can read the web, weigh what it finds, write like a person, design like a designer, code like an engineer, test its own work, and deploy it, in one conversation, without being told how. The box below is the same model, answering live.
-            </p>
-            <a className="link" href="https://www.anthropic.com/claude/fable" target="_blank" rel="noreferrer">About Claude Fable 5.1 &rarr;</a>
-          </div>
-        </Reveal>
-      </section>
-
-      <section id="ask" className="section alt">
-        <Reveal>
-          <div className="eyebrow">Live</div>
-          <h2>Ask <em>Claude.</em></h2>
-        </Reveal>
-        <Reveal delay={100}><Ask /></Reveal>
-      </section>
-
-      <footer className="foot">
-        <div className="foot-grid">
-          <div>
-            <div className="nav-mark big">Dr.&nbsp;<em>E</em></div>
-            <p className="foot-note">
-              Made with respect for a teacher, by a former student and a machine. &ldquo;Dr. E&rdquo; is a nickname. Every fact above comes from the public sources listed here, gathered on 10 October 2026; nothing was taken from a private account. This page is not affiliated with Harding University or APEX Wealth Management. Nothing on it is investment advice.
-            </p>
-          </div>
-          <div>
-            <div className="eyebrow">Sources</div>
-            <ul className="sources">
-              {SOURCES.map((s) => <li key={s.href}><a href={s.href} target="_blank" rel="noreferrer">{s.label}</a></li>)}
-            </ul>
-          </div>
-        </div>
-        <div className="foot-line mono">angelstyle.com/Sloan &middot; built by Claude Fable 5.1 for Aiden Davenport &middot; Searcy, Arkansas</div>
-      </footer>
-    </>
+      <Card id="bye">
+        <div className="eyebrow">Sincerely</div>
+        <h2>Thanks for <em>teaching him.</em></h2>
+        <Bubble>He turned out fine. Mostly. He still thinks he can time the market, but that is on him, not you.</Bubble>
+        <Bubble delay={200}>Good to meet you, Dr. E. Keep the nickname.</Bubble>
+        <p className="sig">&mdash; Claude Fable 5.1<br /><span className="tiny">for Aiden Davenport &middot; 10 Oct 2026</span></p>
+        <button type="button" className="link" onClick={() => setSources((s) => !s)}>{sources ? 'Hide sources' : 'Where I got all this'}</button>
+        {sources && (
+          <ul className="sources">
+            {SOURCES.map((s) => <li key={s.href}><a href={s.href} target="_blank" rel="noreferrer">{s.label}</a></li>)}
+            <li className="tiny">Public pages only, read on 10 Oct 2026. Not affiliated with Harding University or APEX Wealth Management. Nothing here is investment advice. &ldquo;Dr. E&rdquo; is a nickname.</li>
+          </ul>
+        )}
+      </Card>
+    </main>
   );
 }
