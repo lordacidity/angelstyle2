@@ -13,7 +13,7 @@
 // on the map (outposts already held, a fatter purse) and sharper generals.
 // Clear every red outpost to win. Lose your last one and it's over.
 //
-// Campaign: thirty-two levels, each meaner than the last. The Long War: one
+// Campaign: thirty-three levels, each meaner than the last. The Long War: one
 // map many screens tall, three factions stacked up it, scrolled with the
 // arrows, won the same way. Scrap earned either way buys permanent upgrades
 // in the Armoury.
@@ -28,7 +28,7 @@ import { Room, netAvailable, newCode, type Peer } from './net';
 
 const MAP_W = 360;
 const MAP_H = 600;
-const CAMPAIGN_LEVELS = 32;
+const CAMPAIGN_LEVELS = 33;
 const ENDLESS_UNLOCK = 3;
 
 const DEFAULT_COLORS: Record<number, string> = { 0: '#4a4a4a', 1: '#ffffff', 2: '#ff3b3b', 3: '#ff8a3b', 4: '#c04bff', 5: '#2ee6d6', 6: '#b8ff3b', 7: '#ff4fd8', 8: '#ffe84d' };
@@ -388,6 +388,7 @@ function rulesFor(level: number, endless: boolean): Rules {
     case 30: return { ...base, title: 'IRON HEART', blurb: 'Two allied generals whose HQs are iron: size 4, four walls, four cannons. Everything else is close to even. Take the mines, cut them off, then break them.', coalition: true, enemies: 2, ironHQ: true, mines: 6, nodeCount: 34, mapH: 1200, enemyExtra: 1, enemyGold: 140, enemyGarrison: 60 };
     case 31: return { ...base, title: 'HYDRA', blurb: 'Six allied generals, each with a small start, sharing everything they see. Each head is weak. Together they think as one.', coalition: true, enemies: 6, nodeCount: 56, mapH: 1900, fog: 2, enemyExtra: 1, enemyGold: 80, enemyGarrison: 50 };
     case 32: return { ...base, title: 'ENDGAME', blurb: 'Five allied generals with twin HQs, heavy fog and roads that shift. Only a small edge in numbers: the cleverest generals in the game, on close to even terms. The last level.', coalition: true, enemies: 5, twinHQ: true, fog: 1, shift: 50, mines: 6, nodeCount: 64, mapH: 2200, enemyExtra: 1, enemyGold: 140, enemyGarrison: 60, aiInterval: 0.7 };
+    case 33: return { ...base, title: 'THE SERPENT', blurb: 'Bonus. Every outpost has two roads at most: the map is one long winding serpent, and every fight is single file through the guns. Three allied generals hold the coils ahead and close in on you from both ends. Loot and mines lie along the body for whoever gets there first.', coalition: true, enemies: 3, maxDeg: 2, nodeCount: 34, mapH: 1500, fog: 2, truce: 20, mines: 4, loot: { count: 4, troops: 60 }, goldPiles: { count: 3, gold: 120 }, enemyExtra: 1, enemyGold: 140, enemyGarrison: 60, enemyWalls: 1, aiInterval: 0.8 };
     default: return base;
   }
   }
