@@ -333,11 +333,15 @@ function rulesFor(level: number, endless: boolean): Rules {
     aiSmart: level <= 8 ? 0 : level <= 16 ? 1 : level <= 20 ? 2 : level <= 24 ? 3 : 4,
     // Scrap and time no longer carry you: past twelve the generals answer the
     // Armoury you bring and keep growing the longer the war drags on.
-    adapt: level >= 29 ? 0.02 : level >= 25 ? 0.015 : level >= 13 ? 0.006 : 0,
-    escalate: level >= 29 ? 0.06 : level >= 25 ? 0.04 : level >= 13 ? 0.02 : 0,
+    // From 29 on it is a fair fight: no answer to your Armoury, no clock, no
+    // head start to speak of. The generals win by thinking or not at all.
+    adapt: level >= 29 ? 0 : level >= 25 ? 0.015 : level >= 13 ? 0.006 : 0,
+    escalate: level >= 29 ? 0 : level >= 25 ? 0.04 : level >= 13 ? 0.02 : 0,
   };
   const late = (r: Rules): Rules => {
     // Past sixteen the purse grows and the generals open with tech of their own.
+    // From 29 the head start is only what the level itself says.
+    if (level >= 29) return r;
     if (level >= 17) r = { ...r, enemyGold: r.enemyGold * 1.5, enemyExtra: Math.min(4, r.enemyExtra + 1), enemyTech: 1 };
     if (level >= 21) r = { ...r, enemyGold: r.enemyGold * 1.5, enemyTech: 2 };
     return r;
@@ -373,10 +377,10 @@ function rulesFor(level: number, endless: boolean): Rules {
     case 26: return { ...base, title: 'THE MARSHAL', blurb: 'One general, and a good one. Twin fortress HQs, mines, ground already held and a deep purse. It keeps a reserve, reinforces what you are about to hit, strikes from two sides at the same instant and goes for your HQ the moment it is thin.', enemies: 1, nodeCount: 30, mapH: 1000, twinHQ: true, fortress: true, mines: 4, enemyExtra: 4, enemyGold: 200, escalate: 0.05, neutralBase: 24 };
     case 27: return { ...base, title: 'THE CLOCK', blurb: 'Every minute the generals breed and earn 15% more. A slow win is a loss. Three fortress HQs, a short truce and loot to race for: be fast.', enemies: 3, fortress: true, nodeCount: 26, mapH: 900, maxDeg: 3, truce: 25, loot: { count: 4, troops: 60 }, goldPiles: { count: 2, gold: 100 }, enemyGold: 120, escalate: 0.15 };
     case 28: return { ...base, title: 'NO QUARTER', blurb: 'The last war. Four allied generals with twin fortress HQs each, fog on every side, roads that shift, mines to fight over and a clock that favours them. Nobody is coming to help you.', coalition: true, enemies: 4, nodeCount: 60, mapH: 2000, fortress: true, twinHQ: true, fog: 2, shift: 60, mines: 6, enemyExtra: 3, enemyGold: 200, escalate: 0.06, aiInterval: 0.8, aiMargin: 0.9, aiStageEvery: 1, neutralBase: 26 };
-    case 29: return { ...base, title: 'BLITZ', blurb: 'Three allied generals, rich and already sprawled across half the map, and they come at you from the first second. No truce. Hold, then break them.', coalition: true, enemies: 3, nodeCount: 30, mapH: 1000, enemyExtra: 4, enemyGold: 300, escalate: 0.08, aiInterval: 0.8, aiMargin: 0.9 };
-    case 30: return { ...base, title: 'IRON HEART', blurb: 'Two allied generals whose HQs are the strongest ground ever built: size 4, four walls, four cannons. Take the mines, starve them, then break them.', coalition: true, enemies: 2, ironHQ: true, mines: 6, nodeCount: 34, mapH: 1200, enemyExtra: 3, enemyGold: 250 };
-    case 31: return { ...base, title: 'HYDRA', blurb: 'Six allied generals, each small, each a head to cut off. Every one you leave standing keeps growing, and they all share what they see.', coalition: true, enemies: 6, nodeCount: 56, mapH: 1900, fog: 2, enemyExtra: 2, enemyGold: 150, escalate: 0.07 };
-    case 32: return { ...base, title: 'ENDGAME', blurb: 'Five allied generals with twin iron HQs, heavy fog, roads that shift and a clock that doubles them in eight minutes. The last level.', coalition: true, enemies: 5, ironHQ: true, twinHQ: true, fog: 1, shift: 50, mines: 6, nodeCount: 64, mapH: 2200, enemyExtra: 2, enemyGold: 250, escalate: 0.12, aiInterval: 0.7, aiMargin: 0.92 };
+    case 29: return { ...base, title: 'BLITZ', blurb: 'Three allied generals who start much as you do and come at you from the first second. No truce, no head start: they win by out-thinking you, or not at all.', coalition: true, enemies: 3, nodeCount: 30, mapH: 1000, enemyExtra: 1, enemyGold: 60, aiInterval: 0.8 };
+    case 30: return { ...base, title: 'IRON HEART', blurb: 'Two allied generals whose HQs are iron: size 4, four walls, four cannons. Everything else is even. Take the mines, cut them off, then break them.', coalition: true, enemies: 2, ironHQ: true, mines: 6, nodeCount: 34, mapH: 1200, enemyExtra: 1, enemyGold: 80 };
+    case 31: return { ...base, title: 'HYDRA', blurb: 'Six allied generals, each starting with one outpost and almost nothing in the purse, sharing everything they see. Each head is weak. Together they think as one.', coalition: true, enemies: 6, nodeCount: 56, mapH: 1900, fog: 2, enemyExtra: 0, enemyGold: 40 };
+    case 32: return { ...base, title: 'ENDGAME', blurb: 'Five allied generals with twin HQs, heavy fog and roads that shift. No clock, no purse to speak of: the cleverest generals in the game, on even terms. The last level.', coalition: true, enemies: 5, twinHQ: true, fog: 1, shift: 50, mines: 6, nodeCount: 64, mapH: 2200, enemyExtra: 1, enemyGold: 80, aiInterval: 0.7 };
     default: return base;
   }
   }
@@ -651,20 +655,6 @@ function buildWorld(rules: Rules, meta: Record<MetaKey, number>, seedExtra = 0, 
     }
   }
 
-  // The generals answer the Armoury from the first second, not only over
-  // time: the garrison and purse you bring, they bring too, and more.
-  if (rules.adapt && !rules.mp) {
-    let sum = 0;
-    for (const k of Object.keys(m1) as MetaKey[]) sum += m1[k];
-    const fx = 1 + rules.adapt * sum;
-    for (const n of nodes) {
-      if (n.owner < 2) continue;
-      n.troops = Math.round((n.troops + META.garrison.per * m1.garrison) * fx);
-      n.capBoost = rules.adapt * sum * 0.5;
-      if (n.base) n.wall += Math.min(3, Math.floor(sum / 25));
-    }
-    for (const f of factions) f.gold = (f.gold + META.gold.per * m1.gold) * fx;
-  }
   return {
     rules, nodes, edges, adj, convoys: [], shots: [], factions,
     econ, mp: rules.mp ? { mode: rules.mp, names: {} } : null, time: 0,
@@ -681,7 +671,7 @@ const wallMult = (n: Node) => 1 + (0.25 + n.wallBoost) * n.wall;
 function claim(w: World, n: Node, owner: number) {
   n.owner = owner;
   n.wallBoost = isHuman(w, owner) ? META.masonry.per * econ(w, owner).meta.masonry / 100 : 0;
-  n.capBoost = isHuman(w, owner) ? META.cap.per * econ(w, owner).meta.cap / 100 : owner >= 2 ? (adaptMult(w) - 1) * 0.5 : 0;
+  n.capBoost = isHuman(w, owner) ? META.cap.per * econ(w, owner).meta.cap / 100 : 0;
 }
 // One formula for everyone. Your tech and Armoury sit on top; the red has
 // neither, only what it builds on the ground.
