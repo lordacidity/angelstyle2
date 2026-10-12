@@ -201,6 +201,8 @@ interface Rules {
   /** The generals are at peace with each other: they share eyes, never fight
    *  one another and cross each other's ground, and all of it falls on you. */
   coalition?: boolean;
+  /** The garrison each general's HQ opens with (40 unless said). */
+  enemyGarrison?: number;
   /** Every general's HQ opens at size 4 with four walls and four cannons. */
   ironHQ?: boolean;
   /** How much harder the unclaimed ground is held the farther up the map it sits (a team room). */
@@ -226,8 +228,13 @@ function adaptMult(w: World): number {
   return 1 + w.rules.adapt * best;
 }
 /** How far the generals have grown: 1 at the start, more every minute and
- *  for every level of Armoury where the level says so. */
-const generalsMult = (w: World) => (1 + (w.rules.escalate ?? 0) * (w.time / 60)) * adaptMult(w);
+ *  for every level of Armoury where the level says so. Alone, never past half
+ *  again what you have: an edge, not a multiple. A room's ladder sets its own. */
+const GENERALS_CAP = 1.5;
+const generalsMult = (w: World) => {
+  const m = (1 + (w.rules.escalate ?? 0) * (w.time / 60)) * adaptMult(w);
+  return w.mp ? m : Math.min(GENERALS_CAP, m);
+};
 
 const isHuman = (w: World, o: number) => o in w.econ;
 const econ = (w: World, o: number) => w.econ[o];
@@ -333,14 +340,14 @@ function rulesFor(level: number, endless: boolean): Rules {
     aiSmart: level <= 8 ? 0 : level <= 16 ? 1 : level <= 20 ? 2 : level <= 24 ? 3 : 4,
     // Scrap and time no longer carry you: past twelve the generals answer the
     // Armoury you bring and keep growing the longer the war drags on.
-    // From 29 on it is a fair fight: no answer to your Armoury, no clock, no
-    // head start to speak of. The generals win by thinking or not at all.
-    adapt: level >= 29 ? 0 : level >= 25 ? 0.015 : level >= 13 ? 0.006 : 0,
-    escalate: level >= 29 ? 0 : level >= 25 ? 0.04 : level >= 13 ? 0.02 : 0,
+    // From 29 on the generals get only a small edge: a gentle answer to your
+    // Armoury and a slow clock, both under the cap. They win by thinking.
+    adapt: level >= 29 ? 0.006 : level >= 25 ? 0.015 : level >= 13 ? 0.006 : 0,
+    escalate: level >= 29 ? 0.02 : level >= 25 ? 0.04 : level >= 13 ? 0.02 : 0,
   };
   const late = (r: Rules): Rules => {
     // Past sixteen the purse grows and the generals open with tech of their own.
-    // From 29 the head start is only what the level itself says.
+    // From 29 the head start is only what the level itself says: modest.
     if (level >= 29) return r;
     if (level >= 17) r = { ...r, enemyGold: r.enemyGold * 1.5, enemyExtra: Math.min(4, r.enemyExtra + 1), enemyTech: 1 };
     if (level >= 21) r = { ...r, enemyGold: r.enemyGold * 1.5, enemyTech: 2 };
@@ -375,12 +382,12 @@ function rulesFor(level: number, endless: boolean): Rules {
     case 24: return { ...base, title: 'ALL OF IT', blurb: 'Everything at once: heavy fog, shifting roads, four generals, fortresses, twin HQs.', fog: 1, shift: 45, enemies: 4, nodeCount: 48, mapH: 1600, fortress: true, twinHQ: true, enemyExtra: 2, enemyGold: 450, aiInterval: 1.0, aiMargin: 0.85, aiStageEvery: 1 };
     case 25: return { ...base, title: 'COALITION', blurb: 'Three generals have made peace with each other. They share what they see, never fight one another, cross each other\'s ground to reinforce, and every column is aimed at you.', coalition: true, enemies: 3, nodeCount: 40, mapH: 1400, fog: 2, enemyGold: 150, neutralBase: 24 };
     case 26: return { ...base, title: 'THE MARSHAL', blurb: 'One general, and a good one. Twin fortress HQs, mines, ground already held and a deep purse. It keeps a reserve, reinforces what you are about to hit, strikes from two sides at the same instant and goes for your HQ the moment it is thin.', enemies: 1, nodeCount: 30, mapH: 1000, twinHQ: true, fortress: true, mines: 4, enemyExtra: 4, enemyGold: 200, escalate: 0.05, neutralBase: 24 };
-    case 27: return { ...base, title: 'THE CLOCK', blurb: 'Every minute the generals breed and earn 15% more. A slow win is a loss. Three fortress HQs, a short truce and loot to race for: be fast.', enemies: 3, fortress: true, nodeCount: 26, mapH: 900, maxDeg: 3, truce: 25, loot: { count: 4, troops: 60 }, goldPiles: { count: 2, gold: 100 }, enemyGold: 120, escalate: 0.15 };
+    case 27: return { ...base, title: 'THE CLOCK', blurb: 'Every minute the generals breed and earn 15% more, up to half again what they started with. A slow win is a loss. Three fortress HQs, a short truce and loot to race for: be fast.', enemies: 3, fortress: true, nodeCount: 26, mapH: 900, maxDeg: 3, truce: 25, loot: { count: 4, troops: 60 }, goldPiles: { count: 2, gold: 100 }, enemyGold: 120, escalate: 0.15 };
     case 28: return { ...base, title: 'NO QUARTER', blurb: 'The last war. Four allied generals with twin fortress HQs each, fog on every side, roads that shift, mines to fight over and a clock that favours them. Nobody is coming to help you.', coalition: true, enemies: 4, nodeCount: 60, mapH: 2000, fortress: true, twinHQ: true, fog: 2, shift: 60, mines: 6, enemyExtra: 3, enemyGold: 200, escalate: 0.06, aiInterval: 0.8, aiMargin: 0.9, aiStageEvery: 1, neutralBase: 26 };
-    case 29: return { ...base, title: 'BLITZ', blurb: 'Three allied generals who start much as you do and come at you from the first second. No truce, no head start: they win by out-thinking you, or not at all.', coalition: true, enemies: 3, nodeCount: 30, mapH: 1000, enemyExtra: 1, enemyGold: 60, aiInterval: 0.8 };
-    case 30: return { ...base, title: 'IRON HEART', blurb: 'Two allied generals whose HQs are iron: size 4, four walls, four cannons. Everything else is even. Take the mines, cut them off, then break them.', coalition: true, enemies: 2, ironHQ: true, mines: 6, nodeCount: 34, mapH: 1200, enemyExtra: 1, enemyGold: 80 };
-    case 31: return { ...base, title: 'HYDRA', blurb: 'Six allied generals, each starting with one outpost and almost nothing in the purse, sharing everything they see. Each head is weak. Together they think as one.', coalition: true, enemies: 6, nodeCount: 56, mapH: 1900, fog: 2, enemyExtra: 0, enemyGold: 40 };
-    case 32: return { ...base, title: 'ENDGAME', blurb: 'Five allied generals with twin HQs, heavy fog and roads that shift. No clock, no purse to speak of: the cleverest generals in the game, on even terms. The last level.', coalition: true, enemies: 5, twinHQ: true, fog: 1, shift: 50, mines: 6, nodeCount: 64, mapH: 2200, enemyExtra: 1, enemyGold: 80, aiInterval: 0.7 };
+    case 29: return { ...base, title: 'BLITZ', blurb: 'Three allied generals with a slightly bigger start than yours, coming at you from the first second. No truce. They win by out-thinking you.', coalition: true, enemies: 3, nodeCount: 30, mapH: 1000, enemyExtra: 1, enemyGold: 120, enemyGarrison: 60, aiInterval: 0.8 };
+    case 30: return { ...base, title: 'IRON HEART', blurb: 'Two allied generals whose HQs are iron: size 4, four walls, four cannons. Everything else is close to even. Take the mines, cut them off, then break them.', coalition: true, enemies: 2, ironHQ: true, mines: 6, nodeCount: 34, mapH: 1200, enemyExtra: 1, enemyGold: 140, enemyGarrison: 60 };
+    case 31: return { ...base, title: 'HYDRA', blurb: 'Six allied generals, each with a small start, sharing everything they see. Each head is weak. Together they think as one.', coalition: true, enemies: 6, nodeCount: 56, mapH: 1900, fog: 2, enemyExtra: 1, enemyGold: 80, enemyGarrison: 50 };
+    case 32: return { ...base, title: 'ENDGAME', blurb: 'Five allied generals with twin HQs, heavy fog and roads that shift. Only a small edge in numbers: the cleverest generals in the game, on close to even terms. The last level.', coalition: true, enemies: 5, twinHQ: true, fog: 1, shift: 50, mines: 6, nodeCount: 64, mapH: 2200, enemyExtra: 1, enemyGold: 140, enemyGarrison: 60, aiInterval: 0.7 };
     default: return base;
   }
   }
@@ -587,7 +594,7 @@ function buildWorld(rules: Rules, meta: Record<MetaKey, number>, seedExtra = 0, 
       }
     }
     if (!best) break;
-    best.owner = fid; best.base = true; best.tier = 2; best.troops = 40; best.wall = 1;
+    best.owner = fid; best.base = true; best.tier = 2; best.troops = human ? 40 : rules.enemyGarrison ?? 40; best.wall = 1;
     taken.add(best.id);
     if (human) {
       const mh = econ[fid].meta;
@@ -609,7 +616,7 @@ function buildWorld(rules: Rules, meta: Record<MetaKey, number>, seedExtra = 0, 
     // Twin HQ: a second one of theirs beside the first, like yours.
     if (rules.twinHQ) {
       const twin = adj[best.id].map((i) => nodes[i]).find((n) => n.owner === fid && !n.base) ?? adj[best.id].map((i) => nodes[i]).find((n) => n.owner === 0 && !taken.has(n.id));
-      if (twin) { twin.owner = fid; twin.base = true; twin.tier = 2; twin.troops = 40; twin.wall = 1; taken.add(twin.id); }
+      if (twin) { twin.owner = fid; twin.base = true; twin.tier = 2; twin.troops = rules.enemyGarrison ?? 40; twin.wall = 1; taken.add(twin.id); }
     }
     factions.push({ id: fid, tick: rnd() * rules.aiInterval, dead: 0, gold: rules.enemyGold, buyT: 2, tech: { conscription: rules.enemyTech ?? 0, logistics: rules.enemyTech ? 1 : 0 } });
   }
@@ -1278,7 +1285,7 @@ function step(w: World, dt: number) {
       if (d < td) { td = d; target = c; }
     }
     if (!target) continue;
-    const dmg = cannonDmg(n.cannon) * (isHuman(w, n.owner) ? 1 + META.cannon.per * econ(w, n.owner).meta.cannon / 100 : 1 + (adaptMult(w) - 1) * 0.5);
+    const dmg = cannonDmg(n.cannon) * (isHuman(w, n.owner) ? 1 + META.cannon.per * econ(w, n.owner).meta.cannon / 100 : 1 + (Math.min(GENERALS_CAP, adaptMult(w)) - 1) * 0.5);
     target.n -= dmg;
     const p = convoyPos(w, target);
     w.shots.push({ x1: n.x, y1: n.y, x2: p.x, y2: p.y, age: 0 });
