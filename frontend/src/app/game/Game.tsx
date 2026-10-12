@@ -155,7 +155,7 @@ interface Convoy { id: number; owner: number; n: number; from: number; to: numbe
 interface Shot { x1: number; y1: number; x2: number; y2: number; age: number }
 /** A column a general has planned but not yet sent, so a strike can land all at once. */
 interface Launch { at: number; from: number; to: number; n: number }
-interface Faction { id: number; tick: number; dead: number; gold: number; buyT: number; tech: { conscription: number; logistics: number }; queue?: Launch[] }
+interface Faction { id: number; tick: number; dead: number; gold: number; buyT: number; tech: { conscription: number; logistics: number }; queue?: Launch[]; seen?: number }
 
 interface Rules {
   level: number; endless: boolean; nodeCount: number; enemies: number;
@@ -324,9 +324,13 @@ function rulesFor(level: number, endless: boolean): Rules {
     enemyExtra: Math.min(3, Math.floor(L / 3)),
     enemyGold: L * 20,
     neutralBase: 6 + L * 2,
+    // 4, from 25, also thinks a move ahead: it counts what you could rush in
+    // to save a target, prizes what would cut your ground in two, answers the
+    // moment you send a column, routes round your guns, and allied generals
+    // pick one target and land on it together.
     // 3 is a general that holds a reserve, reinforces what you are about to
     // hit, times a pincer so every column lands together, and goes for your HQ.
-    aiSmart: level <= 8 ? 0 : level <= 16 ? 1 : level <= 20 ? 2 : 3,
+    aiSmart: level <= 8 ? 0 : level <= 16 ? 1 : level <= 20 ? 2 : level <= 24 ? 3 : 4,
     // Scrap and time no longer carry you: past twelve the generals answer the
     // Armoury you bring and keep growing the longer the war drags on.
     adapt: level >= 29 ? 0.02 : level >= 25 ? 0.015 : level >= 13 ? 0.006 : 0,
@@ -705,8 +709,10 @@ const edgeLen = (w: World, a: number, b: number) => Math.hypot(w.nodes[a].x - w.
 // The road from one outpost to another: the cheapest way through, with
 // the sender's own ground costing a step and anyone else's costing five, so a
 // column goes round the enemy where it can and through them where it must.
-function route(w: World, from: number, to: number, owner: number): number[] | null {
+function route(w: World, from: number, to: number, owner: number, wary = false): number[] | null {
   if (from === to) return null;
+  // A wary column counts the guns that cover each outpost on the way.
+  const danger = wary ? w.nodes.map((v) => w.nodes.reduce((s, g) => s + (g.cannon && g.owner !== 0 && !isAlly(w, g.owner, owner) && Math.hypot(g.x - v.x, g.y - v.y) < cannonRange(g, w) ? 1.5 * g.cannon : 0), 0)) : null;
   const dist = new Array(w.nodes.length).fill(Infinity) as number[];
   const prev = new Array(w.nodes.length).fill(-1) as number[];
   const done = new Array(w.nodes.length).fill(false) as boolean[];
@@ -717,7 +723,7 @@ function route(w: World, from: number, to: number, owner: number): number[] | nu
     if (u < 0 || u === to) break;
     done[u] = true;
     for (const v of w.adj[u]) {
-      const c = dist[u] + (isAlly(w, w.nodes[v].owner, owner) || v === to ? 1 : 5) + edgeLen(w, u, v) / 1000;
+      const c = dist[u] + (isAlly(w, w.nodes[v].owner, owner) || v === to ? 1 : 5) + edgeLen(w, u, v) / 1000 + (danger ? danger[v] : 0);
       if (c < dist[v]) { dist[v] = c; prev[v] = u; }
     }
   }
@@ -735,9 +741,9 @@ function shipOrder(w: World, n: Node) {
   for (const to of n.route.to) sendCount(w, n.id, to, each);
 }
 function send(w: World, from: number, to: number, frac: number) { sendCount(w, from, to, Math.floor(w.nodes[from].troops * frac)); }
-function sendCount(w: World, from: number, to: number, amount: number) {
+function sendCount(w: World, from: number, to: number, amount: number, wary = false) {
   const n = w.nodes[from];
-  const path = w.adj[from].includes(to) ? [from, to] : route(w, from, to, n.owner);
+  const path = w.adj[from].includes(to) ? [from, to] : route(w, from, to, n.owner, wary);
   if (!path) return;
   amount = Math.min(amount, Math.floor(n.troops));
   if (amount < 1) return;
@@ -880,16 +886,52 @@ function reinforce(w: World, f: Faction): Set<number> {
   return helped;
 }
 
+/** What the other side could still throw into an outpost before a column
+ *  that takes `eta` seconds lands: its neighbours of the same side that can
+ *  get there first, taken at under a third: nobody answers every blow at once.
+ *  Neutral ground has no friends. */
+function rescueOf(w: World, f: Faction, m: Node, eta: number): number {
+  if (m.owner === 0) return 0;
+  let s = 0;
+  for (const i of w.adj[m.id]) {
+    const k = w.nodes[i];
+    if (k.owner !== m.owner || k.mine) continue;
+    if (edgeLen(w, i, m.id) / convoySpeed(w, k.owner) > eta) continue;
+    s += reckon(w, f.id, k) * 0.3;
+  }
+  return s;
+}
+/** Whether taking this outpost cuts its holder's ground in two: some of it
+ *  would no longer reach an HQ, and could no longer be fed or reinforced. */
+function cutsLine(w: World, m: Node): boolean {
+  if (m.owner === 0) return false;
+  const o = m.owner;
+  const hqs = w.nodes.filter((n) => n.owner === o && n.base && n.id !== m.id);
+  if (!hqs.length) return false;
+  const seen = new Set<number>(hqs.map((n) => n.id));
+  for (const q = hqs.map((n) => n.id); q.length;) {
+    const i = q.shift()!;
+    for (const j of w.adj[i]) if (j !== m.id && !seen.has(j) && w.nodes[j].owner === o) { seen.add(j); q.push(j); }
+  }
+  return w.nodes.some((n) => n.owner === o && n.id !== m.id && !seen.has(n.id));
+}
+/** What a target is worth beyond its walls: an HQ, a mine, a cut in the line. */
+const prizeOf = (w: World, m: Node) => (m.base ? 1.5 : 0) + (m.mine ? 0.8 : 0) + (cutsLine(w, m) ? 1.2 : 0) + m.prod * 0.2 + (m.hub ? 1 : 0);
+
 /** A pincer: every column leaves at the moment that has them all land on the
  *  target together, so the garrison has no time to answer the first before
  *  the rest are on it. */
 function planStrike(w: World, f: Faction, target: Node, from: Node[], frac: number) {
+  const gen = (n: Node) => w.factions.find((g) => g.id === n.owner) ?? f;
   const legs = from
-    .map((n) => ({ n, amt: Math.floor(Math.max(0, n.troops - holdOf(w, f, n)) * frac), eta: etaOf(w, n.id, target.id, f.id) }))
+    .map((n) => ({ n, amt: Math.floor(Math.max(0, n.troops - holdOf(w, gen(n), n)) * frac), eta: etaOf(w, n.id, target.id, n.owner) }))
     .filter((l) => l.amt >= 1 && l.eta < Infinity);
   if (!legs.length) return;
   const slowest = Math.max(...legs.map((l) => l.eta));
-  f.queue = legs.map((l) => ({ at: w.time + (slowest - l.eta), from: l.n.id, to: target.id, n: l.amt }));
+  for (const l of legs) {
+    const g = gen(l.n);
+    (g.queue ??= []).push({ at: w.time + (slowest - l.eta), from: l.n.id, to: target.id, n: l.amt });
+  }
 }
 /** Send the planned columns whose time has come. */
 function runQueue(w: World, f: Faction) {
@@ -899,7 +941,7 @@ function runQueue(w: World, f: Faction) {
     if (q.at > w.time) { rest.push(q); continue; }
     const n = w.nodes[q.from];
     if (n.owner !== f.id || isAlly(w, w.nodes[q.to].owner, f.id)) continue;
-    sendCount(w, q.from, q.to, Math.min(q.n, Math.floor(n.troops)));
+    sendCount(w, q.from, q.to, Math.min(q.n, Math.floor(n.troops)), w.rules.aiSmart >= 4);
   }
   f.queue = rest;
 }
@@ -911,6 +953,9 @@ function aiTick(w: World, f: Faction) {
   const r = w.rules;
   const frac = r.sendFrac;
   const careful = r.aiSmart >= 3;
+  // The cleverest think a move ahead: what you could send to save the target,
+  // what a capture would cut off, and they walk round your guns.
+  const shrewd = r.aiSmart >= 4;
   // The best generals see the blow coming and stop it with men from next
   // door, rather than only running from it.
   const helped = careful ? reinforce(w, f) : new Set<number>();
@@ -952,16 +997,18 @@ function aiTick(w: World, f: Faction) {
       const incoming = w.convoys.filter((c) => c.to === m.id && c.owner === m.owner && seesColumn(w, f.id, c)).reduce((s, c) => s + c.n, 0);
       // A canny general counts what the guns on the way will cost.
       const guns = r.aiSmart >= 1 ? w.nodes.filter((g) => !isAlly(w, g.owner, f.id) && g.cannon && Math.hypot(g.x - m.x, g.y - m.y) < cannonRange(g, w)).reduce((s, g) => s + cannonDmg(g.cannon) * 3, 0) : 0;
-      const need = (reckon(w, f.id, m) + incoming) * wallMult(m) + 1 + guns;
+      const rescue = shrewd ? rescueOf(w, f, m, edgeLen(w, n.id, m.id) / convoySpeed(w, f.id)) : 0;
+      const need = (reckon(w, f.id, m) + incoming + rescue) * wallMult(m) + 1 + guns;
       if (avail < need * (m.owner === 0 ? 1.1 : 1.25)) continue;
       let score = (isHuman(w, m.owner) ? 3 : m.owner === 0 ? 1 : 2) + (m.base ? 2.5 : 0) + m.prod * 0.4 - need / avail + (m.hub ? 2 : 0) + (m.loot ? 1.5 : 0) + (m.gold ? 1 : 0);
       if (isHuman(w, m.owner) && m.cannon && r.aiSmart === 0) score += 1;
       // Cut off the head: your HQ is worth more the thinner it is held, and an
       // outpost you have just emptied sending columns out is the one to hit.
       if (careful && isHuman(w, m.owner)) score += (m.base ? 2 : 0) + (m.troops < capOf(m) * 0.4 ? 1.5 : 0);
+      if (shrewd && m.owner !== 0) score += prizeOf(w, m);
       if (score > bestScore) { bestScore = score; best = m; }
     }
-    if (best) { sendCount(w, n.id, best.id, Math.floor(avail)); continue; }
+    if (best) { sendCount(w, n.id, best.id, Math.floor(avail), shrewd); continue; }
     // Full and nothing it can take: bleed the weakest of yours anyway.
     if (n.troops >= capOf(n) * 0.95) {
       const yours = hostile.filter((m) => isHuman(w, m.owner)).sort((a, b) => reckon(w, f.id, a) * wallMult(a) - reckon(w, f.id, b) * wallMult(b));
@@ -986,24 +1033,42 @@ function aiTick(w: World, f: Faction) {
   // for the next.
   // A strike already planned is left to land before the next is thought of.
   if (f.queue?.length) return;
+  // A war council: allied generals pick one target between them and land on
+  // it together. The first of them alive speaks for all.
+  const council = shrewd && !!r.coalition && !w.mp;
+  const allies = council ? w.factions.filter((g) => !g.dead && isAlly(w, g.id, f.id)) : [f];
+  if (council && allies.some((g) => g.queue?.length)) return;
+  const ours = (n: Node) => (council ? allies.some((g) => g.id === n.owner) : n.owner === f.id);
   let bestT: Node | null = null; let bestRatio = Infinity; let bestFrom: Node[] = [];
+  let goT: Node | null = null; let goScore = -Infinity; let goFrom: Node[] = [];
   for (const m of w.nodes) {
     if (isAlly(w, m.owner, f.id) || (truceOn(w) && m.owner !== 0) || keepsOut(w, m)) continue;
-    const ring = w.adj[m.id].filter((i) => w.nodes[i].owner === f.id);
+    const ring = w.adj[m.id].filter((i) => ours(w.nodes[i]));
     if (!ring.length) continue;
     const ids = new Set<number>(ring);
-    for (const i of ring) for (const j of w.adj[i]) if (w.nodes[j].owner === f.id && j !== m.id) ids.add(j);
+    for (const i of ring) for (const j of w.adj[i]) if (ours(w.nodes[j]) && j !== m.id) ids.add(j);
     const from = [...ids].map((i) => w.nodes[i]).filter((n) => n.troops >= 10);
     if (!from.length) continue;
     const incoming = w.convoys.filter((c) => c.to === m.id && c.owner === m.owner && seesColumn(w, f.id, c)).reduce((s, c) => s + c.n, 0);
-    const need = (reckon(w, f.id, m) + incoming) * wallMult(m) + 1 + (m.cannon ? 15 * m.cannon : 0);
-    const avail = from.reduce((s, n) => s + Math.max(0, n.troops - (careful ? holdOf(w, f, n) : 0)) * frac, 0);
+    const eta = shrewd ? Math.max(...from.map((n) => Math.hypot(n.x - m.x, n.y - m.y) / convoySpeed(w, n.owner))) : 0;
+    const rescue = shrewd ? rescueOf(w, f, m, eta) : 0;
+    const need = (reckon(w, f.id, m) + incoming + rescue) * wallMult(m) + 1 + (m.cannon ? 15 * m.cannon : 0);
+    const gen = (n: Node) => w.factions.find((g) => g.id === n.owner) ?? f;
+    const avail = from.reduce((s, n) => s + Math.max(0, n.troops - (careful ? holdOf(w, gen(n), n) : 0)) * frac, 0);
     const ratio = need / avail;
     if (ratio < bestRatio) { bestRatio = ratio; bestT = m; bestFrom = from; }
+    // Of what it can break, a shrewd general takes what is worth most.
+    if (shrewd && ratio < r.aiMargin) {
+      const sc = prizeOf(w, m) + (isHuman(w, m.owner) ? 1 : 0) - ratio;
+      if (sc > goScore) { goScore = sc; goT = m; goFrom = from; }
+    }
   }
+  if (goT) { bestT = goT; bestFrom = goFrom; bestRatio = 0; }
+  // The others in the council leave the launch to the one who speaks, and stage.
+  const follower = council && allies[0].id !== f.id;
   if (!bestT) return;
-  if (bestRatio < r.aiMargin) {
-    if (careful) planStrike(w, f, bestT, bestFrom, frac);
+  if (bestRatio < r.aiMargin && !follower) {
+    if (careful) planStrike(w, f, bestT, bestFrom, shrewd ? Math.min(0.9, frac + 0.15) : frac);
     else for (const n of bestFrom) send(w, n.id, bestT.id, frac);
     return;
   }
@@ -1237,6 +1302,11 @@ function step(w: World, dt: number) {
   for (const f of w.factions) {
     if (f.dead) continue;
     f.tick -= dt;
+    if (w.rules.aiSmart >= 4) {
+      const fresh = w.convoys.some((c) => c.id > (f.seen ?? 0) && c.owner !== 0 && !isAlly(w, c.owner, f.id) && seesColumn(w, f.id, c));
+      f.seen = w.nextId - 1;
+      if (fresh) f.tick = Math.min(f.tick, 0.2);
+    }
     if (f.tick <= 0) { aiTick(w, f); f.tick = w.rules.aiInterval * (w.rules.aiSmart >= 3 ? 0.6 : 1); }
     if (w.rules.aiSmart >= 3) runQueue(w, f);
     f.buyT -= dt;
