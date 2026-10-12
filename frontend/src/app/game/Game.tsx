@@ -110,9 +110,9 @@ const metaCost = (key: MetaKey, lvl: number) => {
 
 // ── Save ───────────────────────────────────────────────────────────────────
 
-interface Save { scrap: number; cleared: number; bestTime: number; meta: Record<MetaKey, number>; cb: boolean; teamBest: number }
+interface Save { scrap: number; cleared: number; bestTime: number; meta: Record<MetaKey, number>; cb: boolean; teamBest: number; tries: Record<number, number>; skill: number }
 const SAVE_KEY = 'redline.v1';
-const freshSave = (): Save => ({ scrap: 0, cleared: 0, bestTime: 0, cb: false, teamBest: 0, meta: { prod: 0, speed: 0, gold: 0, cannon: 0, masonry: 0, range: 0, vault: 0, cap: 0, garrison: 0 } });
+const freshSave = (): Save => ({ scrap: 0, cleared: 0, bestTime: 0, cb: false, teamBest: 0, tries: {}, skill: 1, meta: { prod: 0, speed: 0, gold: 0, cannon: 0, masonry: 0, range: 0, vault: 0, cap: 0, garrison: 0 } });
 function loadSave(): Save {
   try {
     const raw = localStorage.getItem(SAVE_KEY);
@@ -201,6 +201,8 @@ interface Rules {
   /** The generals are at peace with each other: they share eyes, never fight
    *  one another and cross each other's ground, and all of it falls on you. */
   coalition?: boolean;
+  /** How far the generals may outgrow you (the usual cap unless said), and the edge a run was set at. */
+  genCap?: number; edge?: number;
   /** The garrison each general's HQ opens with (40 unless said). */
   enemyGarrison?: number;
   /** Every general's HQ opens at size 4 with four walls and four cannons. */
@@ -233,7 +235,7 @@ function adaptMult(w: World): number {
 const GENERALS_CAP = 1.5;
 const generalsMult = (w: World) => {
   const m = (1 + (w.rules.escalate ?? 0) * (w.time / 60)) * adaptMult(w);
-  return w.mp ? m : Math.min(GENERALS_CAP, m);
+  return w.mp ? m : Math.min(w.rules.genCap ?? GENERALS_CAP, m);
 };
 
 const isHuman = (w: World, o: number) => o in w.econ;
@@ -392,6 +394,36 @@ function rulesFor(level: number, endless: boolean): Rules {
     default: return base;
   }
   }
+}
+
+// From 29 the generals' edge is set by you: hard on the first try, a notch
+// easier every time you fall on that level, and the whole ladder steeper or
+// gentler as your wins show how good you are. Learn it in a handful of tries.
+const ADAPTIVE_FROM = 29;
+const EDGE_START = 2.0;
+const EDGE_STEP = 0.3;
+function edgeFor(s: Save, level: number): number {
+  return Math.max(0.3, Math.min(3, EDGE_START * s.skill - EDGE_STEP * (s.tries[level] ?? 0)));
+}
+/** A level's generals at a given edge: their garrison, ground, purse, how far they may outgrow you and how fast. */
+function withEdge(r: Rules, k: number): Rules {
+  return {
+    ...r, edge: k,
+    enemyGarrison: Math.round(40 + 40 * k),
+    enemyExtra: r.enemyExtra + Math.round(k * 0.75),
+    enemyGold: Math.round(r.enemyGold * (0.5 + 0.6 * k)),
+    genCap: 1.3 + 0.35 * k,
+    escalate: 0.01 + 0.02 * k,
+    blurb: `${r.blurb ?? ''} Generals' edge: ${k.toFixed(1)}. It eases a little every time you fall here.`,
+  };
+}
+/** After a run on an adaptive level: a loss is counted; a win reads how hard it was and tunes the ladder. */
+function recordTry(s: Save, level: number, won: boolean) {
+  if (level < ADAPTIVE_FROM) return;
+  const t = s.tries[level] ?? 0;
+  if (!won) { s.tries[level] = t + 1; return; }
+  s.skill = Math.max(0.6, Math.min(1.8, s.skill + (t === 0 ? 0.15 : t <= 2 ? 0.05 : t <= 6 ? 0 : -0.1)));
+  delete s.tries[level];
 }
 
 // Seeded so a level is the same map every attempt: dying to it teaches it.
@@ -1286,7 +1318,7 @@ function step(w: World, dt: number) {
       if (d < td) { td = d; target = c; }
     }
     if (!target) continue;
-    const dmg = cannonDmg(n.cannon) * (isHuman(w, n.owner) ? 1 + META.cannon.per * econ(w, n.owner).meta.cannon / 100 : 1 + (Math.min(GENERALS_CAP, adaptMult(w)) - 1) * 0.5);
+    const dmg = cannonDmg(n.cannon) * (isHuman(w, n.owner) ? 1 + META.cannon.per * econ(w, n.owner).meta.cannon / 100 : 1 + (Math.min(w.rules.genCap ?? GENERALS_CAP, adaptMult(w)) - 1) * 0.5);
     target.n -= dmg;
     const p = convoyPos(w, target);
     w.shots.push({ x1: n.x, y1: n.y, x2: p.x, y2: p.y, age: 0 });
@@ -2006,7 +2038,8 @@ export default function Game() {
   const start = useCallback((level: number, endless: boolean) => {
     const s = loadSave();
     ME = 1;
-    worldRef.current = buildWorld(rulesFor(level, endless), s.meta);
+    const base = rulesFor(level, endless);
+    worldRef.current = buildWorld(!endless && level >= ADAPTIVE_FROM ? withEdge(base, edgeFor(s, level)) : base, s.meta);
     pausedRef.current = true; speedRef.current = 0.5; sendPctRef.current = 1; settledRef.current = false;
     setIntro(true);
     dragRef.current = null;
@@ -2185,8 +2218,10 @@ export default function Game() {
       const first = s.cleared < w.rules.level;
       s.scrap += Math.round((10 + w.rules.level * 4) * (first ? 1.5 : 1));
       s.cleared = Math.max(s.cleared, w.rules.level);
+      recordTry(s, w.rules.level, true);
     } else {
       s.scrap += Math.min(6, Math.floor(w.time / 45));
+      recordTry(s, w.rules.level, false);
     }
     storeSave(s); setSave(s);
   }, []);
