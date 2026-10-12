@@ -110,9 +110,9 @@ const metaCost = (key: MetaKey, lvl: number) => {
 
 // ── Save ───────────────────────────────────────────────────────────────────
 
-interface Save { scrap: number; cleared: number; bestTime: number; meta: Record<MetaKey, number>; cb: boolean; teamBest: number; tries: Record<number, number>; skill: number }
+interface Save { scrap: number; cleared: number; bestTime: number; meta: Record<MetaKey, number>; cb: boolean; teamBest: number }
 const SAVE_KEY = 'redline.v1';
-const freshSave = (): Save => ({ scrap: 0, cleared: 0, bestTime: 0, cb: false, teamBest: 0, tries: {}, skill: 1, meta: { prod: 0, speed: 0, gold: 0, cannon: 0, masonry: 0, range: 0, vault: 0, cap: 0, garrison: 0 } });
+const freshSave = (): Save => ({ scrap: 0, cleared: 0, bestTime: 0, cb: false, teamBest: 0, meta: { prod: 0, speed: 0, gold: 0, cannon: 0, masonry: 0, range: 0, vault: 0, cap: 0, garrison: 0 } });
 function loadSave(): Save {
   try {
     const raw = localStorage.getItem(SAVE_KEY);
@@ -396,16 +396,10 @@ function rulesFor(level: number, endless: boolean): Rules {
   }
 }
 
-// From 29 the generals' edge is set by you: hard on the first try, a notch
-// easier every time you fall on that level, and the whole ladder steeper or
-// gentler as your wins show how good you are. Learn it in a handful of tries.
-const ADAPTIVE_FROM = 29;
-const EDGE_START = 2.0;
-const EDGE_STEP = 0.3;
-function edgeFor(s: Save, level: number): number {
-  return Math.max(0.3, Math.min(3, EDGE_START * s.skill - EDGE_STEP * (s.tries[level] ?? 0)));
-}
-/** A level's generals at a given edge: their garrison, ground, purse, how far they may outgrow you and how fast. */
+// From 29 each level sets the generals' edge, the same on every try: their
+// garrison, ground, purse, how far they may outgrow you and how fast.
+// Somewhere between a fair fight (0.5) and a hopeless one (3).
+const EDGE: Record<number, number> = { 29: 1.3, 30: 1.4, 31: 1.5, 32: 1.7, 33: 1.6 };
 function withEdge(r: Rules, k: number): Rules {
   return {
     ...r, edge: k,
@@ -414,16 +408,7 @@ function withEdge(r: Rules, k: number): Rules {
     enemyGold: Math.round(r.enemyGold * (0.5 + 0.6 * k)),
     genCap: 1.3 + 0.35 * k,
     escalate: 0.01 + 0.02 * k,
-    blurb: `${r.blurb ?? ''} Generals' edge: ${k.toFixed(1)}. It eases a little every time you fall here.`,
   };
-}
-/** After a run on an adaptive level: a loss is counted; a win reads how hard it was and tunes the ladder. */
-function recordTry(s: Save, level: number, won: boolean) {
-  if (level < ADAPTIVE_FROM) return;
-  const t = s.tries[level] ?? 0;
-  if (!won) { s.tries[level] = t + 1; return; }
-  s.skill = Math.max(0.6, Math.min(1.8, s.skill + (t === 0 ? 0.15 : t <= 2 ? 0.05 : t <= 6 ? 0 : -0.1)));
-  delete s.tries[level];
 }
 
 // Seeded so a level is the same map every attempt: dying to it teaches it.
@@ -2039,7 +2024,7 @@ export default function Game() {
     const s = loadSave();
     ME = 1;
     const base = rulesFor(level, endless);
-    worldRef.current = buildWorld(!endless && level >= ADAPTIVE_FROM ? withEdge(base, edgeFor(s, level)) : base, s.meta);
+    worldRef.current = buildWorld(!endless && EDGE[level] ? withEdge(base, EDGE[level]) : base, s.meta);
     pausedRef.current = true; speedRef.current = 0.5; sendPctRef.current = 1; settledRef.current = false;
     setIntro(true);
     dragRef.current = null;
@@ -2218,10 +2203,8 @@ export default function Game() {
       const first = s.cleared < w.rules.level;
       s.scrap += Math.round((10 + w.rules.level * 4) * (first ? 1.5 : 1));
       s.cleared = Math.max(s.cleared, w.rules.level);
-      recordTry(s, w.rules.level, true);
     } else {
       s.scrap += Math.min(6, Math.floor(w.time / 45));
-      recordTry(s, w.rules.level, false);
     }
     storeSave(s); setSave(s);
   }, []);
