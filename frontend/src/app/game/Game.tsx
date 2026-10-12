@@ -13,7 +13,7 @@
 // on the map (outposts already held, a fatter purse) and sharper generals.
 // Clear every red outpost to win. Lose your last one and it's over.
 //
-// Campaign: thirty-three levels, each meaner than the last. The Long War: one
+// Campaign: thirty-seven levels, each meaner than the last. The Long War: one
 // map many screens tall, three factions stacked up it, scrolled with the
 // arrows, won the same way. Scrap earned either way buys permanent upgrades
 // in the Armoury.
@@ -28,7 +28,7 @@ import { Room, netAvailable, newCode, type Peer } from './net';
 
 const MAP_W = 360;
 const MAP_H = 600;
-const CAMPAIGN_LEVELS = 33;
+const CAMPAIGN_LEVELS = 37;
 const ENDLESS_UNLOCK = 3;
 
 const DEFAULT_COLORS: Record<number, string> = { 0: '#4a4a4a', 1: '#ffffff', 2: '#ff3b3b', 3: '#ff8a3b', 4: '#c04bff', 5: '#2ee6d6', 6: '#b8ff3b', 7: '#ff4fd8', 8: '#ffe84d' };
@@ -391,6 +391,10 @@ function rulesFor(level: number, endless: boolean): Rules {
     case 31: return { ...base, title: 'HYDRA', blurb: 'Six allied generals, each with a small start, sharing everything they see. Each head is weak. Together they think as one.', coalition: true, enemies: 6, nodeCount: 56, mapH: 1900, fog: 2, enemyExtra: 1, enemyGold: 80, enemyGarrison: 50 };
     case 32: return { ...base, title: 'ENDGAME', blurb: 'Five allied generals with twin HQs, heavy fog and roads that shift. Only a small edge in numbers: the cleverest generals in the game, on close to even terms. The last level.', coalition: true, enemies: 5, twinHQ: true, fog: 1, shift: 50, mines: 6, nodeCount: 64, mapH: 2200, enemyExtra: 1, enemyGold: 140, enemyGarrison: 60, aiInterval: 0.7 };
     case 33: return { ...base, title: 'THE SERPENT', blurb: 'Bonus. Every outpost has two roads at most: the map is one long winding serpent, and every fight is single file through the guns. Three allied generals hold the coils ahead and close in on you from both ends. Loot and mines lie along the body for whoever gets there first.', coalition: true, enemies: 3, maxDeg: 2, nodeCount: 34, mapH: 1500, fog: 2, truce: 20, mines: 4, loot: { count: 4, troops: 60 }, goldPiles: { count: 3, gold: 120 }, enemyExtra: 1, enemyGold: 140, enemyGarrison: 60, enemyWalls: 1, aiInterval: 0.8 };
+    case 34: return { ...base, title: 'CROSSFIRE', blurb: 'Five sectors and one hub. Four allied generals hold the other four and all of them want the stash in the middle. Take the hub and you are fighting all four at once; leave it and they take it together.', coalition: true, choke: true, enemies: 4, hubLoot: 150, fog: 2, nodeCount: 30, mapH: 1300, enemyExtra: 1, enemyGold: 120 };
+    case 35: return { ...base, title: 'THE LONG MARCH', blurb: 'A map three screens tall, three roads at most from any outpost, and three allied generals at the far end. Every column walks a long way. Keep your supply lines fed or watch them get cut.', coalition: true, enemies: 3, nodeCount: 50, mapH: 2600, maxDeg: 3, truce: 30, mines: 5, fog: 3, enemyExtra: 1, enemyGold: 120 };
+    case 36: return { ...base, title: 'QUICKSAND', blurb: 'The roads shift every 35 seconds. Four allied generals with twin HQs, and no line you hold stays a line for long. Read the map again every time it moves.', coalition: true, enemies: 4, twinHQ: true, shift: 35, maxDeg: 3, nodeCount: 40, mapH: 1500, fog: 2, enemyExtra: 1, enemyGold: 120 };
+    case 37: return { ...base, title: 'WARLORDS', blurb: 'Seven allied generals, every colour the war has, spread over a huge map rich with mines. They share everything, they feed each other, and they pick their targets together. The real last level.', coalition: true, enemies: 7, nodeCount: 76, mapH: 2600, mines: 8, fog: 2, loot: { count: 4, troops: 60 }, enemyExtra: 1, enemyGold: 100, aiInterval: 0.8 };
     default: return base;
   }
   }
@@ -399,7 +403,7 @@ function rulesFor(level: number, endless: boolean): Rules {
 // From 29 each level sets the generals' edge, the same on every try: their
 // garrison, ground, purse, how far they may outgrow you and how fast.
 // Somewhere between a fair fight (0.5) and a hopeless one (3).
-const EDGE: Record<number, number> = { 29: 1.3, 30: 1.4, 31: 1.5, 32: 1.7, 33: 1.6 };
+const EDGE: Record<number, number> = { 29: 1.3, 30: 1.4, 31: 1.5, 32: 1.7, 33: 1.6, 34: 1.4, 35: 1.5, 36: 1.5, 37: 1.6 };
 function withEdge(r: Rules, k: number): Rules {
   return {
     ...r, edge: k,
@@ -871,13 +875,15 @@ function incomingTo(w: World, f: Faction, n: Node): { total: number; soonest: nu
 function reinforce(w: World, f: Faction): Set<number> {
   const helped = new Set<number>();
   if (truceOn(w)) return helped;
+  // A shrewd general in a coalition stands by its allies as by itself.
+  const mutual = w.rules.aiSmart >= 4 && !!w.rules.coalition && !w.mp;
   for (const n of w.nodes) {
-    if (n.owner !== f.id) continue;
+    if (n.owner !== f.id && !(mutual && n.owner >= 2 && isAlly(w, n.owner, f.id))) continue;
     const { total, soonest } = incomingTo(w, f, n);
     if (!total) continue;
     const wm = wallMult(n);
-    // Help already marching to it counts: no sending twice for one attack.
-    const onRoad = w.convoys.filter((c) => c.to === n.id && c.owner === f.id).reduce((s, c) => s + c.n, 0);
+    // Help already marching to it counts, whoever sent it: no sending twice for one attack.
+    const onRoad = w.convoys.filter((c) => c.to === n.id && isAlly(w, c.owner, f.id)).reduce((s, c) => s + c.n, 0);
     const short = total / wm - n.troops - onRoad + 3;
     if (short <= 0) continue;
     const near = new Set<number>(w.adj[n.id]);
@@ -1033,12 +1039,18 @@ function aiTick(w: World, f: Faction) {
   // Nothing full ever sits idle: an outpost near its cap with nothing to
   // take ships most of itself, by road, to the thinnest outpost of its that
   // touches the enemy or the unclaimed ground. Its production never stalls.
-  const fronts = w.nodes.filter((n) => n.owner === f.id && w.adj[n.id].some((i) => !isAlly(w, w.nodes[i].owner, f.id)));
+  // A shrewd general's rear never idles: anything behind the line with men to
+  // spare ships them on, to the front that is under the most pressure, its
+  // own or an ally's. A general with no front of its own feeds its allies'.
+  const touchesEnemy = (n: Node) => w.adj[n.id].some((i) => !isAlly(w, w.nodes[i].owner, f.id));
+  const fronts = w.nodes.filter((n) => (n.owner === f.id || (shrewd && n.owner >= 2 && isAlly(w, n.owner, f.id))) && touchesEnemy(n));
+  const pressure = (n: Node) => w.adj[n.id].reduce((s, i) => { const m = w.nodes[i]; return s + (m.owner !== 0 && !isAlly(w, m.owner, f.id) ? reckon(w, f.id, m) : 0); }, 0) - n.troops * wallMult(n);
+  const ranked = shrewd ? [...fronts].sort((a, b) => pressure(b) - pressure(a)) : fronts;
   for (const n of w.nodes) {
-    if (n.owner !== f.id || n.mine || n.troops < capOf(n) * 0.8) continue;
-    if (fronts.includes(n)) continue;
-    const to = fronts.filter((m) => m.id !== n.id).sort((a, b) => a.troops - b.troops)[0];
-    if (to) send(w, n.id, to.id, 0.7);
+    if (n.owner !== f.id || n.mine || touchesEnemy(n)) continue;
+    if (n.troops < (shrewd ? Math.max(15, capOf(n) * 0.35) : capOf(n) * 0.8)) continue;
+    const to = shrewd ? ranked.find((m) => m.id !== n.id) : fronts.filter((m) => m.id !== n.id).sort((a, b) => a.troops - b.troops)[0];
+    if (to) send(w, n.id, to.id, shrewd ? 0.8 : 0.7);
   }
   // Nothing falls to one column: the general picks the target that is
   // nearest to falling, stages for it — every outpost of its that touches
@@ -1158,9 +1170,10 @@ function aiSpend(w: World, f: Faction) {
   let bought = 0;
   for (let i = 0; i < wants.length; i++) {
     const want = wants[i];
-    if (f.gold < want.cost) { if (!careful || i < 2) return; continue; }
+    // A shrewd general never sits on a purse: what it cannot afford it skips.
+    if (f.gold < want.cost) { if (!careful || (i < 2 && w.rules.aiSmart < 4)) return; continue; }
     f.gold -= want.cost; want.buy();
-    if (++bought >= (careful ? 3 : 2)) return;
+    if (++bought >= (w.rules.aiSmart >= 4 ? 4 : careful ? 3 : 2)) return;
   }
 }
 
