@@ -15,6 +15,7 @@
 
 import { randomInt, randomUUID } from 'node:crypto';
 import { CLIPPERS } from '@/lib/clipping';
+import { withoutHiddenPersonas } from '@/lib/vids-hidden-personas';
 import pg from 'pg';
 import { createClient, type SupabaseClient } from '@supabase/supabase-js';
 import {
@@ -499,7 +500,10 @@ export async function listLibrary(): Promise<VidsLibraryPayload> {
     links: l.rows.map(toLink),
     clipable: c.rows.map(toClipable).filter((x): x is VidClipableFlag => x !== null),
   };
-  return CLIPPERS ? clipableOnly(all) : all;
+  // The persona videos switched off by hand in code go first, for everybody;
+  // see lib/vids-hidden-personas. The clippers' own cut comes after.
+  const shown = withoutHiddenPersonas(all);
+  return CLIPPERS ? clipableOnly(shown) : shown;
 }
 
 /** The library as the clipper deployment is allowed to see it: only what has
