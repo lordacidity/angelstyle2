@@ -16,6 +16,32 @@ import * as store from "./store.js";
 import * as filesStore from "./filesStore.js";
 import * as templates from "./templates.js";
 import { chat as deepseekChat, parseJson as deepseekParseJson } from "./deepseek.js";
+import { scrubVideoBytes } from "./videoMetadata.js";
+
+// Every video that reaches a phone goes with its metadata stripped. It is done
+// to the file itself, where it sits in the Incoming folder — once when it is
+// uploaded, and again before each push, which catches a file that was dropped
+// into the folder by hand (the second pass finds nothing and writes nothing).
+// The picture and the sound are untouched: see videoMetadata.ts.
+const VIDEO_EXT = new Set([".mp4", ".mov", ".m4v", ".webm", ".mkv", ".3gp"]);
+const STRIP_MAX_BYTES = 1.5 * 1024 * 1024 * 1024;
+function stripMetadata(filePath: string): void {
+  try {
+    if (!VIDEO_EXT.has(path.extname(filePath).toLowerCase())) return;
+    if (fs.statSync(filePath).size > STRIP_MAX_BYTES) {
+      console.warn(`[metadata] ${path.basename(filePath)} is too big to strip here — it goes as it is`);
+      return;
+    }
+    const bytes = fs.readFileSync(filePath);
+    const report = scrubVideoBytes(bytes);
+    if (report.changed) {
+      fs.writeFileSync(filePath, bytes);
+      console.log(`[metadata] stripped ${path.basename(filePath)}`);
+    }
+  } catch (err) {
+    console.warn(`[metadata] could not strip ${path.basename(filePath)}:`, String(err));
+  }
+}
 
 // Single source of truth lives at the repo-root .env (phonedeck/.env). The Next
 // app loads it via next.config, and we read the same file here so both runtimes
@@ -183,6 +209,10 @@ app.get("/api/files", (_req, res) => {
 
 app.post("/api/upload", upload.array("files"), (req, res) => {
   const files = (req.files as Express.Multer.File[] | undefined) ?? [];
+  for (const f of files) {
+    stripMetadata(f.path);
+    try { f.size = fs.statSync(f.path).size; } catch { /* as multer counted it */ }
+  }
   res.json({ ok: true, files: files.map((f) => ({ name: f.filename, size: f.size })) });
 });
 
@@ -270,6 +300,7 @@ app.post("/api/push", async (req, res) => {
     return;
   }
   const filePath = watcher.filePath(fileName);
+  stripMetadata(filePath);
   const phoneTargetDir = getSettings().phoneTargetDir;
   const results = await Promise.all(
     serials.map((s) => pushFile(s, filePath, phoneTargetDir)),
@@ -464,6 +495,7 @@ app.post("/api/push-theme", async (req, res) => {
   const reachable = serials.filter((s) => ready.has(s));
 
   const filePath = watcher.filePath(fileName);
+  stripMetadata(filePath);
   const phoneTargetDir = getSettings().phoneTargetDir;
   const results = await Promise.all(
     reachable.map((s) => pushFile(s, filePath, phoneTargetDir)),

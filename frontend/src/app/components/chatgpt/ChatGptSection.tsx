@@ -35,6 +35,7 @@
 // zoom reads as a camera push-in. Clicking a pick's name highlights just the
 // name, so the next zoom lands on it. The pill's ↺ (or Ctrl 0) resets the zoom.
 
+import { stripVideoMetadata } from '@/lib/videoMetadata';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import s from './ChatGpt.module.css';
 import { askChatGpt, buildBlocks, replyToText, totalLen, type Block, type Direction, type Reply, type Run } from './reply';
@@ -485,7 +486,7 @@ export function ChatGptSection({ active }: { active: boolean }) {
         signal: ctrl.signal,
         onProgress: (done, total) => setRender({ label: `Rendering ${Math.round((done / total) * 100)}%`, pct: done / total }),
       });
-      downloadBlob(blob, filename);
+      downloadBlob(await stripVideoMetadata(blob), filename);
       setRenderNote({ ok: true, text: `Saved ${filename}` });
     } catch (err) {
       if (!ctrl.signal.aborted) setRenderNote({ ok: false, text: err instanceof Error ? err.message : String(err) });

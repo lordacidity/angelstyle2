@@ -7,6 +7,7 @@
 // with a scrubber, so the visuals can be checked frame by frame; Start
 // renders the MP4 and downloads it. Not yet wired into Vids' Bottom card.
 
+import { stripVideoMetadata } from '@/lib/videoMetadata';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import {
   ACTIVITY,
@@ -277,7 +278,7 @@ export function TradeSection({ active }: { active: boolean }) {
         signal: ctrl.signal,
         onProgress: (done, total) => setBusy({ label: `Rendering ${Math.round((done / total) * 100)}%`, pct: done / total }),
       });
-      downloadBlob(blob, filename);
+      downloadBlob(await stripVideoMetadata(blob), filename);
       setNote({ ok: true, text: `Saved ${filename} (${seconds.toFixed(1)}s)` });
     } catch (err) {
       if (!ctrl.signal.aborted) setNote({ ok: false, text: err instanceof Error ? err.message : String(err) });

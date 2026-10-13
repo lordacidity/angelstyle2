@@ -9,6 +9,7 @@
 // fit. Export re-records the clip in real time through MediaRecorder; its
 // bitrate slider is real codec compression on top of the shader's.
 
+import { stripVideoMetadata } from '@/lib/videoMetadata';
 import { useCallback, useEffect, useRef, useState, type ChangeEvent, type DragEvent, type PointerEvent, type WheelEvent } from 'react';
 
 type Key =
@@ -493,9 +494,9 @@ export function VideoEditorSection({ active, tabs }: { active: boolean; tabs?: R
     const rec = new MediaRecorder(stream, { mimeType: mime || undefined, videoBitsPerSecond: bps });
     const chunks: Blob[] = [];
     rec.ondataavailable = (e) => { if (e.data.size) chunks.push(e.data); };
-    rec.onstop = () => {
+    rec.onstop = async () => {
       const type = rec.mimeType || 'video/webm';
-      const url = URL.createObjectURL(new Blob(chunks, { type }));
+      const url = URL.createObjectURL(await stripVideoMetadata(new Blob(chunks, { type })));
       const a = document.createElement('a');
       a.href = url;
       a.download = `${file.name}-lowfi.${type.includes('mp4') ? 'mp4' : 'webm'}`;

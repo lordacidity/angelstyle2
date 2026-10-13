@@ -1,5 +1,6 @@
 'use client';
 
+import { stripVideoMetadata } from '@/lib/videoMetadata';
 import { useState, useRef } from 'react';
 import type { MutableRefObject, RefObject } from 'react';
 
@@ -740,7 +741,7 @@ export function useRecording(config: UseRecordingConfig) {
       if (!buffer) throw new Error('No buffer received from output');
       if (includeEditRef.current) buffer = await mergeWithEdit(buffer, clipDuration);
 
-      const blob = new Blob([buffer], { type: 'video/mp4' });
+      const blob = await stripVideoMetadata(new Blob([buffer], { type: 'video/mp4' }));
 
       // Filename = short, readable version of the on-card caption (word-boundary
       // truncated). Falls back to the old row/id naming when there's no caption.

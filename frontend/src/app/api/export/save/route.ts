@@ -6,6 +6,7 @@
 //
 // Body = raw video bytes. Query: ?name= = desired (pre-extension) filename.
 
+import { scrubVideoBytes } from '@/lib/videoMetadata';
 import { NextRequest, NextResponse } from 'next/server';
 
 export const runtime = 'nodejs';
@@ -32,6 +33,9 @@ export async function POST(req: NextRequest) {
     if (buf.byteLength === 0) {
       return NextResponse.json({ error: 'empty body' }, { status: 400 });
     }
+
+    // Its metadata is stripped before it leaves — see lib/videoMetadata.
+    scrubVideoBytes(buf);
 
     const filename = `${safeName(rawName)}.mp4`;
 

@@ -39,6 +39,7 @@
 // the whole job for the three clips of a persona: they are one performance
 // carrying one context, so there is nothing to cut, score, mark or speed up.
 
+import { stripVideoMetadata } from '@/lib/videoMetadata';
 import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { PointerEvent as ReactPointerEvent } from 'react';
 import type { VidContext, VidContextPatch, VidEdit, VidMark, VidRow } from '@/lib/vids-types';
@@ -1040,7 +1041,8 @@ export function VidsClipEditor({
     abortRef.current = { ctrl, kind };
     setBusy({ frac: 0, label: 'Starting…' });
     try {
-      const blob = await renderEditedClip({
+      // Metadata stripped where the file is made — see lib/videoMetadata.
+      const blob = await stripVideoMetadata(await renderEditedClip({
         // No fps: the clip is written back at its own frame rate. Pinning it to
         // 30 resampled 60 and 24fps footage onto a grid it was never shot on,
         // every single save, and the judder that leaves never comes back out.
@@ -1051,7 +1053,7 @@ export function VidsClipEditor({
         duration,
         onProgress: (frac, label) => { if (mine()) setBusy({ frac, label }); },
         signal: ctrl.signal,
-      });
+      }));
       const file = `${safeExportName(name) || 'clip'}.mp4`;
       if (kind === 'download') {
         downloadBlob(blob, file);

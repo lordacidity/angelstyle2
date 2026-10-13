@@ -66,6 +66,7 @@
 // the recordings again from the answers, and this page puts the record's
 // words, look and sound on (build.restore) rather than rolling and asking.
 
+import { stripVideoMetadata } from '@/lib/videoMetadata';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { CSSProperties, FocusEvent, PointerEvent, SyntheticEvent } from 'react';
 import type { VidBuildSpec, VidPersona, VidRecipe, VidRow } from '@/lib/vids-types';
@@ -1497,7 +1498,10 @@ export function Vids2Builder({
       })
       .catch(() => { /* handled where it is awaited */ });
     try {
-      const blob = await composeSequence({
+      // Its metadata is stripped here, where the file is made, so every way
+      // out of the page below — Download, the share sheet, Phonedeck, Publish —
+      // hands over the clean one.
+      const blob = await stripVideoMetadata(await composeSequence({
         // Held to the one size and rate a vid goes out at, whatever the clips
         // are — see OUT_FPS.
         width: outW,
@@ -1513,7 +1517,7 @@ export function Vids2Builder({
         veil,
         onProgress: (frac, label) => setExporting({ frac, label }),
         signal: ctrl.signal,
-      });
+      }));
       // Taken off the page while the last of it was being written: Cancel, or
       // — on the clipper page — an answer changed under a build being made
       // ahead of the press, which unmounts this one. The abort only stops a

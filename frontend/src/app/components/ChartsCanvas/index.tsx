@@ -1,5 +1,6 @@
 'use client';
 
+import { stripVideoMetadata } from '@/lib/videoMetadata';
 import { useRef, useEffect, useCallback, forwardRef, useImperativeHandle, memo } from 'react';
 import { canvasPropsEqual } from '@/lib/canvasMemo';
 import { CANVAS_W, CANVAS_H, DISPLAY_SCALE, CAPTION_LINE_HEIGHT, HEADER_PADDING_X } from './constants';
@@ -1020,6 +1021,7 @@ const ChartsCanvasBase = forwardRef<ChartsCanvasRef, ChartsCanvasProps>(function
           await new Promise<void>(r => setTimeout(r, 2000));
         }
 
+        blob = await stripVideoMetadata(blob);
         const audioTag = audioMixed ? ' 🔊' : ' (muted)';
         try {
           const form = new FormData();

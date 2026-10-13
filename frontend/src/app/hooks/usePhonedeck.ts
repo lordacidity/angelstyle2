@@ -13,6 +13,7 @@
 // mounted instance reads and writes the same Set: pick a phone on Vids and the
 // panel on Media has it picked as well.
 
+import { stripVideoMetadata } from '@/lib/videoMetadata';
 import { useEffect, useRef, useState, useSyncExternalStore } from 'react';
 import { PHONEDECK_URL } from '@/lib/canvasVideoExport';
 import { CLIPPERS } from '@/lib/clipping';
@@ -161,7 +162,7 @@ export function usePhonedeck({ onPushed }: { onPushed?: (fileName: string) => vo
     setUploading(true);
     try {
       const form = new FormData();
-      form.append('files', file, name);
+      form.append('files', await stripVideoMetadata(file), name);
       const r = await fetch(`${PHONEDECK_URL}/api/upload`, { method: 'POST', body: form });
       return r.ok;
     } catch {

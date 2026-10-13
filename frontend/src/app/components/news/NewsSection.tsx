@@ -33,6 +33,7 @@
 // late, the name dragged and zoomed in on. Preview plays it here with its
 // sound; Save renders the MP4 and downloads it.
 
+import { stripVideoMetadata } from '@/lib/videoMetadata';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { OUTLETS, outletById } from '@/lib/news/outlets';
 // Searching, reading a story, finding its photos and drawing its page are
@@ -392,7 +393,7 @@ export function NewsSection({ active = true }: { active?: boolean }) {
         signal: ctrl.signal,
         onProgress: (done, total) => setVideoBusy({ label: `Rendering ${Math.round((done / total) * 100)}%`, pct: done / total }),
       });
-      downloadBlob(blob, filename);
+      downloadBlob(await stripVideoMetadata(blob), filename);
       setVideoNote({ ok: true, text: `Saved ${filename} (${seconds.toFixed(1)}s)` });
     } catch (err) {
       if (!ctrl.signal.aborted) setVideoNote({ ok: false, text: errorText(err) });

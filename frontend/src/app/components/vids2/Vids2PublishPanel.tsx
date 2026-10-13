@@ -26,6 +26,7 @@
 // right-4 like PhonedeckMiniPanel, the established corner for an
 // export-adjacent floating panel, so the two don't stack on top of each other.
 
+import { stripVideoMetadata } from '@/lib/videoMetadata';
 import { useEffect, useRef, useState } from 'react';
 import { useFloatingPanel } from '../../hooks/useFloatingPanel';
 import { withBase } from '@/lib/clipping';
@@ -210,7 +211,9 @@ export function Vids2PublishPanel({
         });
         // Save to the shared library exactly like a manual save would — this
         // is also where the public URL Hyper Attention needs comes from.
-        const row = await uploadVideo(fit.blob, {
+        // Stripped of its metadata before it goes anywhere: this upload is
+        // the file Hyper Attention imports.
+        const row = await uploadVideo(await stripVideoMetadata(fit.blob), {
           name: videoName, folderId: null, theme: theme ?? null,
           onProgress: (p) => setStep(`Uploading… ${Math.round(p * 100)}%`),
         });

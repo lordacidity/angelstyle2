@@ -1,5 +1,6 @@
 'use client';
 
+import { stripVideoMetadata } from '@/lib/videoMetadata';
 import React, { useRef, useEffect, useCallback, useState, forwardRef, useImperativeHandle } from 'react';
 import { createPortal } from 'react-dom';
 import { QUOTE_STYLES, QUOTE_STYLES_PAIRED, ALL_QUOTE_STYLES } from '../quoteStyles';
@@ -64,7 +65,9 @@ const PHONEDECK_URL = process.env.NEXT_PUBLIC_PHONEDECK_URL ?? 'http://localhost
 // Send an exported blob to Phonedeck's Incoming folder. Falls back to a normal
 // browser download if Phonedeck isn't running, so an export is never lost.
 // Returns a status string for the UI.
-async function sendToPhonedeck(blob: Blob, filename: string): Promise<string> {
+async function sendToPhonedeck(given: Blob, filename: string): Promise<string> {
+  // A video goes out with its metadata stripped; a picture is left as it is.
+  const blob = await stripVideoMetadata(given);
   try {
     const form = new FormData();
     form.append('files', blob, filename);

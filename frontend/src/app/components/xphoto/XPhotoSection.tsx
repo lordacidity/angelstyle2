@@ -18,6 +18,7 @@
 //                    ./encodeVideo.ts.
 // The 3:2 cards share a frame (./card.ts) and can be drawn light or dark.
 
+import { stripVideoMetadata } from '@/lib/videoMetadata';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { DownloadIcon, SpinnerIcon } from '@/lib/icons';
 import {
@@ -640,7 +641,7 @@ export function XPhotoSection() {
         onProgress: setVideoProgress,
       });
       const theme = cardTheme === 'light' ? '-light' : '';
-      triggerDownload(blob, `${safeFile(selected.name)}-${selected.ticker.toLowerCase()}-price-video${theme}.mp4`);
+      triggerDownload(await stripVideoMetadata(blob), `${safeFile(selected.name)}-${selected.ticker.toLowerCase()}-price-video${theme}.mp4`);
     } catch (err) {
       notify(false, err instanceof Error ? err.message : String(err), ERROR_TOAST_MS);
     } finally {
