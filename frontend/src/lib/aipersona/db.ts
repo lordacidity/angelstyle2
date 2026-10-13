@@ -24,13 +24,13 @@ import type { JobKind } from './fal';
 import { knownThumb, warmThumbs } from './fit1080';
 import { PersonaInputError } from './respond';
 import type {
-  JobStatus, LibraryPayload, Persona, PersonaVideo, Scene, SceneJob, SceneStage, SceneSummary,
+  JobStatus, LibraryPayload, Persona, PersonaVideo, SavedScene, Scene, SceneJob, SceneStage, SceneSummary,
 } from './types';
 
 // ── Connection pool (singleton, hot-reload safe) ──────────────────────────────
 // Bump SCHEMA_VERSION whenever SCHEMA below changes, so a process that started
 // before the change re-runs the (idempotent) DDL.
-const SCHEMA_VERSION = 4;
+const SCHEMA_VERSION = 8;
 
 const g = globalThis as unknown as {
   __aipersonaPool?: pg.Pool;
@@ -94,6 +94,28 @@ const SCHEMA: string[] = [
   // The persona videos in Vids (their ids there) a saved video has been the
   // start of — what the character's page greys a used hook by.
   `ALTER TABLE aipersona_takes ADD COLUMN IF NOT EXISTS used_in UUID[] NOT NULL DEFAULT '{}'`,
+  // A persona's room: a photo of the place it is in, dropped on its page.
+  `ALTER TABLE aipersona_personas ADD COLUMN IF NOT EXISTS room_path TEXT`,
+  // "Use location": a take whose first frame is drawn in its persona's room,
+  // and the prompt the scene asks those takes with.
+  `ALTER TABLE aipersona_takes ADD COLUMN IF NOT EXISTS use_room BOOLEAN NOT NULL DEFAULT false`,
+  `ALTER TABLE aipersona_scenes ADD COLUMN IF NOT EXISTS room_prompt TEXT NOT NULL DEFAULT ''`,
+  // Saved scenes: a cut clip and its first frame, named and kept to be made
+  // into a scene for any persona later. Using one copies its files, so no
+  // scene or take ever points back at this table.
+  `CREATE TABLE IF NOT EXISTS aipersona_saved_scenes (
+    id         UUID PRIMARY KEY,
+    name       TEXT NOT NULL,
+    clip_path  TEXT NOT NULL,
+    frame_path TEXT NOT NULL,
+    width      INTEGER NOT NULL DEFAULT 0,
+    height     INTEGER NOT NULL DEFAULT 0,
+    duration   REAL NOT NULL DEFAULT 0,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+  )`,
+  // The sentence saying what happens in a saved scene — what the Kling prompt
+  // of a scene made from it opens with.
+  `ALTER TABLE aipersona_saved_scenes ADD COLUMN IF NOT EXISTS action TEXT NOT NULL DEFAULT ''`,
 ];
 
 function ensureSchema(): Promise<void> {
@@ -118,6 +140,7 @@ async function query<R extends pg.QueryResultRow>(sql: string, values: unknown[]
 
 const PREFIX = 'aipersona';
 export const photoPath = (id: string, ext: string) => `${PREFIX}/photos/${id}.${ext}`;
+export const roomPath = (id: string, ext: string) => `${PREFIX}/rooms/${id}.${ext}`;
 export const avatarPath = (personaId: string) => `${PREFIX}/avatars/${personaId}-${Date.now()}.jpg`;
 /** Where the browser asks for a photo's thumbnail (made on first ask). */
 export const thumbUrl = (path: string) => {
@@ -128,18 +151,24 @@ export const thumbUrl = (path: string) => {
 };
 export const sourcePath = (id: string, ext: string) => `${PREFIX}/sources/${id}.${ext}`;
 export const sceneFile = (sceneId: string, file: string) => `${PREFIX}/scenes/${sceneId}/${file}`;
+export const savedFile = (savedId: string, file: string) => `${PREFIX}/saved/${savedId}/${file}`;
 
 const OBJECT_ID = '[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\\.[a-z0-9]{2,5}';
 /** Paths only ever come back from our own upload route, but they pass through
  *  the browser on the way — so they are checked for shape before use. */
 export const isPhotoPath = (v: unknown): v is string =>
   typeof v === 'string' && new RegExp(`^${PREFIX}/photos/${OBJECT_ID}$`).test(v);
+export const isRoomPath = (v: unknown): v is string =>
+  typeof v === 'string' && new RegExp(`^${PREFIX}/rooms/${OBJECT_ID}$`).test(v);
 export const isSourcePath = (v: unknown): v is string =>
   typeof v === 'string' && new RegExp(`^${PREFIX}/sources/${OBJECT_ID}$`).test(v);
 const UUID = '[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}';
 /** A take's character first frame, as lib/aipersona/scenes files one. */
 export const isFramePath = (v: unknown): v is string =>
   typeof v === 'string' && new RegExp(`^${PREFIX}/scenes/${UUID}/${UUID}-frame-[a-z0-9]+\\.[a-z0-9]{2,5}$`).test(v);
+/** A saved scene's first frame. */
+export const isSavedFramePath = (v: unknown): v is string =>
+  typeof v === 'string' && new RegExp(`^${PREFIX}/saved/${UUID}/frame\\.png$`).test(v);
 /** Where lib/aipersona/fit1080 keeps a picture's thumbnail, if it has made one. */
 const thumbOf = (path: string) => `${path.replace(/\.[a-z0-9]{2,5}$/i, '')}.thumb.jpg`;
 
@@ -161,6 +190,10 @@ export interface TakeRecord {
   photoPath: string;
   /** The persona's profile picture, if one has been made. */
   avatarPath: string | null;
+  /** "Use location" was on for this take when the scene was made. */
+  useRoom: boolean;
+  /** The persona's room as it is now, if it has one. */
+  roomPath: string | null;
   frame: JobRecord;
   video: JobRecord;
 }
@@ -175,6 +208,8 @@ export interface SceneRecord {
   height: number;
   duration: number;
   framePrompt: string;
+  /** The first-frame prompt with location; empty when no take uses one. */
+  locationPrompt: string;
   videoPrompt: string;
   createdAt: string;
   takes: TakeRecord[];
@@ -186,14 +221,14 @@ export type Live = Map<string, { queue: number | null; working: boolean; note?: 
 
 interface SceneDb {
   id: string; name: string; stage: SceneStage; clip_path: string; frame_path: string;
-  width: number; height: number; duration: number; frame_prompt: string; video_prompt: string; created_at: Date;
+  width: number; height: number; duration: number; frame_prompt: string; room_prompt: string; video_prompt: string; created_at: Date;
 }
 
 type JobDb<K extends JobKind> = {
   [F in 'status' | 'request' | 'path' | 'prompt' | 'error' as `${K}_${F}`]:
     F extends 'status' ? JobStatus : F extends 'request' | 'path' ? string | null : string;
 };
-type TakeDb = { id: string; persona_id: string; persona_name: string; photo_path: string; avatar_path: string | null } & JobDb<'frame'> & JobDb<'video'>;
+type TakeDb = { id: string; persona_id: string; persona_name: string; photo_path: string; avatar_path: string | null; room_path: string | null; use_room: boolean } & JobDb<'frame'> & JobDb<'video'>;
 
 const toTake = (r: TakeDb): TakeRecord => ({
   id: r.id,
@@ -201,6 +236,8 @@ const toTake = (r: TakeDb): TakeRecord => ({
   personaName: r.persona_name,
   photoPath: r.photo_path,
   avatarPath: r.avatar_path,
+  useRoom: r.use_room,
+  roomPath: r.room_path,
   frame: { status: r.frame_status, request: r.frame_request, path: r.frame_path, prompt: r.frame_prompt, error: r.frame_error },
   video: { status: r.video_status, request: r.video_request, path: r.video_path, prompt: r.video_prompt, error: r.video_error },
 });
@@ -230,6 +267,7 @@ export function toScene(rec: SceneRecord, live?: Live): Scene {
     height: rec.height,
     duration: rec.duration,
     framePrompt: rec.framePrompt,
+    locationPrompt: rec.locationPrompt,
     videoPrompt: rec.videoPrompt,
     createdAt: rec.createdAt,
     takes: rec.takes.map((t) => ({
@@ -239,6 +277,7 @@ export function toScene(rec: SceneRecord, live?: Live): Scene {
       photoUrl: publicUrl(t.photoPath),
       thumbUrl: thumbUrl(t.photoPath),
       avatarUrl: t.avatarPath ? publicUrl(t.avatarPath) : null,
+      usesLocation: t.useRoom,
       frame: toJob(t, 'frame', live),
       video: toJob(t, 'video', live),
     })),
@@ -247,16 +286,17 @@ export function toScene(rec: SceneRecord, live?: Live): Scene {
 
 // ── The front screen ──────────────────────────────────────────────────────────
 
-interface PersonaDb { id: string; name: string; photo_path: string; avatar_path: string | null; created_at: Date }
-const PERSONA_COLS = 'id, name, photo_path, avatar_path, created_at';
+interface PersonaDb { id: string; name: string; photo_path: string; avatar_path: string | null; room_path: string | null; created_at: Date }
+const PERSONA_COLS = 'id, name, photo_path, avatar_path, room_path, created_at';
 
 const toPersona = (r: PersonaDb, videos: PersonaVideo[] = []): Persona => ({
   id: r.id, name: r.name, photoUrl: publicUrl(r.photo_path), thumbUrl: thumbUrl(r.photo_path), avatarUrl: r.avatar_path ? publicUrl(r.avatar_path) : null,
+  roomUrl: r.room_path ? publicUrl(r.room_path) : null, roomThumbUrl: r.room_path ? thumbUrl(r.room_path) : null,
   createdAt: r.created_at.toISOString(), videos,
 });
 
 export async function getLibrary(): Promise<LibraryPayload> {
-  const [personas, videos, scenes] = await Promise.all([
+  const [personas, videos, scenes, saved] = await Promise.all([
     query<PersonaDb>(`SELECT ${PERSONA_COLS} FROM aipersona_personas ORDER BY created_at`),
     query<{ id: string; persona_id: string; scene_id: string; scene_name: string; video_path: string; frame_path: string | null; saved_at: Date; used_in: string[]; width: number; height: number }>(
       `SELECT t.id, t.persona_id, t.scene_id, COALESCE(NULLIF(t.name, ''), s.name) AS scene_name, t.video_path, t.frame_path, t.saved_at, t.used_in, s.width, s.height
@@ -268,12 +308,13 @@ export async function getLibrary(): Promise<LibraryPayload> {
       `SELECT s.*, (SELECT count(*) FROM aipersona_takes t WHERE t.scene_id = s.id)::int AS personas
          FROM aipersona_scenes s WHERE s.stage <> 'done' ORDER BY s.created_at DESC`,
     ),
+    query<SavedDb>(`SELECT ${SAVED_COLS} FROM aipersona_saved_scenes ORDER BY created_at, id`),
   ]);
 
   // Every still the section is about to show, found before it is listed —
   // see warmThumbs. A second and a half at most; the rest catch up behind.
   await warmThumbs(
-    [...personas.rows.map((p) => p.photo_path), ...videos.rows.flatMap((v) => (v.frame_path ? [v.frame_path] : []))],
+    [...personas.rows.flatMap((p) => (p.room_path ? [p.photo_path, p.room_path] : [p.photo_path])), ...videos.rows.flatMap((v) => (v.frame_path ? [v.frame_path] : [])), ...saved.rows.map((s) => s.frame_path)],
     1500,
   );
 
@@ -294,7 +335,55 @@ export async function getLibrary(): Promise<LibraryPayload> {
       id: s.id, name: s.name, stage: s.stage, frameUrl: publicUrl(s.frame_path),
       personas: s.personas, createdAt: s.created_at.toISOString(),
     })),
+    saved: saved.rows.map(toSaved),
   };
+}
+
+// ── Saved scenes ──────────────────────────────────────────────────────────────
+
+interface SavedDb { id: string; name: string; action: string; clip_path: string; frame_path: string; width: number; height: number; duration: number; created_at: Date }
+const SAVED_COLS = 'id, name, action, clip_path, frame_path, width, height, duration, created_at';
+
+const toSaved = (r: SavedDb): SavedScene => ({
+  id: r.id, name: r.name, action: r.action, clipUrl: publicUrl(r.clip_path), frameUrl: publicUrl(r.frame_path), thumbUrl: thumbUrl(r.frame_path),
+  width: r.width, height: r.height, duration: r.duration, createdAt: r.created_at.toISOString(),
+});
+
+/** A saved scene as the server works with it: where its files are. */
+export interface SavedRecord { id: string; name: string; action: string; clipPath: string; framePath: string; width: number; height: number; duration: number }
+
+export async function createSaved(s: SavedRecord): Promise<SavedScene> {
+  const r = await query<SavedDb>(
+    `INSERT INTO aipersona_saved_scenes (id, name, clip_path, frame_path, width, height, duration, action)
+     VALUES ($1, $2, $3, $4, $5, $6, $7, $8) RETURNING ${SAVED_COLS}`,
+    [s.id, s.name, s.clipPath, s.framePath, s.width, s.height, s.duration, s.action],
+  );
+  return toSaved(r.rows[0]);
+}
+
+/** The saved scenes named, in the order they were saved. Ones that no longer
+ *  exist are simply not in the answer. */
+export async function loadSaved(ids: string[]): Promise<SavedRecord[]> {
+  const r = await query<SavedDb>(`SELECT ${SAVED_COLS} FROM aipersona_saved_scenes WHERE id = ANY($1::uuid[]) ORDER BY created_at, id`, [ids]);
+  return r.rows.map((x) => ({ id: x.id, name: x.name, action: x.action, clipPath: x.clip_path, framePath: x.frame_path, width: x.width, height: x.height, duration: x.duration }));
+}
+
+/** Rename a saved scene, or rewrite its sentence (which may be emptied). */
+export async function updateSaved(id: string, patch: { name?: string; action?: string }): Promise<SavedScene | null> {
+  const r = await query<SavedDb>(
+    `UPDATE aipersona_saved_scenes SET name = COALESCE($2, name), action = COALESCE($3, action) WHERE id = $1 RETURNING ${SAVED_COLS}`,
+    [id, patch.name ?? null, patch.action ?? null],
+  );
+  return r.rows[0] ? toSaved(r.rows[0]) : null;
+}
+
+/** Delete a saved scene and its files. Scenes already made from it have their
+ *  own copies and are not touched. */
+export async function deleteSaved(id: string): Promise<boolean> {
+  const r = await query<{ clip_path: string; frame_path: string }>('DELETE FROM aipersona_saved_scenes WHERE id = $1 RETURNING clip_path, frame_path', [id]);
+  if (!r.rows[0]) return false;
+  await removeObjects([r.rows[0].clip_path, r.rows[0].frame_path, thumbOf(r.rows[0].frame_path)]);
+  return true;
 }
 
 // ── Personas ──────────────────────────────────────────────────────────────────
@@ -330,10 +419,21 @@ export async function deletePersona(id: string): Promise<boolean> {
   const files = await query<{ frame_path: string | null; video_path: string | null }>(
     'SELECT frame_path, video_path FROM aipersona_takes WHERE persona_id = $1', [id],
   );
-  const r = await query<{ photo_path: string; avatar_path: string | null }>('DELETE FROM aipersona_personas WHERE id = $1 RETURNING photo_path, avatar_path', [id]);
+  const r = await query<{ photo_path: string; avatar_path: string | null; room_path: string | null }>('DELETE FROM aipersona_personas WHERE id = $1 RETURNING photo_path, avatar_path, room_path', [id]);
   if (!r.rows[0]) return false;
-  await removeObjects([r.rows[0].photo_path, r.rows[0].avatar_path, ...files.rows.flatMap((f) => [f.frame_path, f.video_path])].filter((p): p is string => !!p));
+  const room = r.rows[0].room_path;
+  await removeObjects([r.rows[0].photo_path, r.rows[0].avatar_path, room, room && thumbOf(room), ...files.rows.flatMap((f) => [f.frame_path, f.video_path])].filter((p): p is string => !!p));
   return true;
+}
+
+/** Give a persona a room, swap the one it has, or (null) take it away. The
+ *  old room is dropped from the bucket once the row no longer points at it. */
+export async function setRoom(id: string, path: string | null): Promise<Persona | null> {
+  const before = (await query<{ room_path: string | null }>('SELECT room_path FROM aipersona_personas WHERE id = $1', [id])).rows[0];
+  const r = await query<PersonaDb>(`UPDATE aipersona_personas SET room_path = $2 WHERE id = $1 RETURNING ${PERSONA_COLS}`, [id, path]);
+  if (!r.rows[0]) { if (path) await removeObjects([path]); return null; }
+  if (before?.room_path && before.room_path !== path) await removeObjects([before.room_path, thumbOf(before.room_path)]);
+  return toPersona(r.rows[0]);
 }
 
 /** The stored photo of one persona, for making its profile picture. */
@@ -370,7 +470,7 @@ export async function loadScene(id: string): Promise<SceneRecord | null> {
   const [scene, takes] = await Promise.all([
     query<SceneDb>('SELECT * FROM aipersona_scenes WHERE id = $1', [id]),
     query<TakeDb>(
-      `SELECT t.id, t.persona_id, p.name AS persona_name, p.photo_path, p.avatar_path, ${TAKE_COLS}
+      `SELECT t.id, t.persona_id, p.name AS persona_name, p.photo_path, p.avatar_path, p.room_path, t.use_room, ${TAKE_COLS}
          FROM aipersona_takes t JOIN aipersona_personas p ON p.id = t.persona_id
         WHERE t.scene_id = $1 ORDER BY p.created_at, t.id`,
       [id],
@@ -380,7 +480,7 @@ export async function loadScene(id: string): Promise<SceneRecord | null> {
   if (!s) return null;
   return {
     id: s.id, name: s.name, stage: s.stage, clipPath: s.clip_path, framePath: s.frame_path,
-    width: s.width, height: s.height, duration: s.duration, framePrompt: s.frame_prompt, videoPrompt: s.video_prompt,
+    width: s.width, height: s.height, duration: s.duration, framePrompt: s.frame_prompt, locationPrompt: s.room_prompt, videoPrompt: s.video_prompt,
     createdAt: s.created_at.toISOString(), takes: takes.rows.map(toTake),
   };
 }
@@ -390,20 +490,25 @@ export async function loadScene(id: string): Promise<SceneRecord | null> {
 export async function createScene(scene: {
   id: string; name: string; clipPath: string; framePath: string; width: number; height: number; duration: number;
   framePrompt: string; personaIds: string[];
+  /** The Kling prompt, when it is already known what happens in the clip. */
+  videoPrompt?: string;
+  /** The prompt with location, and who (of personaIds) is drawn in their
+   *  room. One named here with no room is made the ordinary way. */
+  locationPrompt: string; locationIds: string[];
 }): Promise<SceneRecord> {
   await ensureSchema();
   const client = await getPool().connect();
   try {
     await client.query('BEGIN');
     await client.query(
-      `INSERT INTO aipersona_scenes (id, name, clip_path, frame_path, width, height, duration, frame_prompt)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`,
-      [scene.id, scene.name, scene.clipPath, scene.framePath, scene.width, scene.height, scene.duration, scene.framePrompt],
+      `INSERT INTO aipersona_scenes (id, name, clip_path, frame_path, width, height, duration, frame_prompt, room_prompt, video_prompt)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)`,
+      [scene.id, scene.name, scene.clipPath, scene.framePath, scene.width, scene.height, scene.duration, scene.framePrompt, scene.locationPrompt, scene.videoPrompt ?? ''],
     );
     const takes = await client.query(
-      `INSERT INTO aipersona_takes (scene_id, persona_id)
-       SELECT $1, id FROM aipersona_personas WHERE id = ANY($2::uuid[])`,
-      [scene.id, scene.personaIds],
+      `INSERT INTO aipersona_takes (scene_id, persona_id, use_room)
+       SELECT $1, id, (room_path IS NOT NULL AND id = ANY($3::uuid[])) FROM aipersona_personas WHERE id = ANY($2::uuid[])`,
+      [scene.id, scene.personaIds, scene.locationIds],
     );
     if (!takes.rowCount) throw new PersonaInputError('None of those characters exist any more.');
     await client.query('COMMIT');

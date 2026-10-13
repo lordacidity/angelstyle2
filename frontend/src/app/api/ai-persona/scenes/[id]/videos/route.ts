@@ -32,7 +32,7 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
   const body = (await req.json().catch(() => ({}))) as Record<string, unknown>;
   const prompt = typeof body.prompt === 'string' ? body.prompt.trim().slice(0, MAX_PROMPT_CHARS) : '';
   if (!prompt) return refuse('The prompt is empty.');
-  if (hasBlank(prompt)) return refuse('Replace the brackets with what he is doing first.');
+  if (hasBlank(prompt)) return refuse('Replace the brackets with one sentence saying what is happening first.');
 
   try {
     const scene = await loadScene(id);

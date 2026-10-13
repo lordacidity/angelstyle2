@@ -6,8 +6,11 @@
 //   frames  every persona's character first frame is made and looked over.
 //           Any of them can be regenerated, with the prompt edited for just
 //           that redo. When they are all right: Approved.
-//   prompt  the Kling prompt is written. It starts as "A man [what he is
-//           doing]" and Go stays off until the brackets have been replaced.
+//   prompt  the Kling prompt is written. It opens with a blank — a whole
+//           sentence in brackets, saying what is happening — and Go stays off
+//           until the brackets have been replaced. A scene whose sentence was
+//           written ahead (on a saved scene, or in New scene) arrives with it
+//           already filled in.
 //   videos  Kling runs for every persona; same regenerate, same per-redo
 //           prompt. When they are all right: Approve all.
 //   done    the videos are saved to the personas.
@@ -22,7 +25,7 @@ import {
   approveScene, deleteScene, deleteTake, downloadUrl, fileSlug, getScene, redoFrame, redoVideo, setSceneStage, startVideos,
 } from '@/lib/aipersona/client';
 import {
-  DEFAULT_MOTION_PROMPT, MAX_PROMPT_CHARS, hasBlank, type Scene, type SceneJob, type SceneStage, type SceneTake,
+  DEFAULT_MOTION_PROMPT, MAX_FRAME_PROMPT_CHARS, MAX_PROMPT_CHARS, hasBlank, type Scene, type SceneJob, type SceneStage, type SceneTake,
 } from '@/lib/aipersona/types';
 import { ConfirmButton, FIELD, GHOST, LABEL, PRIMARY, Split, errorText } from './aipersona-ui';
 
@@ -110,6 +113,9 @@ function TakeCard({ scene, take, kind, locked, canRemove, onRedo, onRemove }: {
         {/* eslint-disable-next-line @next/next/no-img-element */}
         <img src={face} alt="" className="h-6 w-6 shrink-0 rounded-full object-cover" />
         <span className="min-w-0 flex-1 truncate text-sm">{take.personaName}</span>
+        {take.usesLocation && (
+          <span className="shrink-0 rounded border border-zinc-800 px-1 text-[10px] text-zinc-400" title="Its first frame is drawn in its own location">location</span>
+        )}
         {done && (
           <a href={downloadUrl(job.url!, fileName)} download={fileName} title="Download" className="text-zinc-500 transition-colors hover:text-white">
             <DownloadIcon size={14} />
@@ -119,7 +125,7 @@ function TakeCard({ scene, take, kind, locked, canRemove, onRedo, onRemove }: {
           <button
             type="button"
             onClick={() => {
-              setPrompt(job.prompt || (kind === 'frame' ? scene.framePrompt : scene.videoPrompt));
+              setPrompt(job.prompt || (kind === 'video' ? scene.videoPrompt : take.usesLocation ? scene.locationPrompt : scene.framePrompt));
               setError('');
               setOpen((o) => !o);
             }}
@@ -145,12 +151,12 @@ function TakeCard({ scene, take, kind, locked, canRemove, onRedo, onRemove }: {
           <span className={LABEL}>Prompt for this redo only</span>
           <textarea
             value={prompt}
-            onChange={(e) => setPrompt(e.target.value.slice(0, MAX_PROMPT_CHARS))}
+            onChange={(e) => setPrompt(e.target.value.slice(0, kind === 'frame' ? MAX_FRAME_PROMPT_CHARS : MAX_PROMPT_CHARS))}
             disabled={busy}
             autoFocus
             className={`${FIELD} min-h-[110px] resize-y py-2 text-xs leading-relaxed`}
           />
-          {blank && <p className="text-[11px] text-amber-400">Replace the brackets with what he is doing.</p>}
+          {blank && <p className="text-[11px] text-amber-400">Replace the brackets with one sentence saying what is happening.</p>}
           <div className="flex gap-2">
             <button type="button" onClick={() => run(() => onRedo(take, prompt.trim()))} disabled={busy || !prompt.trim() || blank} className={`${PRIMARY} h-8 flex-1`}>
               {busy && <SpinnerIcon size={12} className="animate-spin" />}
@@ -188,7 +194,9 @@ export function SceneReview({ sceneId, initial, onBack, onChanged, onStatus, onD
   const [error, setError] = useState('');
   const [pollError, setPollError] = useState('');
   const [acting, setActing] = useState(false);
-  const [motionPrompt, setMotionPrompt] = useState(DEFAULT_MOTION_PROMPT);
+  /** The Kling prompt as edited here; null until it is touched, and then it
+   *  is the scene's own — written ahead — or the one with the blank. */
+  const [typedPrompt, setMotionPrompt] = useState<string | null>(null);
   const promptBox = useRef<HTMLTextAreaElement>(null);
   // Bumped by everything that changes the scene from here. A poll that was
   // already on its way when that happened is answering an older question, and
@@ -256,6 +264,7 @@ export function SceneReview({ sceneId, initial, onBack, onChanged, onStatus, onD
   const count = (k: Kind, status: SceneJob['status']) => scene.takes.filter((t) => t[k].status === status).length;
   const framesDone = total > 0 && count('frame', 'done') === total;
   const videosDone = total > 0 && count('video', 'done') === total;
+  const motionPrompt = typedPrompt ?? (scene.videoPrompt || DEFAULT_MOTION_PROMPT);
   const blank = hasBlank(motionPrompt);
 
   /** Run something that answers with the scene as it now stands. */
@@ -330,7 +339,13 @@ export function SceneReview({ sceneId, initial, onBack, onChanged, onStatus, onD
       {scene.stage === 'frames' && (
         <div className="grid gap-1.5">
           <span className={LABEL}>First-frame prompt</span>
-          <p className="text-xs leading-relaxed text-zinc-400">{scene.framePrompt}</p>
+          <p className="max-h-40 overflow-y-auto whitespace-pre-wrap text-xs leading-relaxed text-zinc-400">{scene.framePrompt}</p>
+          {scene.locationPrompt && scene.takes.some((t) => t.usesLocation) && (
+            <>
+              <span className={`mt-3 ${LABEL}`}>First-frame prompt with location</span>
+              <p className="max-h-40 overflow-y-auto whitespace-pre-wrap text-xs leading-relaxed text-zinc-400">{scene.locationPrompt}</p>
+            </>
+          )}
         </div>
       )}
 
@@ -346,7 +361,7 @@ export function SceneReview({ sceneId, initial, onBack, onChanged, onStatus, onD
           />
           <span className={`normal-case tracking-normal ${blank ? 'text-amber-400' : 'text-zinc-600'}`}>
             {blank
-              ? 'Replace the brackets with what he is doing — just a few words. Go stays off until they are gone.'
+              ? 'Replace the brackets, and what is in them, with one sentence saying what is happening. Go stays off until they are gone.'
               : 'Kling moves each character first frame the way the clip moves.'}
           </span>
         </label>

@@ -120,6 +120,13 @@ export async function putObject(path: string, body: Buffer, contentType: string)
   if (error) throw new Error(`Could not store ${path}: ${error.message}`);
 }
 
+/** Copy one object to another path, inside the bucket — nothing comes down
+ *  to the server on the way. */
+export async function copyObject(from: string, to: string): Promise<void> {
+  const { error } = await getSb().storage.from(VIDS_BUCKET).copy(from, to);
+  if (error) throw new Error(`Could not copy ${from}: ${error.message}`);
+}
+
 // Best-effort — a leftover object is harmless; a failed delete must not fail
 // the request that already removed the row.
 export async function removeObjects(paths: string[]): Promise<void> {

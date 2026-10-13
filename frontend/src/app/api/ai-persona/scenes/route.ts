@@ -21,7 +21,7 @@ import { cutClip } from '@/lib/aipersona/clip';
 import { createScene, isSourcePath, loadScene, sceneFile, toScene } from '@/lib/aipersona/db';
 import { fail, refuse } from '@/lib/aipersona/respond';
 import { queueFrame } from '@/lib/aipersona/scenes';
-import { MAX_NAME_CHARS, MAX_PROMPT_CHARS, MAX_SPEED, MIN_SPEED } from '@/lib/aipersona/types';
+import { MAX_FRAME_PROMPT_CHARS, MAX_NAME_CHARS, MAX_SPEED, MIN_SPEED, cleanAction, motionPrompt } from '@/lib/aipersona/types';
 import { isUuid, publicUrl, putObject, removeObjects } from '@/lib/vids-db';
 
 export const runtime = 'nodejs';
@@ -34,8 +34,13 @@ const Body = z.object({
   start: z.number().min(0),
   end: z.number().positive(),
   speed: z.number().min(MIN_SPEED).max(MAX_SPEED),
-  prompt: z.string().trim().min(1).max(MAX_PROMPT_CHARS),
+  prompt: z.string().trim().min(1).max(MAX_FRAME_PROMPT_CHARS),
   personaIds: z.array(z.string().refine(isUuid)).min(1).max(100),
+  // "Use location": these personas are drawn in their room, from this prompt.
+  locationIds: z.array(z.string().refine(isUuid)).max(100).default([]),
+  locationPrompt: z.string().trim().max(MAX_FRAME_PROMPT_CHARS).default(''),
+  // The sentence saying what is happening: the Kling prompt, filled in ahead.
+  action: z.string().max(2000).default(''),
 });
 
 export async function POST(req: NextRequest) {
@@ -43,7 +48,9 @@ export async function POST(req: NextRequest) {
   if (!parsed.success) {
     return refuse('A scene needs a name, an uploaded video, a trim, a speed, a prompt and at least one character.');
   }
-  const { name, sourcePath, start, end, speed, prompt, personaIds } = parsed.data;
+  const { name, sourcePath, start, end, speed, prompt, personaIds, locationIds, locationPrompt } = parsed.data;
+  if (locationIds.length && !locationPrompt) return refuse('The first-frame prompt with location is empty.');
+  const action = cleanAction(parsed.data.action);
 
   const id = randomUUID();
   const clipPath = sceneFile(id, 'clip.mp4');
@@ -61,13 +68,15 @@ export async function POST(req: NextRequest) {
       scene = await createScene({
         id, name, clipPath, framePath, width: cut.width, height: cut.height, duration: cut.duration,
         framePrompt: prompt, personaIds,
+        videoPrompt: action ? motionPrompt(action) : '',
+        locationPrompt: locationIds.length ? locationPrompt : '', locationIds,
       });
     } catch (err) {
       await removeObjects([clipPath, framePath]);
       throw err;
     }
 
-    await Promise.all(scene.takes.map((take) => queueFrame(scene, take, prompt)));
+    await Promise.all(scene.takes.map((take) => queueFrame(scene, take, take.useRoom ? locationPrompt : prompt)));
     // The upload has been cut; the cut is what the scene keeps.
     await removeObjects([sourcePath]);
     return NextResponse.json(toScene((await loadScene(id)) ?? scene));

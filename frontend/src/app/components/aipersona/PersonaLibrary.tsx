@@ -10,7 +10,7 @@ import { useEffect, useState } from 'react';
 import { SpinnerIcon, UploadIcon } from '@/lib/icons';
 import { createPersona, makeAvatar, uploadFile } from '@/lib/aipersona/client';
 import { MAX_NAME_CHARS, PHOTO_TYPES, type LibraryPayload, type SceneStage } from '@/lib/aipersona/types';
-import { DropZone, FIELD, PRIMARY, errorText, photoProblem } from './aipersona-ui';
+import { DropZone, FIELD, GHOST, PRIMARY, errorText, photoProblem } from './aipersona-ui';
 
 const STAGE_LABEL: Record<SceneStage, string> = {
   frames: 'first frames', prompt: 'writing the prompt', videos: 'videos', done: 'approved',
@@ -84,12 +84,14 @@ function NewPersonaCard({ onCreated }: { onCreated: () => Promise<void> }) {
   );
 }
 
-export function PersonaLibrary({ library, error, onOpenPersona, onNewScene, onOpenScene, onChanged }: {
+export function PersonaLibrary({ library, error, onOpenPersona, onNewScene, onOpenSaved, onOpenScene, onChanged }: {
   /** Null until the first load lands. */
   library: LibraryPayload | null;
   error: string;
   onOpenPersona: (id: string) => void;
   onNewScene: () => void;
+  /** The Scenes page: the saved scenes, and where one is saved. */
+  onOpenSaved: () => void;
   onOpenScene: (id: string) => void;
   onChanged: () => Promise<void>;
 }) {
@@ -153,6 +155,14 @@ export function PersonaLibrary({ library, error, onOpenPersona, onNewScene, onOp
               className={PRIMARY}
             >
               New scene
+            </button>
+            <button
+              type="button"
+              onClick={onOpenSaved}
+              title="Saved scenes: drop a video, trim it, name it and keep it — then make it for any character from that character's page"
+              className={GHOST}
+            >
+              Scenes{library && library.saved.length > 0 ? ` · ${library.saved.length}` : ''}
             </button>
           </div>
         </div>

@@ -3,13 +3,14 @@
 // Mints a signed URL for one file. The browser PUTs the bytes straight to the
 // bucket — a scene's video is far past what a request body through the site
 // gate should carry — and then hands the path back to whichever route wanted
-// the file: a `photo` to the personas routes, a `source` to POST scenes.
+// the file: a `photo` or a `room` to the personas routes, a `source` to POST
+// scenes.
 //
 // Behind the site gate like every /api/* route.
 
 import { randomUUID } from 'node:crypto';
 import { NextRequest, NextResponse } from 'next/server';
-import { photoPath, sourcePath } from '@/lib/aipersona/db';
+import { photoPath, roomPath, sourcePath } from '@/lib/aipersona/db';
 import { fail, refuse } from '@/lib/aipersona/respond';
 import { PHOTO_TYPES, type UploadResponse } from '@/lib/aipersona/types';
 import { signUpload } from '@/lib/vids-db';
@@ -36,11 +37,14 @@ export async function POST(req: NextRequest) {
   if (body.kind === 'photo') {
     if (!PHOTO_TYPES.includes(mime)) return refuse(`A character photo is a JPEG, PNG or WebP — this one is ${mime || 'of no stated type'}.`);
     path = photoPath(randomUUID(), PHOTO_EXT[mime]);
+  } else if (body.kind === 'room') {
+    if (!PHOTO_TYPES.includes(mime)) return refuse(`A room photo is a JPEG, PNG or WebP — this one is ${mime || 'of no stated type'}.`);
+    path = roomPath(randomUUID(), PHOTO_EXT[mime]);
   } else if (body.kind === 'source') {
     if (!mime.startsWith('video/')) return refuse(`A scene is cut from a video — this one is ${mime || 'of no stated type'}.`);
     path = sourcePath(randomUUID(), videoExt(name, mime));
   } else {
-    return refuse('kind must be photo or source.');
+    return refuse('kind must be photo, room or source.');
   }
 
   try {

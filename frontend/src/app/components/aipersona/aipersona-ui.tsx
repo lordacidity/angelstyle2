@@ -16,9 +16,10 @@ export const LABEL = 'text-[11px] uppercase tracking-wide text-zinc-500';
 
 export const errorText = (err: unknown) => (err instanceof Error ? err.message : String(err));
 
-/** Why this file can't be a character photo, or nothing if it can. */
-export function photoProblem(file: File): string {
-  if (!PHOTO_TYPES.includes(file.type)) return `A character photo is a JPEG, PNG or WebP — that one is ${file.type || 'of no stated type'}.`;
+/** Why this file can't be a character photo (or a room photo), or nothing if
+ *  it can. */
+export function photoProblem(file: File, what = 'character photo'): string {
+  if (!PHOTO_TYPES.includes(file.type)) return `A ${what} is a JPEG, PNG or WebP — that one is ${file.type || 'of no stated type'}.`;
   if (file.size > MAX_PHOTO_BYTES) return `That photo is ${(file.size / 1024 / 1024).toFixed(1)}MB; the limit is ${MAX_PHOTO_BYTES / 1024 / 1024}MB.`;
   return '';
 }
@@ -47,8 +48,11 @@ export function Split({ title, backLabel, onBack, side, footer, children }: {
 
 /** Somewhere to drop a file, or click to pick one. What it looks like inside
  *  is the caller's. */
-export function DropZone({ accept, onFile, disabled, label, className = '', children }: {
+export function DropZone({ accept, onFile, onNoFile, disabled, label, className = '', children }: {
   accept: string; onFile: (file: File) => void; disabled?: boolean; label: string; className?: string; children: ReactNode;
+  /** Something was dropped that is not a file — a picture dragged out of a
+   *  web page, say, which arrives as a link. */
+  onNoFile?: () => void;
 }) {
   const [over, setOver] = useState(false);
   const input = useRef<HTMLInputElement>(null);
@@ -65,8 +69,10 @@ export function DropZone({ accept, onFile, disabled, label, className = '', chil
       onDrop={(e) => {
         e.preventDefault();
         setOver(false);
+        if (disabled) return;
         const file = e.dataTransfer.files?.[0];
-        if (file && !disabled) onFile(file);
+        if (file) onFile(file);
+        else onNoFile?.();
       }}
       className={`overflow-hidden border border-dashed transition-colors ${
         disabled ? 'cursor-default' : 'cursor-pointer'

@@ -10,7 +10,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { loadScene, toScene } from '@/lib/aipersona/db';
 import { PersonaStateError, fail, refuse } from '@/lib/aipersona/respond';
 import { queueFrame } from '@/lib/aipersona/scenes';
-import { MAX_PROMPT_CHARS } from '@/lib/aipersona/types';
+import { MAX_FRAME_PROMPT_CHARS } from '@/lib/aipersona/types';
 import { isUuid } from '@/lib/vids-db';
 
 export const runtime = 'nodejs';
@@ -21,7 +21,7 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
   const { id } = await params;
   if (!isUuid(id)) return refuse('bad id');
   const body = (await req.json().catch(() => ({}))) as Record<string, unknown>;
-  const prompt = typeof body.prompt === 'string' ? body.prompt.trim().slice(0, MAX_PROMPT_CHARS) : '';
+  const prompt = typeof body.prompt === 'string' ? body.prompt.trim().slice(0, MAX_FRAME_PROMPT_CHARS) : '';
   if (!prompt) return refuse('The prompt is empty.');
 
   try {

@@ -3,7 +3,8 @@
 // no.
 
 import type {
-  CreateSceneRequest, ErrorResponse, LibraryPayload, Persona, Scene, UploadRequest, UploadResponse,
+  CreateSavedSceneRequest, CreateSceneRequest, ErrorResponse, LibraryPayload, MakeScenesRequest, Persona, SavedScene, Scene,
+  UploadRequest, UploadResponse,
 } from './types';
 
 async function ask<T>(path: string, init?: RequestInit): Promise<T> {
@@ -44,7 +45,7 @@ function put(url: string, file: File, onProgress?: (fraction: number) => void): 
   });
 }
 
-/** Put a character photo, or the video a scene is cut from, in the bucket.
+/** Put a character photo, a room, or the video a scene is cut from, in the bucket.
  *  Answers with the path the next request names it by. */
 export async function uploadFile(kind: UploadRequest['kind'], file: File, onProgress?: (fraction: number) => void): Promise<string> {
   const { path, url } = await ask<UploadResponse>('/upload', send('POST', { kind, name: file.name, mime: file.type } satisfies UploadRequest));
@@ -57,9 +58,21 @@ export const getLibrary = () => ask<LibraryPayload>('/personas');
 export const createPersona = (name: string, photoPath: string) => ask<Persona>('/personas', send('POST', { name, photoPath }));
 export const updatePersona = (id: string, patch: { name?: string; photoPath?: string }) =>
   ask<Persona>(`/personas/${id}`, send('PATCH', patch));
+/** Give a character a room (a path from uploadFile, kind `room`), or null to take it away. */
+export const setRoom = (id: string, roomPath: string | null) => ask<Persona>(`/personas/${id}`, send('PATCH', { roomPath }));
 export const deletePersona = (id: string) => ask<{ ok: true }>(`/personas/${id}`, send('DELETE'));
 
 export const createScene = (scene: CreateSceneRequest) => ask<Scene>('/scenes', send('POST', scene));
+/** Cut a video and keep it as a saved scene. Nothing is sent to fal. */
+export const createSaved = (scene: CreateSavedSceneRequest) => ask<SavedScene>('/saved', send('POST', scene));
+/** Rename a saved scene, or rewrite the sentence saying what happens in it. */
+export const updateSaved = (id: string, patch: { name?: string; action?: string }) => ask<SavedScene>(`/saved/${id}`, send('PATCH', patch));
+export const deleteSaved = (id: string) => ask<{ ok: true }>(`/saved/${id}`, send('DELETE'));
+/** One character into each of the saved scenes named. Starts a character
+ *  first frame for every one — this is the Go that spends. */
+export const makeScenes = (personaId: string, body: MakeScenesRequest) =>
+  ask<{ scenes: Scene[]; failed: { name: string; error: string }[] }>(`/personas/${personaId}/scenes`, send('POST', body));
+
 /** The poll — and what moves a scene's running jobs along. */
 export const getScene = (id: string) => ask<Scene>(`/scenes/${id}`);
 export const setSceneStage = (id: string, stage: 'prompt' | 'frames') => ask<Scene>(`/scenes/${id}`, send('PATCH', { stage }));

@@ -96,15 +96,18 @@ export function imageSizeFor(width: number, height: number): { width: number; he
  *  resolution, the photo the very file that was uploaded — and the answer is
  *  asked for as a PNG at the clip's size, so nothing is compressed on the way
  *  in or on the way out. */
-export async function submitFrame({ frameUrl, photoUrl, prompt, width, height }: {
-  frameUrl: string; photoUrl: string; prompt: string; width: number; height: number;
+//
+// With a location there is a third: the character's room, #image3, after the
+// other two — and the prompt is the one written for three pictures.
+export async function submitFrame({ frameUrl, photoUrl, roomUrl, prompt, width, height }: {
+  frameUrl: string; photoUrl: string; roomUrl?: string; prompt: string; width: number; height: number;
 }): Promise<string> {
   ensureConfigured();
   try {
     const { request_id } = await fal.queue.submit(FRAME_MODEL, {
       input: {
         prompt,
-        image_urls: [frameUrl, photoUrl],
+        image_urls: roomUrl ? [frameUrl, photoUrl, roomUrl] : [frameUrl, photoUrl],
         image_size: imageSizeFor(width, height),
         quality: FRAME_QUALITY,
         output_format: 'png',

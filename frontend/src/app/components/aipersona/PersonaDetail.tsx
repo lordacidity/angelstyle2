@@ -1,8 +1,10 @@
 'use client';
 
-// One persona: its videos, and the two things about it that can be edited —
-// the name, and the character photo. Drop a new photo on the old one to
-// replace it; scenes made from here on use the new one.
+// One persona: its videos, and the things about it that can be edited — the
+// name, the character photo, and its room. Drop a new photo on the old one to
+// replace it; scenes made from here on use the new one. The room is a photo of
+// the place the character is in, dropped in the same way; it is kept exactly
+// as uploaded, and scenes do not use it yet.
 //
 // The videos are also what a Vids persona is made from: "Make persona video"
 // picks three of them — a start, a middle and an end — edits each, and saves
@@ -12,9 +14,9 @@
 
 import { useEffect, useRef, useState } from 'react';
 import { DownloadIcon, SpinnerIcon } from '@/lib/icons';
-import { deletePersona, deleteTake, downloadUrl, fileSlug, makeAvatar, renameTake, updatePersona, uploadFile } from '@/lib/aipersona/client';
+import { deletePersona, deleteTake, downloadUrl, fileSlug, makeAvatar, renameTake, setRoom, updatePersona, uploadFile } from '@/lib/aipersona/client';
 import { quickMake, quickShared, type QuickShared } from '@/lib/aipersona/quick-make';
-import { MAX_NAME_CHARS, PHOTO_TYPES, type Persona, type PersonaVideo } from '@/lib/aipersona/types';
+import { MAX_NAME_CHARS, PHOTO_TYPES, SCENE_KINDS as TAKE_SECTIONS, sceneKind as takeSection, type Persona, type PersonaVideo } from '@/lib/aipersona/types';
 import { deletePersona as deleteMade, listLibrary, updatePersona as renameMade } from '@/lib/vids-client';
 import { personaFolders } from '@/lib/vids-persona-folders';
 import { PERSONA_PARTS, type VidPersona, type VidRow, type VidsLibraryPayload } from '@/lib/vids-types';
@@ -130,7 +132,7 @@ function WholeVideo({ clips }: { clips: VidRow[] }) {
 /** A name that is renamed by typing over it: Enter or leaving it saves, Escape
  *  puts it back. Keyed by the name where it is used, so a rename that lands
  *  (or one made elsewhere) is what it shows. */
-function NameInput({ value, max, disabled, onRename }: {
+export function NameInput({ value, max, disabled, onRename }: {
   value: string; max: number; disabled?: boolean; onRename: (next: string) => void;
 }) {
   const [name, setName] = useState(value);
@@ -253,17 +255,9 @@ interface QuickJob {
 /** What the three videos Quick make is given become, in the order pressed. */
 const QUICK_SLOTS = ['Start', 'Middle', 'End'] as const;
 
-/** The three kinds of video a character has, by what they are called: one
- *  with "trading" in its name is the trade, one with "end" as a word of its
- *  own (or "ending") is an ending, and everything else is a hook. */
-const TAKE_SECTIONS = [
-  { key: 'hook', label: 'Hook' },
-  { key: 'trading', label: 'Trading' },
-  { key: 'end', label: 'End' },
-] as const;
-type TakeSection = (typeof TAKE_SECTIONS)[number]['key'];
-const takeSection = (name: string): TakeSection =>
-  (/trading/i.test(name) ? 'trading' : /\bend(ing)?\b/i.test(name) ? 'end' : 'hook');
+// The three kinds of video a character has — Hook, Trading, End — go by what
+// they are called: SCENE_KINDS / sceneKind in lib/aipersona/types, which the
+// saved scenes are sorted by as well.
 
 /** One persona video made from this character: played whole, renamed by
  *  typing over its name, deleted with a second click. Deleting drops the
@@ -317,10 +311,12 @@ function MadeVideo({ persona, clips, onChanged }: {
   );
 }
 
-export function PersonaDetail({ persona, onBack, onChanged }: {
+export function PersonaDetail({ persona, onBack, onChanged, onMakeScenes }: {
   persona: Persona;
   onBack: () => void;
   onChanged: () => Promise<void>;
+  /** "Make scenes": pick saved scenes to put this character into. */
+  onMakeScenes: () => void;
 }) {
   const [name, setName] = useState(persona.name);
   /** "Make persona video" — the one with the editor — is open in place of
@@ -437,8 +433,48 @@ export function PersonaDetail({ persona, onBack, onChanged }: {
     if (!problem) void run('photo', async () => updatePersona(persona.id, { photoPath: await uploadFile('photo', file) }));
   }
 
+  // The room keeps its own state, so it can be dropped in while something
+  // else on the page is working (a profile pic takes half a minute), and what
+  // went wrong with it is said at the room, not further down.
+  const [roomBusy, setRoomBusy] = useState<string | null>(null);
+  const [roomError, setRoomError] = useState('');
+
+  async function runRoom(text: string, action: () => Promise<unknown>) {
+    setRoomBusy(text);
+    setRoomError('');
+    try {
+      await action();
+      await onChanged();
+    } catch (err) {
+      setRoomError(errorText(err));
+    } finally {
+      setRoomBusy(null);
+    }
+  }
+
+  function replaceRoom(file: File) {
+    const problem = photoProblem(file, 'room photo');
+    setRoomError(problem);
+    if (problem) return;
+    void runRoom('Uploading…', async () => {
+      const path = await uploadFile('room', file, (f) => setRoomBusy(`Uploading… ${Math.round(f * 100)}%`));
+      setRoomBusy('Saving…');
+      await setRoom(persona.id, path);
+    });
+  }
+
   const side = (
     <div className="grid gap-5">
+      <button
+        type="button"
+        onClick={onMakeScenes}
+        disabled={busy === 'delete'}
+        title={`Pick saved scenes and make each of them with ${persona.name} in it`}
+        className={PRIMARY}
+      >
+        Make scenes
+      </button>
+
       <div className="flex items-center gap-3">
         <span className="relative grid h-16 w-16 shrink-0 place-items-center overflow-hidden rounded-full bg-zinc-900">
           {persona.avatarUrl && (
@@ -467,6 +503,47 @@ export function PersonaDetail({ persona, onBack, onChanged }: {
           {busy === 'photo' && <SpinnerIcon size={22} className="absolute animate-spin text-white" />}
         </DropZone>
         <span className="text-[11px] text-zinc-600">Drop a new photo on it, or click, to replace it.</span>
+      </div>
+
+      <div className="grid gap-1.5">
+        <span className={LABEL}>Room</span>
+        <DropZone
+          accept={PHOTO_TYPES.join(',')}
+          onFile={replaceRoom}
+          onNoFile={() => setRoomError('That was not a file. Save the picture to this computer first, then drop the file here (or click to pick it).')}
+          disabled={!!roomBusy || busy === 'delete'}
+          label={persona.roomThumbUrl ? 'Replace the room photo' : 'Add a room photo'}
+          className={`relative grid place-items-center rounded-md ${persona.roomThumbUrl ? '' : 'h-28'}`}
+        >
+          {persona.roomThumbUrl ? (
+            // eslint-disable-next-line @next/next/no-img-element
+            <img src={persona.roomThumbUrl} alt="" decoding="async" className={`w-full object-contain ${roomBusy ? 'opacity-40' : ''}`} />
+          ) : (
+            !roomBusy && <span className="px-4 text-center text-xs text-zinc-500">Drop a photo of the room or location, or click</span>
+          )}
+          {roomBusy && (
+            <span className="absolute flex items-center gap-2 text-xs tabular-nums text-white">
+              <SpinnerIcon size={16} className="animate-spin" /> {roomBusy}
+            </span>
+          )}
+        </DropZone>
+        {roomError && <p className="text-xs text-red-400">{roomError}</p>}
+        {persona.roomUrl ? (
+          <span className="flex items-center gap-3 text-[11px] text-zinc-600">
+            <span className="min-w-0 flex-1">Drop a new photo on it, or click, to replace it.</span>
+            <a href={persona.roomUrl} target="_blank" rel="noreferrer" className="transition-colors hover:text-white">Full size</a>
+            <ConfirmButton
+              onConfirm={() => void runRoom('Removing…', () => setRoom(persona.id, null))}
+              disabled={!!roomBusy || busy === 'delete'}
+              armedLabel="Remove?"
+              className="border border-transparent transition-colors hover:text-white"
+            >
+              Remove
+            </ConfirmButton>
+          </span>
+        ) : (
+          <span className="text-[11px] text-zinc-600">Optional. Kept at full quality, exactly as uploaded.</span>
+        )}
       </div>
 
       <label className={`grid gap-1.5 ${LABEL}`}>

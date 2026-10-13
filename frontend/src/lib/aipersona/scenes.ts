@@ -9,6 +9,7 @@
 //
 // Server-only.
 
+import { scrubVideoBytes } from '@/lib/videoMetadata';
 import { errMessage, publicUrl, putObject, removeObjects } from '@/lib/vids-db';
 import { fitForKling } from './clip';
 import { fit1080p, imageAt1080p, imageThumb, photoAsTaken, videoAt1080p } from './fit1080';
@@ -22,10 +23,20 @@ import { jobResult, jobStatus, submitFrame, submitMotion, type JobKind } from '.
 
 /** Queue this take's character first frame. A refusal is written on the take
  *  rather than thrown: one persona's rejected photo shouldn't stop the rest. */
+//
+// A take with "Use location" on sends a third picture, its persona's room,
+// the same way the photo goes: full size, untouched. Its prompt names three
+// pictures, so it is not sent with two — if the room has been removed since,
+// the take says so instead of paying for a frame drawn from a prompt that
+// points at a picture that isn't there.
 export async function queueFrame(scene: SceneRecord, take: TakeRecord, prompt: string): Promise<void> {
   try {
+    if (take.useRoom && !take.roomPath) {
+      throw new Error(`${take.personaName} is set to use its location, but its room photo has been removed. Add one on its page and try again, or take it out of the scene.`);
+    }
     const request = await submitFrame({
       frameUrl: publicUrl(await imageAt1080p(scene.framePath)), photoUrl: publicUrl(await photoAsTaken(take.photoPath)), prompt,
+      ...(take.useRoom && take.roomPath ? { roomUrl: publicUrl(await photoAsTaken(take.roomPath)) } : {}),
       ...fit1080p(scene.width, scene.height),
     });
     await jobQueued(take, 'frame', request, prompt);
@@ -54,8 +65,10 @@ const EXTENSION: Record<string, string> = {
   'image/png': 'png', 'image/jpeg': 'jpg', 'image/webp': 'webp', 'video/mp4': 'mp4', 'video/quicktime': 'mov', 'video/webm': 'webm',
 };
 
-/** Copy what fal made into our bucket, byte for byte — the image model's PNG
- *  and Kling's video exactly as fal served them, never re-encoded. Each result
+/** Copy what fal made into our bucket — the image model's PNG and Kling's
+ *  video exactly as fal served them, never re-encoded. The one thing taken out
+ *  of a video is its metadata (lib/videoMetadata), which leaves the picture and
+ *  the sound bit for bit as they were. Each result
  *  gets a path of its own, so a redo is never served the last one out of a
  *  cache. (A frame too big for Kling's image limit is fitted on the way out to
  *  Kling, in a copy — see frameForKling — not here.) */
@@ -65,6 +78,7 @@ async function keep(url: string, scene: SceneRecord, take: TakeRecord, kind: Job
   const fallback = kind === 'frame' ? 'image/png' : 'video/mp4';
   const type = (res.headers.get('content-type') || '').split(';')[0].trim().toLowerCase();
   const body = Buffer.from(await res.arrayBuffer());
+  if (kind === 'video') scrubVideoBytes(body);
   const contentType = EXTENSION[type] ? type : fallback;
   const path = sceneFile(scene.id, `${take.id}-${kind}-${Date.now().toString(36)}.${EXTENSION[contentType]}`);
   await putObject(path, body, contentType);

@@ -1,13 +1,16 @@
 // /api/ai-persona/personas/:id
 //
-//   PATCH { name?, photoPath? }  -> rename, or swap the character photo — the
-//                                   two things a persona has
-//   DELETE                       -> the persona, its photo and its videos
+//   PATCH { name?, photoPath? }  -> rename, or swap the character photo
+//   PATCH { roomPath }           -> give it a room (a photo of the place it is
+//                                   in), swap the one it has, or — null — take
+//                                   it away
+//   DELETE                       -> the persona, its photo, its room and its
+//                                   videos
 //
 // Behind the site gate like every /api/* route.
 
 import { NextRequest, NextResponse } from 'next/server';
-import { deletePersona, isPhotoPath, updatePersona } from '@/lib/aipersona/db';
+import { deletePersona, isPhotoPath, isRoomPath, setRoom, updatePersona } from '@/lib/aipersona/db';
 import { fail, refuse } from '@/lib/aipersona/respond';
 import { MAX_NAME_CHARS } from '@/lib/aipersona/types';
 import { isUuid } from '@/lib/vids-db';
@@ -21,6 +24,16 @@ export async function PATCH(req: NextRequest, { params }: Ctx) {
   const { id } = await params;
   if (!isUuid(id)) return refuse('bad id');
   const body = (await req.json().catch(() => ({}))) as Record<string, unknown>;
+
+  if (body.roomPath !== undefined) {
+    if (body.roomPath !== null && !isRoomPath(body.roomPath)) return refuse('That is not an uploaded room photo.');
+    try {
+      const persona = await setRoom(id, body.roomPath);
+      return persona ? NextResponse.json(persona) : refuse('That character no longer exists.', 404);
+    } catch (err) {
+      return fail('personas PATCH', err);
+    }
+  }
 
   const patch: { name?: string; photoPath?: string } = {};
   if (body.name !== undefined) {

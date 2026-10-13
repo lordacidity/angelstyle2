@@ -6,6 +6,10 @@
 //   Personas  a name and a character photo each. The front screen shows them
 //             all and makes new ones; clicking one shows its videos and lets
 //             the name and the photo be changed. (PersonaLibrary, PersonaDetail)
+//   Saved     a video cut and named once and kept (SavedScenes), to be made
+//   scenes    for any character from that character's page: "Make scenes"
+//             there is New scene the other way round — the character is set
+//             and the scenes are picked (PersonaScenes).
 //   A scene   a video, trimmed and sped up. Its first frame is redrawn once
 //             for every persona — GPT Image, the frame as #image1 and the
 //             character photo as #image2 — and, when those are approved, Kling
@@ -36,12 +40,15 @@ import type { LibraryPayload, Scene } from '@/lib/aipersona/types';
 import { SpinnerIcon } from '@/lib/icons';
 import { PersonaDetail } from './PersonaDetail';
 import { PersonaLibrary } from './PersonaLibrary';
+import { PersonaScenes } from './PersonaScenes';
+import { SavedScenes } from './SavedScenes';
 import { SceneReview, type SceneTabState } from './SceneReview';
 import { SceneSetup } from './SceneSetup';
 import { errorText } from './aipersona-ui';
 
-/** The front tab: the characters, or one of them. */
-type Home = { at: 'library' } | { at: 'persona'; id: string };
+/** The front tab: the characters, or one of them — or that one with "Make
+ *  scenes" open — or the saved scenes. */
+type Home = { at: 'library' } | { at: 'persona'; id: string } | { at: 'make'; id: string } | { at: 'saved'; from?: string };
 
 /** A scene tab: one being set up, or one already made. `fresh` is the scene
  *  as Go answered with it, so the screen needn't ask again. */
@@ -124,15 +131,50 @@ export function AiPersonaSection() {
     setStatus((s) => (s[key]?.title === title && s[key]?.state === state ? s : { ...s, [key]: { title, state } }));
   }, []);
 
-  const persona = home.at === 'persona' ? library?.personas.find((p) => p.id === home.id) : undefined;
-  const homeScreen = home.at === 'persona' && persona ? (
-    <PersonaDetail key={persona.id} persona={persona} onBack={() => setHome({ at: 'library' })} onChanged={refresh} />
+  /** "Make scenes" answered: every scene it made gets a tab, and the first
+   *  is the one shown. The character's page is what is left behind them. */
+  const openMade = (scenes: Scene[], personaId: string) => {
+    setTabs((ts) => [
+      ...ts,
+      ...scenes.filter((s) => !ts.some((t) => t.key === `s-${s.id}`)).map((s): Tab => ({ key: `s-${s.id}`, kind: 'scene', id: s.id, fresh: s })),
+    ]);
+    setHome({ at: 'persona', id: personaId });
+    if (scenes[0]) setActive(`s-${scenes[0].id}`);
+    void refresh();
+  };
+
+  const persona = home.at === 'persona' || home.at === 'make' ? library?.personas.find((p) => p.id === home.id) : undefined;
+  const homeScreen = home.at === 'saved' && library ? (
+    <SavedScenes
+      saved={library.saved}
+      // Back to where it was opened from: a character's Make scenes, or the front.
+      onBack={() => setHome(home.from ? { at: 'make', id: home.from } : { at: 'library' })}
+      onChanged={refresh}
+    />
+  ) : home.at === 'make' && persona && library ? (
+    <PersonaScenes
+      key={persona.id}
+      persona={persona}
+      saved={library.saved}
+      onBack={() => setHome({ at: 'persona', id: persona.id })}
+      onOpenSaved={() => setHome({ at: 'saved', from: persona.id })}
+      onMade={(scenes) => openMade(scenes, persona.id)}
+    />
+  ) : home.at === 'persona' && persona ? (
+    <PersonaDetail
+      key={persona.id}
+      persona={persona}
+      onBack={() => setHome({ at: 'library' })}
+      onChanged={refresh}
+      onMakeScenes={() => setHome({ at: 'make', id: persona.id })}
+    />
   ) : (
     <PersonaLibrary
       library={library}
       error={error}
       onOpenPersona={(id) => setHome({ at: 'persona', id })}
       onNewScene={newScene}
+      onOpenSaved={() => setHome({ at: 'saved' })}
       onOpenScene={(id) => openScene(id)}
       onChanged={refresh}
     />
