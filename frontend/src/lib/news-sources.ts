@@ -1,17 +1,14 @@
 // Curator Twitter handles stored in Railway Postgres news_sources table.
 // Soft-fails — callers should catch and proceed without curator tweets.
 
-import { Pool } from 'pg';
+import type { Pool } from 'pg';
+import { railwayPool } from '@/lib/railway-pool';
 
 let pool: Pool | null = null;
 
 function getPool(): Pool {
   if (!pool) {
-    pool = new Pool({
-      connectionString: process.env.DATABASE_PUBLIC_URL,
-      ssl: { rejectUnauthorized: false },
-      max: 2,
-    });
+    pool = railwayPool(process.env.DATABASE_PUBLIC_URL ?? '', { max: 2, name: 'news-sources' });
   }
   return pool;
 }

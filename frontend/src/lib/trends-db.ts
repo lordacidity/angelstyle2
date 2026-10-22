@@ -17,6 +17,7 @@
 // component; it would leak the DB connection string.
 
 import pg from 'pg';
+import { railwayPool } from '@/lib/railway-pool';
 
 export type TrendPoint = { timestamp: number; value: number };
 
@@ -31,7 +32,7 @@ function getPool(): pg.Pool {
   if (!connectionString) {
     throw new Error('DATABASE_PUBLIC_URL not set — paste Railway\'s Connect-panel value into frontend/.env');
   }
-  g.__trendsPool = new pg.Pool({ connectionString, ssl: { rejectUnauthorized: false } });
+  g.__trendsPool = railwayPool(connectionString, { name: 'trends' });
   return g.__trendsPool;
 }
 

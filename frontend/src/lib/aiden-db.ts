@@ -11,6 +11,7 @@
 // connection string into the bundle. Client code imports lib/aiden-types.
 
 import pg from 'pg';
+import { railwayPool } from '@/lib/railway-pool';
 import {
   EVENT_KINDS, EVENT_ROLES, FIRM_KINDS, GEO_STATUSES, GOAL_STATUSES, LINK_KINDS, ROUND_ROLES, WARMTHS,
   type AidenChatMessage, type AidenEntity, type AidenEvent, type AidenEventPerson,
@@ -41,7 +42,7 @@ function getPool(): pg.Pool {
   }
   // A small pool: the snapshot runs its reads side by side, and this DB is
   // shared with the Board and the rest of the Studio.
-  g.__aidenPool = new pg.Pool({ connectionString, ssl: { rejectUnauthorized: false }, max: 4 });
+  g.__aidenPool = railwayPool(connectionString, { max: 4, name: 'aiden' });
   return g.__aidenPool;
 }
 

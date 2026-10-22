@@ -19,6 +19,7 @@
 // Server-only. The section imports lib/aipersona/types.
 
 import pg from 'pg';
+import { railwayPool } from '@/lib/railway-pool';
 import { publicUrl, removeObjects } from '@/lib/vids-db';
 import type { JobKind } from './fal';
 import { knownThumb, warmThumbs } from './fit1080';
@@ -42,7 +43,7 @@ function getPool(): pg.Pool {
   const connectionString = process.env.DATABASE_PUBLIC_URL ?? process.env.DATABASE_URL ?? '';
   if (!connectionString) throw new Error('DATABASE_PUBLIC_URL not set');
   // A small pool: this DB is shared with the Board and the rest of the Studio.
-  g.__aipersonaPool = new pg.Pool({ connectionString, ssl: { rejectUnauthorized: false }, max: 4 });
+  g.__aipersonaPool = railwayPool(connectionString, { max: 4, name: 'aipersona' });
   return g.__aipersonaPool;
 }
 

@@ -13,6 +13,7 @@
 // component or it would leak the DB connection string.
 
 import pg from 'pg';
+import { railwayPool } from '@/lib/railway-pool';
 
 export interface EmojiPref {
   /** Lowercase hex codepoint(s) — matches an EMOJIS entry + its PNG filename. */
@@ -45,7 +46,7 @@ function getPool(): pg.Pool {
   if (!connectionString) {
     throw new Error('DATABASE_PUBLIC_URL not set — paste Railway\'s Connect-panel value into frontend/.env');
   }
-  g.__emojiPrefsPool = new pg.Pool({ connectionString, ssl: { rejectUnauthorized: false } });
+  g.__emojiPrefsPool = railwayPool(connectionString, { name: 'emoji-prefs' });
   return g.__emojiPrefsPool;
 }
 

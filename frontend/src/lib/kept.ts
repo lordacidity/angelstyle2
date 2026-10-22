@@ -23,6 +23,7 @@
 // fails with something kept, however old, hands the kept thing over instead.
 
 import pg from 'pg';
+import { railwayPool } from '@/lib/railway-pool';
 
 const MIN = 60_000;
 /** A refresh started this long ago and not finished is taken to have died. */
@@ -57,7 +58,7 @@ function getPool(): pg.Pool | null {
   if (g.__keptPool) return g.__keptPool;
   const connectionString = process.env.DATABASE_PUBLIC_URL ?? process.env.DATABASE_URL ?? '';
   if (!connectionString) return null;
-  g.__keptPool = new pg.Pool({ connectionString, ssl: { rejectUnauthorized: false }, max: 3 });
+  g.__keptPool = railwayPool(connectionString, { max: 3, name: 'kept' });
   return g.__keptPool;
 }
 

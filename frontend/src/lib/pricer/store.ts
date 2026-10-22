@@ -8,6 +8,7 @@
 // route handlers) — never import it from a client component, it would leak the connection string.
 
 import pg from 'pg';
+import { railwayPool } from '@/lib/railway-pool';
 
 // The pricing log's columns, in CSV order: one row per completed pricing — the bio, each analyst's price,
 // confidence, evidence and rationale, and the judge's verdict. pricedRow() in pipeline.js fills them and the
@@ -57,7 +58,7 @@ function getPool(): pg.Pool {
   if (!connectionString) {
     throw new Error('DATABASE_PUBLIC_URL not set — the pricer keeps its peer lines and log in Railway Postgres (root .env)');
   }
-  g.__pricerPool = new pg.Pool({ connectionString, ssl: { rejectUnauthorized: false } });
+  g.__pricerPool = railwayPool(connectionString, { name: 'pricer' });
   return g.__pricerPool;
 }
 
