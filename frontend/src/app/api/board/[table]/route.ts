@@ -20,7 +20,10 @@ export async function GET(
     return NextResponse.json(await listRows(table));
   } catch (err) {
     console.error('[board GET]', err);
-    return NextResponse.json({ error: 'failed to load board' }, { status: 500 });
+    // Say why, so a Railway outage reads as one on the board instead of as an
+    // empty tab nobody can explain.
+    const why = err instanceof Error ? err.message : 'unexpected error';
+    return NextResponse.json({ error: `failed to load board: ${why}` }, { status: 500 });
   }
 }
 

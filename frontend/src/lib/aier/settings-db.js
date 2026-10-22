@@ -1,5 +1,5 @@
 import fs from 'node:fs';
-import pg from 'pg';
+import { railwayPool } from '../railway-pool';
 import { SETTINGS_FILE } from './paths.js';
 
 // Durable home for the Aier admin settings blob (the same JSON that used to live in
@@ -23,7 +23,7 @@ function getPool() {
   if (g.__aierSettingsPool) return g.__aierSettingsPool;
   const cs = connectionString();
   if (!cs) return null; // no DB configured → caller uses the file fallback
-  g.__aierSettingsPool = new pg.Pool({ connectionString: cs, ssl: { rejectUnauthorized: false } });
+  g.__aierSettingsPool = railwayPool(cs, { name: 'aier-settings' });
   return g.__aierSettingsPool;
 }
 

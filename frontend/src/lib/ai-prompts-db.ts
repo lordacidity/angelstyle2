@@ -11,6 +11,7 @@
 // component or it would leak the DB connection string.
 
 import pg from 'pg';
+import { railwayPool } from '@/lib/railway-pool';
 
 // Fixed number of topic slots shown in the AI Prompts section.
 export const PROMPT_COUNT = 15;
@@ -45,7 +46,7 @@ function getPool(): pg.Pool {
   if (!connectionString) {
     throw new Error('DATABASE_PUBLIC_URL not set — paste Railway\'s Connect-panel value into frontend/.env');
   }
-  g.__aiPromptsPool = new pg.Pool({ connectionString, ssl: { rejectUnauthorized: false } });
+  g.__aiPromptsPool = railwayPool(connectionString, { name: 'ai-prompts' });
   return g.__aiPromptsPool;
 }
 

@@ -16,6 +16,7 @@
 import { randomInt, randomUUID } from 'node:crypto';
 import { CLIPPERS } from '@/lib/clipping';
 import pg from 'pg';
+import { railwayPool, readWithRetry } from '@/lib/railway-pool';
 import { createClient, type SupabaseClient } from '@supabase/supabase-js';
 import {
   RECIPE_CODE_ALPHABET, RECIPE_CODE_LENGTH, cleanEdit, cleanMarks, cleanTheme, isClipableKind, isRecipeCode, recipeName,
@@ -55,7 +56,7 @@ function getPool(): pg.Pool {
   if (!connectionString) {
     throw new Error('DATABASE_PUBLIC_URL not set — paste Railway\'s Connect-panel value into the root .env');
   }
-  g.__vidsPool = new pg.Pool({ connectionString, ssl: { rejectUnauthorized: false } });
+  g.__vidsPool = railwayPool(connectionString, { max: 5, name: 'vids' });
   return g.__vidsPool;
 }
 
@@ -492,13 +493,13 @@ const toVideo = (r: VideoDb): VidRow => {
 export async function listLibrary(): Promise<VidsLibraryPayload> {
   await ensureSchema();
   const pool = getPool();
-  const [f, v, p, l, c] = await Promise.all([
+  const [f, v, p, l, c] = await readWithRetry(() => Promise.all([
     pool.query<FolderDb>(`SELECT ${FOLDER_COLS} FROM vids_folders ORDER BY name`),
     pool.query<VideoDb>(`SELECT ${VIDEO_COLS} FROM vids_videos ORDER BY created_at DESC`),
     pool.query<PersonaDb>(`SELECT ${PERSONA_COLS} FROM vids_personas ORDER BY name`),
     pool.query<LinkDb>(`SELECT ${LINK_COLS} FROM vids_links ORDER BY created_at`),
     pool.query<ClipableDb>(`SELECT ${CLIPABLE_COLS} FROM vids_clipable ORDER BY created_at`),
-  ]);
+  ]));
   const all: VidsLibraryPayload = {
     folders: f.rows.map(toFolder),
     videos: v.rows.map(toVideo),

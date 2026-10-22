@@ -11,6 +11,7 @@
 // it from a client component — it would leak the DB connection string.
 
 import pg from 'pg';
+import { railwayPool, readWithRetry } from '@/lib/railway-pool';
 
 // ── Allowlisted tables ────────────────────────────────────────────────────────
 // Table identifiers can't be parameterized in SQL, so callers pass one of these
@@ -95,7 +96,7 @@ function getPool(): pg.Pool {
   if (!connectionString) {
     throw new Error('DATABASE_PUBLIC_URL not set — paste Railway\'s Connect-panel value into frontend/.env');
   }
-  g.__boardPool = new pg.Pool({ connectionString, ssl: { rejectUnauthorized: false } });
+  g.__boardPool = railwayPool(connectionString, { name: 'board' });
   return g.__boardPool;
 }
 
@@ -192,12 +193,14 @@ export async function listRows(table: BoardTable): Promise<BoardRow[]> {
   await ensureSchema();
   // Age out expired rows first (throttled), so the board shrinks on its own.
   await purgeExpired(table);
-  const r = await getPool().query<DbRow>(
+  // A read, so safe to try twice: one dropped Railway connection should not
+  // leave the tab empty.
+  const r = await readWithRetry(() => getPool().query<DbRow>(
     // Newest first — the board reads top-to-bottom with the most recent rows up
     // top, and freshly-added rows land at the top of the list. Capped so the
     // payload can never run away.
     `SELECT ${SELECT_COLS} FROM ${PHYSICAL[table]} ORDER BY created_at DESC LIMIT ${BOARD_ROW_CAP}`,
-  );
+  ));
   return r.rows.map(toRow);
 }
 
