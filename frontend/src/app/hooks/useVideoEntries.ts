@@ -99,12 +99,18 @@ export function useVideoEntries() {
         body: JSON.stringify({ url: currentEntry.url.trim() }),
       });
       const json = await res.json() as { error?: string };
-      const errorMsg = typeof json.error === 'string' ? json.error : 'Something went wrong';
-      const data = res.ok ? (json as VideoData) : null;
+      // A "success" with no video address and no photos has nothing to show:
+      // the player would sit black without a word. Call it what it is.
+      const got = res.ok ? (json as VideoData) : null;
+      const empty = !!got && !(got.play || got.hdplay || got.wmplay) && !(got.images && got.images.length > 0);
+      const errorMsg = empty
+        ? 'The link was found but no video came back. Try again, or upload the file instead.'
+        : typeof json.error === 'string' ? json.error : 'Something went wrong';
+      const data = empty ? null : got;
       setEntries(prev => prev.map(e =>
         e.id === id ? {
           ...e, loading: false,
-          error: res.ok ? '' : errorMsg,
+          error: data ? '' : errorMsg,
           data, videoFailed: false,
         } : e
       ));

@@ -175,7 +175,18 @@ export async function POST(request: NextRequest) {
         return NextResponse.json({ error: data.error || 'Failed to fetch Instagram media' }, { status: 400 });
       }
 
-      const firstResult = data.result[0];
+      // igdl copies each item's url, or '' when there is none, and still calls
+      // the whole thing a success. When its backend answers with something
+      // other than a list (an error page, a text message), every item comes
+      // back with an empty url; passed on, that played as a silent black box.
+      // Only an item with a real address counts.
+      const firstResult = data.result.find(r => /^https?:\/\//i.test(r.url || ''));
+      if (!firstResult) {
+        return NextResponse.json(
+          { error: 'The Instagram downloader found no video at this link. Its service may be down; try again later or upload the file instead.' },
+          { status: 502 },
+        );
+      }
       return NextResponse.json({
         id: Date.now().toString(),
         title: '',
