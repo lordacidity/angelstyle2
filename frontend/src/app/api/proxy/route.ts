@@ -13,6 +13,8 @@ const ALLOWED_HOSTS = [
   'd.rapidcdn.app',
   'cdninstagram.com',
   'instagram.com',
+  // Instagram reels served from Meta's edge (instagram.<pop>.fna.fbcdn.net)
+  'fna.fbcdn.net',
   'twimg.com',
   'video.twimg.com',
   'pbs.twimg.com',

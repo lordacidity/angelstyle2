@@ -127,6 +127,30 @@ async function fetchTikTokViaTikwm(resolvedUrl: string): Promise<TikTokData | nu
   return json.data;
 }
 
+// Primary Instagram source: kkinstagram.com, an InstaFix embed fixer (the
+// Instagram counterpart of fxtwitter). For a link-preview bot it answers
+// /videos/<shortcode>/1 with a redirect to the reel's mp4 on Instagram's CDN.
+// btch-downloader's igdl backend started answering "Request Failed With Code
+// 401" in Oct 2026, so it is only the fallback now.
+async function fetchInstagramViaInstaFix(url: string): Promise<string | null> {
+  const m = url.match(/instagram\.com\/(?:[^/]+\/)?(?:reels?|p|tv)\/([A-Za-z0-9_-]+)/i);
+  if (!m) return null;
+  const res = await fetchWithTimeout(`https://kkinstagram.com/videos/${m[1]}/1`, {
+    redirect: 'manual',
+    headers: { 'User-Agent': 'TelegramBot (like TwitterBot)' },
+  }, 15000);
+  const location = res.headers.get('location') || '';
+  // Only a redirect onto Instagram's own CDN counts; anything else (an error
+  // page, an ad redirect) is not a video.
+  try {
+    const { protocol, hostname } = new URL(location);
+    if (protocol === 'https:' && (hostname.endsWith('.fna.fbcdn.net') || hostname.endsWith('.cdninstagram.com'))) {
+      return location;
+    }
+  } catch {}
+  return null;
+}
+
 export async function POST(request: NextRequest) {
   let url: string;
   const Schema = z.object({ url: z.string() });
@@ -165,6 +189,26 @@ export async function POST(request: NextRequest) {
     }
 
     if (isInstagramUrl(trimmedUrl)) {
+      let videoUrl: string | null = null;
+      try {
+        videoUrl = await fetchInstagramViaInstaFix(trimmedUrl);
+      } catch (err) {
+        console.error('InstaFix error:', err instanceof Error ? err.message : err);
+      }
+      if (videoUrl) {
+        return NextResponse.json({
+          id: Date.now().toString(),
+          title: '',
+          cover: '',
+          author: { uniqueId: 'instagram', nickname: 'Instagram User', avatarThumb: '' },
+          play: videoUrl,
+          wmplay: videoUrl,
+          hdplay: videoUrl,
+          duration: 0,
+          size: 0,
+        });
+      }
+
       const { igdl } = await import('btch-downloader');
       const controller = new AbortController();
       const timeoutId = setTimeout(() => controller.abort(), API_TIMEOUT);
