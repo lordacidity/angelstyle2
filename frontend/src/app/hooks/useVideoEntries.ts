@@ -4,6 +4,7 @@ import { useState, useRef } from 'react';
 import type { TikTokCanvasRef } from '../components/TikTokCanvas';
 import type { VideoEntry, VideoMode, VideoData } from '../types';
 import { makeEmptyEntry } from '@/lib/entry';
+import { bestVideoUrl } from '@/lib/utils';
 
 export function useVideoEntries() {
   const [entries, setEntries] = useState<VideoEntry[]>([makeEmptyEntry('1')]);
@@ -33,8 +34,30 @@ export function useVideoEntries() {
     setEntries([makeEmptyEntry('1')]);
   }
 
-  function handleVideoError(id: string) {
+  // The link resolved but the <video> could not play what came back. That used
+  // to leave a silent black box; ask the proxy what it said and put the answer,
+  // with the video's host, under the row so the cause can be seen.
+  async function handleVideoError(id: string) {
     setEntries(prev => prev.map(e => e.id === id ? { ...e, videoFailed: true } : e));
+    const entry = entriesRef.current.find(e => e.id === id);
+    if (!entry?.data || entry.localVideoSrc) return;
+    const src = entry.data.play || entry.data.hdplay || entry.data.wmplay || '';
+    let host = 'unknown host';
+    try { host = new URL(src).hostname; } catch { /* keep the fallback */ }
+    let why = 'no video address came back';
+    if (src) {
+      try {
+        const res = await fetch(bestVideoUrl(entry.data), { headers: { Range: 'bytes=0-0' } });
+        why = res.ok
+          ? 'the file came back but the browser could not play it'
+          : ((await res.json().catch(() => ({}))) as { error?: string }).error ?? `HTTP ${res.status}`;
+      } catch {
+        why = 'the proxy could not be reached';
+      }
+    }
+    setEntries(prev => prev.map(e => e.id === id
+      ? { ...e, error: `The video would not play: ${why} (video host: ${host}).` }
+      : e));
   }
 
   function setMode(id: string, mode: VideoMode) {
