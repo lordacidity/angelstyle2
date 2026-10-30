@@ -1,0 +1,61 @@
+/* angelstyle.com/knockout. Scoped under .ko. */
+
+html:has(.ko), body:has(.ko) { background: #141416; overscroll-behavior: none; }
+
+.ko {
+  min-height: 100dvh;
+  max-width: 520px;
+  margin: 0 auto;
+  padding: max(16px, env(safe-area-inset-top)) 16px max(16px, env(safe-area-inset-bottom));
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  color: #f4f4f5;
+  background: #141416;
+  font-family: var(--font-inter), system-ui, -apple-system, sans-serif;
+  -webkit-tap-highlight-color: transparent;
+  user-select: none;
+}
+.ko button { font: inherit; color: inherit; cursor: pointer; }
+.ko-top { display: flex; align-items: center; justify-content: space-between; }
+.ko-top h1 { margin: 0; font-size: 28px; font-weight: 900; text-transform: uppercase; }
+.ko-count { display: flex; gap: 8px; font-size: 24px; font-weight: 900; font-variant-numeric: tabular-nums; }
+.ko-dim { color: rgba(244, 244, 245, 0.5); }
+
+.ko-board { position: relative; }
+.ko-board canvas { display: block; width: 100%; aspect-ratio: 1; touch-action: none; }
+
+.ko-cover { position: absolute; inset: 0; display: grid; place-items: center; background: rgba(20, 20, 22, 0.55); }
+.ko-cover.solid { background: #141416; }
+.ko-card {
+  background: #232326;
+  border-radius: 20px;
+  padding: 20px 24px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 12px;
+  text-align: center;
+}
+.ko-card p { margin: 0; font-weight: 700; font-size: 18px; }
+.ko-card p.ko-dim { font-size: 15px; font-weight: 500; }
+.ko-big { font-size: 28px !important; font-weight: 900 !important; }
+
+.ko-pick { display: flex; flex-wrap: wrap; justify-content: center; gap: 8px; }
+.ko-pick button {
+  width: 42px; height: 42px; border-radius: 12px; border: 0;
+  background: #18181b; font-weight: 800; font-size: 16px; color: rgba(244, 244, 245, 0.6);
+}
+.ko-pick button.on { background: #f4f4f5; color: #141416; }
+
+.ko-primary {
+  background: #f4f4f5;
+  color: #141416 !important;
+  border: 0;
+  border-radius: 999px;
+  padding: 11px 22px;
+  font-weight: 800;
+  font-size: 16px;
+}
+
+.ko-bar { display: flex; align-items: center; justify-content: space-between; gap: 12px; font-size: 15px; font-weight: 600; color: rgba(244, 244, 245, 0.7); }

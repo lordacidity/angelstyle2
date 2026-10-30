@@ -19,7 +19,7 @@ import { hasAidenToken } from '@/lib/aiden-auth';
 // would catch '/Sloan' too and loop.)
 // /filler is a standalone game with no API behind it; it is public so its
 // service worker (/filler-sw.js) can cache it for offline play.
-const PUBLIC_PREFIXES = ['/unlock', '/api/unlock', '/api/aier/health', '/Sloan', '/api/sloan', '/filler', '/filler-sw.js'];
+const PUBLIC_PREFIXES = ['/unlock', '/api/unlock', '/api/aier/health', '/Sloan', '/api/sloan', '/filler', '/filler-sw.js', '/knockout'];
 
 // ── The clipper deployment ───────────────────────────────────────────────────
 // pauv.io/clipping is this same app built with NEXT_PUBLIC_APP=clippers, so
