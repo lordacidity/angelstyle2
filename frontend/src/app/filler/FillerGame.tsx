@@ -8,6 +8,9 @@ import {
 } from './engine';
 
 const PALETTE = ['#e8485e', '#9fd05a', '#f6d84a', '#47a3ec', '#6a4ea6', '#3b3b40'];
+// Claimed tiles show as white (you) and black (bot); the color you pick still decides what you take.
+const OWN_YOU = '#ffffff';
+const OWN_BOT = '#000000';
 const NAMES = ['Red', 'Green', 'Yellow', 'Blue', 'Purple', 'Black'];
 const LEVELS: Difficulty[] = ['easy', 'medium', 'hard'];
 const STATS_KEY = 'filler:stats';
@@ -169,7 +172,7 @@ export default function FillerGame() {
                 key={`${i}-${order === undefined ? 's' : game.score[1] + game.score[2]}`}
                 className={`tile ${owner ? `own p${owner}` : ''} ${order !== undefined ? 'pop' : ''} ${i === START[0] || i === START[1] ? 'home' : ''}`}
                 style={{
-                  background: PALETTE[game.color[i]],
+                  background: owner === 1 ? OWN_YOU : owner === 2 ? OWN_BOT : PALETTE[game.color[i]],
                   animationDelay: order !== undefined ? `${Math.min(order * 28, 500)}ms` : undefined,
                 }}
               />

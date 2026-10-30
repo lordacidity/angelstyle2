@@ -94,6 +94,8 @@ html:has(.filler), body:has(.filler) {
   border-radius: 50%;
   background: rgba(255, 255, 255, 0.55);
 }
+.filler-board .tile.home.p1::before { background: rgba(0, 0, 0, 0.18); }
+.filler-board .tile.home.p2::before { background: rgba(255, 255, 255, 0.3); }
 .filler-board .tile.pop { animation: filler-pop 0.42s cubic-bezier(.3,1.6,.5,1) both; }
 @keyframes filler-pop {
   0% { transform: scale(0.72); filter: brightness(1.5); }
