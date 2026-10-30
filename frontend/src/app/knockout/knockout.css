@@ -59,3 +59,4 @@ html:has(.ko), body:has(.ko) { background: #141416; overscroll-behavior: none; }
 }
 
 .ko-bar { display: flex; align-items: center; justify-content: space-between; gap: 12px; font-size: 15px; font-weight: 600; color: rgba(244, 244, 245, 0.7); }
+.ko-pick button.wide { width: auto; padding: 0 14px; font-size: 14px; }
