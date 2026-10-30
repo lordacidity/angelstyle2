@@ -1,0 +1,14 @@
+{
+  "name": "Filler",
+  "short_name": "Filler",
+  "description": "Flood the board with your color before the bot does.",
+  "start_url": "/filler",
+  "scope": "/filler",
+  "display": "standalone",
+  "background_color": "#141416",
+  "theme_color": "#141416",
+  "icons": [
+    { "src": "/filler/icon-192.png", "sizes": "192x192", "type": "image/png" },
+    { "src": "/filler/icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any maskable" }
+  ]
+}
