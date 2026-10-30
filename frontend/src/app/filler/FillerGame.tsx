@@ -8,9 +8,9 @@ import {
 } from './engine';
 
 const PALETTE = ['#e8485e', '#9fd05a', '#f6d84a', '#47a3ec', '#6a4ea6', '#3b3b40'];
-// Claimed tiles show as white (you) and black (bot); the color you pick still decides what you take.
+// Claimed tiles show as white (you) and grey (bot); the color you pick still decides what you take.
 const OWN_YOU = '#ffffff';
-const OWN_BOT = '#000000';
+const OWN_BOT = '#9a9aa0';
 const NAMES = ['Red', 'Green', 'Yellow', 'Blue', 'Purple', 'Black'];
 const LEVELS: Difficulty[] = ['easy', 'medium', 'hard'];
 const STATS_KEY = 'filler:stats';
