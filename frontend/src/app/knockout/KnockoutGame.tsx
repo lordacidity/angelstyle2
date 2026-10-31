@@ -27,18 +27,21 @@ const COUNTS = [1, 2, 3, 4, 5, 6, 8];
 const LEVELS: Level[] = ['easy', 'medium', 'hard'];
 const cap = (w: string) => w[0].toUpperCase() + w.slice(1);
 
+/** Scatters both teams at random over the board, kept apart and off the edge. */
 function setupDiscs(n: number): Disc[] {
-  const discs: Disc[] = [];
-  const spread = Math.min(Math.PI * 0.75, 0.35 * (n - 1));
-  for (const team of [0, 1] as Team[]) {
-    const center = team === 0 ? Math.PI : 0;
-    for (let k = 0; k < n; k++) {
-      const a = center + (n === 1 ? 0 : -spread / 2 + (spread * k) / (n - 1));
-      const r = n > 5 && k % 2 ? 0.38 : 0.6;
-      discs.push({ x: Math.cos(a) * r, y: Math.sin(a) * r, vx: 0, vy: 0, team, ax: 0, ay: 0, out: 0 });
+  const spots: { x: number; y: number }[] = [];
+  let gap = 0.3;
+  while (spots.length < n * 2) {
+    let placed = false;
+    for (let tries = 0; tries < 400 && !placed; tries++) {
+      const a = Math.random() * Math.PI * 2;
+      const r = 0.8 * Math.sqrt(Math.random());
+      const x = Math.cos(a) * r, y = Math.sin(a) * r;
+      if (spots.every((p) => Math.hypot(p.x - x, p.y - y) >= gap)) { spots.push({ x, y }); placed = true; }
     }
+    if (!placed) gap *= 0.9;
   }
-  return discs;
+  return spots.map((p, i) => ({ ...p, vx: 0, vy: 0, team: (i % 2) as Team, ax: 0, ay: 0, out: 0 }));
 }
 
 /** Turns every piece's aim into velocity at once. */
