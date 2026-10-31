@@ -28,8 +28,9 @@ function score(discs: Disc[], team: Team, r: number): number {
   const rn = nextRadius(r);
   let s = 0;
   for (const d of discs) {
-    const dist = Math.hypot(d.x, d.y);
-    const lost = d.out > 0 || dist > rn;
+    // The shrink sweeps pieces inward, so only falls during the round count.
+    const dist = Math.min(Math.hypot(d.x, d.y), rn);
+    const lost = d.out > 0;
     if (d.team === team) s += lost ? -12 : -3 * (dist / rn) ** 4;
     else s += lost ? 10 : 1.5 * (dist / rn) ** 2;
   }

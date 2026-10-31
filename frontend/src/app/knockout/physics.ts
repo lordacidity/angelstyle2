@@ -47,3 +47,29 @@ export function step(discs: Disc[], r: number) {
 }
 
 export const anyMoving = (discs: Disc[]) => discs.some((d) => !d.out && (d.vx || d.vy));
+
+/** The shrinking edge sweeps pieces inward instead of knocking them off. */
+export function squeeze(discs: Disc[], r: number) {
+  const live = discs.filter((d) => !d.out);
+  const clamp = () => {
+    for (const d of live) {
+      const dist = Math.hypot(d.x, d.y);
+      if (dist > r) { d.x *= r / dist; d.y *= r / dist; }
+    }
+  };
+  for (let pass = 0; pass < 4; pass++) {
+    clamp();
+    for (let i = 0; i < live.length; i++) {
+      for (let j = i + 1; j < live.length; j++) {
+        const a = live[i], b = live[j];
+        const dx = b.x - a.x, dy = b.y - a.y;
+        const dist = Math.hypot(dx, dy);
+        if (dist === 0 || dist >= DISC * 2) continue;
+        const push = (DISC * 2 - dist) / 2;
+        a.x -= (dx / dist) * push; a.y -= (dy / dist) * push;
+        b.x += (dx / dist) * push; b.y += (dy / dist) * push;
+      }
+    }
+  }
+  clamp();
+}

@@ -1,13 +1,14 @@
 'use client';
 
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { DISC, MAX_PULL, POWER, STEP, nextRadius, step, type Disc, type Team } from './physics';
+import { DISC, MAX_PULL, POWER, STEP, nextRadius, squeeze, step, type Disc, type Team } from './physics';
 import { planShots, type Level, type Shot } from './bot';
 
 // Both sides aim in secret, then every piece launches at once. Two players
 // pass the phone between them; against the bot, it locks in its shots before
 // you aim. Pieces whose center leaves the board fall off. The board shrinks a
-// little each round, so games always end.
+// little each round, sweeping pieces inward rather than off, so the
+// space keeps getting tighter.
 
 type Mode = 'bot' | 'pvp';
 type Phase =
@@ -176,9 +177,11 @@ export default function KnockoutGame() {
       acc = Math.min(acc + (now - last) / 1000, 0.1);
       last = now;
       if (phaseRef.current.kind === 'sim') {
-        while (acc >= STEP) { step(g.discs, g.r); acc -= STEP; }
-        g.r += (g.rTarget - g.r) * 0.15;
-        if (g.shrunk) for (const d of g.discs) if (!d.out && Math.hypot(d.x, d.y) > g.r) d.out = 0.001;
+        if (g.shrunk) {
+          acc = 0;
+          g.r += (g.rTarget - g.r) * 0.15;
+          squeeze(g.discs, g.r);
+        } else while (acc >= STEP) { step(g.discs, g.r); acc -= STEP; }
         settled();
       } else acc = 0;
       draw();
