@@ -4,8 +4,8 @@ export type Team = 0 | 1;
 export interface Disc { x: number; y: number; vx: number; vy: number; team: Team; ax: number; ay: number; out: number }
 
 export const DISC = 0.075;     // piece radius, board starts at radius 1
-export const MAX_PULL = 0.5;   // longest drag that counts
-export const POWER = 10;       // launch speed per unit of pull
+export const MAX_PULL = 0.8;   // longest drag that counts
+export const POWER = 2;        // launch speed per unit of drag
 export const DRAG = 1.3;       // exponential slow-down per second
 export const STEP = 1 / 120;
 export const MIN_R = 0.5;

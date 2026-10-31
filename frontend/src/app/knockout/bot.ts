@@ -6,7 +6,7 @@
 // Hard plays around you by imagining random shots you might take, never the
 // real ones.
 
-import { MAX_PULL, anyMoving, nextRadius, step, type Disc, type Team } from './physics';
+import { MAX_PULL, POWER, anyMoving, nextRadius, step, type Disc, type Team } from './physics';
 
 export type Level = 'easy' | 'medium' | 'hard';
 export interface Piece { x: number; y: number; team: Team; out: boolean }
@@ -17,7 +17,7 @@ const NO_SHOT: Shot = { ax: 0, ay: 0 };
 function simulate(pieces: Piece[], shots: Shot[], r: number): Disc[] {
   const discs: Disc[] = pieces.map((p, i) => ({
     x: p.x, y: p.y, team: p.team, ax: 0, ay: 0, out: p.out ? 1 : 0,
-    vx: (shots[i]?.ax ?? 0) * 10, vy: (shots[i]?.ay ?? 0) * 10,
+    vx: (shots[i]?.ax ?? 0) * POWER, vy: (shots[i]?.ay ?? 0) * POWER,
   }));
   for (let t = 0; t < 600 && anyMoving(discs); t++) step(discs, r);
   return discs;
@@ -68,7 +68,7 @@ export function planShots(pieces: Piece[], team: Team, r: number, level: Level):
 
   const hard = level === 'hard';
   const offsets = hard ? [-0.16, -0.08, 0, 0.08, 0.16] : [-0.1, 0, 0.1];
-  const pulls = hard ? [0.22, 0.34, 0.42, 0.5] : [0.3, 0.5];
+  const pulls = (hard ? [0.44, 0.68, 0.84, 1] : [0.6, 1]).map((f) => f * MAX_PULL);
   // Hard scores each plan against a few imagined opponent turns as well as a
   // still one, so it avoids shots that only work if you stand still.
   const worlds: Shot[][] = [pieces.map(() => NO_SHOT)];

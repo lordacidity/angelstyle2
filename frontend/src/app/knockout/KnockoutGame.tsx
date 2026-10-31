@@ -154,7 +154,7 @@ export default function KnockoutGame() {
         ctx.stroke();
         ctx.globalAlpha = 1;
         if (d.team === aiming && (d.ax || d.ay)) {
-          const tx = d.x + d.ax * 1.6, ty = d.y + d.ay * 1.6;
+          const tx = d.x + d.ax, ty = d.y + d.ay;
           const ang = Math.atan2(d.ay, d.ax);
           ctx.strokeStyle = TEAMS[d.team].fill;
           ctx.lineWidth = 0.025;
@@ -215,7 +215,7 @@ export default function KnockoutGame() {
     if (g.dragging < 0) return;
     const d = g.discs[g.dragging];
     const p = toWorld(e);
-    let ax = d.x - p.x, ay = d.y - p.y;
+    let ax = p.x - d.x, ay = p.y - d.y;
     const len = Math.hypot(ax, ay);
     if (len < DISC * 0.6) { ax = ay = 0; }
     else if (len > MAX_PULL) { ax *= MAX_PULL / len; ay *= MAX_PULL / len; }
@@ -306,8 +306,8 @@ export default function KnockoutGame() {
         <div className="ko-bar">
           <span>
             {mode === 'bot'
-              ? (botReady ? 'Bot has locked in. Pull back to aim.' : 'Bot is choosing…')
-              : `${TEAMS[phase.team].name}: pull back from a piece to aim`}
+              ? (botReady ? 'Bot has locked in. Drag a piece where you want it to go.' : 'Bot is choosing…')
+              : `${TEAMS[phase.team].name}: drag a piece where you want it to go`}
           </span>
           {mode === 'bot' ? (
             <button className="ko-primary" onClick={launch}>Go</button>
