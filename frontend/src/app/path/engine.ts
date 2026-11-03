@@ -74,17 +74,17 @@ interface KindDef {
   immune?: 'blast' | 'cold'; armored?: boolean; boss?: boolean;
 }
 export const KINDS: Record<Kind, KindDef> = {
-  red: { color: '#ff3b3b', r: 7, speed: 38, hp: 1, gold: 1, kids: [] },
-  blue: { color: '#3b8bff', r: 7.5, speed: 50, hp: 1, gold: 1, kids: ['red'] },
-  green: { color: '#38e08a', r: 8, speed: 62, hp: 1, gold: 1, kids: ['blue'] },
-  yellow: { color: '#ffd166', r: 8.5, speed: 82, hp: 1, gold: 1, kids: ['green'] },
-  pink: { color: '#ff4fd8', r: 8.5, speed: 96, hp: 1, gold: 1, kids: ['yellow'] },
-  black: { color: '#2a2a2e', r: 5.5, speed: 52, hp: 1, gold: 1, kids: ['pink', 'pink'], immune: 'blast' },
-  white: { color: '#f2f2f2', r: 5.5, speed: 60, hp: 1, gold: 1, kids: ['pink', 'pink'], immune: 'cold' },
-  iron: { color: '#8a8f98', r: 8.5, speed: 30, hp: 1, gold: 2, kids: ['black'], armored: true },
-  shell: { color: '#c08a52', r: 9.5, speed: 40, hp: 12, gold: 4, kids: ['black', 'white'] },
-  giant: { color: '#9ad1ff', r: 18, speed: 18, hp: 300, gold: 40, kids: ['shell', 'shell', 'shell', 'shell'], boss: true },
-  titan: { color: '#ff3b3b', r: 25, speed: 12, hp: 1500, gold: 120, kids: ['giant', 'giant'], boss: true },
+  red: { color: '#ef6461', r: 7, speed: 38, hp: 1, gold: 1, kids: [] },
+  blue: { color: '#5b8def', r: 7.5, speed: 50, hp: 1, gold: 1, kids: ['red'] },
+  green: { color: '#62bf8a', r: 8, speed: 62, hp: 1, gold: 1, kids: ['blue'] },
+  yellow: { color: '#f0c45a', r: 8.5, speed: 82, hp: 1, gold: 1, kids: ['green'] },
+  pink: { color: '#e27bc8', r: 8.5, speed: 96, hp: 1, gold: 1, kids: ['yellow'] },
+  black: { color: '#2b2b30', r: 5.5, speed: 52, hp: 1, gold: 1, kids: ['pink', 'pink'], immune: 'blast' },
+  white: { color: '#f1f1ee', r: 5.5, speed: 60, hp: 1, gold: 1, kids: ['pink', 'pink'], immune: 'cold' },
+  iron: { color: '#8d9199', r: 8.5, speed: 30, hp: 1, gold: 2, kids: ['black'], armored: true },
+  shell: { color: '#b8916a', r: 9.5, speed: 40, hp: 12, gold: 4, kids: ['black', 'white'] },
+  giant: { color: '#a9c6e4', r: 18, speed: 18, hp: 300, gold: 40, kids: ['shell', 'shell', 'shell', 'shell'], boss: true },
+  titan: { color: '#ef6461', r: 25, speed: 12, hp: 1500, gold: 120, kids: ['giant', 'giant'], boss: true },
 };
 const rbeCache: Partial<Record<Kind, number>> = {};
 export function rbe(k: Kind): number {
@@ -122,7 +122,7 @@ const BASE: Stats = {
 };
 
 export const TOWERS: Record<TowerKey, TowerDef> = {
-  dart: { name: 'Dart', cost: 200, color: '#ffffff', desc: 'Cheap. Throws darts.', base: { range: 92, rate: 1.15, pierce: 2 },
+  dart: { name: 'Dart', cost: 200, color: '#e9e9e6', desc: 'Cheap. Throws darts.', base: { range: 92, rate: 1.15, pierce: 2 },
     paths: [[
       { name: 'Sharp', cost: 140, desc: '+2 pierce', apply: (s) => { s.pierce += 2; } },
       { name: 'Razor', cost: 320, desc: '+1 damage, +2 pierce', apply: (s) => { s.dmg += 1; s.pierce += 2; } },
@@ -132,7 +132,7 @@ export const TOWERS: Record<TowerKey, TowerDef> = {
       { name: 'Far eyes', cost: 170, desc: '+28 range', apply: (s) => { s.range += 28; } },
       { name: 'Triple', cost: 650, desc: 'three darts a throw', apply: (s) => { s.count = 3; s.spread = 0.22; } },
     ]] },
-  spray: { name: 'Spray', cost: 280, color: '#ff8a3b', desc: 'Darts in every direction.', base: { range: 62, rate: 0.8, count: 8, speed: 360 },
+  spray: { name: 'Spray', cost: 280, color: '#e9e9e6', desc: 'Darts in every direction.', base: { range: 62, rate: 0.8, count: 8, speed: 360 },
     paths: [[
       { name: 'Faster', cost: 160, desc: 'sprays 40% faster', apply: (s) => { s.rate *= 1.4; } },
       { name: 'Rapid', cost: 380, desc: 'sprays 50% faster', apply: (s) => { s.rate *= 1.5; } },
@@ -142,7 +142,7 @@ export const TOWERS: Record<TowerKey, TowerDef> = {
       { name: 'Dense', cost: 260, desc: '12 darts', apply: (s) => { s.count = Math.max(s.count, 12); } },
       { name: 'Hot tips', cost: 720, desc: '+1 damage, +2 pierce', apply: (s) => { s.dmg += 1; s.pierce += 2; } },
     ]] },
-  cannon: { name: 'Cannon', cost: 450, color: '#c04bff', desc: 'Splash. Pops iron. Not black.', base: { range: 86, rate: 0.62, heavy: true, splash: 26, maxHits: 14, speed: 300 },
+  cannon: { name: 'Cannon', cost: 450, color: '#e9e9e6', desc: 'Splash. Pops iron. Not black.', base: { range: 86, rate: 0.62, heavy: true, splash: 26, maxHits: 14, speed: 300 },
     paths: [[
       { name: 'Big shells', cost: 300, desc: '+12 blast, more hits', apply: (s) => { s.splash += 12; s.maxHits += 10; } },
       { name: 'Heavy shells', cost: 650, desc: '+2 damage', apply: (s) => { s.dmg += 2; } },
@@ -152,7 +152,7 @@ export const TOWERS: Record<TowerKey, TowerDef> = {
       { name: 'Reach', cost: 220, desc: '+28 range', apply: (s) => { s.range += 28; } },
       { name: 'Cluster', cost: 900, desc: 'four more blasts a shot', apply: (s) => { s.cluster = true; } },
     ]] },
-  frost: { name: 'Frost', cost: 320, color: '#2ee6d6', desc: 'Slows everything near it.', base: { range: 58, rate: 0.6, dmg: 0, slow: 0.55, slowT: 1.4 },
+  frost: { name: 'Frost', cost: 320, color: '#e9e9e6', desc: 'Slows everything near it.', base: { range: 58, rate: 0.6, dmg: 0, slow: 0.55, slowT: 1.4 },
     paths: [[
       { name: 'Biting', cost: 260, desc: 'each pulse pops a layer', apply: (s) => { s.dmg = Math.max(s.dmg, 1); } },
       { name: 'Deep freeze', cost: 420, desc: 'slower, for longer', apply: (s) => { s.slow = 0.35; s.slowT = 2.2; } },
@@ -162,7 +162,7 @@ export const TOWERS: Record<TowerKey, TowerDef> = {
       { name: 'Pulse', cost: 320, desc: 'pulses 50% faster', apply: (s) => { s.rate *= 1.5; } },
       { name: 'Permafrost', cost: 850, desc: 'slows giants too', apply: (s) => { s.bossSlow = true; s.range += 10; } },
     ]] },
-  sniper: { name: 'Sniper', cost: 380, color: '#38e08a', desc: 'Sees the whole map. Pops iron.', base: { range: 9999, rate: 0.45, dmg: 2, heavy: true },
+  sniper: { name: 'Sniper', cost: 380, color: '#e9e9e6', desc: 'Sees the whole map. Pops iron.', base: { range: 9999, rate: 0.45, dmg: 2, heavy: true },
     paths: [[
       { name: 'Full metal', cost: 350, desc: '4 damage', apply: (s) => { s.dmg = 4; } },
       { name: 'Rifle', cost: 950, desc: '8 damage', apply: (s) => { s.dmg = 8; } },
@@ -172,7 +172,7 @@ export const TOWERS: Record<TowerKey, TowerDef> = {
       { name: 'Semi-auto', cost: 1200, desc: 'fires twice as fast', apply: (s) => { s.rate *= 2; } },
       { name: 'Marksman', cost: 2800, desc: 'twice as fast again', apply: (s) => { s.rate *= 2; } },
     ]] },
-  bank: { name: 'Bank', cost: 650, color: '#ffd166', desc: 'Pays gold every wave.', base: { range: 0, rate: 0, dmg: 0, income: 80 },
+  bank: { name: 'Bank', cost: 650, color: '#e9e9e6', desc: 'Pays gold every wave.', base: { range: 0, rate: 0, dmg: 0, income: 80 },
     paths: [[
       { name: 'Branch', cost: 500, desc: '+60 gold a wave', apply: (s) => { s.income += 60; } },
       { name: 'Vault', cost: 950, desc: '+100 gold a wave', apply: (s) => { s.income += 100; } },
@@ -371,7 +371,7 @@ export function step(w: World, dt: number) {
         if (t.key !== 'bank') continue;
         const inc = t.stats.income + Math.min(t.stats.interestCap, Math.floor(w.gold * t.stats.interest));
         pay += inc;
-        w.fx.push({ kind: 'coin', x: t.x, y: t.y - 14, r: 0, t: 0, life: 1.2, color: '#ffd166', text: `+${inc}` });
+        w.fx.push({ kind: 'coin', x: t.x, y: t.y - 14, r: 0, t: 0, life: 1.2, color: '#e9e9e6', text: `+${inc}` });
       }
       w.gold += pay;
     }
@@ -401,7 +401,7 @@ export function step(w: World, dt: number) {
       const near = w.balls.filter((b) => inRange(b) && canHurt(b, s.heavy, 'cold'));
       if (!near.length) continue;
       t.cd = 1 / s.rate;
-      w.fx.push({ kind: 'pulse', x: t.x, y: t.y, r: s.range, t: 0, life: 0.35, color: '#2ee6d6' });
+      w.fx.push({ kind: 'pulse', x: t.x, y: t.y, r: s.range, t: 0, life: 0.35, color: '#a9d8e4' });
       for (const b of near) {
         const boss = KINDS[b.kind].boss;
         if (!boss || s.bossSlow) { b.slowF = Math.min(b.slowF, boss ? (1 + s.slow) / 2 : s.slow); b.slowT = Math.max(b.slowT, s.slowT); }
@@ -425,7 +425,7 @@ export function step(w: World, dt: number) {
     t.cd = 1 / s.rate;
     t.aim = Math.atan2(tgt.y - t.y, tgt.x - t.x);
     if (t.key === 'sniper') {
-      w.fx.push({ kind: 'tracer', x: t.x, y: t.y, x2: tgt.x, y2: tgt.y, r: 0, t: 0, life: 0.12, color: '#38e08a' });
+      w.fx.push({ kind: 'tracer', x: t.x, y: t.y, x2: tgt.x, y2: tgt.y, r: 0, t: 0, life: 0.12, color: '#e9e9e6' });
       if (canHurt(tgt, s.heavy, 'shot')) hurt(w, tgt, s.dmg, t);
       else w.fx.push({ kind: 'pop', x: tgt.x, y: tgt.y, r: 3, t: 0, life: 0.15, color: '#ffffff' });
     } else if (t.key === 'cannon') {
@@ -494,7 +494,7 @@ function dart(t: Tower, a: number, life: number): Shot {
 }
 
 function blast(w: World, x: number, y: number, r: number, maxHits: number, dmg: number, tower: Tower | undefined) {
-  w.fx.push({ kind: 'blast', x, y, r, t: 0, life: 0.25, color: '#c04bff' });
+  w.fx.push({ kind: 'blast', x, y, r, t: 0, life: 0.25, color: '#e9e9e6' });
   const hits = w.balls
     .filter((b) => !b.dead && Math.hypot(b.x - x, b.y - y) <= r + KINDS[b.kind].r && canHurt(b, true, 'blast'))
     .sort((a, b) => b.d - a.d)

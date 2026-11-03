@@ -53,7 +53,10 @@ function restore(r: RunSave): World | null {
 // ── Drawing ────────────────────────────────────────────────────────────────
 
 const FONT = '-apple-system, system-ui, sans-serif';
-const ACCENT = '#ff3b3b';
+const INK = '#e9e9e6';
+const BG = '#0f0f11';
+const ROADC = '#1d1d21';
+const WARN = '#ef6461';
 
 function roadPath(ctx: CanvasRenderingContext2D, map: MapDef) {
   ctx.beginPath();
@@ -65,7 +68,7 @@ function drawTower(ctx: CanvasRenderingContext2D, key: TowerKey, x: number, y: n
   ctx.globalAlpha = alpha;
   ctx.lineWidth = 2.5;
   ctx.strokeStyle = c;
-  ctx.fillStyle = '#000';
+  ctx.fillStyle = BG;
   const r = TOWER_R;
   if (key === 'cannon' || key === 'bank') {
     ctx.fillRect(x - r + 1, y - r + 1, (r - 1) * 2, (r - 1) * 2);
@@ -89,7 +92,7 @@ function drawTower(ctx: CanvasRenderingContext2D, key: TowerKey, x: number, y: n
     ctx.fillStyle = c; ctx.beginPath(); ctx.arc(x, y, 4, 0, Math.PI * 2); ctx.fill();
   }
   if (key === 'bank') {
-    ctx.fillStyle = c; ctx.font = `800 13px ${FONT}`; ctx.textAlign = 'center'; ctx.textBaseline = 'middle'; ctx.fillText('$', x, y + 1);
+    ctx.fillStyle = c; ctx.font = `600 13px ${FONT}`; ctx.textAlign = 'center'; ctx.textBaseline = 'middle'; ctx.fillText('$', x, y + 1);
   }
   if (key === 'spray') {
     ctx.fillStyle = c; ctx.beginPath(); ctx.arc(x, y, 3, 0, Math.PI * 2); ctx.fill();
@@ -97,7 +100,7 @@ function drawTower(ctx: CanvasRenderingContext2D, key: TowerKey, x: number, y: n
   // Upgrade pips: one dot a level, path one on the left, path two on the right.
   const pips = [...Array(lv[0]).fill(0), ...Array(lv[1]).fill(1)];
   pips.forEach((p, i) => {
-    ctx.fillStyle = p === 0 ? '#ffffff' : ACCENT;
+    ctx.fillStyle = p === 0 ? INK : 'rgba(233,233,230,0.45)';
     ctx.beginPath(); ctx.arc(x - ((pips.length - 1) * 5) / 2 + i * 5, y + r + 5, 1.8, 0, Math.PI * 2); ctx.fill();
   });
   ctx.globalAlpha = 1;
@@ -106,21 +109,16 @@ function drawTower(ctx: CanvasRenderingContext2D, key: TowerKey, x: number, y: n
 interface Ghost { x: number; y: number; ok: boolean }
 
 function draw(ctx: CanvasRenderingContext2D, w: World, sel: Tower | null, placing: TowerKey | null, ghost: Ghost | null) {
-  ctx.fillStyle = '#000'; ctx.fillRect(0, 0, W, H);
-  // A faint grid of dots.
-  ctx.fillStyle = 'rgba(255,255,255,0.05)';
-  for (let x = 10; x < W; x += 20) for (let y = 10; y < H; y += 20) ctx.fillRect(x - 0.5, y - 0.5, 1, 1);
+  ctx.fillStyle = BG; ctx.fillRect(0, 0, W, H);
 
   // The road.
   ctx.lineJoin = 'round'; ctx.lineCap = 'round';
-  roadPath(ctx, w.map); ctx.strokeStyle = 'rgba(255,255,255,0.32)'; ctx.lineWidth = ROAD + 4; ctx.stroke();
-  roadPath(ctx, w.map); ctx.strokeStyle = '#161616'; ctx.lineWidth = ROAD; ctx.stroke();
-  roadPath(ctx, w.map); ctx.strokeStyle = 'rgba(255,255,255,0.1)'; ctx.lineWidth = 1; ctx.setLineDash([4, 8]); ctx.stroke(); ctx.setLineDash([]);
+  roadPath(ctx, w.map); ctx.strokeStyle = ROADC; ctx.lineWidth = ROAD; ctx.stroke();
   // The end of the road: a red line across it.
   const pts = w.map.pts; const e = pts[pts.length - 1]; const e0 = pts[pts.length - 2];
   const ang = Math.atan2(e.y - e0.y, e.x - e0.x);
   if (e.x > 0 && e.x < W && e.y > 0 && e.y < H) {
-    ctx.strokeStyle = ACCENT; ctx.lineWidth = 3; ctx.lineCap = 'butt';
+    ctx.strokeStyle = 'rgba(233,233,230,0.5)'; ctx.lineWidth = 2; ctx.lineCap = 'butt';
     ctx.beginPath();
     ctx.moveTo(e.x + Math.cos(ang + Math.PI / 2) * (ROAD / 2 + 3), e.y + Math.sin(ang + Math.PI / 2) * (ROAD / 2 + 3));
     ctx.lineTo(e.x - Math.cos(ang + Math.PI / 2) * (ROAD / 2 + 3), e.y - Math.sin(ang + Math.PI / 2) * (ROAD / 2 + 3));
@@ -128,7 +126,7 @@ function draw(ctx: CanvasRenderingContext2D, w: World, sel: Tower | null, placin
   } else {
     // Off the bottom: a red bar along the edge where it leaves.
     const ex = Math.max(0, Math.min(W, e0.x)); const ey = Math.max(0, Math.min(H, e.y));
-    ctx.fillStyle = ACCENT; ctx.fillRect(ex - ROAD / 2 - 3, ey - 3, ROAD + 6, 3);
+    ctx.fillStyle = 'rgba(233,233,230,0.5)'; ctx.fillRect(ex - ROAD / 2, ey - 2, ROAD, 2);
   }
   ctx.lineCap = 'round';
 
@@ -168,16 +166,16 @@ function draw(ctx: CanvasRenderingContext2D, w: World, sel: Tower | null, placin
       ctx.fillStyle = '#fff'; ctx.fillRect(b.x - k.r, b.y - k.r - 9, k.r * 2 * (b.hp / k.hp), 4);
     }
     // A shine, so they read as balls.
-    ctx.fillStyle = 'rgba(255,255,255,0.35)';
+    ctx.fillStyle = 'rgba(255,255,255,0.22)';
     ctx.beginPath(); ctx.arc(b.x - k.r * 0.35, b.y - k.r * 0.35, k.r * 0.28, 0, Math.PI * 2); ctx.fill();
-    if (b.slowT > 0) { ctx.strokeStyle = 'rgba(46,230,214,0.8)'; ctx.lineWidth = 1.5; ctx.beginPath(); ctx.arc(b.x, b.y, k.r + 2.5, 0, Math.PI * 2); ctx.stroke(); }
+    if (b.slowT > 0) { ctx.strokeStyle = 'rgba(169,216,228,0.7)'; ctx.lineWidth = 1.5; ctx.beginPath(); ctx.arc(b.x, b.y, k.r + 2.5, 0, Math.PI * 2); ctx.stroke(); }
   }
 
   // Shots.
   for (const s of w.shots) {
-    if (s.kind === 'shell') { ctx.fillStyle = '#c04bff'; ctx.beginPath(); ctx.arc(s.x, s.y, 3.5, 0, Math.PI * 2); ctx.fill(); continue; }
+    if (s.kind === 'shell') { ctx.fillStyle = INK; ctx.beginPath(); ctx.arc(s.x, s.y, 3.5, 0, Math.PI * 2); ctx.fill(); continue; }
     const sp = Math.hypot(s.vx, s.vy) || 1;
-    ctx.strokeStyle = s.heavy ? '#ff8a3b' : '#fff'; ctx.lineWidth = 2;
+    ctx.strokeStyle = INK; ctx.lineWidth = s.heavy ? 2.5 : 1.5;
     ctx.beginPath(); ctx.moveTo(s.x, s.y); ctx.lineTo(s.x - (s.vx / sp) * 6, s.y - (s.vy / sp) * 6); ctx.stroke();
   }
 
@@ -201,7 +199,7 @@ function draw(ctx: CanvasRenderingContext2D, w: World, sel: Tower | null, placin
       ctx.strokeStyle = f.color; ctx.lineWidth = 1.5;
       ctx.beginPath(); ctx.moveTo(f.x, f.y); ctx.lineTo(f.x2!, f.y2!); ctx.stroke();
     } else if (f.kind === 'coin') {
-      ctx.fillStyle = f.color; ctx.font = `800 11px ${FONT}`; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+      ctx.fillStyle = f.color; ctx.font = `600 11px ${FONT}`; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
       ctx.fillText(f.text ?? '', f.x, f.y - p * 14);
     }
     ctx.globalAlpha = 1;
@@ -210,17 +208,33 @@ function draw(ctx: CanvasRenderingContext2D, w: World, sel: Tower | null, placin
   // The tower being dropped.
   if (placing && ghost) {
     const st = statsOf(placing, [0, 0]);
-    if (st.range > 0 && st.range < 2000) ring(ghost.x, ghost.y, st.range, ghost.ok ? '#ffffff' : ACCENT);
+    if (st.range > 0 && st.range < 2000) ring(ghost.x, ghost.y, st.range, ghost.ok ? '#ffffff' : WARN);
     drawTower(ctx, placing, ghost.x, ghost.y, -Math.PI / 2, [0, 0], ghost.ok ? 0.9 : 0.4);
-    if (!ghost.ok) { ctx.strokeStyle = ACCENT; ctx.lineWidth = 2; ctx.beginPath(); ctx.arc(ghost.x, ghost.y, TOWER_R + 3, 0, Math.PI * 2); ctx.stroke(); }
+    if (!ghost.ok) { ctx.strokeStyle = WARN; ctx.lineWidth = 2; ctx.beginPath(); ctx.arc(ghost.x, ghost.y, TOWER_R + 3, 0, Math.PI * 2); ctx.stroke(); }
   }
 }
 
 function MapThumb({ map }: { map: MapDef }) {
   const d = map.pts.map((p, i) => `${i ? 'L' : 'M'}${p.x.toFixed(0)} ${p.y.toFixed(0)}`).join(' ');
   return (
-    <svg viewBox={`0 0 ${W} ${H}`} className="h-24 w-[62px] shrink-0 rounded-lg bg-black">
-      <path d={d} fill="none" stroke="rgba(255,255,255,0.75)" strokeWidth={ROAD} strokeLinecap="round" strokeLinejoin="round" />
+    <svg viewBox={`0 0 ${W} ${H}`} className="h-24 w-[62px] shrink-0 rounded-xl bg-[#0f0f11]">
+      <path d={d} fill="none" stroke="rgba(233,233,230,0.35)" strokeWidth={ROAD} strokeLinecap="round" strokeLinejoin="round" />
+    </svg>
+  );
+}
+
+/** A tower's shape, small, for the shop. */
+function TowerIcon({ k, dark }: { k: TowerKey; dark?: boolean }) {
+  const c = dark ? '#0f0f11' : INK;
+  const st = { fill: 'none', stroke: c, strokeWidth: 2 } as const;
+  return (
+    <svg viewBox="0 0 20 20" className="h-3.5 w-3.5 shrink-0">
+      {k === 'dart' && <><circle cx="10" cy="10" r="7" {...st} /><line x1="10" y1="10" x2="10" y2="2" {...st} /></>}
+      {k === 'spray' && <polygon points="13.8,2.5 17.5,6.2 17.5,13.8 13.8,17.5 6.2,17.5 2.5,13.8 2.5,6.2 6.2,2.5" {...st} />}
+      {k === 'cannon' && <><rect x="3" y="3" width="14" height="14" {...st} /><line x1="10" y1="10" x2="10" y2="1" stroke={c} strokeWidth={4} /></>}
+      {k === 'frost' && <><circle cx="10" cy="10" r="7" {...st} /><circle cx="10" cy="10" r="2.5" fill={c} /></>}
+      {k === 'sniper' && <polygon points="10,2 18,10 10,18 2,10" {...st} />}
+      {k === 'bank' && <><rect x="3" y="3" width="14" height="14" {...st} /><text x="10" y="14.5" textAnchor="middle" fontSize="11" fontWeight="700" fill={c}>$</text></>}
     </svg>
   );
 }
@@ -298,7 +312,7 @@ export default function PathGame() {
       const v = viewRef.current;
       const ctx = cv.getContext('2d')!;
       ctx.setTransform(1, 0, 0, 1, 0, 0);
-      ctx.fillStyle = '#000'; ctx.fillRect(0, 0, cv.width, cv.height);
+      ctx.fillStyle = BG; ctx.fillRect(0, 0, cv.width, cv.height);
       ctx.setTransform(v.s * v.dpr, 0, 0, v.s * v.dpr, v.ox * v.dpr, v.oy * v.dpr);
       ctx.save(); ctx.beginPath(); ctx.rect(0, 0, W, H); ctx.clip();
       const sel = w.towers.find((t) => t.id === c.sel) ?? null;
@@ -374,33 +388,33 @@ export default function PathGame() {
 
   // ── Screens ──────────────────────────────────────────────────────────────
 
-  const shell = 'fixed inset-0 bg-[#000000] text-white select-none overflow-hidden flex flex-col';
+  const shell = 'fixed inset-0 bg-[#0f0f11] text-[#e9e9e6] select-none overflow-hidden flex flex-col';
   const shellStyle: React.CSSProperties = {
     paddingTop: 'env(safe-area-inset-top)', paddingBottom: 'env(safe-area-inset-bottom)',
     WebkitTouchCallout: 'none', WebkitUserSelect: 'none', touchAction: 'manipulation', overscrollBehavior: 'none',
     fontFamily: FONT,
   };
-  const btn = 'rounded-xl font-bold active:scale-95 transition-transform disabled:opacity-30';
+  const btn = 'rounded-2xl font-semibold active:scale-95 transition-transform disabled:opacity-30';
 
   if (screen === 'menu') {
     const run = save.run; const runMap = run && MAPS.find((m) => m.id === run.map);
     return (
       <div className={shell} style={shellStyle}>
         <div className="mx-auto w-full max-w-[480px] flex-1 overflow-y-auto px-5 py-6">
-          <div className="text-4xl font-black tracking-tight text-[#ff3b3b]">PATH</div>
-          <div className="mt-1 text-sm text-white/50">Hold the road.</div>
+          <div className="text-4xl font-semibold tracking-tight">path</div>
+          <div className="mt-1 text-sm text-white/40">Keep the balls off the end of the road.</div>
           {run && runMap && (
-            <button onClick={() => start(runMap, run)} className={`${btn} mt-5 w-full bg-white py-4 text-lg text-black`}>
-              RESUME · {runMap.name.toUpperCase()} · WAVE {run.wave + 1}
+            <button onClick={() => start(runMap, run)} className={`${btn} mt-5 w-full bg-[#e9e9e6] py-4 text-lg text-black`}>
+              Resume {runMap.name}, wave {run.wave + 1}
             </button>
           )}
-          <div className="mt-6 text-[11px] uppercase tracking-wider text-white/40">{run ? 'New game' : 'Pick a road'}</div>
+          <div className="mt-6 text-[11px] uppercase tracking-wider text-white/40">{run ? "New game" : "Pick a road"}</div>
           <div className="mt-2 space-y-2">
             {MAPS.map((m) => {
               const best = save.best[m.id] ?? 0;
               return (
                 <button key={m.id} onClick={() => { if (!run || confirm('Start over? The saved game will be lost.')) start(m); }}
-                  className={`${btn} flex w-full items-center gap-4 bg-white/5 p-3 text-left`}>
+                  className={`${btn} flex w-full items-center gap-4 bg-white/[0.04] p-3 text-left`}>
                   <MapThumb map={m} />
                   <div className="flex-1">
                     <div className="text-lg">{m.name}</div>
@@ -408,7 +422,7 @@ export default function PathGame() {
                   </div>
                   <div className="text-right">
                     <div className="text-[11px] uppercase tracking-wider text-white/40">Best</div>
-                    <div className={`text-xl ${best >= LAST_WAVE ? 'text-[#ffd166]' : ''}`}>{best || '—'}</div>
+                    <div className={`text-xl ${best >= LAST_WAVE ? '' : 'text-white/70'}`}>{best || '—'}</div>
                   </div>
                 </button>
               );
@@ -438,13 +452,13 @@ export default function PathGame() {
       <div className="mx-auto flex w-full max-w-[520px] flex-1 flex-col">
         {/* Top: out, lives, gold, wave. */}
         <div className="flex items-center justify-between px-3 pb-1 pt-2 text-[13px]">
-          <button className={`${btn} bg-white/10 px-3 py-1.5`} onClick={quit}>✕</button>
+          <button className={`${btn} bg-white/[0.07] px-3 py-1.5`} onClick={quit}>✕</button>
           <div className="flex items-baseline gap-4 tabular-nums">
-            <span className={`text-lg font-black ${ui.lives <= 20 ? 'text-[#ff3b3b]' : ''}`}>♥ {ui.lives}</span>
-            <span className="text-lg font-black text-[#ffd166]">${Math.floor(ui.gold)}</span>
+            <span className={`text-lg font-semibold ${ui.lives <= 20 ? 'text-[#ef6461]' : ''}`}>♥ {ui.lives}</span>
+            <span className="text-lg font-semibold">${Math.floor(ui.gold)}</span>
           </div>
           <div className="text-right">
-            <div className="font-black tabular-nums">WAVE {ui.wave}<span className="text-white/40">/{LAST_WAVE}</span></div>
+            <div className="font-semibold tabular-nums">Wave {ui.wave}<span className="text-white/40">/{LAST_WAVE}</span></div>
             <div className="flex items-center justify-end gap-1 text-[11px] text-white/45">
               next
               {[...new Set(waveGroups(ui.wave + 1).map((g) => g.kind))].map((k) => (
@@ -462,18 +476,18 @@ export default function PathGame() {
             onPointerLeave={(e) => { if (e.pointerType === 'mouse') ctl.current.ghost = null; }} />
           {ui.paused && !ui.over && (
             <button className="absolute inset-0 flex items-center justify-center bg-black/60" onClick={() => act((_, c) => { c.paused = false; })}>
-              <div className="text-center"><div className="text-4xl font-black">PAUSED</div><div className="mt-1 text-sm text-white/50">tap to carry on</div></div>
+              <div className="text-center"><div className="text-3xl font-semibold">Paused</div><div className="mt-1 text-sm text-white/40">tap to carry on</div></div>
             </button>
           )}
           {ui.over && (
             <div className="absolute inset-0 flex flex-col items-center justify-center gap-3 bg-black/75 px-8 text-center">
-              <div className={`text-5xl font-black ${ui.over === 'win' ? 'text-white' : 'text-[#ff3b3b]'}`}>{ui.over === 'win' ? 'HELD' : 'OVERRUN'}</div>
-              <div className="text-sm text-white/60">{ui.over === 'win' ? `All ${LAST_WAVE} waves. The road is yours.` : `Wave ${ui.wave} got through.`}</div>
+              <div className="text-4xl font-semibold">{ui.over === 'win' ? 'Cleared' : 'Leaked'}</div>
+              <div className="text-sm text-white/60">{ui.over === 'win' ? `All ${LAST_WAVE} waves, done.` : `Wave ${ui.wave} got through.`}</div>
               {ui.over === 'win' && (
-                <button className={`${btn} w-full bg-white py-3 text-black`} onClick={() => act((w) => { w.over = null; w.freeplay = true; })}>Keep going</button>
+                <button className={`${btn} w-full bg-[#e9e9e6] py-3 text-black`} onClick={() => act((w) => { w.over = null; w.freeplay = true; })}>Keep going</button>
               )}
-              <button className={`${btn} w-full ${ui.over === 'win' ? 'bg-white/10' : 'bg-white text-black'} py-3`} onClick={replay}>Play again</button>
-              <button className={`${btn} w-full bg-white/10 py-3`} onClick={quit}>Menu</button>
+              <button className={`${btn} w-full ${ui.over === 'win' ? 'bg-white/[0.07]' : 'bg-[#e9e9e6] text-black'} py-3`} onClick={replay}>Play again</button>
+              <button className={`${btn} w-full bg-white/[0.07] py-3`} onClick={quit}>Menu</button>
             </div>
           )}
         </div>
@@ -481,30 +495,30 @@ export default function PathGame() {
         {/* Bottom: controls, then the shop or the picked tower. */}
         <div className="px-3 pb-2 pt-1.5">
           <div className="mb-1.5 flex gap-1.5">
-            <button className={`${btn} flex-1 py-2.5 text-[15px] ${ui.running ? 'bg-white/10' : 'bg-white text-black'}`} disabled={!!ui.over}
+            <button className={`${btn} flex-1 py-2.5 text-[15px] ${ui.running ? 'bg-white/[0.07]' : 'bg-[#e9e9e6] text-black'}`} disabled={!!ui.over}
               onClick={() => act((w, c) => { sendWave(w); c.paused = false; })}>
-              {ui.running ? `▶ SEND ${ui.wave + 1} EARLY` : `▶ WAVE ${ui.wave + 1}`}
+              {ui.running ? `Send ${ui.wave + 1} early` : `Start wave ${ui.wave + 1}`}
             </button>
-            <button className={`${btn} w-14 py-2.5 text-[13px] ${ui.auto ? 'bg-[#ff3b3b] text-white' : 'bg-white/10'}`} onClick={() => act((_, c) => { c.auto = !c.auto; })}>AUTO</button>
-            <button className={`${btn} w-12 py-2.5 text-[14px] ${ui.speed > 1 ? 'bg-white text-black' : 'bg-white/10'}`} onClick={() => act((_, c) => { c.speed = c.speed === 1 ? 2 : c.speed === 2 ? 3 : 1; })}>{ui.speed}×</button>
-            <button className={`${btn} w-12 bg-white/10 py-2.5 text-[14px]`} onClick={() => act((_, c) => { c.paused = !c.paused; })}>{ui.paused ? '▶' : '❚❚'}</button>
+            <button className={`${btn} w-14 py-2.5 text-[13px] ${ui.auto ? 'bg-[#e9e9e6] text-black' : 'bg-white/[0.07]'}`} onClick={() => act((_, c) => { c.auto = !c.auto; })}>Auto</button>
+            <button className={`${btn} w-12 py-2.5 text-[14px] ${ui.speed > 1 ? 'bg-[#e9e9e6] text-black' : 'bg-white/[0.07]'}`} onClick={() => act((_, c) => { c.speed = c.speed === 1 ? 2 : c.speed === 2 ? 3 : 1; })}>{ui.speed}×</button>
+            <button className={`${btn} w-12 bg-white/[0.07] py-2.5 text-[14px]`} onClick={() => act((_, c) => { c.paused = !c.paused; })}>{ui.paused ? '▶' : '❚❚'}</button>
           </div>
 
           <div className="h-[122px]">
             {sel ? (
               <div className="flex h-full flex-col gap-1.5">
                 <div className="flex items-center gap-1.5 text-[13px]">
-                  <span className="inline-block h-2.5 w-2.5 rounded-full" style={{ background: TOWERS[sel.key].color }} />
+                  <TowerIcon k={sel.key} />
                   <b>{TOWERS[sel.key].name}</b>
                   <span className="text-white/40">{sel.pops} pops</span>
                   <span className="flex-1" />
                   {sel.key !== 'bank' && sel.key !== 'frost' && sel.key !== 'spray' && (
-                    <button className={`${btn} bg-white/10 px-2.5 py-1.5`} onClick={() => withSel((_, t) => { t.target = TARGETS[(TARGETS.indexOf(t.target) + 1) % TARGETS.length]; })}>
+                    <button className={`${btn} bg-white/[0.07] px-2.5 py-1.5`} onClick={() => withSel((_, t) => { t.target = TARGETS[(TARGETS.indexOf(t.target) + 1) % TARGETS.length]; })}>
                       {TARGET_NAME[sel.target]} ▸
                     </button>
                   )}
-                  <button className={`${btn} bg-white/10 px-2.5 py-1.5 text-[#ffd166]`} onClick={() => withSel((w, t, c) => { sell(w, t); c.sel = null; })}>Sell ${sel.sell}</button>
-                  <button className={`${btn} bg-white/10 px-2.5 py-1.5`} onClick={() => act((_, c) => { c.sel = null; })}>✕</button>
+                  <button className={`${btn} bg-white/[0.07] px-2.5 py-1.5`} onClick={() => withSel((w, t, c) => { sell(w, t); c.sel = null; })}>Sell ${sel.sell}</button>
+                  <button className={`${btn} bg-white/[0.07] px-2.5 py-1.5`} onClick={() => act((_, c) => { c.sel = null; })}>✕</button>
                 </div>
                 <div className="grid min-h-0 flex-1 grid-cols-2 gap-1.5">
                   {([0, 1] as const).map((p) => {
@@ -513,9 +527,9 @@ export default function PathGame() {
                     const poor = !!next && ui.gold < next.cost;
                     return (
                       <button key={p} disabled={!open || poor} onClick={() => withSel((w, t) => { upgrade(w, t, p); })}
-                        className={`${btn} flex flex-col items-start justify-between bg-white/5 px-3 py-2 text-left disabled:opacity-100`}>
+                        className={`${btn} flex flex-col items-start justify-between bg-white/[0.04] px-3 py-2 text-left disabled:opacity-100`}>
                         <div className="flex w-full items-center gap-1">
-                          {path.map((_, i) => <span key={i} className="inline-block h-1.5 w-4 rounded-full" style={{ background: i < lv ? (p ? ACCENT : '#fff') : 'rgba(255,255,255,0.15)' }} />)}
+                          {path.map((_, i) => <span key={i} className="inline-block h-1.5 w-4 rounded-full" style={{ background: i < lv ? INK : 'rgba(255,255,255,0.12)' }} />)}
                         </div>
                         {next ? (
                           <>
@@ -523,7 +537,7 @@ export default function PathGame() {
                               <div className="text-[14px]">{next.name}</div>
                               <div className="text-[11px] font-normal leading-tight text-white/50">{next.desc}</div>
                             </div>
-                            <div className={`text-[13px] ${!open ? 'text-white/30' : poor ? 'text-white/40' : 'text-[#ffd166]'}`}>{open ? `$${next.cost}` : 'Locked'}</div>
+                            <div className={`text-[13px] ${!open ? 'text-white/30' : poor ? 'text-white/40' : 'text-white/80'}`}>{open ? `$${next.cost}` : 'Locked'}</div>
                           </>
                         ) : (
                           <div className="text-[13px] text-white/40">Maxed</div>
@@ -541,11 +555,11 @@ export default function PathGame() {
                     return (
                       <button key={k} disabled={ui.gold < t.cost && !on}
                         onClick={() => act((_, c) => { c.placing = on ? null : k; c.ghost = null; c.sel = null; })}
-                        className={`${btn} flex flex-col items-start justify-center px-2.5 text-left ${on ? 'bg-white text-black' : 'bg-white/5'}`}>
+                        className={`${btn} flex flex-col items-start justify-center px-2.5 text-left ${on ? 'bg-[#e9e9e6] text-black' : 'bg-white/5'}`}>
                         <div className="flex items-center gap-1.5 text-[14px]">
-                          <span className="inline-block h-2.5 w-2.5 rounded-full" style={{ background: t.color, outline: on ? '1px solid #000' : undefined }} />{t.name}
+                          <TowerIcon k={k} dark={on} />{t.name}
                         </div>
-                        <div className={`text-[12px] ${on ? 'text-black/60' : 'text-[#ffd166]'}`}>${t.cost}</div>
+                        <div className={`text-[12px] font-normal ${on ? 'text-black/60' : 'text-white/50'}`}>${t.cost}</div>
                       </button>
                     );
                   })}

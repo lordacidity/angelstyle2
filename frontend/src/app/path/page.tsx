@@ -6,7 +6,7 @@ import PathClient from './PathClient';
 
 export const metadata: Metadata = {
   title: 'PATH',
-  description: 'Hold the road.',
+  description: 'Keep the balls off the end of the road.',
   appleWebApp: { capable: true, statusBarStyle: 'black-translucent', title: 'PATH' },
 };
 
@@ -16,7 +16,7 @@ export const viewport: Viewport = {
   maximumScale: 1,
   userScalable: false,
   viewportFit: 'cover',
-  themeColor: '#000000',
+  themeColor: '#0f0f11',
 };
 
 export default function Page() {
