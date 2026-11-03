@@ -202,8 +202,12 @@ export function botMove(s: State, p: Player, level: Difficulty): number {
   if (level === 'medium') {
     return searchRoot(s, p, 3, Infinity, null);
   }
-  // Hard: iterative deepening for as long as the budget allows.
-  const deadline = performance.now() + 900;
+  return deepSearch(s, p, 900);
+}
+
+/** Iterative deepening for as long as the budget (ms) allows. */
+function deepSearch(s: State, p: Player, budget: number): number {
+  const deadline = performance.now() + budget;
   let best = searchRoot(s, p, 2, Infinity, null);
   for (let depth = 3; depth <= 24; depth++) {
     try {
@@ -215,4 +219,43 @@ export function botMove(s: State, p: Player, level: Difficulty): number {
     if (N - s.score[1] - s.score[2] < depth / 2) break; // searched to the end
   }
   return best;
+}
+
+// ── The coach ────────────────────────────────────────────────────────────────
+
+export type Advice =
+  | { color: number; kind: 'win'; gain: number }
+  | { color: number; kind: 'greedy'; gain: number; reply: number; steals: number }
+  | { color: number; kind: 'steal'; gain: number; alt: number; altGain: number; steals: number }
+  | { color: number; kind: 'setup'; gain: number; alt: number; altGain: number; next: number; altNext: number }
+  | { color: number; kind: 'safer'; gain: number; alt: number; altGain: number; reply: number; altReply: number };
+
+const bestGain = (s: State, p: Player) =>
+  Math.max(0, ...legalColors(s).map((c) => play(s, p, c).gained.length));
+
+/** The Hard bot's pick for `p`, plus the plainest reason it beats the greedy grab. */
+export function advise(s: State, p: Player): Advice {
+  const color = deepSearch(s, p, 400);
+  const o = other(p);
+  const info = (c: number) => {
+    const { state, gained } = play(s, p, c);
+    return { gain: gained.length, state, reply: bestGain(state, o), next: bestGain(state, p) };
+  };
+  const me = info(color);
+  if (me.state.score[p] * 2 > N) return { color, kind: 'win', gain: me.gain };
+
+  // What the opponent would take with each color if it were their turn now.
+  // Whatever color you pick, they can't pick next turn.
+  const theirs = (c: number) => (c === colorOf(s, o) ? 0 : play(s, o, c).gained.length);
+  let alt = color, altGain = me.gain;
+  for (const c of legalColors(s)) {
+    const g = play(s, p, c).gained.length;
+    if (g > altGain) { alt = c; altGain = g; }
+  }
+  const steals = theirs(color);
+  if (alt === color) return { color, kind: 'greedy', gain: me.gain, reply: me.reply, steals };
+  const a = info(alt);
+  if (steals >= 2 && steals >= theirs(alt)) return { color, kind: 'steal', gain: me.gain, alt, altGain, steals };
+  if (me.next > a.next) return { color, kind: 'setup', gain: me.gain, alt, altGain, next: me.next, altNext: a.next };
+  return { color, kind: 'safer', gain: me.gain, alt, altGain, reply: me.reply, altReply: a.reply };
 }

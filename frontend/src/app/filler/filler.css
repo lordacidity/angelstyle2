@@ -162,4 +162,8 @@ html:has(.filler), body:has(.filler) {
 }
 .filler-picker .gain { font-size: 14px; }
 
+.filler-picker .swatch.best { outline: 3px solid var(--text); outline-offset: 3px; }
+.filler-hint { margin: 0; font-size: 14px; line-height: 1.45; color: var(--dim); min-height: 4.4em; }
+.filler-hint b { color: var(--text); }
+
 .filler-foot { display: flex; align-items: center; justify-content: space-between; margin-top: auto; font-size: 13px; color: var(--dim); }

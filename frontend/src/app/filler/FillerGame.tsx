@@ -3,8 +3,8 @@
 import { useCallback, useEffect, useState } from 'react';
 import {
   COLOR_COUNT, N, START, W,
-  botMove, colorOf, isOver, legalColors, newGame, play,
-  type Difficulty, type Player, type State,
+  advise, botMove, colorOf, isOver, legalColors, newGame, play,
+  type Advice, type Difficulty, type Player, type State,
 } from './engine';
 
 const PALETTE = ['#e8485e', '#9fd05a', '#f6d84a', '#47a3ec', '#6a4ea6', '#3b3b40'];
@@ -31,6 +31,28 @@ function save(key: string, value: unknown) {
   try { localStorage.setItem(key, JSON.stringify(value)); } catch { /* private mode */ }
 }
 
+/** One or two sentences on why the coach's pick is best. */
+function explain(a: Advice): string {
+  const name = NAMES[a.color];
+  const lo = (c: number) => NAMES[c].toLowerCase();
+  switch (a.kind) {
+    case 'win':
+      return `${name}: it puts you past half the board (+${a.gain}) and wins on the spot.`;
+    case 'greedy':
+      return a.steals >= 2
+        ? `${name}: it's the biggest grab (+${a.gain}), and it also takes ${lo(a.color)} away from the bot, which wanted it for +${a.steals}.`
+        : `${name}: it's the biggest grab (+${a.gain}), and the bot's best reply after it is only +${a.reply}.`;
+    case 'steal':
+      return `${name} over ${lo(a.alt)} (+${a.altGain}): the bot wanted ${lo(a.color)} for +${a.steals}, and while you're ${lo(a.color)} it can't pick it. Denying the bot is worth more than a few extra tiles.`;
+    case 'setup':
+      return `${name} over ${lo(a.alt)}: ${lo(a.alt)} grabs more now (+${a.altGain} vs +${a.gain}), but ${lo(a.color)} reaches open ground and sets up a +${a.next} grab next turn instead of +${a.altNext}.`;
+    case 'safer':
+      return a.reply < a.altReply
+        ? `${name} over ${lo(a.alt)}: ${lo(a.alt)} grabs more now (+${a.altGain} vs +${a.gain}), but it opens a +${a.altReply} reply for the bot; ${lo(a.color)} holds it to +${a.reply}.`
+        : `${name} over ${lo(a.alt)} (+${a.altGain}): looking a few turns ahead, ${lo(a.color)} wins the race for the open tiles between you and the bot.`;
+  }
+}
+
 // Rendered on the client only (see FillerClient.tsx): the board is random and
 // the preferences live in localStorage, so there is nothing to prerender.
 export default function FillerGame() {
@@ -44,6 +66,7 @@ export default function FillerGame() {
   const [stats, setStats] = useState<Stats>(() => load(STATS_KEY, emptyStats()));
   const [menu, setMenu] = useState(false);
   const [offline, setOffline] = useState(false);
+  const [advice, setAdvice] = useState<{ for: State; a: Advice } | null>(null);
 
   const start = useCallback((first: Player) => {
     setGame(newGame());
@@ -83,6 +106,13 @@ export default function FillerGame() {
     });
   }, [game, level]);
 
+  // Your turn: let the bot's ripple land, then work out the best pick.
+  useEffect(() => {
+    if (turn !== 1 || isOver(game)) return;
+    const id = setTimeout(() => setAdvice({ for: game, a: advise(game, 1) }), 350);
+    return () => clearTimeout(id);
+  }, [game, turn]);
+
   // Bot's turn: let the player's ripple land, then think.
   useEffect(() => {
     if (turn !== 2 || isOver(game)) return;
@@ -116,6 +146,7 @@ export default function FillerGame() {
   const myColor = colorOf(game, 1);
   const botColor = colorOf(game, 2);
   const rec = stats[level];
+  const hint = advice && advice.for === game && turn === 1 && !over ? advice.a : null;
 
   return (
     <main className="filler">
@@ -212,7 +243,7 @@ export default function FillerGame() {
           return (
             <button
               key={c}
-              className={`swatch ${allowed ? '' : 'off'}`}
+              className={`swatch ${allowed ? '' : 'off'} ${hint?.color === c ? 'best' : ''}`}
               style={{ background: PALETTE[c] }}
               disabled={!allowed || turn !== 1 || over}
               onClick={() => apply(1, c)}
@@ -223,6 +254,12 @@ export default function FillerGame() {
           );
         })}
       </nav>
+
+      {!over && turn === 1 && (
+        <p className="filler-hint" aria-live="polite">
+          {hint ? <><b>Best pick:</b> {explain(hint)}</> : 'Working out the best pick…'}
+        </p>
+      )}
 
       <footer className="filler-foot">
         <button className="filler-ghost" onClick={() => start(botFirst ? 2 : 1)}>New game</button>
