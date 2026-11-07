@@ -282,8 +282,10 @@ export default function SudokuGame() {
     return () => window.removeEventListener('keydown', onKey);
   }, [onDigit, erase, selected, undo]);
 
-  // Pad buttons: a tap enters, a hold locks.
+  // Pad buttons: a tap enters, a hold or a double tap locks.
   const hold = useRef<{ timer: number; fired: boolean } | null>(null);
+  const lastTap = useRef<{ d: number; t: number } | null>(null);
+  const DOUBLE_MS = 320;
   const padDown = (d: number) => (e: React.PointerEvent) => {
     e.preventDefault();
     (e.currentTarget as HTMLElement).setPointerCapture?.(e.pointerId);
@@ -301,7 +303,20 @@ export default function SudokuGame() {
     hold.current = null;
     if (!h) return;
     clearTimeout(h.timer);
-    if (!h.fired) onDigit(d);
+    if (h.fired) { lastTap.current = null; return; }
+    const now = performance.now();
+    const prev = lastTap.current;
+    if (prev && prev.d === d && now - prev.t < DOUBLE_MS) {
+      // Second tap of a double tap: the first already entered or highlighted
+      // the digit, so this one only locks it.
+      lastTap.current = null;
+      setLocked(d);
+      setHighlight(d);
+      navigator.vibrate?.(12);
+      return;
+    }
+    lastTap.current = { d, t: now };
+    onDigit(d);
   };
   const padCancel = () => {
     if (hold.current) clearTimeout(hold.current.timer);
@@ -429,7 +444,7 @@ export default function SudokuGame() {
           </button>
         ))}
       </div>
-      <p className="sud-hint">{locked !== null ? `${locked} is locked. Tap cells to place it; tap ${locked} again to let go.` : 'Hold a number to lock it.'}</p>
+      <p className="sud-hint">{locked !== null ? `${locked} is locked. Tap cells to place it; tap ${locked} again to let go.` : 'Hold or double-tap a number to lock it.'}</p>
     </div>
   );
 }
