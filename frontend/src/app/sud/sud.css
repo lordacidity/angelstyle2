@@ -1,0 +1,172 @@
+/* angelstyle.com/sud. Scoped under .sud so nothing leaks into the Studio.
+   Light by default, dark when the device is. */
+
+.sud {
+  --bg: #fafafa;
+  --panel: #ffffff;
+  --line: #d4d4d8;
+  --line-strong: #27272a;
+  --text: #18181b;
+  --dim: #71717a;
+  --given: #18181b;
+  --entry: #2563eb;
+  --sel: #bfdbfe;
+  --near: #f1f3f6;
+  --hi: #fde68a;
+  --bad: #fecaca;
+  --bad-text: #b91c1c;
+  --key: #ffffff;
+  --key-text: #18181b;
+  --lock: #18181b;
+  --lock-text: #ffffff;
+  --ok: #15803d;
+}
+@media (prefers-color-scheme: dark) {
+  .sud {
+    --bg: #121214;
+    --panel: #19191c;
+    --line: #2e2e33;
+    --line-strong: #9a9aa3;
+    --text: #f4f4f5;
+    --dim: #8b8b94;
+    --given: #f4f4f5;
+    --entry: #7cb3ff;
+    --sel: #2b4a7a;
+    --near: #1f1f24;
+    --hi: #5b4a12;
+    --bad: #5a1f1f;
+    --bad-text: #fca5a5;
+    --key: #232327;
+    --key-text: #f4f4f5;
+    --lock: #f4f4f5;
+    --lock-text: #121214;
+    --ok: #4ade80;
+  }
+}
+
+html:has(.sud), body:has(.sud) {
+  background: var(--bg, #fafafa);
+  overscroll-behavior: none;
+}
+@media (prefers-color-scheme: dark) {
+  html:has(.sud), body:has(.sud) { background: #121214; }
+}
+
+.sud, .sud * { box-sizing: border-box; }
+
+.sud {
+  min-height: 100dvh;
+  max-width: 480px;
+  margin: 0 auto;
+  padding: max(12px, env(safe-area-inset-top)) 14px max(14px, env(safe-area-inset-bottom));
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  color: var(--text);
+  background: var(--bg);
+  font-family: var(--font-inter), system-ui, -apple-system, sans-serif;
+  -webkit-tap-highlight-color: transparent;
+  user-select: none;
+  -webkit-user-select: none;
+  -webkit-touch-callout: none;
+  touch-action: manipulation;
+}
+
+.sud button { font: inherit; cursor: pointer; touch-action: manipulation; }
+.sud button:disabled { opacity: 0.35; cursor: default; }
+
+.sud-top { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
+.sud-clock { font-variant-numeric: tabular-nums; font-size: 15px; font-weight: 600; color: var(--dim); }
+
+.sud-seg { display: flex; background: var(--near); border-radius: 10px; padding: 3px; gap: 2px; }
+.sud-seg button {
+  background: none; border: 0; padding: 7px 12px; border-radius: 8px;
+  font-size: 13px; font-weight: 600; color: var(--dim); line-height: 1;
+}
+.sud-seg button.on { background: var(--panel); color: var(--text); box-shadow: 0 1px 2px rgba(0, 0, 0, 0.12); }
+
+.sud-new {
+  background: none; border: 1px solid var(--line); border-radius: 999px;
+  padding: 7px 14px; font-size: 13px; font-weight: 600; color: var(--text);
+}
+.sud-new.sure { background: var(--bad); border-color: transparent; color: var(--bad-text); }
+
+.sud-status { min-height: 18px; font-size: 14px; font-weight: 600; text-align: center; color: var(--dim); }
+.sud-status.solved { color: var(--ok); }
+.sud-status.wrong { color: var(--bad-text); }
+
+.sud-board {
+  display: grid;
+  grid-template-columns: repeat(9, 1fr);
+  aspect-ratio: 1;
+  width: 100%;
+  background: var(--panel);
+  border: 2px solid var(--line-strong);
+  border-radius: 6px;
+  overflow: hidden;
+}
+.sud-cell {
+  position: relative;
+  aspect-ratio: 1;
+  min-width: 0;
+  border: 0;
+  border-right: 1px solid var(--line);
+  border-bottom: 1px solid var(--line);
+  background: var(--panel);
+  padding: 0;
+  display: grid;
+  place-items: center;
+  color: var(--entry);
+  font-weight: 500;
+}
+.sud-cell:nth-child(9n) { border-right: 0; }
+.sud-cell:nth-last-child(-n + 9) { border-bottom: 0; }
+.sud-cell.br { border-right: 2px solid var(--line-strong); }
+.sud-cell.bb { border-bottom: 2px solid var(--line-strong); }
+.sud-cell.given { color: var(--given); font-weight: 700; }
+.sud-cell.near { background: var(--near); }
+.sud-cell.hi { background: var(--hi); }
+.sud-cell.sel { background: var(--sel); }
+.sud-cell.bad { background: var(--bad); color: var(--bad-text); }
+.sud-cell.bad.sel { box-shadow: inset 0 0 0 2px var(--bad-text); }
+.sud-v { font-size: clamp(18px, 5.4vw, 28px); line-height: 1; }
+.sud-notes {
+  display: grid; grid-template-columns: repeat(3, 1fr); width: 100%; height: 100%;
+  padding: 7%; box-sizing: border-box;
+}
+.sud-notes i {
+  font-style: normal; font-size: clamp(8px, 2.3vw, 11px); line-height: 1; color: var(--dim);
+  display: grid; place-items: center; font-weight: 600;
+}
+.sud-notes i.hi { color: var(--text); font-weight: 800; }
+@media (prefers-color-scheme: dark) { .sud-cell.hi .sud-notes i.hi { color: #fff; } }
+
+/* The controls sit at the bottom, under the thumbs, however tall the screen. */
+.sud-tools { display: flex; justify-content: space-between; gap: 10px; margin-top: auto; }
+
+.sud-pad {
+  display: grid;
+  grid-template-columns: repeat(9, 1fr);
+  gap: 6px;
+}
+.sud-key {
+  aspect-ratio: 0.8;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: var(--key);
+  color: var(--key-text);
+  font-size: clamp(18px, 6vw, 26px);
+  font-weight: 600;
+  display: grid; place-items: center;
+  transition: transform 60ms ease, background 120ms ease, color 120ms ease;
+  min-width: 0; padding: 0;
+}
+.sud-key:active { transform: scale(0.94); }
+.sud-key.hi { background: var(--hi); border-color: transparent; }
+.sud-key.done { opacity: 0.3; }
+.sud-key.locked, .sud-key.locked.hi {
+  background: var(--lock); color: var(--lock-text); border-color: var(--lock); opacity: 1;
+  box-shadow: 0 0 0 3px var(--sel);
+}
+
+.sud-hint { margin: 0; font-size: 12px; color: var(--dim); text-align: center; min-height: 15px; }
