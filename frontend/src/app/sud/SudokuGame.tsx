@@ -31,6 +31,8 @@ function save(key: string, value: unknown) {
 }
 
 type Mode = 'fill' | 'note';
+type Theme = 'auto' | 'light' | 'dark';
+type Prefs = { difficulty?: Difficulty; mode?: Mode; theme?: Theme };
 type Snapshot = { cells: Grid; notes: number[] };
 
 const bit = (d: number) => 1 << (d - 1);
@@ -81,18 +83,18 @@ function fmt(seconds: number) {
 export default function SudokuGame() {
   const [state] = useState(() => {
     const saved = load<Saved>(SAVE_KEY);
-    const prefs = load<{ difficulty: Difficulty; mode: Mode }>(PREF_KEY);
+    const prefs = load<Prefs>(PREF_KEY) ?? {};
+    const common = { mode: prefs.mode ?? ('fill' as Mode), theme: prefs.theme ?? ('auto' as Theme), difficulty: prefs.difficulty ?? ('hard' as Difficulty) };
     if (saved) {
       return {
+        ...common,
         puzzle: { givens: fromString(saved.givens), solution: fromString(saved.solution), difficulty: saved.difficulty } as Puzzle,
         cells: fromString(saved.cells),
         notes: saved.notes,
         elapsed: saved.elapsed,
-        mode: prefs?.mode ?? 'fill',
       };
     }
-    const f = fresh(prefs?.difficulty ?? 'hard');
-    return { ...f, elapsed: 0, mode: prefs?.mode ?? ('fill' as Mode) };
+    return { ...common, ...fresh(common.difficulty), elapsed: 0 };
   });
 
   const [puzzle, setPuzzle] = useState<Puzzle>(state.puzzle);
@@ -100,6 +102,11 @@ export default function SudokuGame() {
   const [notes, setNotes] = useState<number[]>(state.notes);
   const [elapsed, setElapsed] = useState(state.elapsed);
   const [mode, setMode] = useState<Mode>(state.mode);
+  // The difficulty the next New puzzle gets; the current puzzle keeps its own.
+  const [difficulty, setDifficulty] = useState<Difficulty>(state.difficulty);
+  const [theme, setTheme] = useState<Theme>(state.theme);
+  const [systemDark, setSystemDark] = useState(() => matchMedia('(prefers-color-scheme: dark)').matches);
+  const [settingsOpen, setSettingsOpen] = useState(false);
   const [selected, setSelected] = useState<number | null>(null);
   const [highlight, setHighlight] = useState<number | null>(null);
   const [locked, setLocked] = useState<number | null>(null);
@@ -121,7 +128,23 @@ export default function SudokuGame() {
       cells: toString(cells), notes, elapsed,
     } satisfies Saved);
   }, [givens, puzzle, cells, notes, elapsed]);
-  useEffect(() => { save(PREF_KEY, { difficulty: puzzle.difficulty, mode }); }, [puzzle.difficulty, mode]);
+  useEffect(() => { save(PREF_KEY, { difficulty, mode, theme } satisfies Prefs); }, [difficulty, mode, theme]);
+
+  // Auto follows the device; Light and Dark override it.
+  useEffect(() => {
+    const mq = matchMedia('(prefers-color-scheme: dark)');
+    const onChange = () => setSystemDark(mq.matches);
+    mq.addEventListener('change', onChange);
+    return () => mq.removeEventListener('change', onChange);
+  }, []);
+  const dark = theme === 'dark' || (theme === 'auto' && systemDark);
+  useEffect(() => {
+    // The status bar colour in a saved-to-home-screen copy follows the page.
+    for (const m of document.querySelectorAll('meta[name="theme-color"]')) {
+      m.removeAttribute('media');
+      m.setAttribute('content', dark ? '#121214' : '#fafafa');
+    }
+  }, [dark]);
 
   // Clock: runs while the puzzle is open and the tab is visible.
   useEffect(() => {
@@ -259,8 +282,10 @@ export default function SudokuGame() {
     return () => window.removeEventListener('keydown', onKey);
   }, [onDigit, erase, selected, undo]);
 
-  // Pad buttons: a tap enters, a hold locks.
+  // Pad buttons: a tap enters, a hold or a double tap locks.
   const hold = useRef<{ timer: number; fired: boolean } | null>(null);
+  const lastTap = useRef<{ d: number; t: number } | null>(null);
+  const DOUBLE_MS = 320;
   const padDown = (d: number) => (e: React.PointerEvent) => {
     e.preventDefault();
     (e.currentTarget as HTMLElement).setPointerCapture?.(e.pointerId);
@@ -278,7 +303,20 @@ export default function SudokuGame() {
     hold.current = null;
     if (!h) return;
     clearTimeout(h.timer);
-    if (!h.fired) onDigit(d);
+    if (h.fired) { lastTap.current = null; return; }
+    const now = performance.now();
+    const prev = lastTap.current;
+    if (prev && prev.d === d && now - prev.t < DOUBLE_MS) {
+      // Second tap of a double tap: the first already entered or highlighted
+      // the digit, so this one only locks it.
+      lastTap.current = null;
+      setLocked(d);
+      setHighlight(d);
+      navigator.vibrate?.(12);
+      return;
+    }
+    lastTap.current = { d, t: now };
+    onDigit(d);
   };
   const padCancel = () => {
     if (hold.current) clearTimeout(hold.current.timer);
@@ -291,26 +329,65 @@ export default function SudokuGame() {
     return n;
   }, [cells]);
 
+  // Every cell that shares a row, column or box with a placed copy of the
+  // highlighted digit: where it cannot go, so what is left is where it can.
+  const covered = useMemo(() => {
+    const c = new Array<boolean>(81).fill(false);
+    if (highlight === null) return c;
+    for (let i = 0; i < 81; i++) if (cells[i] === highlight) for (const p of PEERS[i]) c[p] = true;
+    return c;
+  }, [cells, highlight]);
+
   const selRow = selected === null ? -1 : Math.floor(selected / 9);
   const selCol = selected === null ? -1 : selected % 9;
   const selBox = selected === null ? -1 : Math.floor(selRow / 3) * 3 + Math.floor(selCol / 3);
 
   return (
-    <div className="sud" data-locked={locked !== null || undefined}>
+    <div className="sud" data-theme={dark ? 'dark' : 'light'} data-locked={locked !== null || undefined}>
       <header className="sud-top">
-        <div className="sud-seg" role="tablist" aria-label="Difficulty">
-          {(['hard', 'expert'] as Difficulty[]).map((d) => (
-            <button key={d} role="tab" aria-selected={puzzle.difficulty === d} className={puzzle.difficulty === d ? 'on' : ''}
-              onClick={() => puzzle.difficulty !== d && askNew(d)}>
-              {d === 'hard' ? 'Hard' : 'Expert'}
-            </button>
-          ))}
+        <button className="sud-gear" onClick={() => setSettingsOpen(true)} aria-label="Settings" aria-haspopup="dialog">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+            <circle cx="12" cy="12" r="3" />
+            <path d="M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3h.1a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8v.1a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z" />
+          </svg>
+        </button>
+        <div className="sud-clock" aria-live="off">
+          <span className="sud-level">{puzzle.difficulty === 'hard' ? 'Hard' : 'Expert'}</span>
+          {fmt(elapsed)}
         </div>
-        <div className="sud-clock" aria-live="off">{fmt(elapsed)}</div>
-        <button className={`sud-new${confirmNew ? ' sure' : ''}`} onClick={() => askNew(puzzle.difficulty)}>
+        <button className={`sud-new${confirmNew ? ' sure' : ''}`} onClick={() => askNew(difficulty)}>
           {confirmNew ? 'Sure?' : 'New'}
         </button>
       </header>
+
+      {settingsOpen && (
+        <div className="sud-scrim" onClick={() => setSettingsOpen(false)}>
+          <div className="sud-sheet" role="dialog" aria-label="Settings" onClick={(e) => e.stopPropagation()}>
+            <div className="sud-row">
+              <span>Difficulty</span>
+              <div className="sud-seg" role="tablist" aria-label="Difficulty">
+                {(['hard', 'expert'] as Difficulty[]).map((d) => (
+                  <button key={d} role="tab" aria-selected={difficulty === d} className={difficulty === d ? 'on' : ''} onClick={() => setDifficulty(d)}>
+                    {d === 'hard' ? 'Hard' : 'Expert'}
+                  </button>
+                ))}
+              </div>
+            </div>
+            <div className="sud-row">
+              <span>Theme</span>
+              <div className="sud-seg" role="tablist" aria-label="Theme">
+                {(['auto', 'light', 'dark'] as Theme[]).map((t) => (
+                  <button key={t} role="tab" aria-selected={theme === t} className={theme === t ? 'on' : ''} onClick={() => setTheme(t)}>
+                    {t[0].toUpperCase() + t.slice(1)}
+                  </button>
+                ))}
+              </div>
+            </div>
+            <p className="sud-note">{difficulty !== puzzle.difficulty ? `The next New puzzle is ${difficulty === 'hard' ? 'Hard' : 'Expert'}.` : 'Difficulty applies to the next New puzzle.'}</p>
+            <button className="sud-done" onClick={() => setSettingsOpen(false)}>Done</button>
+          </div>
+        </div>
+      )}
 
       <div className={`sud-status${solved ? ' solved' : wrong ? ' wrong' : ''}`} aria-live="polite">
         {solved ? `Solved in ${fmt(elapsed)}` : wrong ? 'Something is off' : ''}
@@ -324,6 +401,7 @@ export default function SudokuGame() {
           if (i === selected) cls.push('sel');
           else if (selected !== null && (r === selRow || c === selCol || b === selBox)) cls.push('near');
           if (highlight !== null && v === highlight) cls.push('hi');
+          else if (covered[i]) cls.push('cover');
           if (wrong?.[i]) cls.push('bad');
           if (c % 3 === 2 && c !== 8) cls.push('br');
           if (r % 3 === 2 && r !== 8) cls.push('bb');
@@ -366,7 +444,7 @@ export default function SudokuGame() {
           </button>
         ))}
       </div>
-      <p className="sud-hint">{locked !== null ? `${locked} is locked. Tap cells to place it; tap ${locked} again to let go.` : 'Hold a number to lock it.'}</p>
+      <p className="sud-hint">{locked !== null ? `${locked} is locked. Tap cells to place it; tap ${locked} again to let go.` : 'Hold or double-tap a number to lock it.'}</p>
     </div>
   );
 }
