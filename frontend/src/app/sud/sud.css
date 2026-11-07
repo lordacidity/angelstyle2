@@ -13,6 +13,7 @@
   --sel: #bfdbfe;
   --near: #f1f3f6;
   --hi: #fde68a;
+  --cover: #fdf4cc;
   --bad: #fecaca;
   --bad-text: #b91c1c;
   --key: #ffffff;
@@ -21,8 +22,9 @@
   --lock-text: #ffffff;
   --ok: #15803d;
 }
-@media (prefers-color-scheme: dark) {
-  .sud {
+/* The page always sets data-theme to the resolved choice: Auto reads the
+   device, Light and Dark override it. */
+.sud[data-theme="dark"] {
     --bg: #121214;
     --panel: #19191c;
     --line: #2e2e33;
@@ -34,6 +36,7 @@
     --sel: #2b4a7a;
     --near: #1f1f24;
     --hi: #5b4a12;
+    --cover: #2d2817;
     --bad: #5a1f1f;
     --bad-text: #fca5a5;
     --key: #232327;
@@ -41,16 +44,13 @@
     --lock: #f4f4f5;
     --lock-text: #121214;
     --ok: #4ade80;
-  }
 }
 
 html:has(.sud), body:has(.sud) {
-  background: var(--bg, #fafafa);
+  background: #fafafa;
   overscroll-behavior: none;
 }
-@media (prefers-color-scheme: dark) {
-  html:has(.sud), body:has(.sud) { background: #121214; }
-}
+html:has(.sud[data-theme="dark"]), body:has(.sud[data-theme="dark"]) { background: #121214; }
 
 .sud, .sud * { box-sizing: border-box; }
 
@@ -76,7 +76,30 @@ html:has(.sud), body:has(.sud) {
 .sud button:disabled { opacity: 0.35; cursor: default; }
 
 .sud-top { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
-.sud-clock { font-variant-numeric: tabular-nums; font-size: 15px; font-weight: 600; color: var(--dim); }
+.sud-clock { font-variant-numeric: tabular-nums; font-size: 15px; font-weight: 600; color: var(--dim); display: flex; gap: 10px; align-items: baseline; }
+.sud-level { font-size: 13px; color: var(--text); }
+.sud-gear {
+  width: 36px; height: 36px; border-radius: 999px; border: 1px solid var(--line);
+  background: none; color: var(--text); display: grid; place-items: center; padding: 0;
+}
+
+/* Settings: a sheet over the board. */
+.sud-scrim {
+  position: fixed; inset: 0; z-index: 10; background: rgba(0, 0, 0, 0.35);
+  display: flex; align-items: flex-end; justify-content: center;
+  padding: 0 14px max(14px, env(safe-area-inset-bottom));
+}
+.sud-sheet {
+  width: 100%; max-width: 452px; background: var(--panel); color: var(--text);
+  border: 1px solid var(--line); border-radius: 18px; padding: 16px;
+  display: flex; flex-direction: column; gap: 14px;
+}
+.sud-row { display: flex; align-items: center; justify-content: space-between; gap: 12px; font-size: 14px; font-weight: 600; }
+.sud-note { margin: 0; font-size: 12px; color: var(--dim); }
+.sud-done {
+  border: 0; border-radius: 12px; padding: 11px; font-size: 14px; font-weight: 700;
+  background: var(--lock); color: var(--lock-text);
+}
 
 .sud-seg { display: flex; background: var(--near); border-radius: 10px; padding: 3px; gap: 2px; }
 .sud-seg button {
@@ -125,6 +148,7 @@ html:has(.sud), body:has(.sud) {
 .sud-cell.bb { border-bottom: 2px solid var(--line-strong); }
 .sud-cell.given { color: var(--given); font-weight: 700; }
 .sud-cell.near { background: var(--near); }
+.sud-cell.cover { background: var(--cover); }
 .sud-cell.hi { background: var(--hi); }
 .sud-cell.sel { background: var(--sel); }
 .sud-cell.bad { background: var(--bad); color: var(--bad-text); }
@@ -139,7 +163,7 @@ html:has(.sud), body:has(.sud) {
   display: grid; place-items: center; font-weight: 600;
 }
 .sud-notes i.hi { color: var(--text); font-weight: 800; }
-@media (prefers-color-scheme: dark) { .sud-cell.hi .sud-notes i.hi { color: #fff; } }
+.sud[data-theme="dark"] .sud-cell.hi .sud-notes i.hi { color: #fff; }
 
 /* The controls sit at the bottom, under the thumbs, however tall the screen. */
 .sud-tools { display: flex; justify-content: space-between; gap: 10px; margin-top: auto; }
