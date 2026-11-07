@@ -17,9 +17,10 @@ import { hasAidenToken } from '@/lib/aiden-auth';
 // password. (Its lowercase alias is redirected below, not in next.config.ts:
 // a config redirect matches case-insensitively, so '/sloan' → '/Sloan' there
 // would catch '/Sloan' too and loop.)
-// /filler is a standalone game with no API behind it; it is public so its
-// service worker (/filler-sw.js) can cache it for offline play.
-const PUBLIC_PREFIXES = ['/unlock', '/api/unlock', '/api/aier/health', '/Sloan', '/api/sloan', '/filler', '/filler-sw.js', '/knockout'];
+// /filler and /sud are standalone games with no API behind them; they are
+// public so their service workers (/filler-sw.js, /sud-sw.js) can cache them
+// for offline play.
+const PUBLIC_PREFIXES = ['/unlock', '/api/unlock', '/api/aier/health', '/Sloan', '/api/sloan', '/filler', '/filler-sw.js', '/knockout', '/sud', '/sud-sw.js'];
 
 // ── The clipper deployment ───────────────────────────────────────────────────
 // pauv.io/clipping is this same app built with NEXT_PUBLIC_APP=clippers, so

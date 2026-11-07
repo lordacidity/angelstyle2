@@ -1,0 +1,14 @@
+{
+  "name": "Sudoku",
+  "short_name": "Sudoku",
+  "description": "Hard and expert sudoku, offline.",
+  "start_url": "/sud",
+  "scope": "/sud",
+  "display": "standalone",
+  "background_color": "#fafafa",
+  "theme_color": "#fafafa",
+  "icons": [
+    { "src": "/sud/icon-192.png", "sizes": "192x192", "type": "image/png" },
+    { "src": "/sud/icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any maskable" }
+  ]
+}
